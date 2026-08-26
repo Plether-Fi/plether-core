@@ -87,6 +87,7 @@ library CfdEnginePlanTypes {
     /// @param isFadWindow Whether FAD margin policy is active.
     /// @param oracleFrozen Whether frozen-market close-spread policy is active.
     /// @param frozenCloseSpreadBps Spread charged on oracle-frozen close notional, in basis points.
+    /// @param settlementBufferBps Protected headroom required per unit of maximum directional liability, in basis points.
     struct RawSnapshot {
         CfdTypes.Position position;
         uint256 positionEntryCostUsdcAtoms;
@@ -124,6 +125,7 @@ library CfdEnginePlanTypes {
         bool isFadWindow;
         bool oracleFrozen;
         uint256 frozenCloseSpreadBps;
+        uint256 settlementBufferBps;
     }
 
     /// @notice Projected protocol solvency state after a close or liquidation.
@@ -158,7 +160,7 @@ library CfdEnginePlanTypes {
         MARGIN_DRAINED_BY_FEES,
         /// @notice Post-trade position margin or equity fails the initial-margin and liquidation checks.
         INSUFFICIENT_INITIAL_MARGIN,
-        /// @notice Projected effective solvency assets fall below the maximum liability envelope.
+        /// @notice Projected effective solvency assets cannot cover maximum liability plus protected settlement headroom.
         SOLVENCY_EXCEEDED,
         /// @notice Requested size is not divisible by the canonical 100-token position quantum.
         INVALID_SIZE_QUANTUM,
@@ -181,7 +183,7 @@ library CfdEnginePlanTypes {
     /// @param positionMarginAfterOpen Resulting clearinghouse position-margin bucket in 6-decimal USDC.
     /// @param sideOiIncrease Increase in aggregate side open interest, with 18 decimals.
     /// @param sideEntryNotionalDelta Signed change in raw side `size * entryPrice`, with 26 decimals.
-    /// @param sideEntryCarryContribution Reserved diagnostic field; current planning sets zero and apply does not use it.
+    /// @param requiredEffectiveAssetsAfterUsdc Minimum post-settlement effective assets required by protected admission.
     /// @param sideMaxProfitIncrease Increase in the aggregate side maximum-profit envelope, in 6-decimal USDC.
     /// @param tradeCostUsdc Signed VPI plus execution fee; positive debits the account and negative rebates it.
     /// @param marginDeltaUsdc Order margin supplied for the open/increase.
@@ -212,7 +214,7 @@ library CfdEnginePlanTypes {
 
         uint256 sideOiIncrease;
         int256 sideEntryNotionalDelta;
-        int256 sideEntryCarryContribution;
+        uint256 requiredEffectiveAssetsAfterUsdc;
         uint256 sideMaxProfitIncrease;
 
         int256 tradeCostUsdc;

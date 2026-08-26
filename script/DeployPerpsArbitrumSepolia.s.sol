@@ -532,6 +532,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("TerminalNavBookV2:", address(deployed.terminalNavBook));
         console.log("PositionSizeQuantum:", deployed.terminalNavBook.SIZE_QUANTUM());
         console.log("FrozenCloseSpreadBps:", deployed.engine.frozenCloseSpreadBps());
+        console.log("SettlementBufferBps:", deployed.engine.settlementBufferBps());
         console.log("FadRunwaySeconds:", deployed.engine.fadRunwaySeconds());
         console.log("CfdEnginePlanner:", address(deployed.planner));
         console.log("CfdEngineSettlementSidecar:", address(deployed.settlementSidecar));

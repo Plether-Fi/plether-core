@@ -20,6 +20,8 @@ contract CfdEngineAdmin is Ownable2Step {
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     /// @notice Maximum oracle-frozen close spread, in basis points (10%).
     uint256 public constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
+    /// @notice Maximum protected settlement buffer, in basis points (10%).
+    uint256 public constant MAX_SETTLEMENT_BUFFER_BPS = 1000;
 
     /// @notice Engine host that receives finalized configuration.
     ICfdEngineAdminHost public immutable engine;
@@ -28,7 +30,7 @@ contract CfdEngineAdmin is Ownable2Step {
     /// @dev Advances once after every successful risk, calendar, or freshness finalization.
     uint64 public activeConfigVersion = 1;
 
-    /// @notice Latest staged risk, execution-fee, and frozen-spread configuration.
+    /// @notice Latest staged risk, execution-fee, frozen-spread, and settlement-buffer configuration.
     ICfdEngineAdminHost.EngineRiskConfig public pendingRiskConfig;
     /// @notice Earliest Unix timestamp for risk finalization, or zero when none is active.
     uint256 public riskConfigActivationTime;
@@ -50,7 +52,7 @@ contract CfdEngineAdmin is Ownable2Step {
     error CfdEngineAdmin__ZeroStaleness();
     /// @notice Thrown when the proposed pre-FAD runway exceeds 24 hours.
     error CfdEngineAdmin__RunwayTooLong();
-    /// @notice Thrown when a risk parameter or frozen-close spread violates the accepted bounds.
+    /// @notice Thrown when a risk parameter, frozen-close spread, or settlement buffer violates accepted bounds.
     error CfdEngineAdmin__InvalidRiskParams();
     /// @notice Thrown when the execution fee is zero or exceeds 10,000 basis points.
     error CfdEngineAdmin__InvalidExecutionFee();
@@ -95,14 +97,14 @@ contract CfdEngineAdmin is Ownable2Step {
         engine = ICfdEngineAdminHost(engine_);
     }
 
-    /// @notice Validates and stages risk parameters, execution fee, and oracle-frozen close spread.
+    /// @notice Validates and stages risk parameters, execution fee, oracle-frozen close spread, and settlement buffer.
     /// @dev Callable only by the current owner. Replaces any pending risk proposal and resets its delay. Maintenance
     ///      margin must be nonzero; initial margin must be at least maintenance; FAD margin must be at least maintenance;
     ///      initial and FAD margin may not exceed 10,000 bps; annual base carry may not exceed 100,000 bps; minimum
     ///      liquidation charge and charge bps must be nonzero; keeper plus protocol share may not exceed 10,000 bps; and
     ///      max skew may not exceed 1e18. There is no admin-side upper bound on `vpiFactor` or `bountyBps`, and FAD margin
     ///      need not be at least initial margin. The open/close execution fee must be 1..10,000 bps and the oracle-frozen
-    ///      close spread must be 1..1,000 bps.
+    ///      close spread must be 1..1,000 bps. The settlement buffer may be 0..1,000 bps.
     /// @param config Complete risk configuration to validate and stage.
     function proposeRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config
@@ -114,6 +116,9 @@ contract CfdEngineAdmin is Ownable2Step {
         if (config.frozenCloseSpreadBps == 0 || config.frozenCloseSpreadBps > MAX_FROZEN_CLOSE_SPREAD_BPS) {
             revert CfdEngineAdmin__InvalidRiskParams();
         }
+        if (config.settlementBufferBps > MAX_SETTLEMENT_BUFFER_BPS) {
+            revert CfdEngineAdmin__InvalidRiskParams();
+        }
         pendingRiskConfig = config;
         riskConfigActivationTime = block.timestamp + TIMELOCK_DELAY;
         emit RiskConfigProposed(config, riskConfigActivationTime);
@@ -122,7 +127,7 @@ contract CfdEngineAdmin is Ownable2Step {
     /// @notice Applies the pending risk configuration once its timelock has elapsed.
     /// @dev Callable only by the current owner. Clears the local proposal before calling the engine, but an engine revert
     ///      rolls back those clears and the event. The canonical engine checkpoints both side carry indexes under the old
-    ///      carry rate before replacing risk parameters, execution fee, and frozen-close spread.
+    ///      carry rate before replacing risk parameters, execution fee, frozen-close spread, and settlement buffer.
     function finalizeRiskConfig() external onlyOwner {
         _requireTimelockReady(riskConfigActivationTime);
         ICfdEngineAdminHost.EngineRiskConfig memory config = pendingRiskConfig;

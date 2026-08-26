@@ -274,7 +274,8 @@ interface ICfdEngineTypes {
     /// @notice Legacy protocol-wide pool-asset, liability, reservation, and degraded-mode view.
     /// @param poolAssetsUsdc Canonical physical HousePool assets.
     /// @param maxLiabilityUsdc Larger side's aggregate maximum-profit liability.
-    /// @param withdrawalReservedUsdc Cash reserved against maximum position liability and trader claims.
+    /// @param withdrawalReservedUsdc Cash reserved against maximum position liability, trader claims, and the
+    ///        settlement buffer.
     /// @param freeUsdc Pool cash above `withdrawalReservedUsdc`.
     /// @param protocolTreasuryBalanceUsdc Clearinghouse balance of the configured protocol treasury.
     /// @param totalTraderClaimBalanceUsdc Aggregate senior trader-claim liability owed by the HousePool.

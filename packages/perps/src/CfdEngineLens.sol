@@ -595,6 +595,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.capPrice = engineContract.CAP_PRICE();
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engineContract.executionFeeBps();
+        snap.settlementBufferBps = engineContract.settlementBufferBps();
         snap.isFadWindow = engineContract.isFadWindow();
         snap.oracleFrozen = engineContract.isOracleFrozen();
         snap.frozenCloseSpreadBps = engineContract.frozenCloseSpreadBps();

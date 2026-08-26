@@ -19,6 +19,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -693,14 +694,14 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_WithdrawalReserveIncludesTraderClaimLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.totalTraderClaimBalanceUsdc();
-
-        expectedReserved += uint256(0);
+        uint256 maxLiability = _maxLiability();
+        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceUsdc()
+            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities and trader claim obligations"
+            "Withdrawal reserve must include liabilities, trader claims, and settlement headroom"
         );
     }
 

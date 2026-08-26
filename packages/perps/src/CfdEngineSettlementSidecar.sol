@@ -91,6 +91,8 @@ interface ICfdEngineAccountActionView {
 
     function frozenCloseSpreadBps() external view returns (uint256);
 
+    function settlementBufferBps() external view returns (uint256);
+
     function riskParams()
         external
         view
@@ -192,6 +194,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.degradedMode = engine.degradedMode();
         snap.capPrice = engine.CAP_PRICE();
         snap.executionFeeBps = engine.executionFeeBps();
+        snap.settlementBufferBps = engine.settlementBufferBps();
         snap.isFadWindow = engine.isFadWindow();
         snap.oracleFrozen = engine.isOracleFrozen();
         snap.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -512,6 +515,20 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 side: currentPosition.size == 0 ? delta.posSide : currentPosition.side
             })
         );
+        _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterUsdc);
+    }
+
+    /// @notice Verifies the planner's protected-solvency target against canonical post-open cash and claims.
+    function _assertRequiredEffectiveAssets(
+        ICfdEngineSettlementHost host,
+        uint256 requiredEffectiveAssetsUsdc
+    ) private view {
+        uint256 physicalAssetsUsdc = IHousePool(host.pool()).totalAssets();
+        uint256 traderClaimsUsdc = host.totalTraderClaimBalanceUsdc();
+        uint256 effectiveAssetsUsdc = physicalAssetsUsdc > traderClaimsUsdc ? physicalAssetsUsdc - traderClaimsUsdc : 0;
+        if (effectiveAssetsUsdc < requiredEffectiveAssetsUsdc) {
+            revert ICfdEngineTypes.CfdEngine__PostOpSolvencyBreach();
+        }
     }
 
     /// @notice Applies the live close/decrease settlement plan produced by the planner.

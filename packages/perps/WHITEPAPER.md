@@ -34,11 +34,12 @@ The bound is useful but narrower than a blanket solvency guarantee. It limits
 gross positive **price PnL at one common mark**. It does not fully reserve every
 possible sequence in which Long and Short positions close at different prices,
 and it does not independently cap VPI rebates, carry, fees, oracle failures, or
-stablecoin losses. Plether therefore treats the endpoint envelope as a
-risk-admission and withdrawal primitive, not as a substitute for settlement
-containment. Profitable exits may become senior trader claims when cash is
-unavailable; valid terminal exits can complete even when they reveal
-insolvency; and a degraded-mode latch then prevents further risk expansion.
+stablecoin losses. Plether therefore combines the endpoint envelope with a
+liability-scaled settlement buffer for risk admission and withdrawals, not as a
+substitute for settlement containment. Profitable exits may become senior trader
+claims when cash is unavailable; valid terminal exits can complete even when
+they reveal insolvency; and a degraded-mode latch then prevents further risk
+expansion.
 
 This paper formalizes the bounded-liability result and its counterexample,
 defines Plether's four accounting views, explains the HousePool capital
@@ -330,8 +331,8 @@ them into one number.
 
 | Accounting view | Question | Primary construction |
 | --- | --- | --- |
-| Risk admission | May the protocol accept more price risk? | Post-operation physical assets net of trader claims versus \(L_{\max}\) |
-| LP withdrawal | How much physical USDC may leave now? | Physical assets less endpoint liability, trader claims, and explicit reserves |
+| Risk admission | May the protocol accept more price risk? | Post-operation physical assets net of trader claims versus \(L_{\max}\) plus its settlement buffer |
+| LP withdrawal | How much physical USDC may leave now? | Physical assets less endpoint liability, trader claims, and the same settlement buffer plus explicit pool reserves |
 | Tranche reconciliation and share pricing | What marked ownership backs tranche shares? | Physical assets less claims plus the exact signed account-capped terminal price delta |
 | Terminal reachability | What trader-owned value can this close or liquidation actually consume? | Explicit clearinghouse buckets and permitted terminal reservation paths |
 
@@ -346,7 +347,10 @@ Let:
 - \(A^+\) be projected post-operation physical assets;
 - \(K^+\) be projected aggregate trader claims;
 - \(P^+\) be a pending payout not yet reflected in \(A^+\); and
-- \(L_{\max}^+\) be the projected common-mark endpoint envelope.
+- \(L_{\max}^+\) be the projected common-mark endpoint envelope;
+- \(\beta_{\mathrm{buf}}\) be the settlement-buffer rate in basis points; and
+- \(B_{\mathrm{settle}}^+\) be the projected settlement buffer, rounded up in
+  six-decimal USDC atoms.
 
 The engine's effective assets are
 
@@ -355,10 +359,17 @@ A_{\mathrm{eff}}^+
 =\max(A^+-K^+-P^+,0).
 \]
 
+The buffer target is
+
+\[
+B_{\mathrm{settle}}^+
+=\left\lceil\frac{L_{\max}^+\beta_{\mathrm{buf}}}{10{,}000}\right\rceil.
+\]
+
 Risk expansion is rejected unless
 
 \[
-A_{\mathrm{eff}}^+\ge L_{\max}^+.
+A_{\mathrm{eff}}^+\ge L_{\max}^+ + B_{\mathrm{settle}}^+.
 \]
 
 For a simple open with no preexisting claims or pending payout, this reduces to
@@ -366,13 +377,23 @@ the familiar expression
 
 \[
 A_{\mathrm{physical}}\ge
-\max(L_{\mathrm{SHORT}},L_{\mathrm{LONG}}).
+\max(L_{\mathrm{SHORT}},L_{\mathrm{LONG}})
++B_{\mathrm{settle}}.
 \]
+
+The deployed default is \(\beta_{\mathrm{buf}}=25\) basis points. The 48-hour
+timelocked Engine risk config accepts the inclusive range from zero to 1,000 basis
+points (10%). Zero disables this additional headroom.
 
 Open planning includes immediate pool changes. Positive VPI increases physical
 pool assets; a VPI rebate reduces them; the protocol execution fee belongs to
 treasury rather than LP assets. The admission test therefore uses the projected
 post-operation balance sheet rather than a stale pre-trade asset number.
+Attached take-profit/stop-loss protection inherits the parent open's predicate.
+Protection added to an existing position creates no exposure and does not apply
+the gate. Closes, liquidations, and triggered protection closes may consume the
+buffer because terminal liveness takes priority over restoring admission
+headroom.
 
 ### Proposition 2 - Constant-time admission predicate
 
@@ -392,7 +413,14 @@ The base withdrawal reservation is
 R_{\mathrm{base}}=L_{\max}+K+R_{\mathrm{sup}},
 \]
 
-where \(R_{\mathrm{sup}}\) is the explicit supplemental-reserve slot. Live
+where the Engine supplies
+
+\[
+R_{\mathrm{sup}}=B_{\mathrm{settle}}
+=\left\lceil\frac{L_{\max}\beta_{\mathrm{buf}}}{10{,}000}\right\rceil.
+\]
+
+Thus the current base reserve is \(K+L_{\max}+B_{\mathrm{settle}}\). Live
 HousePool paths can layer pending claimant buckets and unassigned assets on top.
 The base free cash is
 
@@ -418,9 +446,15 @@ Proposition 1 into a pathwise guarantee.
 
 **Boundary example.** Let physical assets be $60 million, trader claims $5
 million, and \(L_{\max}\) $55 million. Effective assets equal $55 million, so
-the risk balance is exactly at its chosen solvency boundary. Withdrawal reserves
-equal all $60 million and LP free cash is zero. "Solvent" and "withdrawable" are
+raw solvency is exactly at its boundary. At the 25-basis-point default,
+\(B_{\mathrm{settle}}\) is $137,500 and the base withdrawal reserve is
+$60,137,500, leaving zero LP free cash. The state is raw-solvent but below the
+risk-admission buffer. "Solvent", "open-admissible", and "withdrawable" are
 therefore not synonyms.
+
+The buffer is a headroom target, not another maximum payout or economic
+liability. It does not enter terminal NAV or yield and has no separate custody
+or clearinghouse bucket; changing the rate moves no tokens.
 
 ### 3.5 Exact symmetric terminal NAV
 
@@ -1131,7 +1165,8 @@ would revert.
 ### 7.5 Degraded mode
 
 After a close or liquidation, the engine compares effective physical assets with
-the remaining endpoint envelope. If the former is smaller, degraded mode
+the remaining endpoint envelope. If the former is smaller, meaning
+\(A_{\mathrm{eff}}<L_{\max}\), degraded mode
 latches. While degraded:
 
 - new opens are blocked;
@@ -1143,7 +1178,11 @@ latches. While degraded:
 Degraded mode is not a global pause. It is a latched containment response to a
 terminal transition that the protocol deliberately allowed to finish; it does
 not auto-clear merely because a later mark looks solvent. After genuine
-restoration, the owner may clear the latch through the explicit recovery path.
+restoration to \(A_{\mathrm{eff}}\ge L_{\max}\), the owner may clear the latch
+through the explicit recovery path. The settlement buffer is deliberately
+excluded from both latch and clear conditions: a state satisfying
+\(L_{\max}\le A_{\mathrm{eff}}<L_{\max}+B_{\mathrm{settle}}\) is not degraded,
+although new risk and LP redemption funding remain constrained.
 
 ---
 
@@ -1267,6 +1306,11 @@ throughout and does not switch to the 3% FAD basis around closure windows. The
 paired cohort is an aggregate research allocation whose legs are assumed to be
 interleaved; the model checks final skew but does not simulate transaction-level
 intermediate skew, VPI, or queue execution.
+
+The replay's reference endpoint-solvency predicate predates and does not model
+the production settlement buffer. Its cohort-admission results therefore remain
+historical research outputs rather than exact reproductions of the current
+\(L_{\max}+B_{\mathrm{settle}}\) admission rule.
 
 The historical model labels uncollectible price loss as uncovered-loss telemetry.
 That label is not current Terminal NAV V2 settlement semantics: production caps
@@ -1560,6 +1604,9 @@ Plether mitigates but does not eliminate these risks through:
 ### 10.3 Economic and accounting limits
 
 - **Sequential settlement:** \(L_{\max}\) is not a pathwise reserve.
+- **Settlement buffer:** \(B_{\mathrm{settle}}\) creates ordinary liquidity
+  headroom but is not pathwise insurance, a trader entitlement, or a guarantee
+  that every profitable close pays immediately.
 - **Lot lattice:** exact entry-cost and terminal-book arithmetic relies on every
   open, increase, and close being a whole 100-token lot; changing the price
   decimals or quantum invalidates the USDC-atom identity and requires a new
@@ -1693,8 +1740,10 @@ Plether's serious design choice is therefore not the cap alone. It is the
 combination of a bounded snapshot envelope with accounting that admits what is
 physical, what is reserved, what is owed, and what has failed to arrive.
 
-The HousePool makes that credit structure explicit. Junior and senior LPs own
-different loss priorities. Carry prices the LP capital actually supporting
+The HousePool makes that credit structure explicit. A liability-scaled
+settlement buffer preserves ordinary headroom without changing raw degraded
+solvency or marked NAV. Junior and senior LPs own different loss priorities.
+Carry prices the LP capital actually supporting
 maximum-profit exposure. VPI prices directional concentration. Delayed execution
 prices oracle latency. Trader claims make cash shortfall visible. Degraded mode
 contains a deficit without trapping users in positions solely to preserve a
@@ -1712,6 +1761,7 @@ when normal settlement assumptions fail.
 | Symbol | Definition |
 | --- | --- |
 | \(A\) | Canonical physical HousePool assets |
+| \(B_{\mathrm{settle}}\) | Liability-scaled settlement headroom, atom-ceiled from \(L_{\max}\) |
 | \(C\) | Immutable protocol price cap |
 | \(D\) | Pool depth used by VPI |
 | \(E_i\) | Exact entry cost of account \(i\), in USDC atoms |
@@ -1736,6 +1786,7 @@ when normal settlement assumptions fail.
 | \(w_j\) | Basket component weight |
 | \(\delta_i(p)\) | Account \(i\)'s signed LP-side terminal price delta |
 | \(\Delta_{\mathrm{terminal}}(p)\) | Exact aggregate signed terminal price delta |
+| \(\beta_{\mathrm{buf}}\) | Settlement-buffer rate in basis points |
 
 ## Appendix B. Reproduction
 

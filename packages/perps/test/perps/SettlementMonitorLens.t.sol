@@ -113,9 +113,9 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertEq(health.poolAccountedAssetsUsdc, pool.accountedAssets());
         assertEq(health.poolCustodyDeficitUsdc, 0);
         assertEq(health.seniorImpairmentUsdc, 0);
-        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 3);
-        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V3"));
-        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V2"));
+        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 4);
+        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V4"));
+        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V3"));
         assertTrue(monitorLens.observableConfigDigest() != bytes32(0));
     }
 
@@ -2018,6 +2018,21 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertFalse(missingRecipient.observationComplete);
     }
 
+    function test_ObservableConfigDigestChangesWithSettlementBuffer() public {
+        bytes32 beforeDigest = monitorLens.observableConfigDigest();
+        vm.mockCall(
+            address(engine),
+            abi.encodeWithSelector(bytes4(keccak256("settlementBufferBps()"))),
+            abi.encode(engine.settlementBufferBps() + 1)
+        );
+
+        bytes32 afterDigest = monitorLens.observableConfigDigest();
+
+        assertTrue(beforeDigest != bytes32(0));
+        assertTrue(afterDigest != bytes32(0));
+        assertTrue(afterDigest != beforeDigest, "settlement buffer policy must change the observable config digest");
+    }
+
     function test_SharedClockFaultIsReflectedByBothTranches() public {
         vm.mockCall(
             address(juniorVault),
@@ -2222,6 +2237,37 @@ contract SettlementMonitorLensTest is BasePerpTest {
         );
 
         assertEq(monitorLens.observableConfigDigest(), bytes32(0));
+    }
+
+    function test_EngineConfigDigestFailsClosedWhenEachScalarPolicyFieldIsUnreadable() public {
+        assertTrue(monitorLens.observableConfigDigest() != bytes32(0), "baseline config digest must be available");
+
+        address[6] memory targets = [
+            address(engine),
+            address(terminalNavBook),
+            address(engine),
+            address(engine),
+            address(engine),
+            address(engine)
+        ];
+        bytes4[6] memory selectors = [
+            bytes4(keccak256("CAP_PRICE()")),
+            bytes4(keccak256("SIZE_QUANTUM()")),
+            bytes4(keccak256("engineMarkStalenessLimit()")),
+            bytes4(keccak256("fadMaxStaleness()")),
+            bytes4(keccak256("fadRunwaySeconds()")),
+            bytes4(keccak256("settlementBufferBps()"))
+        ];
+
+        for (uint256 i; i < targets.length; ++i) {
+            vm.mockCallRevert(targets[i], abi.encodeWithSelector(selectors[i]), bytes("unreadable"));
+            assertEq(
+                monitorLens.observableConfigDigest(),
+                bytes32(0),
+                "an unreadable Engine policy field must fail the config digest closed"
+            );
+            vm.clearMockedCalls();
+        }
     }
 
     function test_HealthAggregatesCustodySeedAndHwmReadFailures() public {

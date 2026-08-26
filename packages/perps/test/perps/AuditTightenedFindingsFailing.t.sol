@@ -65,6 +65,8 @@ contract AuditTightenedFindingsFailing is BasePerpTest {
 
         _fundTrader(longTrader, 100_000 * 1e6);
         _fundTrader(shortTrader, 600_000 * 1e6);
+        // This regression targets post-close side margin, so fund the independent admission headroom first.
+        _fundJunior(address(this), 1000 * 1e6);
 
         _open(shortAccount, CfdTypes.Side.SHORT, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
         _open(longAccount, CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8);

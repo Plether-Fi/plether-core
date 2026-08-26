@@ -8,6 +8,7 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 abstract contract HousePoolAsyncTestBase is BasePerpTest {
@@ -1291,7 +1292,7 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         address trader = address(0x99992);
         address traderAccount = trader;
         _fundTrader(trader, 50_000e6);
-        _open(traderAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.SHORT, 99_700e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
@@ -1497,12 +1498,15 @@ contract HousePoolTest is HousePoolAsyncTestBase {
 
         uint256 freeUSDC = pool.getFreeUSDC();
         uint256 vaultBal = pool.totalAssets();
-        uint256 expectedReserved = 100_000 * 1e6;
+        uint256 maxLiability = _maxLiability();
+        uint256 settlementBuffer =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
+        uint256 expectedReserved = maxLiability + settlementBuffer;
 
         assertEq(
             freeUSDC,
             vaultBal - expectedReserved,
-            "Free USDC should reserve directional liability but not treasury clearinghouse margin"
+            "Free USDC should reserve directional liability and its settlement buffer, but not treasury fees"
         );
     }
 
@@ -1823,10 +1827,10 @@ contract HousePoolTest is HousePoolAsyncTestBase {
     }
 
     // ==========================================
-    // C-03: getFreeUSDC RESERVES POSITIVE UNREALIZED FUNDING
+    // C-03: getFreeUSDC USES ONLY THE LIABILITY-SCALED SETTLEMENT BUFFER AS ITS SUPPLEMENTAL RESERVE
     // ==========================================
 
-    function test_C03_GetFreeUSDC_NoSupplementalReserveInCarryModel() public {
+    function test_C03_GetFreeUSDC_OnlySettlementBufferSupplementalReserveInCarryModel() public {
         _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -1857,18 +1861,24 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        uint256 supplementalReserve = uint256(0);
-        assertEq(supplementalReserve, 0, "Carry mode should not create a supplemental withdrawal reserve here");
+        uint256 maxLiability = _maxLiability();
+        uint256 supplementalReserve =
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).supplementalReservedUsdc;
+        assertEq(
+            supplementalReserve,
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps()),
+            "Carry mode should add no supplemental reserve beyond the settlement buffer"
+        );
 
         uint256 freeUSDC = pool.getFreeUSDC();
         assertGt(freeUSDC, 0, "getFreeUSDC should remain positive in the carry model");
     }
 
     // ==========================================
-    // C-03b: _reconcile RESERVES POSITIVE UNREALIZED FUNDING FROM DISTRIBUTABLE
+    // C-03b: _reconcile KEEPS THE LIABILITY-SCALED SETTLEMENT BUFFER OUT OF NAV
     // ==========================================
 
-    function test_C03b_Reconcile_NoSupplementalReserveInCarryModel() public {
+    function test_C03b_Reconcile_KeepsSettlementBufferOutOfNav() public {
         _setRiskParams(
             CfdTypes.RiskParams({
                 vpiFactor: 0,
@@ -1898,8 +1908,14 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + 30);
 
-        uint256 supplementalReserve = uint256(0);
-        assertEq(supplementalReserve, 0, "Carry mode should not create a supplemental withdrawal reserve here");
+        uint256 maxLiability = _maxLiability();
+        uint256 supplementalReserve =
+            engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit()).supplementalReservedUsdc;
+        assertEq(
+            supplementalReserve,
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps()),
+            "Carry mode should add no supplemental reserve beyond the settlement buffer"
+        );
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -2760,7 +2776,7 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         address trader = address(0x99992);
         address traderAccount = trader;
         _fundTrader(trader, 50_000e6);
-        _open(traderAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.SHORT, 99_700e18, 10_000e6, 1e8);
         vm.prank(address(router));
         engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
         pool.assignUnassignedAssets(false, alice);

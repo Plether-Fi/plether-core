@@ -34,10 +34,11 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     /// @notice Returns the canonical protocol accounting and solvency snapshot.
     /// @dev Maximum liability is the larger side maximum-profit envelope. Withdrawal reserve is that liability plus all
-    ///      trader claims; free USDC is pool assets above the reserve; and effective solvency assets are pool assets net
-    ///      of trader claims. The separately reported net physical assets subtract the protocol-treasury clearinghouse
-    ///      balance, but that subtraction is not applied to `effectiveSolvencyAssetsUsdc`. `hasLiveLiability` follows
-    ///      nonzero side maximum-profit envelopes rather than raw open interest.
+    ///      trader claims and the liability-scaled settlement buffer; free USDC is pool assets above the reserve; and
+    ///      effective solvency assets are pool assets net of trader claims. The separately reported net physical assets
+    ///      subtract the protocol-treasury clearinghouse balance, but that subtraction is not applied to
+    ///      `effectiveSolvencyAssetsUsdc`. `hasLiveLiability` follows nonzero side maximum-profit envelopes rather than
+    ///      raw open interest.
     /// @return snapshot Protocol-level accounting, liability, claim, and degraded-mode values in 6-decimal USDC units.
     function getProtocolAccountingSnapshot()
         external
@@ -50,7 +51,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     /// @notice Builds the engine-side snapshot consumed by HousePool accounting.
     /// @dev Physical assets are current pool `totalAssets`; net physical assets subtract the protocol-treasury
     ///      clearinghouse balance with saturation. Terminal delta, claims, maximum directional liability, open-position
-    ///      status, and book version come from one authenticated Engine snapshot. Supplemental reserve remains zero.
+    ///      status, and book version come from one authenticated Engine snapshot. The supplemental reserve is the
+    ///      liability-scaled settlement buffer and affects withdrawals without changing terminal NAV.
     ///      Mark freshness is required whenever terminal price exposure exists. When gating is required,
     ///      frozen-market policy uses `fadMaxStaleness`; live policy uses the tighter nonzero engine/pool limit. This
     ///      function selects a limit but does not itself test the cached mark's age.
@@ -67,7 +69,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.netPhysicalAssetsUsdc =
             poolAssetsUsdc > protocolTreasuryBalanceUsdc ? poolAssetsUsdc - protocolTreasuryBalanceUsdc : 0;
         snapshot.maxLiabilityUsdc = terminalSnapshot.maxDirectionalLiabilityUsdc;
-        snapshot.supplementalReservedUsdc = 0;
+        snapshot.supplementalReservedUsdc = SolvencyAccountingLib.settlementBufferTargetUsdc(
+            snapshot.maxLiabilityUsdc, engineContract.settlementBufferBps()
+        );
         snapshot.terminalLpPriceDeltaUsdc = terminalSnapshot.terminalLpPriceDeltaUsdc;
         snapshot.terminalNavBookVersion = terminalSnapshot.bookVersion;
         snapshot.traderClaimBalanceUsdc = terminalSnapshot.totalTraderClaimsUsdc;
@@ -121,8 +125,11 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
             : 0;
         snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
-        snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc;
-        snapshot.freeUsdc = solvencyState.freeWithdrawableUsdc;
+        uint256 settlementBufferUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engineContract.settlementBufferBps());
+        snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc + settlementBufferUsdc;
+        snapshot.freeUsdc =
+            poolAssetsUsdc > snapshot.withdrawalReservedUsdc ? poolAssetsUsdc - snapshot.withdrawalReservedUsdc : 0;
         snapshot.protocolTreasuryBalanceUsdc = protocolTreasuryBalanceUsdc;
         snapshot.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         snapshot.degradedMode = engineContract.degradedMode();

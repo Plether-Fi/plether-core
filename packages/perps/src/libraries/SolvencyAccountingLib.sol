@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @title SolvencyAccountingLib
@@ -8,6 +9,8 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 /// @dev All monetary values use 6-decimal USDC. Negative asset or trader-claim deltas use saturating subtraction;
 ///      positive deltas use checked addition. Solvency requires effective assets to be at least maximum liability.
 library SolvencyAccountingLib {
+
+    uint256 internal constant BPS = 10_000;
 
     /// @notice Planned changes used to preview solvency after an operation.
     /// @param physicalAssetsDeltaUsdc Signed change to physical pool assets.
@@ -63,6 +66,40 @@ library SolvencyAccountingLib {
         uint256 shortMaxProfitUsdc
     ) internal pure returns (uint256) {
         return longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
+    }
+
+    /// @notice Returns the protected settlement headroom required for a maximum directional liability.
+    /// @dev Rounds up so every nonzero liability and nonzero rate reserves at least one USDC atom. A zero liability or
+    ///      zero rate returns zero. This buffer is an admission and withdrawal constraint, not an economic liability.
+    /// @param maxLiabilityUsdc Current or projected maximum directional liability.
+    /// @param settlementBufferBps Settlement-buffer rate with a 10,000 basis-point denominator.
+    /// @return bufferUsdc Required protected headroom in 6-decimal USDC units.
+    function settlementBufferTargetUsdc(
+        uint256 maxLiabilityUsdc,
+        uint256 settlementBufferBps
+    ) internal pure returns (uint256 bufferUsdc) {
+        if (maxLiabilityUsdc == 0 || settlementBufferBps == 0) {
+            return 0;
+        }
+        return Math.mulDiv(maxLiabilityUsdc, settlementBufferBps, BPS, Math.Rounding.Ceil);
+    }
+
+    /// @notice Tests whether raw solvency headroom covers the configured settlement buffer.
+    /// @dev The subtraction form avoids overflowing `maxLiabilityUsdc + buffer`. Equality passes.
+    /// @param effectiveAssetsUsdc Physical pool assets net of outstanding trader claims.
+    /// @param maxLiabilityUsdc Current or projected maximum directional liability.
+    /// @param settlementBufferBps Settlement-buffer rate with a 10,000 basis-point denominator.
+    /// @return True when effective assets cover both liability and protected headroom.
+    function hasRequiredSettlementBuffer(
+        uint256 effectiveAssetsUsdc,
+        uint256 maxLiabilityUsdc,
+        uint256 settlementBufferBps
+    ) internal pure returns (bool) {
+        if (effectiveAssetsUsdc < maxLiabilityUsdc) {
+            return false;
+        }
+        return
+            effectiveAssetsUsdc - maxLiabilityUsdc >= settlementBufferTargetUsdc(maxLiabilityUsdc, settlementBufferBps);
     }
 
     /// @notice Returns maximum liability after reducing one side's maximum-profit envelope for a close.

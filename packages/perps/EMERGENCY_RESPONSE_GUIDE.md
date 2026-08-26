@@ -31,7 +31,7 @@ exits**. Plether therefore provides granular breakers, not a global protocol sto
 | Router risk-off pause | `OrderRouterAdmin.pause()` by its owner or configured pauser | New opens/increases; permanently invalidates pending opens through `riskOffOrderCutoff` | Closes, liquidations, mark refresh, LP settlement when not separately held, refunds, and claims | RouterAdmin owner calls `unpause()`; the historical cutoff never decreases |
 | HousePool entry pause | `HousePool.pause()` by its owner or configured pauser | New Senior and Junior deposit requests, Senior reservations, and deposit activation | Redemption requests, eligible settlement/redemption funding, reconciliation, LP request cancellations under existing rules, claims, and trading | HousePool owner calls `unpause()` |
 | HousePool settlement hold | `HousePool.pauseLpEpochSettlement()` by its owner or configured pauser | Synchronized epoch clearing: deposit activation and redemption funding | New requests, existing cancellations, reconciliation, claims, and trading | HousePool owner calls `unpauseLpEpochSettlement()` |
-| Engine degraded mode | Automatically latches when a close or liquidation reveals insufficient adjusted solvency | New opens, position-backed LP redemption funding, and new LP entry through the pool gate | Closes, liquidations, mark refresh, recapitalization, redemption requests, and already-funded claims | Engine owner may clear it only after the on-chain solvency check passes |
+| Engine degraded mode | Automatically latches when a close or liquidation leaves raw `E < L`, where `E = max(HousePool.totalAssets() - trader claims, 0)` and `L` is maximum directional liability | New opens, position-backed LP redemption funding, and new LP entry through the pool gate | Closes, liquidations, mark refresh, recapitalization, redemption requests, and already-funded claims | Engine owner may clear it once raw `E >= L`; the separate settlement-buffer target need not be restored to clear |
 | Oracle/FAD close-only policy | Automatically derived from oracle regime and calendar | Opens in FAD or `oracleFrozen`; oracle-dependent actions also fail closed when their policy is not satisfied | Policy-valid closes, liquidations, mark refresh, and frozen-market LP settlement when not held | Automatic when a valid regime returns; configuration changes remain timelocked |
 | LP freshness/accounting gates | Automatically evaluated from canonical Engine and HousePool state | Settlement/redemption funding while withdrawals are not live; activation on stale marks, deficits, impairment, unassigned assets, or unavailable Senior capacity | Unrelated trading and claims already funded | Automatic after canonical state becomes eligible |
 
@@ -155,7 +155,7 @@ quoting, or transaction broadcast when the hold is active.
 | NAV aggregate faults | Reconcile book commitments against canonical Engine state | Full containment after minimal confirmation |
 | Pool/vault custody or escrow deficits | Reconcile token balances, accounted assets, claimant buckets, and reservations | Full containment after minimal confirmation |
 | Future cached mark or arithmetic-domain fault | Verify time, mark, and contributing reads | Settlement-only if isolated to settlement; otherwise full containment |
-| `EngineDegraded` or terminal-deficit warning | Diagnose solvency while protective keepers remain active | Risk-off or full containment if unexpected, persistent, or accompanied by integrity evidence |
+| `EngineDegraded` or terminal-deficit warning | Diagnose raw solvency while protective keepers remain active; settlement-buffer depletion without `E < L` is not degraded mode | Risk-off or full containment if unexpected, persistent, or accompanied by integrity evidence |
 | `WithdrawalsNotLive`, stale mark, invalid required oracle, pre-boundary oracle | Route or wait under documented policy | No breaker solely from this blocker |
 | `LpEpochSettlementPaused` blocker/deferral | Verify it matches the incident record; continue observing route and queues | No new trigger solely because the requested hold is active |
 | Unknown dependency | Retry block-pinned direct reads through independent providers | Trigger only if safe state cannot be established; choose the smallest affected domain |
@@ -205,7 +205,8 @@ The guardian must never auto-release a restriction. There is no expiry. Governan
 3. oracle source/configuration and exact post-recovery settlement route are validated;
 4. healthy observations remain consistent across the chosen blocks/providers;
 5. every cutoff-invalidated open, queued LP request, and cleanup backlog is understood;
-6. degraded mode, if active, passes its on-chain solvency check;
+6. degraded mode, if active, passes its raw `E >= L` on-chain solvency check; settlement-buffer restoration is
+   independently required before new risk or LP redemption funding, not before clearing the latch;
 7. the held epoch is simulated through the exact cached or atomic-refresh route before settlement release; and
 8. governance documents release order and rotates/disables an implicated guardian.
 

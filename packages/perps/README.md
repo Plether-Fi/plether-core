@@ -512,7 +512,8 @@ is never activated at a different NAV from the one applied to exits.
 The withdrawal firewall is the key LP safety mechanism:
 
 ```text
-freeUSDC = totalAssets - withdrawalReservedUsdc
+baseWithdrawalReservedUsdc = traderClaims + maxLiability + settlementBuffer
+freeUSDC = max(totalAssets - withdrawalReservedUsdc, 0)
 ```
 
 Only unencumbered physical USDC can be committed to funded LP claims. A positive terminal receivable can price shares
@@ -572,8 +573,9 @@ The monitor reads the settlement hold fail-soft. A readable active hold is inten
 post-recovery planning. A failed hold read instead marks the Pool dependency unknown and the composite incomplete.
 The included `LpEpochKeeper` aborts on an active hold before decoding a payload, quoting a Pyth fee, or broadcasting.
 The settlement hold previously bumped the monitor configuration schema and observation domain to V2. Including the
-active Junior maintenance-fee rate and recipient in observable configuration bumps both to V3; off-chain consumers
-must not compare V1, V2, and V3 digests as if they shared a domain.
+active Junior maintenance-fee rate and recipient in observable configuration bumped both to V3. Including
+`settlementBufferBps` in the observable Engine-policy digest now bumps both to V4; off-chain consumers must not
+compare V1, V2, V3, and V4 digests as if they shared a domain.
 
 Use `getSettlementStatus(observedEpoch)` as the lighter high-frequency polling surface. The composite
 `getSettlementObservation(observedEpoch)` is intentionally a checkpoint and alert-investigation read: its ABI return
@@ -608,7 +610,9 @@ The bounded monitoring API is:
   only when every required section is complete and otherwise remains zero. Completeness requires every Oracle
   dependency read to succeed even for cached-mark or no-work routing; current feed-policy validity is required only
   when the selected route is atomic refresh.
-- `observableConfigDigest()`: domain-separated digest of the observable active configuration.
+- `observableConfigDigest()`: domain-separated digest of the observable active configuration, including
+  `settlementBufferBps` in the Engine policy section and the active Junior maintenance-fee APR and recipient in the
+  pool-policy section.
 
 All digests are unauthenticated advisory comparison aids, not trusted batch commitments, and none is consumed by the
 Router.
@@ -719,13 +723,27 @@ This is why the LP docs distinguish freshness-gated repricing from already-funde
 
 ### Bounded solvency at entry
 
-Before increasing risk, the engine checks that the HousePool can cover the worst-case side payout after the trade.
+Before increasing risk, the engine checks that effective HousePool assets can cover both the worst-case directional
+payout and the configured settlement-liquidity buffer after the trade.
 
 ```text
-pool total assets >= max(globalLongMaxProfit, globalShortMaxProfit)
+P = HousePool.totalAssets()
+C = totalTraderClaimBalance
+E = max(P - C, 0)
+L = max(globalLongMaxProfit, globalShortMaxProfit)
+B = ceil(L * settlementBufferBps / 10_000)
+
+open/increase admission: E >= L + B
 ```
 
-This does not mean LPs can never take loss. It means trader upside is bounded and the system can reason about the worst case without iterating positions.
+The default `settlementBufferBps` is `25` bps; governance may set it from `0` through `1,000` bps under the 48-hour
+Engine risk-config timelock. `B` is headroom, not an extra payout, trader claim, NAV adjustment, yield source, or
+separately custodied reserve. The LP withdrawal firewall nevertheless protects the same amount, making its base
+reserve `C + L + B`.
+
+Closes, liquidations, and triggered TP/SL closes may consume this headroom. Attached TP/SL protection inherits the
+parent open's admission check, while protection added to an existing position does not create exposure and therefore
+does not apply this gate. Trader upside remains bounded without iterating positions.
 
 ### LP-capital carry
 
@@ -1012,7 +1030,8 @@ not exist. In particular, the guardian cannot disable trader closes or reduction
 
 ### Degraded mode
 
-If a close or liquidation reveals post-op insolvency, the engine latches `degradedMode`.
+If a close or liquidation leaves raw post-op effective assets `E` below maximum liability `L`, the engine latches
+`degradedMode`.
 
 While degraded:
 
@@ -1020,7 +1039,10 @@ While degraded:
 - position-backed withdrawals are blocked,
 - closes, liquidations, mark updates, and recapitalization remain available.
 
-This is a containment latch, not a pause. The protocol still allows transitions that reduce risk or move the system back toward solvency.
+This is a containment latch, not a pause or a settlement-buffer alarm. A transition may leave `L <= E < L + B`
+without entering degraded mode. Governance may clear an existing latch once `E >= L`; the next open or increase
+still must satisfy the stricter `E >= L + B` admission rule. The protocol continues to allow transitions that reduce
+risk or move the system back toward solvency.
 
 ### Liquidations
 
@@ -1087,7 +1109,8 @@ Engine risk controls live on `CfdEngineAdmin`, and router risk controls plus pau
 
 Timelocked surfaces include:
 
-- `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`, `CfdEngine.executionFeeBps`, `CfdEngine.frozenCloseSpreadBps`
+- `CfdEngineAdmin.EngineRiskConfig` -> `CfdEngine.riskParams`, `CfdEngine.executionFeeBps`,
+  `CfdEngine.frozenCloseSpreadBps`, `CfdEngine.settlementBufferBps`
 - `CfdEngineAdmin.EngineCalendarConfig` -> `CfdEngine.fadDayOverrides`, `CfdEngine.fadRunwaySeconds`
 - `CfdEngineAdmin.EngineFreshnessConfig` -> `CfdEngine.fadMaxStaleness`, `CfdEngine.engineMarkStalenessLimit`
 - `HousePool.PoolConfig` -> one six-field proposal containing `seniorRateBps`, `markStalenessLimit`,
@@ -1167,6 +1190,7 @@ requires containment and a new compatible stack rather than storage repair.
 | `protocolShareBps` | 0 (0%) | Protocol-treasury share of the collected charge; LPs receive the remainder after both shares |
 | `executionFeeBps` | 4 (0.04%) | Timelocked protocol trading fee |
 | `frozenCloseSpreadBps` | 50 (0.50%) | Fixed LP-owned spread on voluntary close/reduce notional during `oracleFrozen` |
+| `settlementBufferBps` | 25 (0.25%) | Liability-scaled admission and LP-withdrawal headroom; governed range 0-1,000 bps |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
 | Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Position-protection trigger bounty | 0.20 USDC | Timelocked activation-keeper reserve, capped at 1 USDC |
@@ -1197,6 +1221,9 @@ OrderRouter also exposes timelocked admin control over `positionProtectionCommit
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
 `frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).
+
+`settlementBufferBps` is timelocked with the same config and may range from `0` (disabled) through `1,000` bps (10%),
+inclusive. It scales maximum directional liability, not pool assets or position notional.
 
 `keeperShareBps` and `protocolShareBps` are also timelocked with `EngineRiskConfig`. Each allocation rounds down, their
 sum must not exceed `10_000`, and LPs receive the exact charge remainder. The defaults are `5_000` keeper, `0` protocol,

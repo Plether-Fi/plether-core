@@ -13,6 +13,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
 
@@ -142,14 +143,14 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_WithdrawalReserveIncludesKnownTraderClaimLiabilities() public view {
-        uint256 expectedReserved = _maxLiability() + engine.totalTraderClaimBalanceUsdc();
-
-        expectedReserved += uint256(0);
+        uint256 maxLiability = _maxLiability();
+        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceUsdc()
+            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
 
         assertEq(
             _withdrawalReservedUsdc(),
             expectedReserved,
-            "Withdrawal reserve must include liabilities and trader claim obligations"
+            "Withdrawal reserve must include liabilities, trader claims, and settlement headroom"
         );
     }
 
@@ -561,6 +562,13 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         uint256 poolAssetsUsdc = housePool.totalAssets();
+        uint256 maxLiabilityUsdc = _maxLiability();
+        uint256 settlementBufferUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
+        uint256 expectedWithdrawalReservedUsdc =
+            maxLiabilityUsdc + engine.totalTraderClaimBalanceUsdc() + settlementBufferUsdc;
+        uint256 expectedFreeUsdc =
+            poolAssetsUsdc > expectedWithdrawalReservedUsdc ? poolAssetsUsdc - expectedWithdrawalReservedUsdc : 0;
 
         assertEq(protocolSnapshot.poolAssetsUsdc, poolAssetsUsdc, "Protocol snapshot HousePool assets mismatch");
         assertEq(
@@ -578,22 +586,20 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             protocolSnapshot.withdrawalReservedUsdc,
-            _withdrawalReservedUsdc(),
+            expectedWithdrawalReservedUsdc,
             "Protocol snapshot withdrawal reserve mismatch"
         );
-        assertEq(
-            protocolSnapshot.freeUsdc,
-            engineProtocolLens.getProtocolAccountingSnapshot().freeUsdc,
-            "Protocol snapshot free USDC mismatch"
-        );
+        assertEq(protocolSnapshot.freeUsdc, expectedFreeUsdc, "Protocol snapshot free USDC mismatch");
         assertEq(
             snapshot.traderClaimBalanceUsdc,
             engine.totalTraderClaimBalanceUsdc(),
             "House-pool snapshot trader claim balance mismatch"
         );
-        assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "House-pool snapshot max liability mismatch");
+        assertEq(snapshot.maxLiabilityUsdc, maxLiabilityUsdc, "House-pool snapshot max liability mismatch");
         assertEq(
-            snapshot.supplementalReservedUsdc, uint256(0), "House-pool snapshot supplemental reserved amount mismatch"
+            snapshot.supplementalReservedUsdc,
+            settlementBufferUsdc,
+            "House-pool snapshot supplemental reserved amount mismatch"
         );
         assertEq(
             snapshot.physicalAssetsUsdc,
