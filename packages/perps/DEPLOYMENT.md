@@ -22,7 +22,7 @@ The deploy script handles contract creation and one-time wiring.
 The bootstrap script handles operator actions after deploy:
 
 - verifying the shared emergency coordinator and configuring its guardian
-- jointly proposing or finalizing the exact HousePool senior limits and Router opening/oracle parameters
+- fail-closing on the constructor-initialized HousePool senior limits and Router opening/oracle parameters
 - verifying the constructor-initialized Junior maintenance fee and treasury snapshot
 - seeding the junior tranche and then the senior tranche
 - minting mock USDC to test users
@@ -53,19 +53,21 @@ The deploy script creates and wires:
 6. `CfdEngineSettlementSidecar`
 7. `CfdEngineAdmin`
 8. `HousePoolRedemptionMathSidecar`
-9. `HousePool`, constructed with the redemption-math sidecar
+9. `ArbitrumSepoliaReleaseHousePool`, a constructor-only `HousePool` wrapper built with the redemption-math sidecar
+   and the exact `$40M/80%` release limits
 10. `TrancheVault` senior
 11. `TrancheVault` junior
 12. `CfdEngineAccountLens`
 13. `CfdEngineLens`
-14. `PletherOracle`
+14. `ArbitrumSepoliaReleaseOracle`, a constructor-only `PletherOracle` wrapper with the `2,500`-bps multiplier
 15. `CfdOrderPolicyEvaluator`
 16. `OrderRouterV2ExecutionSidecar`
 17. `OrderLifecycleBook`, separately deployed and immutable-bound to the predicted Router, Engine,
     MarginClearinghouse, and HousePool
 18. `OrderRouterLiquidationBatchSidecar`, separately deployed with the same predicted Router address
-19. `OrderRouter`, deployed immediately after those two Router-bound dependencies. Its eighth and final constructor
-    dependency is the predeployed lifecycle Book; its constructor deploys the immutable RouterAdmin and stateful
+19. `ArbitrumSepoliaReleaseRouter`, a constructor-only `OrderRouter` wrapper deployed immediately after those two
+    Router-bound dependencies with the `$1,000` opening minimum. Its eighth and final base-constructor dependency is
+    the predeployed lifecycle Book; its base constructor deploys the immutable RouterAdmin and stateful
     position-protection Book
 20. `PositionProtectionBook`, deployed internally and immutably bound by the Router constructor
 21. `PerpsPublicLens`
@@ -98,6 +100,11 @@ being constructed and its supplied core dependencies. It separately rejects a ke
 immutable `ROUTER()` is not `address(this)`. The deploy script also verifies the actual Router address equals the
 prediction. If the deployer nonce changes during the sequence, discard both orphaned Router-bound dependencies,
 recompute the prediction, and redeploy them; neither immutable binding can be repaired.
+
+The three Arbitrum Sepolia wrappers modify constructor state only and add no post-deployment setter. The shared
+HousePool, PletherOracle, and OrderRouter constructors and generic defaults remain unchanged. The release Router
+constructor also rejects an oracle that does not already expose the exact `2,500`-bps adverse multiplier. After
+construction, all configuration changes use the unchanged HousePool and RouterAdmin 48-hour governance paths.
 
 The Router constructor creates only the stateful position-protection Book. That Book requires no separate deployment
 transaction or mutable wiring. Discover it from `OrderRouter.positionProtectionBook()` and verify its immutable
@@ -178,8 +185,8 @@ Important:
 - `TerminalNavBookV2` must be deployed empty, immutable-bound to the new Engine, and wired before any position
   exposure. `CfdEngine.setTerminalNavBook(...)` validates matching Engine, `CAP_PRICE`, `SIZE_QUANTUM = 1e20`, and
   zero book version/totals before accepting it once.
-- Trading does not go live until a finite capacity configuration completes its 48-hour timelock, both seed positions
-  exist within those limits, and `activateTrading()` is called.
+- Trading does not go live until the constructor-installed finite capacity and Router policy are verified, both seed
+  positions exist within those limits, and `activateTrading()` is called.
 - Both configured vaults must report the same pool binding and fixed `LP_REQUEST_CUTOFF_DURATION` of `300` seconds.
   At the same block they must return identical `(nextRequestEpoch, nextRequestCutoffTime)` values from
   `getRequestEpochWindow()`, consistent with the pool's round-hour clock; the cutoff timestamp must be future.
@@ -259,16 +266,16 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
-| `adverseConfidenceMultiplierBps` | `2_500` (finalized through RouterAdmin before seeding) |
-| `minOpenNotionalUsdc` | `1_000e6` (finalized through RouterAdmin before seeding) |
+| `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
+| `minOpenNotionalUsdc` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` (unchanged) |
 | `closeOrderExecutionBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `positionProtectionCommitsEnabled` | `false` |
 | `juniorMaintenanceFeeAprBps` | `100` nominal APR |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
-| `maxSeniorExposureUsdc` | `40_000_000e6` |
-| `maxSeniorShareBps` | `8_000` |
+| `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
+| `maxSeniorShareBps` | `8_000` (release-HousePool constructor initialization) |
 | Senior / Junior seed | `10_000_000e6` each |
 
 `frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion without creating a protocol liability or terminal deficit, while a partial close must settle this separate spread obligation in full. Price loss beyond the terminal collectible cap is a diagnostic write-off and does not block the partial close.
@@ -441,8 +448,6 @@ PERPS_ORDER_ROUTER=0x...
 PERPS_EMERGENCY_COORDINATOR=0x...
 PERPS_GUARDIAN=0x...
 
-MAX_SENIOR_EXPOSURE_USDC=40000000000000
-MAX_SENIOR_SHARE_BPS=8000
 SENIOR_SEED_USDC=10000000000000
 JUNIOR_SEED_USDC=10000000000000
 
@@ -460,8 +465,9 @@ Notes:
 
 - USDC amounts are raw 6-decimal values.
 - `10000000000000` means `10_000_000e6`, or 10,000,000 mock USDC.
-- Seed amounts, seed receivers, both senior limits, guardian, and activation intent are explicit mandatory inputs.
-  Bootstrap accepts only the approved `$40M` exposure, `8,000`-bps share, and `$10M/$10M` seed values.
+- Seed amounts, seed receivers, guardian, and activation intent are explicit mandatory inputs. Bootstrap accepts only
+  the approved `$10M/$10M` seed values and independently reads and verifies the constructor-installed `$40M/80%`
+  HousePool and `$1,000/2,500` Router values.
 - `PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR`, `PERPS_EMERGENCY_COORDINATOR`, and `PERPS_GUARDIAN` are mandatory, and
   the guardian must be nonzero. Bootstrap verifies the supplied released sidecar's code and implementation id for
   rerun inspection; HousePool's internal immutable binding was fixed by its constructor and the deploy script and has
@@ -480,31 +486,30 @@ Run the standalone verifier without `--broadcast` after every phase and record e
 
 ```bash
 VERIFY_PHASE=deployed forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
-VERIFY_PHASE=config-pending forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
 VERIFY_PHASE=seeded forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
 VERIFY_PHASE=active forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
 ```
 
-The first run proposes exact HousePool `$40M/80%` limits and Router `$1,000/2,500` values in the same transaction, then
-requires identical activation timestamps and exits without seeding, funding test users, or activating trading. Wait at
-least 48 hours and rerun with `ACTIVATE_TRADING=false`. The second run verifies and finalizes both complete configs,
-initializes Junior then Senior, and funds any configured test users. Run the `seeded` verifier, change
-`ACTIVATE_TRADING=true`, rerun bootstrap once more, and run the `active` verifier. An unrelated proposal, a partial
-proposal state, or diverging release windows reverts rather than overwriting or finalizing it.
+The deployment transaction installs exact HousePool `$40M/80%` limits and Router `$1,000/2,500` values. Run the
+`deployed` verifier, then bootstrap with `ACTIVATE_TRADING=false`; bootstrap verifies the live values, requires no
+outstanding HousePool or Router proposal, initializes Junior then Senior, and funds any configured test users. Run the
+`seeded` verifier, change `ACTIVATE_TRADING=true`, rerun bootstrap once more, and run the `active` verifier. There is no
+initial configuration proposal or 48-hour release wait.
 
 ## Bootstrap Behavior
 
-The configuration, seed, and activation phases of the bootstrap script are designed to be partial-rerun safe:
+The seed and activation phases of the bootstrap script are designed to be partial-rerun safe:
 
-- it separates both complete configuration proposals and finalizations across one shared 48-hour release window
-- it refuses to seed unless the exact HousePool and Router release values are active
+- it never proposes or finalizes initial HousePool or Router configuration
+- it refuses to seed unless the exact constructor-installed HousePool and Router values are active and neither admin
+  has an outstanding proposal
 - it refuses to seed unless Junior already has the constructor-initialized `100`-bps fee, the deployment treasury
   snapshot, no outstanding fee proposal, and zero pending fee shares before its first supply
 - it rotates the coordinator guardian only when the requested address differs; a matching rerun is a no-op
 - it skips a seed if that side is already initialized
 - it skips activation if trading is already active
 
-Before proposing limits, seeding, or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
+Before seeding or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
 that a code-bearing `TerminalNavBookV2` is wired with matching Engine, cap, and 100-token quantum and that the supplied
 redemption-math sidecar has the expected implementation id. Observable core and coordinator binding mismatches fail
 closed. The supplied sidecar check is inspection-only because bootstrap cannot read back HousePool's internal
@@ -518,10 +523,10 @@ the test-user recipient/amount inputs after the intended funding run.
 
 This is useful if the first bootstrap attempt completes only partially.
 
-Bootstrap does not enable position protection. Its Router proposal preserves every active field except the approved
-minimum opening notional and adverse-confidence multiplier, and explicitly verifies the unchanged `10`-bps basket
-confidence and pending-order limit `5`. Final output reports the Book address, current feature flag, and trigger bounty
-so operators can verify ordinary trading without exposing an unprepared conditional-order surface.
+Bootstrap does not enable position protection or submit any Router proposal. It verifies the constructor-installed
+minimum opening notional and adverse-confidence multiplier plus the unchanged `10`-bps basket confidence and
+pending-order limit `5`. Final output reports the Book address, current feature flag, and trigger bounty so operators
+can verify ordinary trading without exposing an unprepared conditional-order surface.
 
 ## Position Protection Activation
 
@@ -615,13 +620,15 @@ liquidation remain live.
    batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
    `SettlementMonitorLens` facade and its internal sidecar are bound to the same Router, Engine, pool, terminal book,
    clearinghouse, vaults, USDC, protocol lens, and planner version. Confirm Junior maintenance-fee rate, recipient,
-   pending shares, and effective supply read back as `0`, `address(0)`, `0`, and raw supply respectively. Verify the
+   pending shares, and effective supply read back as `100`, the deployment-time protocol-treasury snapshot, `0`, and
+   raw supply respectively. Also verify the constructor-installed HousePool `$40M/80%` and Router `$1,000/2,500`
+   values with zero active configuration proposals. Verify the
    `EmergencyPauseCoordinator` is bound to the exact RouterAdmin and HousePool, installed as pauser on both, and starts
    with no active settlement hold.
 5. Set bootstrap environment variables, including the printed redemption-math sidecar and coordinator, a nonzero
-   guardian, and both explicit senior limits, then run bootstrap to configure the guardian and propose the limits.
-6. Wait for the 48-hour `HousePool` timelock, then rerun the same bootstrap command to finalize the limits, seed Junior
-   then Senior, and activate trading.
+   guardian, both explicit seed receivers, and exact `$10M/$10M` seeds. Run bootstrap with `ACTIVATE_TRADING=false` to
+   configure the guardian and seed Junior then Senior without an initial governance wait.
+6. Run the seeded verifier, set `ACTIVATE_TRADING=true`, rerun bootstrap, and run the active verifier.
 7. Fund test wallets with Arbitrum Sepolia ETH as needed.
 8. Point the frontend, public lens consumers, indexer, ordinary order keeper, LP epoch keeper, trigger worker, and
    monitoring at the new release. Configure the guardian monitor and protocol-funded incident keeper. Protection

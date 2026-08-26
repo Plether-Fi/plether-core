@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "network": {
     "name": "arbitrum-sepolia",
     "chainId": 421614
@@ -25,17 +25,29 @@
     "cfdEngineSettlementSidecar": { "address": null, "runtimeCodeHash": null },
     "cfdEngineAdmin": { "address": null, "runtimeCodeHash": null },
     "housePoolRedemptionMathSidecar": { "address": null, "runtimeCodeHash": null },
-    "housePool": { "address": null, "runtimeCodeHash": null },
+    "housePool": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool",
+      "address": null,
+      "runtimeCodeHash": null
+    },
     "seniorVault": { "address": null, "runtimeCodeHash": null },
     "juniorVault": { "address": null, "runtimeCodeHash": null },
     "cfdEngineAccountLens": { "address": null, "runtimeCodeHash": null },
     "cfdEngineLens": { "address": null, "runtimeCodeHash": null },
     "cfdOrderPolicyEvaluator": { "address": null, "runtimeCodeHash": null },
     "orderRouterV2ExecutionSidecar": { "address": null, "runtimeCodeHash": null },
-    "pletherOracle": { "address": null, "runtimeCodeHash": null },
+    "pletherOracle": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
+      "address": null,
+      "runtimeCodeHash": null
+    },
     "orderRouterLiquidationBatchSidecar": { "address": null, "runtimeCodeHash": null },
     "orderLifecycleBook": { "address": null, "runtimeCodeHash": null, "executionConfigHash": null },
-    "orderRouter": { "address": null, "runtimeCodeHash": null },
+    "orderRouter": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter",
+      "address": null,
+      "runtimeCodeHash": null
+    },
     "orderRouterAdmin": { "address": null, "runtimeCodeHash": null },
     "positionProtectionBook": { "address": null, "runtimeCodeHash": null },
     "perpsPublicLens": { "address": null, "runtimeCodeHash": null },
@@ -70,22 +82,19 @@
     "juniorMaintenanceFeeRecipient": null,
     "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
   },
-  "timelocks": {
-    "housePoolConfigProposalTx": null,
-    "routerConfigProposalTx": null,
-    "sharedActivationTime": null,
-    "housePoolConfigFinalizationTx": null,
-    "routerConfigFinalizationTx": null
+  "deploymentInitialization": {
+    "housePoolReleaseValuesConstructorInitialized": true,
+    "routerReleaseValuesConstructorInitialized": true,
+    "housePoolConfigActivationTimeAtDeployment": "0",
+    "routerConfigActivationTimeAtDeployment": "0"
   },
   "transactions": {
     "deployment": [],
-    "bootstrapProposal": [],
-    "bootstrapFinalizationAndSeeding": [],
+    "bootstrapSeeding": [],
     "activation": []
   },
   "verification": {
     "deployedPhase": { "txOrRunId": null, "passed": false },
-    "configPendingPhase": { "txOrRunId": null, "passed": false },
     "seededPhase": { "txOrRunId": null, "passed": false },
     "activePhase": { "txOrRunId": null, "passed": false },
     "authenticatedPythDryRun": { "timestamp": null, "passed": false }

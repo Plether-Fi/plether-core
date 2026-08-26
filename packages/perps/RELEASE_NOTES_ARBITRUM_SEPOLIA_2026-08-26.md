@@ -34,11 +34,14 @@ or Spot, and repository preparation performs no broadcast. The source tree must 
   `MaintenanceFeeConfigInitialized` records the APR, recipient, and first hourly checkpoint boundary.
 - Later Junior rate or recipient changes retain the existing 48-hour proposal/finalization delay. An Engine treasury
   rotation does not dynamically change the Junior recipient; governance must separately rotate it through that delay.
-- Engine risk values are installed at construction. HousePool `$40M/80%` limits and Router `$1,000/2,500` values are
-  proposed together and must share the same 48-hour activation timestamp. Bootstrap refuses to seed until both exact
-  proposals are finalized.
+- Engine risk values are installed at construction. Release-only HousePool, PletherOracle, and Router constructor
+  wrappers also install the `$40M/80%` limits and `$1,000/2,500` Router policy before the fresh contracts become
+  observable. The shared generic constructors and their defaults remain unchanged.
 - Bootstrap requires explicit `$10M/$10M` amounts and receiver addresses. Before the first Junior seed it verifies an
-  active `100`-bps fee, the current deployment treasury snapshot, no fee proposal, and zero pending fee shares.
+  active `100`-bps fee, the current deployment treasury snapshot, no fee proposal, zero pending fee shares, all four
+  constructor-initialized Router/HousePool values, and no outstanding Router or HousePool proposal.
+- Bootstrap no longer proposes or finalizes initial Router/HousePool configuration. Every later change still uses the
+  existing independent 48-hour governance proposal/finalization path.
 - The complete graph includes `CfdOrderPolicyEvaluator`, `OrderRouterV2ExecutionSidecar`, the predeployed
   `OrderLifecycleBook`, `PositionProtectionBook`, the predeployed liquidation batch sidecar, the monitor facade and
   monitor sidecar, Terminal NAV V2, the redemption math sidecar, and all account/public/protocol lenses.
@@ -54,9 +57,9 @@ isolation remain unchanged.
 ## Required evidence
 
 Populate `deployments/arbitrum-sepolia-perps.template.json` as the immutable release record, including addresses,
-runtime code hashes, transactions, the shared activation time, seed receivers, treasury snapshot, source commit, and
-all four verifier phases. Run `scripts/prepare-perps-arbitrum-sepolia-release.sh` before any broadcast, then use
-`VerifyPerpsArbitrumSepolia` at `deployed`, `config-pending`, `seeded`, and `active`. The verifier is read-only.
+runtime code hashes, constructor-initialization evidence, transactions, seed receivers, treasury snapshot, source
+commit, and all three verifier phases. Run `scripts/prepare-perps-arbitrum-sepolia-release.sh` before any broadcast,
+then use `VerifyPerpsArbitrumSepolia` at `deployed`, `seeded`, and `active`. The verifier is read-only.
 
 The final release gate includes formatting, package-boundary checks, sized builds, all non-fork tests, Perps unit/fuzz/
 invariant suites, EIP-170/EIP-3860 regressions, and an authenticated upgraded-Pyth no-broadcast Arbitrum Sepolia dry

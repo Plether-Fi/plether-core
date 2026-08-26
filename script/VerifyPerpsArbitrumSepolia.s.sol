@@ -26,11 +26,10 @@ import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
 import {SettlementMonitorLensSidecar} from "@plether/perps/SettlementMonitorLensSidecar.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
-import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import "forge-std/Script.sol";
 
 /// @notice Read-only release verifier for the complete Arbitrum Sepolia Perps deployment graph.
-/// @dev The script never starts a broadcast. `VERIFY_PHASE` must be one of deployed, config-pending, seeded, or active.
+/// @dev The script never starts a broadcast. `VERIFY_PHASE` must be one of deployed, seeded, or active.
 contract VerifyPerpsArbitrumSepolia is Script {
 
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
@@ -43,7 +42,6 @@ contract VerifyPerpsArbitrumSepolia is Script {
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 100;
 
     bytes32 internal constant PHASE_DEPLOYED = keccak256("deployed");
-    bytes32 internal constant PHASE_CONFIG_PENDING = keccak256("config-pending");
     bytes32 internal constant PHASE_SEEDED = keccak256("seeded");
     bytes32 internal constant PHASE_ACTIVE = keccak256("active");
 
@@ -80,10 +78,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
     function run() external {
         require(block.chainid == 421_614, "Unexpected chain id");
         bytes32 phase = keccak256(bytes(vm.envString("VERIFY_PHASE")));
-        require(
-            phase == PHASE_DEPLOYED || phase == PHASE_CONFIG_PENDING || phase == PHASE_SEEDED || phase == PHASE_ACTIVE,
-            "Invalid VERIFY_PHASE"
-        );
+        require(phase == PHASE_DEPLOYED || phase == PHASE_SEEDED || phase == PHASE_ACTIVE, "Invalid VERIFY_PHASE");
 
         Deployment memory deployed = _loadDeployment();
         _verifyCode(deployed);
@@ -118,8 +113,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         deployed.accountLens = CfdEngineAccountLens(vm.envAddress("PERPS_ACCOUNT_LENS"));
         deployed.engineLens = CfdEngineLens(vm.envAddress("PERPS_ENGINE_LENS"));
         deployed.orderPolicyEvaluator = CfdOrderPolicyEvaluator(vm.envAddress("PERPS_ORDER_POLICY_EVALUATOR"));
-        deployed.orderExecutionSidecar =
-            OrderRouterV2ExecutionSidecar(vm.envAddress("PERPS_ORDER_EXECUTION_SIDECAR"));
+        deployed.orderExecutionSidecar = OrderRouterV2ExecutionSidecar(vm.envAddress("PERPS_ORDER_EXECUTION_SIDECAR"));
         deployed.router = OrderRouter(vm.envAddress("PERPS_ORDER_ROUTER"));
         deployed.liquidationBatchSidecar =
             OrderRouterLiquidationBatchSidecar(vm.envAddress("PERPS_LIQUIDATION_BATCH_SIDECAR"));
@@ -354,8 +348,14 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(deployed.engine.executionFeeBps() == 4, "Execution fee mismatch");
         require(deployed.engine.frozenCloseSpreadBps() == 50, "Frozen-close spread mismatch");
         require(deployed.oracle.basketMaxConfidenceRatioBps() == 10, "Basket confidence mismatch");
-        require(deployed.router.basketMaxConfidenceRatioBps() == 10, "Router basket confidence mismatch");
+        require(
+            deployed.oracle.adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
+            "Adverse multiplier mismatch"
+        );
         require(deployed.router.maxPendingOrders() == 5, "Pending-order limit mismatch");
+        require(deployed.router.minOpenNotionalUsdc() == RELEASE_MIN_OPEN_NOTIONAL_USDC, "Opening notional mismatch");
+        require(deployed.housePool.maxSeniorExposureUsdc() == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Exposure mismatch");
+        require(deployed.housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Senior share mismatch");
     }
 
     function _verifyGovernanceAndPhase(
@@ -371,10 +371,10 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(deployed.engineAdmin.calendarConfigActivationTime() == 0, "Outstanding Engine calendar proposal");
         require(deployed.engineAdmin.freshnessConfigActivationTime() == 0, "Outstanding Engine freshness proposal");
         require(deployed.routerAdmin.oracleConfigActivationTime() == 0, "Outstanding Router oracle proposal");
+        require(deployed.housePool.poolConfigActivationTime() == 0, "Outstanding HousePool proposal");
+        require(deployed.routerAdmin.routerConfigActivationTime() == 0, "Outstanding Router proposal");
 
         if (phase == PHASE_DEPLOYED) {
-            require(deployed.housePool.poolConfigActivationTime() == 0, "Unexpected HousePool proposal");
-            require(deployed.routerAdmin.routerConfigActivationTime() == 0, "Unexpected Router proposal");
             require(!deployed.housePool.seniorSeedInitialized(), "Senior seed already initialized");
             require(!deployed.housePool.juniorSeedInitialized(), "Junior seed already initialized");
             require(deployed.juniorVault.pendingMaintenanceFeeShares() == 0, "Pre-seed Junior fee shares are nonzero");
@@ -382,37 +382,6 @@ contract VerifyPerpsArbitrumSepolia is Script {
             return;
         }
 
-        if (phase == PHASE_CONFIG_PENDING) {
-            uint256 poolActivationTime = deployed.housePool.poolConfigActivationTime();
-            uint256 routerActivationTime = deployed.routerAdmin.routerConfigActivationTime();
-            require(poolActivationTime != 0 && poolActivationTime == routerActivationTime, "Release window mismatch");
-            (,,,, uint256 maxSeniorExposureUsdc, uint256 maxSeniorShareBps) = deployed.housePool.pendingPoolConfig();
-            require(maxSeniorExposureUsdc == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Pending exposure mismatch");
-            require(maxSeniorShareBps == RELEASE_MAX_SENIOR_SHARE_BPS, "Pending Senior share mismatch");
-            IOrderRouterAdminHost.RouterConfig memory pendingConfig = deployed.routerAdmin.pendingRouterConfig();
-            require(pendingConfig.minOpenNotionalUsdc == RELEASE_MIN_OPEN_NOTIONAL_USDC, "Pending notional mismatch");
-            require(
-                pendingConfig.adverseConfidenceMultiplierBps == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
-                "Pending adverse multiplier mismatch"
-            );
-            require(pendingConfig.basketMaxConfidenceRatioBps == 10, "Pending basket confidence mismatch");
-            require(pendingConfig.maxPendingOrders == 5, "Pending order limit mismatch");
-            require(!deployed.housePool.seniorSeedInitialized(), "Senior seed initialized while config pending");
-            require(!deployed.housePool.juniorSeedInitialized(), "Junior seed initialized while config pending");
-            require(deployed.juniorVault.pendingMaintenanceFeeShares() == 0, "Pre-seed Junior fee shares are nonzero");
-            require(!deployed.housePool.isTradingActive(), "Trading active while config pending");
-            return;
-        }
-
-        require(deployed.housePool.poolConfigActivationTime() == 0, "Outstanding HousePool proposal");
-        require(deployed.routerAdmin.routerConfigActivationTime() == 0, "Outstanding Router proposal");
-        require(deployed.housePool.maxSeniorExposureUsdc() == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Exposure mismatch");
-        require(deployed.housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Senior share mismatch");
-        require(deployed.router.minOpenNotionalUsdc() == RELEASE_MIN_OPEN_NOTIONAL_USDC, "Opening notional mismatch");
-        require(
-            deployed.router.adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
-            "Adverse multiplier mismatch"
-        );
         require(deployed.housePool.seniorSeedInitialized(), "Senior seed missing");
         require(deployed.housePool.juniorSeedInitialized(), "Junior seed missing");
         require(deployed.seniorVault.seedShareFloor() != 0, "Senior seed floor missing");

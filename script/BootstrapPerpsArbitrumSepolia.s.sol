@@ -11,9 +11,7 @@ import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
-import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
-import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import "forge-std/Script.sol";
 
@@ -94,8 +92,6 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address emergencyCoordinatorAddr = vm.envAddress("PERPS_EMERGENCY_COORDINATOR");
         address desiredGuardian = vm.envAddress("PERPS_GUARDIAN");
 
-        uint256 maxSeniorExposureUsdc = vm.envUint("MAX_SENIOR_EXPOSURE_USDC");
-        uint256 maxSeniorShareBps = vm.envUint("MAX_SENIOR_SHARE_BPS");
         uint256 seniorSeedUsdc = vm.envUint("SENIOR_SEED_USDC");
         uint256 juniorSeedUsdc = vm.envUint("JUNIOR_SEED_USDC");
         address seniorSeedReceiver = vm.envAddress("SENIOR_SEED_RECEIVER");
@@ -115,18 +111,12 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         EmergencyPauseCoordinator emergencyCoordinator = EmergencyPauseCoordinator(emergencyCoordinatorAddr);
 
         _validateGuardian(desiredGuardian);
-        _validateReleaseInputs(
-            maxSeniorExposureUsdc,
-            maxSeniorShareBps,
-            seniorSeedUsdc,
-            juniorSeedUsdc,
-            seniorSeedReceiver,
-            juniorSeedReceiver
-        );
+        _validateReleaseInputs(seniorSeedUsdc, juniorSeedUsdc, seniorSeedReceiver, juniorSeedReceiver);
         _verifyRedemptionMathSidecar(redemptionMathSidecarAddr);
         _verifyAsyncVaultPair(housePool, usdc);
         _verifyTerminalNavBook(housePool);
         _verifyRouterWiring(housePool, router);
+        _verifyInitialReleaseConfig(housePool, router, routerAdmin);
         _verifyEmergencyCoordinator(housePool, routerAdmin, emergencyCoordinator);
 
         console.log("Bootstrapping Plether perps on Arbitrum Sepolia");
@@ -149,21 +139,6 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         vm.startBroadcast(privateKey);
 
         _configureGuardian(emergencyCoordinator, desiredGuardian, deployer);
-        bool poolConfigReady = _configureSeniorLimits(housePool, maxSeniorExposureUsdc, maxSeniorShareBps);
-        bool routerConfigReady = _configureRouterRelease(router, routerAdmin);
-        if (!poolConfigReady || !routerConfigReady) {
-            require(!poolConfigReady && !routerConfigReady, "Release configuration readiness diverged");
-            require(
-                housePool.poolConfigActivationTime() == routerAdmin.routerConfigActivationTime(),
-                "HousePool and Router release windows diverged"
-            );
-            vm.stopBroadcast();
-            console.log("");
-            console.log("HousePool and Router release configurations are not both active yet.");
-            console.log("Wait for their shared 48-hour release window, then rerun this same command.");
-            console.log("No tranche seeds, test-user funds, or trading activation were performed.");
-            return;
-        }
         _seedLifecycle(
             housePool,
             IMintableERC20(usdc),
@@ -192,7 +167,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Maximum senior exposure (USDC units):", housePool.maxSeniorExposureUsdc());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
         console.log("Minimum opening notional (USDC units):", router.minOpenNotionalUsdc());
-        console.log("Adverse confidence multiplier (bps):", router.adverseConfidenceMultiplierBps());
+        console.log("Adverse confidence multiplier (bps):", router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
         console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
         console.log("Current LP epoch:", housePool.currentLpEpoch());
@@ -279,6 +254,32 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         IPositionProtectionBookBootstrapView candidate = IPositionProtectionBookBootstrapView(positionProtectionBook);
         require(candidate.ROUTER() == address(router), "PositionProtectionBook router mismatch");
         require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
+    }
+
+    /// @dev Initial release values are constructor-installed. Bootstrap has no privileged initialization path and
+    ///      refuses to seed or activate a deployment whose live values differ or whose later governance change is
+    ///      already pending.
+    function _verifyInitialReleaseConfig(
+        HousePool housePool,
+        OrderRouter router,
+        OrderRouterAdmin routerAdmin
+    ) internal view {
+        require(
+            housePool.maxSeniorExposureUsdc() == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Unexpected maximum senior exposure"
+        );
+        require(housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Unexpected maximum senior share");
+        require(housePool.poolConfigActivationTime() == 0, "Outstanding HousePool config proposal");
+        require(router.minOpenNotionalUsdc() == RELEASE_MIN_OPEN_NOTIONAL_USDC, "Unexpected opening notional");
+        require(
+            router.pletherOracle().adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
+            "Unexpected adverse multiplier"
+        );
+        require(
+            router.pletherOracle().basketMaxConfidenceRatioBps() == RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS,
+            "Basket confidence changed"
+        );
+        require(router.maxPendingOrders() == RELEASE_MAX_PENDING_ORDERS, "Pending-order limit changed");
+        require(routerAdmin.routerConfigActivationTime() == 0, "Outstanding Router config proposal");
     }
 
     /// @dev Requires the deploy-time coordinator and both pauser bindings to match this exact stack. Bootstrap never
@@ -401,171 +402,12 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         (nextRequestEpoch, nextRequestCutoffTime) = candidate.getRequestEpochWindow();
     }
 
-    /// @dev Stages finite senior limits on the first run, then finalizes the exact proposal on a later run after the
-    ///      HousePool timelock. Returning false deliberately stops bootstrap before either seed is initialized.
-    function _configureSeniorLimits(
-        HousePool housePool,
-        uint256 maxSeniorExposureUsdc,
-        uint256 maxSeniorShareBps
-    ) internal returns (bool ready) {
-        uint256 activationTime = housePool.poolConfigActivationTime();
-        bool activeLimitsMatch = housePool.maxSeniorExposureUsdc() == maxSeniorExposureUsdc
-            && housePool.maxSeniorShareBps() == maxSeniorShareBps;
-
-        if (activeLimitsMatch) {
-            if (activationTime != 0) {
-                revert("Outstanding HousePool config proposal");
-            }
-            return true;
-        }
-
-        IHousePool.PoolConfig memory desiredConfig = IHousePool.PoolConfig({
-            seniorRateBps: housePool.seniorRateBps(),
-            markStalenessLimit: housePool.markStalenessLimit(),
-            seniorFrozenLpFeeBps: housePool.seniorFrozenLpFeeBps(),
-            juniorFrozenLpFeeBps: housePool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: maxSeniorExposureUsdc,
-            maxSeniorShareBps: maxSeniorShareBps
-        });
-
-        if (activationTime == 0) {
-            housePool.proposePoolConfig(desiredConfig);
-            console.log("Proposed maximum senior exposure:", maxSeniorExposureUsdc);
-            console.log("Proposed maximum senior share (bps):", maxSeniorShareBps);
-            console.log("Pool config activation time:", housePool.poolConfigActivationTime());
-            return false;
-        }
-
-        (
-            uint256 pendingSeniorRateBps,
-            uint256 pendingMarkStalenessLimit,
-            uint256 pendingSeniorFrozenLpFeeBps,
-            uint256 pendingJuniorFrozenLpFeeBps,
-            uint256 pendingMaxSeniorExposureUsdc,
-            uint256 pendingMaxSeniorShareBps
-        ) = housePool.pendingPoolConfig();
-        if (
-            pendingSeniorRateBps != desiredConfig.seniorRateBps
-                || pendingMarkStalenessLimit != desiredConfig.markStalenessLimit
-                || pendingSeniorFrozenLpFeeBps != desiredConfig.seniorFrozenLpFeeBps
-                || pendingJuniorFrozenLpFeeBps != desiredConfig.juniorFrozenLpFeeBps
-                || pendingMaxSeniorExposureUsdc != desiredConfig.maxSeniorExposureUsdc
-                || pendingMaxSeniorShareBps != desiredConfig.maxSeniorShareBps
-        ) {
-            revert("Pending HousePool config does not match bootstrap limits");
-        }
-
-        if (block.timestamp < activationTime) {
-            console.log("HousePool config is still timelocked until:", activationTime);
-            return false;
-        }
-
-        housePool.finalizePoolConfig();
-        console.log("Finalized maximum senior exposure:", maxSeniorExposureUsdc);
-        console.log("Finalized maximum senior share (bps):", maxSeniorShareBps);
-        return true;
-    }
-
-    /// @dev Coordinates the Router release proposal with the HousePool proposal. The first run stages the exact
-    ///      desired config; a later run finalizes only that proposal after its unchanged 48-hour delay.
-    function _configureRouterRelease(
-        OrderRouter router,
-        OrderRouterAdmin routerAdmin
-    ) internal returns (bool ready) {
-        require(
-            router.basketMaxConfidenceRatioBps() == RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS, "Basket confidence changed"
-        );
-        require(router.maxPendingOrders() == RELEASE_MAX_PENDING_ORDERS, "Pending-order limit changed");
-
-        IOrderRouterAdminHost.RouterConfig memory desiredConfig = _activeRouterConfig(router);
-        desiredConfig.minOpenNotionalUsdc = RELEASE_MIN_OPEN_NOTIONAL_USDC;
-        desiredConfig.adverseConfidenceMultiplierBps = RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS;
-
-        uint256 activationTime = routerAdmin.routerConfigActivationTime();
-        if (_routerConfigMatches(_activeRouterConfig(router), desiredConfig)) {
-            require(activationTime == 0, "Outstanding Router config proposal");
-            return true;
-        }
-
-        if (activationTime == 0) {
-            routerAdmin.proposeRouterConfig(desiredConfig);
-            console.log("Proposed minimum opening notional:", desiredConfig.minOpenNotionalUsdc);
-            console.log("Proposed adverse confidence multiplier (bps):", desiredConfig.adverseConfidenceMultiplierBps);
-            console.log("Router config activation time:", routerAdmin.routerConfigActivationTime());
-            return false;
-        }
-
-        IOrderRouterAdminHost.RouterConfig memory pendingConfig = routerAdmin.pendingRouterConfig();
-        require(
-            _routerConfigMatches(pendingConfig, desiredConfig), "Pending Router config does not match bootstrap release"
-        );
-        if (block.timestamp < activationTime) {
-            console.log("Router config is still timelocked until:", activationTime);
-            return false;
-        }
-
-        routerAdmin.finalizeRouterConfig();
-        require(
-            _routerConfigMatches(_activeRouterConfig(router), desiredConfig),
-            "Finalized Router config does not match bootstrap release"
-        );
-        console.log("Finalized minimum opening notional:", desiredConfig.minOpenNotionalUsdc);
-        console.log("Finalized adverse confidence multiplier (bps):", desiredConfig.adverseConfidenceMultiplierBps);
-        return true;
-    }
-
-    function _activeRouterConfig(
-        OrderRouter router
-    ) internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
-        config.maxOrderAge = router.maxOrderAge();
-        config.orderExecutionStalenessLimit = router.orderExecutionStalenessLimit();
-        config.liquidationStalenessLimit = router.liquidationStalenessLimit();
-        config.basketMaxConfidenceRatioBps = router.basketMaxConfidenceRatioBps();
-        config.orderSettlementWindow = router.orderSettlementWindow();
-        config.maxComponentPublishTimeDivergence = router.maxComponentPublishTimeDivergence();
-        config.adverseConfidenceMultiplierBps = router.adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
-        config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
-        config.maxPendingOrders = router.maxPendingOrders();
-        config.minEngineGas = router.minEngineGas();
-        config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
-    }
-
-    function _routerConfigMatches(
-        IOrderRouterAdminHost.RouterConfig memory left,
-        IOrderRouterAdminHost.RouterConfig memory right
-    ) internal pure returns (bool) {
-        return keccak256(abi.encode(left)) == keccak256(abi.encode(right));
-    }
-
-    function _validateSeniorLimits(
-        uint256 maxSeniorExposureUsdc,
-        uint256 maxSeniorShareBps
-    ) internal pure {
-        if (maxSeniorExposureUsdc == type(uint256).max) {
-            revert("MAX_SENIOR_EXPOSURE_USDC must be finite");
-        }
-        if (maxSeniorShareBps >= 10_000) {
-            revert("MAX_SENIOR_SHARE_BPS must be below 10000");
-        }
-    }
-
     function _validateReleaseInputs(
-        uint256 maxSeniorExposureUsdc,
-        uint256 maxSeniorShareBps,
         uint256 seniorSeedUsdc,
         uint256 juniorSeedUsdc,
         address seniorSeedReceiver,
         address juniorSeedReceiver
     ) internal pure {
-        _validateSeniorLimits(maxSeniorExposureUsdc, maxSeniorShareBps);
-        require(maxSeniorExposureUsdc == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Unexpected maximum senior exposure");
-        require(maxSeniorShareBps == RELEASE_MAX_SENIOR_SHARE_BPS, "Unexpected maximum senior share");
         require(seniorSeedUsdc == RELEASE_SENIOR_SEED_USDC, "Unexpected senior seed");
         require(juniorSeedUsdc == RELEASE_JUNIOR_SEED_USDC, "Unexpected junior seed");
         require(seniorSeedReceiver != address(0), "SENIOR_SEED_RECEIVER is zero");
