@@ -382,8 +382,8 @@ A_{\mathrm{physical}}\ge
 \]
 
 The deployed default is \(\beta_{\mathrm{buf}}=25\) basis points. The 48-hour
-timelocked Engine risk config accepts the inclusive range from zero to 100 basis
-points. Zero disables this additional headroom.
+timelocked Engine risk config accepts the inclusive range from zero to 1,000 basis
+points (10%). Zero disables this additional headroom.
 
 Open planning includes immediate pool changes. Positive VPI increases physical
 pool assets; a VPI rebate reduces them; the protocol execution fee belongs to

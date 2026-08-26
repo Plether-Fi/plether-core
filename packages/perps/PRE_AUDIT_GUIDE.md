@@ -210,7 +210,7 @@ Reachability note:
 - Chosen tradeoff: let `P = HousePool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`,
   `L = max(bullMaxProfit, bearMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`. Opens/increases require
   post-op `E >= L + B`, and LP redemption funding reserves `C + L + B`.
-- Governance rule: the rate defaults to `25` bps and the 48-hour timelocked `EngineRiskConfig` accepts `0..100` bps,
+- Governance rule: the rate defaults to `25` bps and the 48-hour timelocked `EngineRiskConfig` accepts `0..1,000` bps,
   inclusive.
 - Ownership rule: `B` is not a trader or LP liability, terminal NAV, yield, or a clearinghouse/custody bucket. It
   constrains admission and withdrawable cash only.

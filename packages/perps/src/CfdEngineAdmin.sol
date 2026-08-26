@@ -20,8 +20,8 @@ contract CfdEngineAdmin is Ownable2Step {
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     /// @notice Maximum oracle-frozen close spread, in basis points (10%).
     uint256 public constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
-    /// @notice Maximum protected settlement buffer, in basis points (1%).
-    uint256 public constant MAX_SETTLEMENT_BUFFER_BPS = 100;
+    /// @notice Maximum protected settlement buffer, in basis points (10%).
+    uint256 public constant MAX_SETTLEMENT_BUFFER_BPS = 1000;
 
     /// @notice Engine host that receives finalized configuration.
     ICfdEngineAdminHost public immutable engine;
@@ -100,7 +100,7 @@ contract CfdEngineAdmin is Ownable2Step {
     ///      liquidation charge and charge bps must be nonzero; keeper plus protocol share may not exceed 10,000 bps; and
     ///      max skew may not exceed 1e18. There is no admin-side upper bound on `vpiFactor` or `bountyBps`, and FAD margin
     ///      need not be at least initial margin. The open/close execution fee must be 1..10,000 bps and the oracle-frozen
-    ///      close spread must be 1..1,000 bps. The settlement buffer may be 0..100 bps.
+    ///      close spread must be 1..1,000 bps. The settlement buffer may be 0..1,000 bps.
     /// @param config Complete risk configuration to validate and stage.
     function proposeRiskConfig(
         ICfdEngineAdminHost.EngineRiskConfig calldata config

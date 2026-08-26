@@ -58,7 +58,7 @@ size quantum.
 The deployed `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
 
 The deployed `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
-`0..100` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
+`0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
 
 ### One-time wiring
 
@@ -478,7 +478,7 @@ This is an explicit design choice, not an accounting accident.
 
 ### Settlement-liability buffer
 
-The settlement buffer protects a small amount of physical headroom above the maximum directional payout envelope:
+The settlement buffer protects a governed amount of physical headroom above the maximum directional payout envelope:
 
 ```text
 P = HousePool.totalAssets()
@@ -489,7 +489,7 @@ B = ceil(L * settlementBufferBps / 10_000)
 ```
 
 Open and increase admission requires post-op `E >= L + B`. The LP cash firewall includes the same `B`, producing a
-base reserve of `C + L + B`. The rate defaults to `25` bps and is bounded by governance to `0..100` bps inclusive.
+base reserve of `C + L + B`. The rate defaults to `25` bps and is bounded by governance to `0..1,000` bps inclusive.
 
 This is a liquidity-headroom policy, not another economic liability. It is excluded from terminal NAV, yield,
 raw degraded-mode detection, and all custody or clearinghouse reserve buckets. Closes, liquidations, and triggered

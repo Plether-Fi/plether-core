@@ -258,12 +258,14 @@ is intentionally incompatible with older lens decoders under the fresh-deploymen
 indexer, and integration bindings from this build and deploy the matching Public Lens with the new vault pair.
 
 `settlementBufferBps` is also part of the complete `EngineRiskConfig`. It defaults to `25` bps and accepts the
-inclusive governance range `0..100` bps. With `P = HousePool.totalAssets()`, `C = totalTraderClaimBalance`,
+inclusive governance range `0..1,000` bps. With `P = HousePool.totalAssets()`, `C = totalTraderClaimBalance`,
 `E = max(P-C, 0)`, `L = max(bullMaxProfit, bearMaxProfit)`, and
 `B = ceil(L * settlementBufferBps / 10_000)`, open/increase admission requires `E >= L + B` and the LP base
 withdrawal reserve is `C + L + B`. The buffer is not terminal NAV, yield, or a separately custodied balance. Closes
 and liquidations may consume it; raw degraded mode remains `E < L` and may be cleared at `E >= L`. A proposal that
 changes another Engine risk field must copy the intended active buffer value into the complete replacement config.
+Off-chain governance tooling must accept the same `0..1,000` bps range. Because the Engine's Admin dependency is
+one-time-bound, an already deployed stack with the old Admin ceiling cannot gain the wider range without redeployment.
 
 Terminal NAV V2 changes position storage, clearinghouse bucket semantics, Engine and HousePool snapshot ABIs, and
 share-pricing economics. Deploy the Engine, book, clearinghouse, pool, vaults, router, sidecars, oracle, and lenses from

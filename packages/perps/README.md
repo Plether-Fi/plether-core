@@ -632,7 +632,7 @@ This is why the LP docs distinguish freshness-gated repricing from already-funde
 ### Bounded solvency at entry
 
 Before increasing risk, the engine checks that effective HousePool assets can cover both the worst-case directional
-payout and a small settlement-liquidity buffer after the trade.
+payout and the configured settlement-liquidity buffer after the trade.
 
 ```text
 P = HousePool.totalAssets()
@@ -644,7 +644,7 @@ B = ceil(L * settlementBufferBps / 10_000)
 open/increase admission: E >= L + B
 ```
 
-The default `settlementBufferBps` is `25` bps; governance may set it from `0` through `100` bps under the 48-hour
+The default `settlementBufferBps` is `25` bps; governance may set it from `0` through `1,000` bps under the 48-hour
 Engine risk-config timelock. `B` is headroom, not an extra payout, trader claim, NAV adjustment, yield source, or
 separately custodied reserve. The LP withdrawal firewall nevertheless protects the same amount, making its base
 reserve `C + L + B`.
@@ -996,7 +996,7 @@ only one field must repeat the desired active values for the other five.
 | `protocolShareBps` | 0 (0%) | Protocol-treasury share of the collected charge; LPs receive the remainder after both shares |
 | `executionFeeBps` | 4 (0.04%) | Timelocked protocol trading fee |
 | `frozenCloseSpreadBps` | 50 (0.50%) | Fixed LP-owned spread on voluntary close/reduce notional during `oracleFrozen` |
-| `settlementBufferBps` | 25 (0.25%) | Liability-scaled admission and LP-withdrawal headroom; governed range 0-100 bps |
+| `settlementBufferBps` | 25 (0.25%) | Liability-scaled admission and LP-withdrawal headroom; governed range 0-1,000 bps |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
 | Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Position-protection trigger bounty | 0.20 USDC | Timelocked activation-keeper reserve, capped at 1 USDC |
@@ -1028,7 +1028,7 @@ OrderRouter also exposes timelocked admin control over `positionProtectionCommit
 
 `frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).
 
-`settlementBufferBps` is timelocked with the same config and may range from `0` (disabled) through `100` bps (1%),
+`settlementBufferBps` is timelocked with the same config and may range from `0` (disabled) through `1,000` bps (10%),
 inclusive. It scales maximum directional liability, not pool assets or position notional.
 
 `keeperShareBps` and `protocolShareBps` are also timelocked with `EngineRiskConfig`. Each allocation rounds down, their

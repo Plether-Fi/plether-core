@@ -84,7 +84,7 @@ L = maxLiability
 B = ceil(L * settlementBufferBps / 10_000)
 ```
 
-`settlementBufferBps` defaults to `25` bps and governance may set it anywhere from `0` through `100` bps,
+`settlementBufferBps` defaults to `25` bps and governance may set it anywhere from `0` through `1,000` bps,
 inclusive. The ceiling is applied in 6-decimal USDC atoms, so nonzero `L` and a nonzero rate produce at least one
 atom of buffer.
 

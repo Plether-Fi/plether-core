@@ -52,6 +52,7 @@ contract SettlementBufferAccountingTest is Test {
         assertEq(harness.target(400, 25), 1, "an exact atom must remain exact");
         assertEq(harness.target(401, 25), 2, "a fraction above an exact atom must round up");
         assertEq(harness.target(400_000e6, 25), 1000e6, "25 bps liability target");
+        assertEq(harness.target(400_000e6, 1000), 40_000e6, "1,000 bps liability target");
     }
 
     function test_HasRequiredSettlementBuffer_AcceptsEqualityAndRejectsOneAtomLess() public view {
@@ -87,20 +88,20 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         assertEq(engine.settlementBufferBps(), 25, "testnet deployments must start with the 25 bps buffer");
     }
 
-    function test_AdminAcceptsZeroTwentyFiveAndHundredBpsThroughTimelock() public {
+    function test_AdminAcceptsZeroTwentyFiveAndOneThousandBpsThroughTimelock() public {
         _finalizeSettlementBufferBps(0);
         assertEq(engine.settlementBufferBps(), 0, "governance must be able to disable the buffer");
 
         _finalizeSettlementBufferBps(25);
         assertEq(engine.settlementBufferBps(), 25, "governance must accept the release default");
 
-        _finalizeSettlementBufferBps(100);
-        assertEq(engine.settlementBufferBps(), 100, "governance must accept the configured maximum");
+        _finalizeSettlementBufferBps(1000);
+        assertEq(engine.settlementBufferBps(), 1000, "governance must accept the configured maximum");
     }
 
-    function test_AdminRejectsSettlementBufferAboveHundredBps() public {
+    function test_AdminRejectsSettlementBufferAboveOneThousandBps() public {
         ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
-        config.settlementBufferBps = 101;
+        config.settlementBufferBps = 1001;
 
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__InvalidRiskParams.selector);
         engineAdmin.proposeRiskConfig(config);
@@ -156,7 +157,7 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         _setRouterConfig(routerConfig);
 
         ICfdEngineAdminHost.EngineRiskConfig memory riskConfig = _engineRiskConfig();
-        riskConfig.settlementBufferBps = 100;
+        riskConfig.settlementBufferBps = 1000;
         engineAdmin.proposeRiskConfig(riskConfig);
         uint256 activationTime = engineAdmin.riskConfigActivationTime();
         vm.warp(activationTime - 30 minutes);
@@ -196,7 +197,7 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         assertEq(
             executionCode,
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
-            "the live 100 bps policy must invalidate the queued open"
+            "the live 1,000 bps policy must invalidate the queued open"
         );
 
         bytes[] memory updateData = _mockPythUpdateData();
