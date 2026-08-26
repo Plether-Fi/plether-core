@@ -49,7 +49,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_ProtocolAccountingViewMatchesCoreState() public view {
+    function _assertInvariant_ProtocolAccountingViewMatchesCoreState() internal view {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory accountingView =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
@@ -66,7 +66,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_EmptyPositionsPreviewAsInactive() public view {
+    function _assertInvariant_EmptyPositionsPreviewAsInactive() internal view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -97,7 +97,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidationPreviewReachableCollateralMatchesClearinghouse() public view {
+    function _assertInvariant_LiquidationPreviewReachableCollateralMatchesClearinghouse() internal view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -125,7 +125,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidationPreviewExcludesReservedExecutionBounty() public view {
+    function _assertInvariant_LiquidationPreviewExcludesReservedExecutionBounty() internal view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -152,7 +152,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth() public view {
+    function _assertInvariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth() internal view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 canonicalDepth = housePool.totalAssets();
 
@@ -166,7 +166,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_FullClosePreviewStaysConsistentWithCurrentDegradedMode() public view {
+    function _assertInvariant_FullClosePreviewStaysConsistentWithCurrentDegradedMode() internal view {
         bool alreadyDegraded = engine.degradedMode();
         uint256 oraclePrice = _previewOraclePrice();
 
@@ -186,7 +186,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_TransitionFlagsOnlyAppearBeforeDegradedMode() public view {
+    function _assertInvariant_TransitionFlagsOnlyAppearBeforeDegradedMode() internal view {
         bool alreadyDegraded = engine.degradedMode();
         uint256 oraclePrice = _previewOraclePrice();
 
@@ -210,7 +210,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_PostOpDegradedFlagMatchesPreviewBalances() public view {
+    function _assertInvariant_PostOpDegradedFlagMatchesPreviewBalances() internal view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -237,7 +237,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LastOpenCommitAttemptRespectsPreviewCommitSemantics() public view {
+    function _assertInvariant_LastOpenCommitAttemptRespectsPreviewCommitSemantics() internal view {
         PerpAccountingHandler.OpenCommitAttempt memory attempt = handler.lastOpenCommitAttemptSnapshot();
         if (!attempt.active) {
             return;
@@ -262,7 +262,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LastWithdrawAttemptMatchesGuardParity() public view {
+    function _assertInvariant_LastWithdrawAttemptMatchesGuardParity() internal view {
         PerpAccountingHandler.WithdrawParityAttempt memory attempt = handler.lastWithdrawParityAttemptSnapshot();
         if (!attempt.active) {
             return;
@@ -332,6 +332,27 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
         assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");
         assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Max liability should match");
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_ProtocolAccountingViewMatchesCoreState();
+        _assertInvariant_EmptyPositionsPreviewAsInactive();
+        _assertInvariant_LiquidationPreviewReachableCollateralMatchesClearinghouse();
+        _assertInvariant_LiquidationPreviewExcludesReservedExecutionBounty();
+        _assertInvariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth();
+        _assertInvariant_FullClosePreviewStaysConsistentWithCurrentDegradedMode();
+        _assertInvariant_TransitionFlagsOnlyAppearBeforeDegradedMode();
+        _assertInvariant_PostOpDegradedFlagMatchesPreviewBalances();
+        _assertInvariant_LastOpenCommitAttemptRespectsPreviewCommitSemantics();
+        _assertInvariant_LastWithdrawAttemptMatchesGuardParity();
     }
 
 }

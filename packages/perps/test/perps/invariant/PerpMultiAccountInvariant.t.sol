@@ -35,7 +35,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_SumOfPerAccountPendingCountsMatchesLiveOrders() public view {
+    function _assertInvariant_SumOfPerAccountPendingCountsMatchesLiveOrders() internal view {
         uint256 sumPending;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -45,7 +45,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         assertEq(sumPending, _livePendingOrderCount(), "Per-account pending counts must sum to live pending orders");
     }
 
-    function invariant_SumOfPerAccountPendingMarginCountsMatchesLiveMarginOrders() public view {
+    function _assertInvariant_SumOfPerAccountPendingMarginCountsMatchesLiveMarginOrders() internal view {
         uint256 sumMarginOrders;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -57,7 +57,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_LiveOrderOwnershipMatchesAccountLedgerCounts() public view {
+    function _assertInvariant_LiveOrderOwnershipMatchesAccountLedgerCounts() internal view {
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         uint256[] memory liveCounts = new uint256[](handler.actorCount());
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
@@ -83,7 +83,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_TraderClaimsRemainAccountIsolated() public view {
+    function _assertInvariant_TraderClaimsRemainAccountIsolated() internal view {
         uint256 aggregateTraderClaims;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -98,7 +98,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_SideTotalMarginMatchesTrackedEconomicPositionMargins() public view {
+    function _assertInvariant_SideTotalMarginMatchesTrackedEconomicPositionMargins() internal view {
         uint256 longTotalMargin;
         uint256 shortTotalMargin;
 
@@ -127,7 +127,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() public view {
+    function _assertInvariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
@@ -182,6 +182,23 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
             }
         }
         revert("unknown actor");
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_SumOfPerAccountPendingCountsMatchesLiveOrders();
+        _assertInvariant_SumOfPerAccountPendingMarginCountsMatchesLiveMarginOrders();
+        _assertInvariant_LiveOrderOwnershipMatchesAccountLedgerCounts();
+        _assertInvariant_TraderClaimsRemainAccountIsolated();
+        _assertInvariant_SideTotalMarginMatchesTrackedEconomicPositionMargins();
+        _assertInvariant_AccountSnapshotsKeepEngineMarginDistinctFromCustodyBuckets();
     }
 
 }

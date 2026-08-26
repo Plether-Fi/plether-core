@@ -42,6 +42,14 @@ contract PerpExplicitAccountingHandler is Test {
         bool terminalSnapshotMatchesBook;
     }
 
+    struct MismatchResult {
+        bool mismatch;
+        bool secondaryMismatch;
+        uint8 code;
+        uint256 expected;
+        uint256 actual;
+    }
+
     MockUSDC internal immutable usdc;
     CfdEngine internal immutable engine;
     CfdEngineLens internal immutable engineLens;
@@ -89,39 +97,22 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 closePriceFuzz
     ) external {
         uint256 snapshot = vm.snapshotState();
-        bool mismatch;
-        uint8 mismatchCode;
-        uint256 expected;
-        uint256 actual;
+        MismatchResult memory result;
 
         uint256 size = bound(sizeFuzz, 200, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = _boundedHealthyMargin(size, marginFuzz);
         uint256 closePrice = bound(closePriceFuzz, 0.6e8, 1.4e8);
 
         if (_openPair(size, margin, 1e8)) {
-            uint256 closeSize = bound(closeSizeFuzz, 1, size / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM;
-            ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(LONG_TRADER, closeSize, closePrice);
-            if (preview.valid) {
-                uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
-                bool degradedBefore = engine.degradedMode();
-
-                bool executed = _close(LONG_TRADER, CfdTypes.Side.LONG, closeSize, closePrice);
-                if (!executed) {
-                    mismatch = true;
-                    mismatchCode = 1;
-                } else {
-                    CloseObserved memory observed = _observeClose(LONG_TRADER, settlementBefore);
-                    (mismatch, mismatchCode, expected, actual) = _closeMismatch(preview, observed, degradedBefore);
-                }
-            }
+            result = _openedPairCloseMismatch(size, closeSizeFuzz, closePrice);
         }
 
         vm.revertToState(snapshot);
-        if (mismatch) {
+        if (result.mismatch) {
             closePreviewLiveMismatch = true;
-            closeMismatchCode = mismatchCode;
-            expectedValue = expected;
-            actualValue = actual;
+            closeMismatchCode = result.code;
+            expectedValue = result.expected;
+            actualValue = result.actual;
         }
     }
 
@@ -130,43 +121,22 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 liquidationPriceFuzz
     ) external {
         uint256 snapshot = vm.snapshotState();
-        bool mismatch;
-        uint8 mismatchCode;
-        uint256 expected;
-        uint256 actual;
+        MismatchResult memory result;
 
         uint256 size = bound(sizeFuzz, 200, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = _initialishMargin(size);
         uint256 liquidationPrice = bound(liquidationPriceFuzz, 1.05e8, 1.8e8);
 
         if (_openPair(size, margin, 1e8)) {
-            ICfdEngineTypes.LiquidationPreview memory preview =
-                engineLens.previewLiquidation(LONG_TRADER, liquidationPrice);
-            if (preview.liquidatable) {
-                uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
-                uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
-                uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
-                bool degradedBefore = engine.degradedMode();
-
-                bool executed = _liquidate(LONG_TRADER, liquidationPrice, KEEPER);
-                if (!executed) {
-                    mismatch = true;
-                    mismatchCode = 1;
-                } else {
-                    LiquidationObserved memory observed = _observeLiquidation(
-                        LONG_TRADER, KEEPER, settlementBefore, keeperBefore, protocolTreasuryBefore
-                    );
-                    (mismatch, mismatchCode, expected, actual) = _liquidationMismatch(preview, observed, degradedBefore);
-                }
-            }
+            result = _openedPairLiquidationMismatch(liquidationPrice);
         }
 
         vm.revertToState(snapshot);
-        if (mismatch) {
+        if (result.mismatch) {
             liquidationPreviewLiveMismatch = true;
-            liquidationMismatchCode = mismatchCode;
-            expectedValue = expected;
-            actualValue = actual;
+            liquidationMismatchCode = result.code;
+            expectedValue = result.expected;
+            actualValue = result.actual;
         }
     }
 
@@ -177,47 +147,102 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 elapsedFuzz
     ) external {
         uint256 snapshot = vm.snapshotState();
-        bool valueMismatch;
-        bool cashMismatch;
-        uint256 expected;
-        uint256 actual;
+        MismatchResult memory result;
 
         uint256 size = bound(sizeFuzz, 200, 2500) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = _boundedHealthyMargin(size, marginFuzz);
         uint256 closePrice = bound(closePriceFuzz, 0.7e8, 1.3e8);
 
         if (_openPair(size, margin, 1e8)) {
-            uint256 valueBefore = _lpTraderProtocolValue();
-            uint256 physicalCashBefore = _protocolPhysicalCash();
-
-            vm.warp(block.timestamp + bound(elapsedFuzz, 0, 30 days));
-
-            ICfdEngineTypes.ClosePreview memory longPreview = engineLens.previewClose(LONG_TRADER, size, closePrice);
-            if (longPreview.valid && _close(LONG_TRADER, CfdTypes.Side.LONG, size, closePrice)) {
-                ICfdEngineTypes.ClosePreview memory shortPreview =
-                    engineLens.previewClose(SHORT_TRADER, size, closePrice);
-                if (shortPreview.valid && _close(SHORT_TRADER, CfdTypes.Side.SHORT, size, closePrice)) {
-                    uint256 valueAfter = _lpTraderProtocolValue();
-                    uint256 physicalCashAfter = _protocolPhysicalCash();
-                    valueMismatch = valueAfter != valueBefore;
-                    cashMismatch = physicalCashAfter != physicalCashBefore;
-                    expected = valueMismatch ? valueBefore : physicalCashBefore;
-                    actual = valueMismatch ? valueAfter : physicalCashAfter;
-                }
-            }
+            result = _openedPairConservationMismatch(size, closePrice, elapsedFuzz);
         }
 
         vm.revertToState(snapshot);
-        if (valueMismatch) {
+        if (result.mismatch) {
             lpTraderProtocolConservationMismatch = true;
-            expectedValue = expected;
-            actualValue = actual;
+            expectedValue = result.expected;
+            actualValue = result.actual;
         }
-        if (cashMismatch) {
+        if (result.secondaryMismatch) {
             physicalCashConservationMismatch = true;
-            expectedValue = expected;
-            actualValue = actual;
+            expectedValue = result.expected;
+            actualValue = result.actual;
         }
+    }
+
+    function _openedPairCloseMismatch(
+        uint256 size,
+        uint256 closeSizeFuzz,
+        uint256 closePrice
+    ) private returns (MismatchResult memory result) {
+        uint256 closeSize = bound(closeSizeFuzz, 1, size / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM;
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(LONG_TRADER, closeSize, closePrice);
+        if (!preview.valid) {
+            return result;
+        }
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
+        bool degradedBefore = engine.degradedMode();
+        if (!_close(LONG_TRADER, CfdTypes.Side.LONG, closeSize, closePrice)) {
+            result.mismatch = true;
+            result.code = 1;
+            return result;
+        }
+
+        CloseObserved memory observed = _observeClose(LONG_TRADER, settlementBefore);
+        (result.mismatch, result.code, result.expected, result.actual) =
+            _closeMismatch(preview, observed, degradedBefore);
+    }
+
+    function _openedPairLiquidationMismatch(
+        uint256 liquidationPrice
+    ) private returns (MismatchResult memory result) {
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(LONG_TRADER, liquidationPrice);
+        if (!preview.liquidatable) {
+            return result;
+        }
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(LONG_TRADER);
+        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        bool degradedBefore = engine.degradedMode();
+        if (!_liquidate(LONG_TRADER, liquidationPrice, KEEPER)) {
+            result.mismatch = true;
+            result.code = 1;
+            return result;
+        }
+
+        LiquidationObserved memory observed =
+            _observeLiquidation(LONG_TRADER, KEEPER, settlementBefore, keeperBefore, protocolTreasuryBefore);
+        (result.mismatch, result.code, result.expected, result.actual) =
+            _liquidationMismatch(preview, observed, degradedBefore);
+    }
+
+    function _openedPairConservationMismatch(
+        uint256 size,
+        uint256 closePrice,
+        uint256 elapsedFuzz
+    ) private returns (MismatchResult memory result) {
+        uint256 valueBefore = _lpTraderProtocolValue();
+        uint256 physicalCashBefore = _protocolPhysicalCash();
+
+        vm.warp(block.timestamp + bound(elapsedFuzz, 0, 30 days));
+        ICfdEngineTypes.ClosePreview memory longPreview = engineLens.previewClose(LONG_TRADER, size, closePrice);
+        if (!longPreview.valid || !_close(LONG_TRADER, CfdTypes.Side.LONG, size, closePrice)) {
+            return result;
+        }
+
+        ICfdEngineTypes.ClosePreview memory shortPreview = engineLens.previewClose(SHORT_TRADER, size, closePrice);
+        if (!shortPreview.valid || !_close(SHORT_TRADER, CfdTypes.Side.SHORT, size, closePrice)) {
+            return result;
+        }
+
+        uint256 valueAfter = _lpTraderProtocolValue();
+        uint256 physicalCashAfter = _protocolPhysicalCash();
+        result.mismatch = valueAfter != valueBefore;
+        result.secondaryMismatch = physicalCashAfter != physicalCashBefore;
+        result.expected = result.mismatch ? valueBefore : physicalCashBefore;
+        result.actual = result.mismatch ? valueAfter : physicalCashAfter;
     }
 
     function _observeClose(
@@ -557,20 +582,35 @@ contract PerpExplicitAccountingInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_ClosePreviewMatchesLiveSettlement() public view {
+    function _assertInvariant_ClosePreviewMatchesLiveSettlement() internal view {
         assertFalse(handler.closePreviewLiveMismatch(), "Close preview diverged from live settlement");
     }
 
-    function invariant_LiquidationPreviewMatchesLiveSettlement() public view {
+    function _assertInvariant_LiquidationPreviewMatchesLiveSettlement() internal view {
         assertFalse(handler.liquidationPreviewLiveMismatch(), "Liquidation preview diverged from live settlement");
     }
 
-    function invariant_LpTraderProtocolValueIsConservedAcrossRoundTrip() public view {
+    function _assertInvariant_LpTraderProtocolValueIsConservedAcrossRoundTrip() internal view {
         assertFalse(handler.lpTraderProtocolConservationMismatch(), "LP/trader/protocol value was not conserved");
     }
 
-    function invariant_ProtocolPhysicalCashIsConservedAcrossRoundTrip() public view {
+    function _assertInvariant_ProtocolPhysicalCashIsConservedAcrossRoundTrip() internal view {
         assertFalse(handler.physicalCashConservationMismatch(), "Protocol physical cash was not conserved");
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_ClosePreviewMatchesLiveSettlement();
+        _assertInvariant_LiquidationPreviewMatchesLiveSettlement();
+        _assertInvariant_LpTraderProtocolValueIsConservedAcrossRoundTrip();
+        _assertInvariant_ProtocolPhysicalCashIsConservedAcrossRoundTrip();
     }
 
 }

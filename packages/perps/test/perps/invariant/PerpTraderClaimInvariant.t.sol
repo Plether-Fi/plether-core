@@ -32,7 +32,7 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity() public view {
+    function _assertInvariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity() internal view {
         uint256 totalTraderClaimBalanceUsdc;
         uint256 poolAssets = housePool.totalAssets();
 
@@ -54,7 +54,7 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         assertEq(totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc(), "Total trader claim mismatch");
     }
 
-    function invariant_GhostTraderClaimsRemainFullyModelDerived() public view {
+    function _assertInvariant_GhostTraderClaimsRemainFullyModelDerived() internal view {
         uint256 ghostTotalTraderClaimUsdc;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -74,7 +74,7 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         assertEq(engine.totalTraderClaimBalanceUsdc(), ghostTotalTraderClaimUsdc, "Engine trader claim total mismatch");
     }
 
-    function invariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating() public view {
+    function _assertInvariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating() internal view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -116,7 +116,7 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidationPreviewUsesAllOrNothingHousePoolLiquidityGating() public view {
+    function _assertInvariant_LiquidationPreviewUsesAllOrNothingHousePoolLiquidityGating() internal view {
         uint256 oraclePrice = _previewOraclePrice();
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -161,6 +161,21 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         address actor
     ) internal pure returns (address) {
         return actor;
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity();
+        _assertInvariant_GhostTraderClaimsRemainFullyModelDerived();
+        _assertInvariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating();
+        _assertInvariant_LiquidationPreviewUsesAllOrNothingHousePoolLiquidityGating();
     }
 
 }

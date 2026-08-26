@@ -105,6 +105,15 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
 
     uint256 private constant BPS = 10_000;
 
+    struct AssessmentContext {
+        address engineAddress;
+        address executor;
+        uint256 currentOraclePrice;
+        uint256 poolDepthUsdc;
+        uint64 publishTime;
+        uint256 executionBountyUsdc;
+    }
+
     /// @inheritdoc ICfdOrderPolicyEvaluator
     function assessOrder(
         address engineAddress,
@@ -116,22 +125,37 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         OrderV2Types.ExecutionBounds calldata bounds,
         uint256 executionBountyUsdc
     ) external view returns (OrderV2Types.ExecutionAssessment memory assessment) {
-        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
+        AssessmentContext memory context;
+        context.engineAddress = engineAddress;
+        context.executor = executor;
+        context.currentOraclePrice = currentOraclePrice;
+        context.poolDepthUsdc = poolDepthUsdc;
+        context.publishTime = publishTime;
+        context.executionBountyUsdc = executionBountyUsdc;
+        return _assessOrder(context, order, bounds);
+    }
+
+    function _assessOrder(
+        AssessmentContext memory context,
+        CfdTypes.Order calldata order,
+        OrderV2Types.ExecutionBounds calldata bounds
+    ) internal view returns (OrderV2Types.ExecutionAssessment memory assessment) {
+        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(context.engineAddress);
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
-            _buildRawSnapshot(engine, planner, order.account, poolDepthUsdc);
-        bool bountyReturnsToAccount = executor == order.account;
+            _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc);
+        bool bountyReturnsToAccount = context.executor == order.account;
         OrderV2Types.ExecutionBounds memory boundsCopy = bounds;
 
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
-                planner.planClose(snapshot, order, currentOraclePrice, publishTime);
-            return _evaluateClose(snapshot, closeDelta, boundsCopy, executionBountyUsdc, bountyReturnsToAccount);
+                planner.planClose(snapshot, order, context.currentOraclePrice, context.publishTime);
+            return _evaluateClose(snapshot, closeDelta, boundsCopy, context.executionBountyUsdc, bountyReturnsToAccount);
         }
 
         CfdEnginePlanTypes.OpenDelta memory openDelta =
-            planner.planOpen(snapshot, order, currentOraclePrice, publishTime);
-        return _evaluateOpen(snapshot, openDelta, boundsCopy, executionBountyUsdc, bountyReturnsToAccount);
+            planner.planOpen(snapshot, order, context.currentOraclePrice, context.publishTime);
+        return _evaluateOpen(snapshot, openDelta, boundsCopy, context.executionBountyUsdc, bountyReturnsToAccount);
     }
 
     /// @inheritdoc ICfdOrderPolicyEvaluator

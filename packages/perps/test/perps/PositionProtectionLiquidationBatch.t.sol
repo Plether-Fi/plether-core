@@ -35,7 +35,7 @@ contract OrderRouterInitcodeSizeTest is Test {
 
     uint256 internal constant EIP3860_INITCODE_LIMIT = 49_152;
 
-    function test_OrderRouterCreationCodeAndConstructorArgsFitEip3860() public pure {
+    function test_OrderRouterCreationCodeAndConstructorArgsFitsEip3860() public pure {
         assertLe(
             type(OrderRouter).creationCode.length + (8 * 32),
             EIP3860_INITCODE_LIMIT,

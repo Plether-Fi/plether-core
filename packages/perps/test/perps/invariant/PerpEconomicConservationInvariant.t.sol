@@ -120,7 +120,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         (size,,,,,,) = engine.positions(account);
     }
 
-    function invariant_KnownActorAndProtocolBalancesConserveUsdcSupply() public view {
+    function _assertInvariant_KnownActorAndProtocolBalancesConserveUsdcSupply() internal view {
         assertEq(
             _knownBalancesSum(),
             usdc.totalSupply(),
@@ -128,7 +128,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_ClearinghouseCustodyMatchesTrackedAccountBalances() public view {
+    function _assertInvariant_ClearinghouseCustodyMatchesTrackedAccountBalances() internal view {
         uint256 trackedBalances = clearinghouse.balanceUsdc(_account(address(handler)))
             + clearinghouse.balanceUsdc(engine.protocolTreasury());
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -142,7 +142,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_WithdrawalReserveIncludesKnownTraderClaimLiabilities() public view {
+    function _assertInvariant_WithdrawalReserveIncludesKnownTraderClaimLiabilities() internal view {
         uint256 maxLiability = _maxLiability();
         uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceUsdc()
             + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
@@ -154,7 +154,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_TrackedAccountBucketsReconcileSettlementBalances() public view {
+    function _assertInvariant_TrackedAccountBucketsReconcileSettlementBalances() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
@@ -200,7 +200,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_AccountLedgerViewMatchesUnderlyingBuckets() public view {
+    function _assertInvariant_AccountLedgerViewMatchesUnderlyingBuckets() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
@@ -249,7 +249,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() public view {
+    function _assertInvariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations() internal view {
         uint256 totalSettlementUsdc = engineAccountLens.getAccountLedgerView(_account(address(handler)))
             .settlementBalanceUsdc + clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 totalReservedSettlementUsdc =
@@ -284,7 +284,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_PriceLossEventLeavesExactlyThePreviewedTraderClaim() public view {
+    function _assertInvariant_PriceLossEventLeavesExactlyThePreviewedTraderClaim() internal view {
         PerpAccountingHandler.PriceLossTraderClaimEvent memory eventSnapshot =
             handler.lastPriceLossTraderClaimEventSnapshot();
         if (!eventSnapshot.active) {
@@ -303,7 +303,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_TerminalEventsMatchResidualAndPriceWriteoffAccounting() public view {
+    function _assertInvariant_TerminalEventsMatchResidualAndPriceWriteoffAccounting() internal view {
         PerpAccountingHandler.TerminalResidualEvent memory eventSnapshot = handler.lastTerminalResidualEventSnapshot();
         if (!eventSnapshot.active) {
             return;
@@ -328,7 +328,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_AccountLedgerSnapshotMatchesUnderlyingViews() public view {
+    function _assertInvariant_AccountLedgerSnapshotMatchesUnderlyingViews() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
@@ -438,7 +438,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_ReachabilityMonotonicityHoldsForDepositsAndWithdrawals() public view {
+    function _assertInvariant_ReachabilityMonotonicityHoldsForDepositsAndWithdrawals() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpAccountingHandler.ReachabilityTransition memory transition = handler.reachabilityTransition(account);
@@ -469,7 +469,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_NoOrphanedAccountStateWhenNoPositionAndNoPendingOrders() public view {
+    function _assertInvariant_NoOrphanedAccountStateWhenNoPositionAndNoPendingOrders() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(_account(handler.actorAt(i)));
@@ -501,7 +501,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews() public view {
+    function _assertInvariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
@@ -556,7 +556,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() public view {
+    function _assertInvariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets() internal view {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(60 seconds);
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
@@ -631,7 +631,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_HousePoolStatusSnapshotMatchesEngineState() public view {
+    function _assertInvariant_HousePoolStatusSnapshotMatchesEngineState() internal view {
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory snapshot =
             engineProtocolLens.getHousePoolStatusSnapshot();
 
@@ -640,7 +640,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.degradedMode, engine.degradedMode(), "House-pool status degraded mode mismatch");
     }
 
-    function invariant_LiquidationWriteoffsNeverBecomeDebtOrPreserveExecutionBounties() public view {
+    function _assertInvariant_LiquidationWriteoffsNeverBecomeDebtOrPreserveExecutionBounties() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
@@ -661,7 +661,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_GhostTrackedTraderClaimsMatchEngine() public view {
+    function _assertInvariant_GhostTrackedTraderClaimsMatchEngine() internal view {
         uint256 ghostTotalTraderClaims;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -705,6 +705,33 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         address actor
     ) internal pure returns (address) {
         return actor;
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_KnownActorAndProtocolBalancesConserveUsdcSupply();
+        _assertInvariant_ClearinghouseCustodyMatchesTrackedAccountBalances();
+        _assertInvariant_WithdrawalReserveIncludesKnownTraderClaimLiabilities();
+        _assertInvariant_TrackedAccountBucketsReconcileSettlementBalances();
+        _assertInvariant_AccountLedgerViewMatchesUnderlyingBuckets();
+        _assertInvariant_TrackedAccountLedgerTotalsMatchProtocolCustodyAndObligations();
+        _assertInvariant_PriceLossEventLeavesExactlyThePreviewedTraderClaim();
+        _assertInvariant_TerminalEventsMatchResidualAndPriceWriteoffAccounting();
+        _assertInvariant_AccountLedgerSnapshotMatchesUnderlyingViews();
+        _assertInvariant_ReachabilityMonotonicityHoldsForDepositsAndWithdrawals();
+        _assertInvariant_NoOrphanedAccountStateWhenNoPositionAndNoPendingOrders();
+        _assertInvariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews();
+        _assertInvariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets();
+        _assertInvariant_HousePoolStatusSnapshotMatchesEngineState();
+        _assertInvariant_LiquidationWriteoffsNeverBecomeDebtOrPreserveExecutionBounties();
+        _assertInvariant_GhostTrackedTraderClaimsMatchEngine();
     }
 
 }

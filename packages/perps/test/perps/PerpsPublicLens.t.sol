@@ -280,7 +280,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 10_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
-        vm.warp(block.timestamp + 2 * 365 days);
+        vm.warp(block.timestamp + 30 * 365 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 

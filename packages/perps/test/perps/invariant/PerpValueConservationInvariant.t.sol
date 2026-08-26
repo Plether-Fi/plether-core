@@ -125,65 +125,91 @@ contract PerpValueConservationHandler is Test {
         uint256 size = bound(sizeFuzz, 500, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 depositAssets = bound(depositFuzz, 10_000e6, 300_000e6);
 
-        _fundTrader(LONG_TRADER, 50_000e6);
-        _fundTrader(SHORT_TRADER, 50_000e6);
-        _open(LONG_TRADER, CfdTypes.Side.LONG, size, 10_000e6, 1e8);
-        _open(SHORT_TRADER, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
-
-        int256 pnl = _unrealizedTraderPnl();
-        if (pnl == 0) {
-            usdc.mint(JUNIOR_ATTACKER, depositAssets);
-            vm.startPrank(JUNIOR_ATTACKER);
-            usdc.approve(address(juniorVault), depositAssets);
-            uint256 depositRequestId = juniorVault.requestDeposit(depositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
-            vm.stopPrank();
-
-            vm.warp(juniorVault.depositEpochStart(depositRequestId));
-            uint256 depositMarkPrice = engine.lastMarkPrice();
-            router.settleLpEpoch(_mockPythUpdateData(depositMarkPrice == 0 ? 1e8 : depositMarkPrice));
-
-            uint256 claimableDepositAssets = juniorVault.claimableDepositRequest(depositRequestId, JUNIOR_ATTACKER);
-            vm.prank(JUNIOR_ATTACKER);
-            uint256 shares =
-                juniorVault.claimDeposit(depositRequestId, claimableDepositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
-
-            uint256 poolAssetsBeforeCloses = pool.totalAssets();
-            _close(LONG_TRADER, CfdTypes.Side.LONG, size, 1e8);
-            _close(SHORT_TRADER, CfdTypes.Side.SHORT, size, 1e8);
-            uint256 poolAssetsAfterCloses = pool.totalAssets();
-            uint256 contemporaneousPoolInflow =
-                poolAssetsAfterCloses > poolAssetsBeforeCloses ? poolAssetsAfterCloses - poolAssetsBeforeCloses : 0;
-
-            uint256 cooldownEnd = juniorVault.lastDepositTime(JUNIOR_ATTACKER) + juniorVault.DEPOSIT_COOLDOWN();
-            if (block.timestamp < cooldownEnd) {
-                vm.warp(cooldownEnd);
-            }
-            vm.prank(JUNIOR_ATTACKER);
-            uint256 redeemRequestId = juniorVault.requestRedeem(shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
-
-            vm.warp(juniorVault.depositEpochStart(redeemRequestId));
-            uint256 redeemMarkPrice = engine.lastMarkPrice();
-            router.settleLpEpoch(_mockPythUpdateData(redeemMarkPrice == 0 ? 1e8 : redeemMarkPrice));
-
-            uint256 claimableRedeemShares = juniorVault.claimableRedeemRequest(redeemRequestId, JUNIOR_ATTACKER);
-            if (claimableRedeemShares == shares) {
-                vm.prank(JUNIOR_ATTACKER);
-                juniorVault.claimRedeem(redeemRequestId, shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
-                uint256 finalBalance = usdc.balanceOf(JUNIOR_ATTACKER);
-                // Neutral positions may still pay ordinary close/carry revenue into the pool while the async
-                // request matures. That revenue is legitimate LP yield; only extraction beyond the attacker's
-                // contribution plus all contemporaneous pool inflow can have come from legacy claimant capital.
-                uint256 maximumConservedBalance = depositAssets + contemporaneousPoolInflow;
-                violation = finalBalance > maximumConservedBalance;
-                profit = violation ? finalBalance - maximumConservedBalance : 0;
-            }
-        }
+        (violation, profit) = _runNeutralMtmAttack(size, depositAssets);
 
         vm.revertToState(snapshot);
         if (violation) {
             neutralMtmCreatedLpProfit = true;
             neutralMtmLpProfitUsdc = profit;
         }
+    }
+
+    function _runNeutralMtmAttack(
+        uint256 size,
+        uint256 depositAssets
+    ) private returns (bool violation, uint256 profit) {
+        _fundTrader(LONG_TRADER, 50_000e6);
+        _fundTrader(SHORT_TRADER, 50_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, size, 10_000e6, 1e8);
+        _open(SHORT_TRADER, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
+
+        if (_unrealizedTraderPnl() != 0) {
+            return (false, 0);
+        }
+
+        uint256 shares = _depositJuniorForNeutralMtm(depositAssets);
+        uint256 contemporaneousPoolInflow = _closeNeutralPairAndMeasureInflow(size);
+        (bool redeemed, uint256 finalBalance) = _redeemNeutralJuniorShares(shares);
+        if (!redeemed) {
+            return (false, 0);
+        }
+
+        // Neutral positions may still pay ordinary close/carry revenue into the pool while the async
+        // request matures. That revenue is legitimate LP yield; only extraction beyond the attacker's
+        // contribution plus all contemporaneous pool inflow can have come from legacy claimant capital.
+        uint256 maximumConservedBalance = depositAssets + contemporaneousPoolInflow;
+        violation = finalBalance > maximumConservedBalance;
+        profit = violation ? finalBalance - maximumConservedBalance : 0;
+    }
+
+    function _depositJuniorForNeutralMtm(
+        uint256 depositAssets
+    ) private returns (uint256 shares) {
+        usdc.mint(JUNIOR_ATTACKER, depositAssets);
+        vm.startPrank(JUNIOR_ATTACKER);
+        usdc.approve(address(juniorVault), depositAssets);
+        uint256 depositRequestId = juniorVault.requestDeposit(depositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
+        vm.stopPrank();
+
+        vm.warp(juniorVault.depositEpochStart(depositRequestId));
+        uint256 depositMarkPrice = engine.lastMarkPrice();
+        router.settleLpEpoch(_mockPythUpdateData(depositMarkPrice == 0 ? 1e8 : depositMarkPrice));
+
+        uint256 claimableDepositAssets = juniorVault.claimableDepositRequest(depositRequestId, JUNIOR_ATTACKER);
+        vm.prank(JUNIOR_ATTACKER);
+        return juniorVault.claimDeposit(depositRequestId, claimableDepositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
+    }
+
+    function _closeNeutralPairAndMeasureInflow(
+        uint256 size
+    ) private returns (uint256 contemporaneousPoolInflow) {
+        uint256 poolAssetsBeforeCloses = pool.totalAssets();
+        _close(LONG_TRADER, CfdTypes.Side.LONG, size, 1e8);
+        _close(SHORT_TRADER, CfdTypes.Side.SHORT, size, 1e8);
+        uint256 poolAssetsAfterCloses = pool.totalAssets();
+        return poolAssetsAfterCloses > poolAssetsBeforeCloses ? poolAssetsAfterCloses - poolAssetsBeforeCloses : 0;
+    }
+
+    function _redeemNeutralJuniorShares(
+        uint256 shares
+    ) private returns (bool redeemed, uint256 finalBalance) {
+        uint256 cooldownEnd = juniorVault.lastDepositTime(JUNIOR_ATTACKER) + juniorVault.DEPOSIT_COOLDOWN();
+        if (block.timestamp < cooldownEnd) {
+            vm.warp(cooldownEnd);
+        }
+        vm.prank(JUNIOR_ATTACKER);
+        uint256 redeemRequestId = juniorVault.requestRedeem(shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
+
+        vm.warp(juniorVault.depositEpochStart(redeemRequestId));
+        uint256 redeemMarkPrice = engine.lastMarkPrice();
+        router.settleLpEpoch(_mockPythUpdateData(redeemMarkPrice == 0 ? 1e8 : redeemMarkPrice));
+
+        if (juniorVault.claimableRedeemRequest(redeemRequestId, JUNIOR_ATTACKER) != shares) {
+            return (false, 0);
+        }
+        vm.prank(JUNIOR_ATTACKER);
+        juniorVault.claimRedeem(redeemRequestId, shares, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
+        return (true, usdc.balanceOf(JUNIOR_ATTACKER));
     }
 
     function timedCheckpointCannotForgiveHistoricalCarry(
@@ -436,20 +462,35 @@ contract PerpValueConservationInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_FailedExecutionCannotExtractActiveMargin() public view {
+    function _assertInvariant_FailedExecutionCannotExtractActiveMargin() internal view {
         assertFalse(handler.failedCloseExtractedMargin(), "Failed close execution extracted active position margin");
     }
 
-    function invariant_NeutralMtmCannotCreateLpProfit() public view {
+    function _assertInvariant_NeutralMtmCannotCreateLpProfit() internal view {
         assertFalse(handler.neutralMtmCreatedLpProfit(), "Neutral MTM deposit/withdraw sequence created LP profit");
     }
 
-    function invariant_CarryCheckpointsCannotForgiveHistory() public view {
+    function _assertInvariant_CarryCheckpointsCannotForgiveHistory() internal view {
         assertFalse(handler.checkpointForgaveHistoricalCarry(), "Timed carry checkpoint forgave historical carry");
     }
 
-    function invariant_PendingRevenueCannotDisappear() public view {
+    function _assertInvariant_PendingRevenueCannotDisappear() internal view {
         assertFalse(handler.pendingRevenueDisappeared(), "Pending revenue disappeared during recap/reconcile");
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_FailedExecutionCannotExtractActiveMargin();
+        _assertInvariant_NeutralMtmCannotCreateLpProfit();
+        _assertInvariant_CarryCheckpointsCannotForgiveHistory();
+        _assertInvariant_PendingRevenueCannotDisappear();
     }
 
 }
