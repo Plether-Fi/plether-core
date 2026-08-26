@@ -110,10 +110,13 @@ Important:
   rechecks those reciprocal bindings rather than assuming deployment stayed correct.
   The sidecar also pins the Engine planner address and code hash at construction and probes its settlement-critical
   carry-index and market-calendar ABIs at runtime. The facade's creation input is close to the EIP-3860 ceiling
-  because it embeds the sidecar creation code. The verified V2 build has a 23,339-byte facade runtime, 48,794-byte
-  creation code, and 48,826-byte creation input including the 32-byte Router constructor argument, leaving 326 bytes
-  of EIP-3860 headroom. The monitor sidecar is 19,114 bytes at runtime with 20,488-byte initcode. Keep the dedicated
-  runtime and creation-input size regressions green when changing either contract.
+  because it embeds the sidecar creation code. The pre-maintenance-fee V2 baseline had a 23,339-byte facade runtime,
+  48,794-byte creation code, and 48,826-byte creation input including the 32-byte Router constructor argument, leaving
+  326 bytes of EIP-3860 headroom. Its monitor sidecar was 19,114 bytes at runtime with 20,488-byte initcode. The
+  maintenance-fee release is monitor schema/domain V3 because its observable configuration digest also commits to the
+  active Junior fee rate and recipient. With optimizer 200, V3 measures 23,339 bytes of facade runtime, 49,010 bytes
+  of facade creation input (142 bytes below EIP-3860), and 19,298 bytes of sidecar runtime. Keep the dedicated runtime
+  and creation-input size regressions green and remeasure the exact release commit before deployment.
 - `EmergencyPauseCoordinator` is deployed after the monitor and immutable-bound to the exact RouterAdmin and
   HousePool. The deploy transaction verifies its code, bindings, owner, disabled initial guardian, zero initial
   `riskOffOrderCutoff`, unpaused children, and inactive LP settlement hold, then installs it as both pausers. It has
@@ -151,6 +154,10 @@ Important:
   does not change these standard ids. Both deploy and bootstrap verification must assert
   `supportsInterface(type(IAsyncTrancheVault).interfaceId)` for the rebuilt custom interface; regenerate the custom
   vault and lens ABIs for frontend, keeper, and indexer use.
+- Deploy verification and the release-default regression also fail closed unless the Junior vault starts with
+  `maintenanceFeeAprBps() == 0`, `maintenanceFeeRecipient() == address(0)`,
+  `pendingMaintenanceFeeShares() == 0`, and `accruedTotalSupply() == totalSupply()`. The deploy script does not enable
+  or propose a fee. Reusable bootstrap verification deliberately permits a subsequently activated configuration.
 - `OrderRouter` is non-upgradeable and `CfdEngine.setOrderRouter(...)` is one-time. A release containing position
   protection therefore requires a fresh complete perps stack; do not point a new router at an existing engine or
   migrate live positions into the new release.
@@ -217,12 +224,35 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `closeOrderExecutionBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `positionProtectionCommitsEnabled` | `false` |
+| `juniorMaintenanceFeeAprBps` | `0` (disabled) |
+| `juniorMaintenanceFeeRecipient` | `address(0)` |
 | `maxSeniorExposureUsdc` | Operator-supplied finite USDC amount |
 | `maxSeniorShareBps` | Operator-supplied value below `10_000` |
 
 `frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion without creating a protocol liability or terminal deficit, while a partial close must settle this separate spread obligation in full. Price loss beyond the terminal collectible cap is a diagnostic write-off and does not block the partial close.
 
 `frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
+
+The Junior maintenance fee is independently configured on the Junior vault after deployment. The current HousePool
+owner may propose a rate/recipient pair, wait 48 hours, verify the exact pending values, and finalize it. Rates are
+capped at `1,000 bps` nominal APR and a nonzero rate requires a valid nonzero recipient. Finalization crystallizes
+elapsed completed-hour fees under the old pair before applying the new pair. The recipient receives ordinary Junior
+shares, not USDC, and must use the normal asynchronous redemption lifecycle. There is no public fee checkpoint;
+materialization occurs before an actual Junior supply mutation or during configuration finalization. Each checkpoint
+charges at most 8,760 hours and explicitly forgives older elapsed hours. Accrual continues during settlement holds,
+oracle freeze, and zero NAV.
+
+Fee configuration is available only after HousePool has registered both tranche vaults and the caller is operating on
+the registered Junior vault. This makes recipient validation against the Pool and both canonical vaults independent of
+deployment ordering.
+
+The deploy script and release-default test enforce the initial zero-rate configuration. The reusable bootstrap script
+does not require the fee to remain disabled, so later guardian, seeding, and test-user operations remain idempotently
+rerunnable after governance has legitimately activated or rotated the fee configuration.
+
+`PerpsViewTypes.TrancheView` now includes raw/effective supply and Junior fee fields before `sharePrice`. Its tuple ABI
+is intentionally incompatible with older lens decoders under the fresh-deployment assumption. Regenerate frontend,
+indexer, and integration bindings from this build and deploy the matching Public Lens with the new vault pair.
 
 Terminal NAV V2 changes position storage, clearinghouse bucket semantics, Engine and HousePool snapshot ABIs, and
 share-pricing economics. Deploy the Engine, book, clearinghouse, pool, vaults, router, sidecars, oracle, and lenses from
@@ -460,6 +490,8 @@ liquidation remain live.
 - Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
   terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, coordinator, and lenses as a single
   versioned unit.
+- Do not enable the Junior maintenance fee in the deploy or seed transaction. Verify the zero release defaults first;
+  any later enablement is a separate 48-hour governance operation with an explicitly recorded recipient.
 - `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
   price cap, size quantum, and empty initial state were verified by the deploy transaction.
 - The bootstrap script only mints mock USDC. It does not fund users with ETH.
@@ -490,8 +522,10 @@ liquidation remain live.
    plus the canonical Router success paths for mark refresh, protection-trigger oracle resolution, single liquidation,
    batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
    `SettlementMonitorLens` facade and its internal sidecar are bound to the same Router, Engine, pool, terminal book,
-   clearinghouse, vaults, USDC, protocol lens, and planner version. Verify the `EmergencyPauseCoordinator` is bound to
-   the exact RouterAdmin and HousePool, installed as pauser on both, and starts with no active settlement hold.
+   clearinghouse, vaults, USDC, protocol lens, and planner version. Confirm Junior maintenance-fee rate, recipient,
+   pending shares, and effective supply read back as `0`, `address(0)`, `0`, and raw supply respectively. Verify the
+   `EmergencyPauseCoordinator` is bound to the exact RouterAdmin and HousePool, installed as pauser on both, and starts
+   with no active settlement hold.
 5. Set bootstrap environment variables, including the printed redemption-math sidecar and coordinator, a nonzero
    guardian, and both explicit senior limits, then run bootstrap to configure the guardian and propose the limits.
 6. Wait for the 48-hour `HousePool` timelock, then rerun the same bootstrap command to finalize the limits, seed Junior
@@ -620,7 +654,8 @@ new admission capacity. Use `getSettlementHealth()` for critical-fault and depen
 composite `observationDigest` are advisory comparison aids only. `completeObservationDigest` equals that observation
 hash when `observationComplete` and is zero otherwise. Completeness requires every Oracle dependency read even on a
 cached/no-work route, while Oracle policy validity is required only for atomic-refresh routing. The digest is still
-unauthenticated and unenforced. The monitor
+unauthenticated and unenforced. In V3 the observable configuration digest includes the active Junior maintenance-fee
+APR and recipient; inability to read either makes that digest unavailable. The monitor
 deliberately exposes no authoritative `canSettle` decision. A live transaction can still race cancellations, trading,
 configuration, cash, or oracle state. The exact selected-transaction simulation is authoritative; a call with no
 matured progress deliberately reverts, and every atomic-refresh backlog pass needs another validated Pyth update.

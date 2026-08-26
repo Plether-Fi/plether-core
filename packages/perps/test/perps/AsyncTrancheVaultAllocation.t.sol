@@ -12,9 +12,11 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
+    address internal constant MAINTENANCE_FEE_RECIPIENT = address(0xFEE70003);
 
     uint256 internal constant USER_ASSETS = 10_000e6;
     uint256 internal constant USER_SHARES = 10_000e9;
+    uint256 internal constant MAINTENANCE_FEE_APR_BPS = 1000;
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
@@ -77,6 +79,57 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         assertEq(shares, epochShares);
         assertEq(claimedAssets, epochAssets);
         assertEq(claimedShares, epochShares, "burned dust must be included in terminal epoch accounting");
+    }
+
+    function test_DepositAllocationDustBurnMaterializesMaintenanceFeeExactlyOnce() public {
+        uint256 aliceAssets = 1e6;
+        uint256 bobAssets = 1e6;
+        uint256 requestId = _requestDeposit(ALICE, aliceAssets);
+        assertEq(_requestDeposit(BOB, bobAssets), requestId);
+
+        uint256 epochAssets = aliceAssets + bobAssets;
+        uint256 epochShares = epochAssets - 1;
+        _warpToEpoch(requestId);
+        vm.prank(address(pool));
+        assertEq(juniorVault.finalizeDepositEpochFromPool(requestId, epochShares), epochAssets);
+
+        uint256 aliceShares = Math.mulDiv(aliceAssets, epochShares, epochAssets, Math.Rounding.Floor);
+        uint256 bobShares = Math.mulDiv(bobAssets, epochShares, epochAssets, Math.Rounding.Floor);
+        uint256 shareDust = epochShares - aliceShares - bobShares;
+        assertGt(shareDust, 0, "fixture must create nonzero claim-escrow dust");
+
+        _enableJuniorMaintenanceFee();
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 1 hours);
+        uint256 rawSupplyBeforeClaims = juniorVault.totalSupply();
+        uint256 pendingFeeShares = juniorVault.pendingMaintenanceFeeShares();
+        uint256 recipientSharesBefore = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
+        uint256 checkpointBefore = juniorVault.maintenanceFeeCheckpointBoundary();
+        assertGt(pendingFeeShares, 0, "fixture must have a materializable maintenance fee");
+
+        vm.prank(ALICE);
+        assertEq(_async().claimDeposit(requestId, aliceAssets, ALICE, ALICE), aliceShares);
+        assertEq(juniorVault.totalSupply(), rawSupplyBeforeClaims, "nonterminal claim cannot mutate supply");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientSharesBefore);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointBefore);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), pendingFeeShares);
+
+        vm.prank(BOB);
+        assertEq(_async().claimDeposit(requestId, bobAssets, BOB, BOB), bobShares);
+
+        assertEq(
+            juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT) - recipientSharesBefore,
+            pendingFeeShares,
+            "terminal dust burn must checkpoint the accrued fee once"
+        );
+        assertEq(
+            juniorVault.totalSupply(),
+            rawSupplyBeforeClaims + pendingFeeShares - shareDust,
+            "fee mint and claim-escrow dust burn must compose exactly"
+        );
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0);
+        assertGt(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointBefore);
+        assertEq(juniorVault.depositClaimEscrowShares(), 0);
+        assertEq(juniorVault.balanceOf(address(juniorVault)), 0);
     }
 
     function test_PartialMintPlateauRevertsWithoutCorruptingControllerFifo() public {
@@ -303,6 +356,12 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         if (block.timestamp < timestamp) {
             vm.warp(timestamp);
         }
+    }
+
+    function _enableJuniorMaintenanceFee() internal {
+        juniorVault.proposeMaintenanceFeeConfig(MAINTENANCE_FEE_APR_BPS, MAINTENANCE_FEE_RECIPIENT);
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
     }
 
     function _async() internal view returns (IAsyncTrancheVault) {

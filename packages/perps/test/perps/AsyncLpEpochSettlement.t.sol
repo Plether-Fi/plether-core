@@ -18,7 +18,9 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
     address internal constant CAROL = address(0xCA401);
     address internal constant OPERATOR = address(0x0F3A4702);
     address internal constant TRADER = address(0x7A0E2);
+    address internal constant MAINTENANCE_FEE_RECIPIENT = address(0xFEE70001);
     uint256 internal constant SATURDAY_FROZEN = 1_710_021_600;
+    uint256 internal constant MAINTENANCE_FEE_APR_BPS = 1000;
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
@@ -266,6 +268,153 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
             .call(abi.encodeWithSignature("cancelRedeemRequest(uint256,address,address)", requestId, ALICE, ALICE));
         assertFalse(cancelledAtMaturity, "a matured redeem request must not be cancellable");
         assertEq(_pendingRedeem(juniorVault, requestId, ALICE), requestedShares);
+    }
+
+    function test_MaintenanceFee_RequestAndCancellationPathsDoNotCrystallize() public {
+        uint256 shares = _fundOne(juniorVault, ALICE, 50_000e6);
+        _enableJuniorMaintenanceFee();
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 1 hours);
+        _refreshMark();
+
+        uint256 rawSupply = juniorVault.totalSupply();
+        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
+        uint256 feeBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
+        uint256 recipientShares = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
+        assertGt(feeShares, 0, "fixture must have an accrued fee");
+
+        uint256 assets = 25_000e6;
+        uint256 depositId = _requestDeposit(juniorVault, BOB, assets);
+        uint256 redeemId = _requestRedeem(juniorVault, ALICE, shares / 2, ALICE, ALICE);
+        assertEq(depositId, redeemId, "entry and exit must share the cancellable epoch");
+        assertEq(juniorVault.totalSupply(), rawSupply, "requests cannot change issued supply");
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares, "requests cannot checkpoint the fee");
+
+        vm.prank(BOB);
+        assertEq(_async(juniorVault).cancelPendingDeposit(depositId, BOB, BOB), assets);
+        vm.prank(ALICE);
+        assertEq(_async(juniorVault).cancelRedeemRequest(redeemId, ALICE, ALICE), shares / 2);
+
+        assertEq(juniorVault.totalSupply(), rawSupply, "cancellations cannot change issued supply");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientShares);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundary);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares);
+        assertEq(juniorVault.pendingDepositEscrowAssets(), 0);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
+    }
+
+    function test_MaintenanceFee_RejectedDepositAndRefundDoNotCrystallize() public {
+        _enableJuniorMaintenanceFee();
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 1 hours);
+        _refreshMark();
+
+        uint256 assets = 25_000e6;
+        uint256 requestId = _requestDeposit(juniorVault, ALICE, assets);
+        _warpToEpoch(requestId);
+        _refreshMark();
+
+        uint256 rawSupply = juniorVault.totalSupply();
+        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
+        uint256 feeBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
+        uint256 recipientShares = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
+        assertGt(feeShares, 0, "fixture must have an accrued fee");
+
+        vm.prank(address(pool));
+        assertEq(juniorVault.finalizeDepositEpochFromPool(requestId, 0), assets);
+
+        assertEq(juniorVault.totalSupply(), rawSupply, "zero-share rejection cannot change issued supply");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientShares);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundary);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares);
+        assertEq(_async(juniorVault).refundableDepositRequest(requestId, ALICE), assets);
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 feeSharesBeforeRefund = juniorVault.pendingMaintenanceFeeShares();
+        vm.prank(ALICE);
+        assertEq(_async(juniorVault).cancelPendingDeposit(requestId, ALICE, ALICE), assets);
+
+        assertGt(feeSharesBeforeRefund, feeShares, "rejected assets must not stop time-based accrual");
+        assertEq(juniorVault.totalSupply(), rawSupply, "asset refund cannot change issued supply");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientShares);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundary);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeSharesBeforeRefund);
+        assertEq(juniorVault.pendingDepositEscrowAssets(), 0);
+    }
+
+    function test_MaintenanceFee_ZeroValueRedeemRefundDoesNotCrystallize() public {
+        _fundOne(juniorVault, ALICE, 10_000e6);
+        vm.prank(ALICE);
+        juniorVault.transfer(CAROL, 1);
+        _enableJuniorMaintenanceFee();
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 1 hours);
+        _refreshMark();
+
+        uint256 requestId = _requestRedeem(juniorVault, CAROL, 1, CAROL, CAROL);
+        _warpToEpoch(requestId);
+        _refreshMark();
+        assertEq(juniorVault.estimateRedeemAssets(1), 0, "one share must exercise the zero-value path");
+
+        uint256 rawSupply = juniorVault.totalSupply();
+        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
+        uint256 feeBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
+        uint256 recipientShares = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
+        assertGt(feeShares, 0, "fixture must have an accrued fee");
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+
+        assertEq(result.juniorProcessedEpochs, 1);
+        assertEq(result.juniorFundedShares, 0);
+        assertEq(result.juniorFundedAssets, 0);
+        assertEq(_refundableRedeem(juniorVault, requestId, CAROL), 1);
+        assertEq(juniorVault.totalSupply(), rawSupply, "zero-value refund cannot burn shares");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientShares);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundary);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares);
+
+        vm.warp(block.timestamp + 1 hours);
+        uint256 feeSharesBeforeRefund = juniorVault.pendingMaintenanceFeeShares();
+        vm.prank(CAROL);
+        assertEq(_async(juniorVault).claimRedeemRefund(requestId, CAROL, CAROL), 1);
+
+        assertGt(feeSharesBeforeRefund, feeShares, "refundable shares must remain fee-bearing");
+        assertEq(juniorVault.totalSupply(), rawSupply, "share refund cannot change issued supply");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientShares);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundary);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeSharesBeforeRefund);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
+    }
+
+    function test_MaintenanceFee_AlreadyFundedClaimsAfterTimeDoNotCrystallize() public {
+        uint256 shares = _fundOne(juniorVault, ALICE, 100_000e6);
+        _enableJuniorMaintenanceFee();
+        _refreshMark();
+
+        uint256 depositAssets = 25_000e6;
+        uint256 depositId = _requestDeposit(juniorVault, BOB, depositAssets);
+        uint256 redeemShares = shares / 4;
+        uint256 redeemId = _requestRedeem(juniorVault, ALICE, redeemShares, ALICE, ALICE);
+        assertEq(depositId, redeemId, "entry and exit must share the funded epoch");
+        IHousePool.LpEpochSettlementResult memory result = _settleAt(depositId);
+        assertEq(result.juniorDepositAssets, depositAssets);
+        assertEq(result.juniorFundedShares, redeemShares);
+
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 1 hours);
+        uint256 rawSupply = juniorVault.totalSupply();
+        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
+        uint256 feeBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
+        uint256 recipientShares = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
+        assertGt(feeShares, 0, "claim delay must accrue a fee");
+
+        assertGt(_claimAllDeposit(juniorVault, depositId, BOB), 0);
+        assertEq(juniorVault.totalSupply(), rawSupply, "funded deposit claim cannot mint new shares");
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares);
+
+        assertGt(_claimRedeem(juniorVault, redeemId, ALICE, redeemShares), 0);
+        assertEq(juniorVault.totalSupply(), rawSupply, "funded redemption claim cannot burn shares again");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), recipientShares);
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundary);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares);
+        assertEq(juniorVault.depositClaimEscrowShares(), 0);
+        assertEq(juniorVault.withdrawalEscrowAssets(), 0);
     }
 
     function test_SettlementFundsSeniorBeforeJunior() public {
@@ -752,6 +901,14 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 mark = engine.lastMarkPrice();
         vm.prank(address(router));
         engine.updateMarkPrice(mark == 0 ? 1e8 : mark, uint64(block.timestamp));
+    }
+
+    function _enableJuniorMaintenanceFee() internal {
+        juniorVault.proposeMaintenanceFeeConfig(MAINTENANCE_FEE_APR_BPS, MAINTENANCE_FEE_RECIPIENT);
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+        assertEq(juniorVault.maintenanceFeeAprBps(), MAINTENANCE_FEE_APR_BPS);
+        assertEq(juniorVault.maintenanceFeeRecipient(), MAINTENANCE_FEE_RECIPIENT);
     }
 
     function _reserveLiquidityLeaving(

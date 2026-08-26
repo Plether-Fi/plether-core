@@ -34,6 +34,11 @@ interface IAsyncTrancheVaultDeploymentView {
     function LP_REQUEST_CUTOFF_DURATION() external view returns (uint256);
     function asset() external view returns (address);
     function share() external view returns (address);
+    function totalSupply() external view returns (uint256);
+    function maintenanceFeeAprBps() external view returns (uint256);
+    function maintenanceFeeRecipient() external view returns (address);
+    function pendingMaintenanceFeeShares() external view returns (uint256);
+    function accruedTotalSupply() external view returns (uint256);
     function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
     function vault(
         address asset_
@@ -448,6 +453,14 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
         require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
+        if (!isSenior) {
+            require(candidate.maintenanceFeeAprBps() == 0, "Junior maintenance fee must default to zero");
+            require(candidate.maintenanceFeeRecipient() == address(0), "Junior maintenance fee recipient must be zero");
+            require(candidate.pendingMaintenanceFeeShares() == 0, "Junior pending maintenance fee must be zero");
+            require(
+                candidate.accruedTotalSupply() == candidate.totalSupply(), "Junior accrued supply must equal raw supply"
+            );
+        }
         (nextRequestEpoch, nextRequestCutoffTime) = candidate.getRequestEpochWindow();
     }
 
