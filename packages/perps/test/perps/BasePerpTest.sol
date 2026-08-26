@@ -136,8 +136,12 @@ abstract contract BasePerpTest is Test {
         bytes32[] memory baseFeedIds = _basePythFeedIds();
         baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC");
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC");
+        seniorVault = new TrancheVault(
+            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+        );
+        juniorVault = new TrancheVault(
+            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+        );
 
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));

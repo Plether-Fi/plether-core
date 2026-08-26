@@ -159,8 +159,8 @@ contract GasProfileTest is Test {
         engineLens = new CfdEngineLens(address(engine));
         pool = new HousePool(usdc, address(engine), address(new HousePoolRedemptionMathSidecar()));
 
-        seniorVault = new TrancheVault(IERC20(usdc), address(pool), true, "Senior LP", "senUSDC");
-        juniorVault = new TrancheVault(IERC20(usdc), address(pool), false, "Junior LP", "junUSDC");
+        seniorVault = new TrancheVault(IERC20(usdc), address(pool), true, "Senior LP", "senUSDC", 0, address(0));
+        juniorVault = new TrancheVault(IERC20(usdc), address(pool), false, "Junior LP", "junUSDC", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));

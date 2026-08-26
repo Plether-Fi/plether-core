@@ -12,6 +12,7 @@ import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccounting
 
 contract JuniorMaintenanceFeeTest is BasePerpTest {
 
+    event MaintenanceFeeConfigInitialized(uint256 aprBps, address indexed recipient, uint256 checkpointBoundary);
     event MaintenanceFeeConfigProposed(uint256 aprBps, address indexed recipient, uint256 activationTime);
     event MaintenanceFeeConfigFinalized(
         uint256 previousAprBps,
@@ -58,6 +59,103 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
     address internal constant LP = address(0xB0B);
     address internal constant RECEIVER = address(0xCAFE);
     address internal constant TRADER = address(0x7A0E2);
+
+    function test_ConstructorInitializesJuniorFeeAtDeploymentTreasuryAndEmitsCheckpoint() public {
+        HousePool deploymentPool =
+            new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
+        TrancheVault deploymentSenior = new TrancheVault(
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            true,
+            "Deployment Senior LP",
+            "deploymentSeniorUSDC",
+            0,
+            address(0)
+        );
+        deploymentPool.setSeniorVault(address(deploymentSenior));
+
+        uint256 checkpointBoundary = _nextHourBoundary(block.timestamp);
+        address expectedJunior = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        vm.expectEmit(true, false, false, true, expectedJunior);
+        emit MaintenanceFeeConfigInitialized(100, engine.protocolTreasury(), checkpointBoundary);
+        TrancheVault deploymentJunior = new TrancheVault(
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            false,
+            "Deployment Junior LP",
+            "deploymentJuniorUSDC",
+            100,
+            engine.protocolTreasury()
+        );
+
+        assertEq(deploymentJunior.maintenanceFeeAprBps(), 100);
+        assertEq(deploymentJunior.maintenanceFeeRecipient(), engine.protocolTreasury());
+        assertEq(deploymentJunior.maintenanceFeeCheckpointBoundary(), checkpointBoundary);
+        assertEq(deploymentJunior.maintenanceFeeConfigActivationTime(), 0);
+        (uint256 pendingAprBps, address pendingRecipient) = deploymentJunior.pendingMaintenanceFeeConfig();
+        assertEq(pendingAprBps, 0);
+        assertEq(pendingRecipient, address(0));
+    }
+
+    function test_ConstructorRejectsSeniorFeeAndInvalidJuniorConfigs() public {
+        HousePool deploymentPool =
+            new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
+
+        vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeSeniorUnsupported.selector);
+        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 100, FEE_RECIPIENT);
+
+        vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeSeniorUnsupported.selector);
+        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 0, FEE_RECIPIENT);
+
+        TrancheVault deploymentSenior =
+            new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 0, address(0));
+        deploymentPool.setSeniorVault(address(deploymentSenior));
+
+        vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRate.selector);
+        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1001, FEE_RECIPIENT);
+
+        vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
+        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, address(0));
+
+        vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
+        new TrancheVault(
+            IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, address(deploymentPool)
+        );
+
+        vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
+        new TrancheVault(
+            IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, address(deploymentSenior)
+        );
+
+        address expectedJunior = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        vm.expectRevert(TrancheVault.TrancheVault__InvalidMaintenanceFeeRecipient.selector);
+        new TrancheVault(IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 1, expectedJunior);
+    }
+
+    function test_FirstJuniorSeedAfterElapsedZeroSupplyHasNoRetroactiveDilution() public {
+        HousePool deploymentPool =
+            new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
+        TrancheVault deploymentSenior =
+            new TrancheVault(IERC20(address(usdc)), address(deploymentPool), true, "Senior", "s", 0, address(0));
+        deploymentPool.setSeniorVault(address(deploymentSenior));
+        TrancheVault deploymentJunior = new TrancheVault(
+            IERC20(address(usdc)), address(deploymentPool), false, "Junior", "j", 100, engine.protocolTreasury()
+        );
+        deploymentPool.setJuniorVault(address(deploymentJunior));
+
+        vm.warp(deploymentJunior.maintenanceFeeCheckpointBoundary() + 30 days);
+        assertEq(deploymentJunior.pendingMaintenanceFeeShares(), 0);
+        vm.prank(address(deploymentPool));
+        deploymentJunior.bootstrapMint(10_000_000e9, LP);
+
+        assertEq(deploymentJunior.balanceOf(LP), 10_000_000e9);
+        assertEq(deploymentJunior.balanceOf(engine.protocolTreasury()), 0);
+        assertEq(deploymentJunior.pendingMaintenanceFeeShares(), 0);
+
+        vm.warp(deploymentJunior.maintenanceFeeCheckpointBoundary() + 1 hours);
+        assertGt(deploymentJunior.pendingMaintenanceFeeShares(), 0);
+        assertGt(deploymentJunior.accruedTotalSupply(), deploymentJunior.totalSupply());
+    }
 
     function test_DefaultsToZeroAndSeniorNeverAccrues() public view {
         assertEq(juniorVault.maintenanceFeeAprBps(), 0);
@@ -138,7 +236,13 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         candidateJunior.proposeMaintenanceFeeConfig(200, address(futureSenior));
 
         TrancheVault imposterJunior = new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), false, "Imposter Junior LP", "imposterJuniorUSDC"
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            false,
+            "Imposter Junior LP",
+            "imposterJuniorUSDC",
+            0,
+            address(0)
         );
         vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeVaultPairNotReady.selector);
         imposterJunior.proposeMaintenanceFeeConfig(200, FEE_RECIPIENT);
@@ -977,10 +1081,22 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
     {
         deploymentPool = new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
         deploymentSenior = new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), true, "Deployment Senior LP", "deploymentSeniorUSDC"
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            true,
+            "Deployment Senior LP",
+            "deploymentSeniorUSDC",
+            0,
+            address(0)
         );
         deploymentJunior = new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), false, "Deployment Junior LP", "deploymentJuniorUSDC"
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            false,
+            "Deployment Junior LP",
+            "deploymentJuniorUSDC",
+            0,
+            address(0)
         );
     }
 

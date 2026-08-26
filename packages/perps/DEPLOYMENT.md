@@ -12,13 +12,18 @@ The current target network is Arbitrum Sepolia with:
 
 - Deploy script: `script/DeployPerpsArbitrumSepolia.s.sol`
 - Bootstrap script: `script/BootstrapPerpsArbitrumSepolia.s.sol`
+- Read-only verifier: `script/VerifyPerpsArbitrumSepolia.s.sol`
+- Preflight and no-broadcast dry run: `scripts/prepare-perps-arbitrum-sepolia-release.sh`
+- Environment template: `.env.arbitrum-sepolia-perps.example`
+- Manifest template: `deployments/arbitrum-sepolia-perps.template.json`
 
 The deploy script handles contract creation and one-time wiring.
 
 The bootstrap script handles operator actions after deploy:
 
 - verifying the shared emergency coordinator and configuring its guardian
-- proposing or finalizing finite senior-exposure limits
+- fail-closing on the constructor-initialized HousePool senior limits and Router opening/oracle parameters
+- verifying the constructor-initialized Junior maintenance fee and treasury snapshot
 - seeding the junior tranche and then the senior tranche
 - minting mock USDC to test users
 - activating trading
@@ -48,19 +53,21 @@ The deploy script creates and wires:
 6. `CfdEngineSettlementSidecar`
 7. `CfdEngineAdmin`
 8. `HousePoolRedemptionMathSidecar`
-9. `HousePool`, constructed with the redemption-math sidecar
+9. `ArbitrumSepoliaReleaseHousePool`, a constructor-only `HousePool` wrapper built with the redemption-math sidecar
+   and the exact `$40M/80%` release limits
 10. `TrancheVault` senior
 11. `TrancheVault` junior
 12. `CfdEngineAccountLens`
 13. `CfdEngineLens`
-14. `PletherOracle`
+14. `ArbitrumSepoliaReleaseOracle`, a constructor-only `PletherOracle` wrapper with the `2,500`-bps multiplier
 15. `CfdOrderPolicyEvaluator`
 16. `OrderRouterV2ExecutionSidecar`
 17. `OrderLifecycleBook`, separately deployed and immutable-bound to the predicted Router, Engine,
     MarginClearinghouse, and HousePool
 18. `OrderRouterLiquidationBatchSidecar`, separately deployed with the same predicted Router address
-19. `OrderRouter`, deployed immediately after those two Router-bound dependencies. Its eighth and final constructor
-    dependency is the predeployed lifecycle Book; its constructor deploys the immutable RouterAdmin and stateful
+19. `ArbitrumSepoliaReleaseRouter`, a constructor-only `OrderRouter` wrapper deployed immediately after those two
+    Router-bound dependencies with the `$1,000` opening minimum. Its eighth and final base-constructor dependency is
+    the predeployed lifecycle Book; its base constructor deploys the immutable RouterAdmin and stateful
     position-protection Book
 20. `PositionProtectionBook`, deployed internally and immutably bound by the Router constructor
 21. `PerpsPublicLens`
@@ -77,6 +84,11 @@ It then performs the required set-once wiring:
 - `CfdEngine.setOrderRouter(...)`
 - `MarginClearinghouse.setEngine(...)`
 
+Vault ordering is deliberate: construct Senior with `0/address(0)`, call `HousePool.setSeniorVault`, snapshot
+`CfdEngine.protocolTreasury()`, construct Junior with `100` bps and that recipient, then call
+`HousePool.setJuniorVault`. Both values and the empty fee-proposal state are verified immediately. This ordering lets
+the Junior constructor enforce the existing forbidden-recipient rules against the already canonical Senior vault.
+
 The lifecycle Book, stateless keeper sidecar, and Router form a strict three-`CREATE` deployment sequence. Let `n` be
 the deployer's nonce immediately before deploying `OrderLifecycleBook`. Compute the expected Router address at nonce
 `n + 2`; deploy the lifecycle Book at `n` with that Router plus the exact Engine, MarginClearinghouse, and HousePool;
@@ -88,6 +100,11 @@ being constructed and its supplied core dependencies. It separately rejects a ke
 immutable `ROUTER()` is not `address(this)`. The deploy script also verifies the actual Router address equals the
 prediction. If the deployer nonce changes during the sequence, discard both orphaned Router-bound dependencies,
 recompute the prediction, and redeploy them; neither immutable binding can be repaired.
+
+The three Arbitrum Sepolia wrappers modify constructor state only and add no post-deployment setter. The shared
+HousePool, PletherOracle, and OrderRouter constructors and generic defaults remain unchanged. The release Router
+constructor also rejects an oracle that does not already expose the exact `2,500`-bps adverse multiplier. After
+construction, all configuration changes use the unchanged HousePool and RouterAdmin 48-hour governance paths.
 
 The Router constructor creates only the stateful position-protection Book. That Book requires no separate deployment
 transaction or mutable wiring. Discover it from `OrderRouter.positionProtectionBook()` and verify its immutable
@@ -168,8 +185,8 @@ Important:
 - `TerminalNavBookV2` must be deployed empty, immutable-bound to the new Engine, and wired before any position
   exposure. `CfdEngine.setTerminalNavBook(...)` validates matching Engine, `CAP_PRICE`, `SIZE_QUANTUM = 1e20`, and
   zero book version/totals before accepting it once.
-- Trading does not go live until a finite capacity configuration completes its 48-hour timelock, both seed positions
-  exist within those limits, and `activateTrading()` is called.
+- Trading does not go live until the constructor-installed finite capacity and Router policy are verified, both seed
+  positions exist within those limits, and `activateTrading()` is called.
 - Both configured vaults must report the same pool binding and fixed `LP_REQUEST_CUTOFF_DURATION` of `300` seconds.
   At the same block they must return identical `(nextRequestEpoch, nextRequestCutoffTime)` values from
   `getRequestEpochWindow()`, consistent with the pool's round-hour clock; the cutoff timestamp must be future.
@@ -182,10 +199,10 @@ Important:
   does not change these standard ids. Both deploy and bootstrap verification must assert
   `supportsInterface(type(IAsyncTrancheVault).interfaceId)` for the rebuilt custom interface; regenerate the custom
   vault and lens ABIs for frontend, keeper, and indexer use.
-- Deploy verification and the release-default regression also fail closed unless the Junior vault starts with
-  `maintenanceFeeAprBps() == 0`, `maintenanceFeeRecipient() == address(0)`,
-  `pendingMaintenanceFeeShares() == 0`, and `accruedTotalSupply() == totalSupply()`. The deploy script does not enable
-  or propose a fee. Reusable bootstrap verification deliberately permits a subsequently activated configuration.
+- Deploy verification and the release-default regression fail closed unless Senior reports `0/address(0)` and Junior
+  reports `maintenanceFeeAprBps() == 100` with the deployment-time `CfdEngine.protocolTreasury()` snapshot. Neither
+  vault may have a pending fee proposal or pending fee shares before seeding. Bootstrap enforces the same snapshot and
+  does not contain a fee-configuration transaction.
 - `OrderRouter` is non-upgradeable and `CfdEngine.setOrderRouter(...)` is one-time. A release containing position
   protection therefore requires a fresh complete perps stack; do not point a new router at an existing engine or
   migrate live positions into the new release.
@@ -209,13 +226,12 @@ Important:
 
 ## Oracle Configuration
 
-The Arbitrum Sepolia deploy script uses Pyth at:
+The Arbitrum Sepolia deploy script uses upgraded Pyth at:
 
-- `0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF`
+- `0x0B73614636C855Bf23F342F307FB981A3e47f42B`
 
-Pre-broadcast blocker: the current `plether-app` Arbitrum Sepolia configuration instead names
-`0x0B73614636C855Bf23F342F307FB981A3e47f42B`. Confirm the authoritative Pyth endpoint and align both repositories before
-deploying; this guide intentionally does not choose between the conflicting addresses.
+Preflight fetches all six feeds through authenticated `https://pyth.dourolabs.app/hermes`, verifies the returned update
+payload against this contract's `getUpdateFee(bytes[])`, and performs a no-broadcast deployment simulation.
 
 The router basket uses 6 FX feeds with DXY weights:
 
@@ -234,11 +250,11 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 
 | Parameter | Value |
 | --- | --- |
-| `vpiFactor` | `0.005e18` |
+| `vpiFactor` | `0.01e18` |
 | `frozenCloseSpreadBps` | `50` |
 | `maxSkewRatio` | `0.4e18` |
-| `maintMarginBps` | `30` |
-| `initMarginBps` | `45` |
+| `maintMarginBps` | `10` |
+| `initMarginBps` | `20` |
 | `fadMarginBps` | `300` |
 | `baseCarryBps` | `500` |
 | `minBountyUsdc` | `1e6` |
@@ -250,21 +266,30 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `positionSizeQuantum` | `1e20` raw units (100 synthetic tokens) |
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
-| `adverseConfidenceMultiplierBps` | `2_000` |
+| `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
+| `minOpenNotionalUsdc` | `1_000e6` (release-Router constructor initialization) |
+| `maxPendingOrders` | `5` (unchanged) |
 | `closeOrderExecutionBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `positionProtectionCommitsEnabled` | `false` |
-| `juniorMaintenanceFeeAprBps` | `0` (disabled) |
-| `juniorMaintenanceFeeRecipient` | `address(0)` |
-| `maxSeniorExposureUsdc` | Operator-supplied finite USDC amount |
-| `maxSeniorShareBps` | Operator-supplied value below `10_000` |
+| `juniorMaintenanceFeeAprBps` | `100` nominal APR |
+| `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
+| `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
+| `maxSeniorShareBps` | `8_000` (release-HousePool constructor initialization) |
+| Senior / Junior seed | `10_000_000e6` each |
 
 `frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion without creating a protocol liability or terminal deficit, while a partial close must settle this separate spread obligation in full. Price loss beyond the terminal collectible cap is a diagnostic write-off and does not block the partial close.
 
 `frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
 
-The Junior maintenance fee is independently configured on the Junior vault after deployment. The current HousePool
-owner may propose a rate/recipient pair, wait 48 hours, verify the exact pending values, and finalize it. Rates are
+The Junior maintenance fee is initialized in the Junior vault constructor at `100` bps with the Engine's current
+protocol treasury. Senior is constructed with `0/address(0)` and registered first so the Junior constructor can reject
+all canonical forbidden recipients. `MaintenanceFeeConfigInitialized` records the rate, recipient, and first hourly
+checkpoint boundary. The recipient is a snapshot, not a dynamic pointer; an Engine treasury rotation must be paired
+with a separately timelocked Junior recipient rotation.
+
+After deployment, the current HousePool owner may propose a rate/recipient pair, wait 48 hours, verify the exact pending
+values, and finalize it. Rates are
 capped at `1,000 bps` nominal APR and a nonzero rate requires a valid nonzero recipient. Finalization crystallizes
 elapsed completed-hour fees under the old pair before applying the new pair. The recipient receives ordinary Junior
 shares, not USDC, and must use the normal asynchronous redemption lifecycle. There is no public fee checkpoint;
@@ -276,9 +301,10 @@ Fee configuration is available only after HousePool has registered both tranche 
 the registered Junior vault. This makes recipient validation against the Pool and both canonical vaults independent of
 deployment ordering.
 
-The deploy script and release-default test enforce the initial zero-rate configuration. The reusable bootstrap script
-does not require the fee to remain disabled, so later guardian, seeding, and test-user operations remain idempotently
-rerunnable after governance has legitimately activated or rotated the fee configuration.
+The first Junior seed receives no retroactive dilution: when raw supply is zero, the checkpoint boundary advances
+without minting fee shares. Completed hours after supply exists accrue through the existing effective-supply and
+checkpoint paths. Fee payment remains Junior-share dilution only, with no USDC transfer, principal mutation, or Senior
+charge.
 
 `PerpsViewTypes.TrancheView` now includes raw/effective supply and Junior fee fields before `sharePrice`. Its tuple ABI
 is intentionally incompatible with older lens decoders under the fresh-deployment assumption. Regenerate frontend,
@@ -321,7 +347,7 @@ The confidence is measured against the neutral pre-cap basket while the returned
 cannot always independently reconstruct the configured ratio from `confidence / markPrice`. Treat `policyValid` as
 the feed-policy result instead of using that post-cap quotient as a second policy check.
 
-`adverseConfidenceMultiplierBps = 2_000` applies `0.2x` of Pyth's confidence interval when shifting live/FAD
+`adverseConfidenceMultiplierBps = 2_500` applies `0.25x` of Pyth's confidence interval when shifting live/FAD
 order execution and all liquidation prices in the adverse direction. Oracle-frozen voluntary closes bypass the
 shift and use `frozenCloseSpreadBps` instead; aggregate basket confidence-width validation remains active.
 
@@ -346,6 +372,18 @@ Before every deployment:
 ## Environment
 
 ### Deploy
+
+Before any broadcast, copy `.env.arbitrum-sepolia-perps.example` to an ignored local release env file, populate it,
+and run:
+
+```bash
+PERPS_RELEASE_ENV_FILE=.env.arbitrum-sepolia-perps \
+  scripts/prepare-perps-arbitrum-sepolia-release.sh
+```
+
+This requires a clean reviewed `origin/master`, pinned submodules, Forge `1.5.1-stable`, a funded deployer, chain id
+`421614`, upgraded-Pyth bytecode, an authenticated six-feed Hermes payload, and payload/contract compatibility. Its
+Forge simulation omits `--broadcast`.
 
 Required:
 
@@ -410,20 +448,14 @@ PERPS_ORDER_ROUTER=0x...
 PERPS_EMERGENCY_COORDINATOR=0x...
 PERPS_GUARDIAN=0x...
 
-MAX_SENIOR_EXPOSURE_USDC=...
-MAX_SENIOR_SHARE_BPS=...
-```
-
-Optional:
-
-```bash
-SENIOR_SEED_USDC=50000000000000
-JUNIOR_SEED_USDC=50000000000000
+SENIOR_SEED_USDC=10000000000000
+JUNIOR_SEED_USDC=10000000000000
 
 SENIOR_SEED_RECEIVER=0x...
 JUNIOR_SEED_RECEIVER=0x...
 
-ACTIVATE_TRADING=true
+# Keep false until the seeded verifier passes; set true only for the activation rerun.
+ACTIVATE_TRADING=false
 
 TEST_USER_RECIPIENTS=0xabc...,0xdef...
 TEST_USER_AMOUNTS=1000000000000,500000000000
@@ -432,17 +464,16 @@ TEST_USER_AMOUNTS=1000000000000,500000000000
 Notes:
 
 - USDC amounts are raw 6-decimal values.
-- `50000000000000` means `50_000_000e6`, or 50,000,000 mock USDC.
-- Both senior-limit variables are mandatory. The exposure limit must be finite and the share limit must be below
-  `10_000` bps; the script deliberately refuses the constructor's uncapped bootstrap values.
+- `10000000000000` means `10_000_000e6`, or 10,000,000 mock USDC.
+- Seed amounts, seed receivers, guardian, and activation intent are explicit mandatory inputs. Bootstrap accepts only
+  the approved `$10M/$10M` seed values and independently reads and verifies the constructor-installed `$40M/80%`
+  HousePool and `$1,000/2,500` Router values.
 - `PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR`, `PERPS_EMERGENCY_COORDINATOR`, and `PERPS_GUARDIAN` are mandatory, and
   the guardian must be nonzero. Bootstrap verifies the supplied released sidecar's code and implementation id for
   rerun inspection; HousePool's internal immutable binding was fixed by its constructor and the deploy script and has
   no runtime getter by design. Bootstrap then verifies that the coordinator has code, is bound to this exact
   RouterAdmin and HousePool, and is already installed as both pausers. It fails closed rather than repairing partial
   or cross-deployment coordinator wiring.
-- Choose limits that admit the intended seeds. For symmetric `50_000_000e6` seeds, the exposure cap must be at least
-  `50_000_000e6` and the senior-share cap must be at least `5_000` bps.
 - `TEST_USER_RECIPIENTS` and `TEST_USER_AMOUNTS` must have the same length.
 
 Run:
@@ -451,23 +482,34 @@ Run:
 source .env && forge script script/BootstrapPerpsArbitrumSepolia.s.sol:BootstrapPerpsArbitrumSepolia --rpc-url $ARB_SEPOLIA_RPC_URL --broadcast
 ```
 
-The first run proposes the exact finite limits through `HousePool.proposePoolConfig(...)` and then exits without
-seeding, funding test users, or activating trading. Wait at least 48 hours and rerun the same command with the same
-environment. The second run verifies the pending proposal, finalizes it, initializes junior before senior, funds test
-users, and optionally activates trading. An unrelated outstanding `HousePool` proposal makes the script revert rather
-than silently overwrite or finalize it.
+Run the standalone verifier without `--broadcast` after every phase and record each successful result in the manifest:
+
+```bash
+VERIFY_PHASE=deployed forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
+VERIFY_PHASE=seeded forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
+VERIFY_PHASE=active forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
+```
+
+The deployment transaction installs exact HousePool `$40M/80%` limits and Router `$1,000/2,500` values. Run the
+`deployed` verifier, then bootstrap with `ACTIVATE_TRADING=false`; bootstrap verifies the live values, requires no
+outstanding HousePool or Router proposal, initializes Junior then Senior, and funds any configured test users. Run the
+`seeded` verifier, change `ACTIVATE_TRADING=true`, rerun bootstrap once more, and run the `active` verifier. There is no
+initial configuration proposal or 48-hour release wait.
 
 ## Bootstrap Behavior
 
-The configuration, seed, and activation phases of the bootstrap script are designed to be partial-rerun safe:
+The seed and activation phases of the bootstrap script are designed to be partial-rerun safe:
 
-- it separates the required limit proposal and finalization across the `HousePool` 48-hour timelock
-- it refuses to seed while the requested finite limits are not active
+- it never proposes or finalizes initial HousePool or Router configuration
+- it refuses to seed unless the exact constructor-installed HousePool and Router values are active and neither admin
+  has an outstanding proposal
+- it refuses to seed unless Junior already has the constructor-initialized `100`-bps fee, the deployment treasury
+  snapshot, no outstanding fee proposal, and zero pending fee shares before its first supply
 - it rotates the coordinator guardian only when the requested address differs; a matching rerun is a no-op
 - it skips a seed if that side is already initialized
 - it skips activation if trading is already active
 
-Before proposing limits, seeding, or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
+Before seeding or activation, bootstrap derives the Engine from `HousePool.ENGINE()` and verifies
 that a code-bearing `TerminalNavBookV2` is wired with matching Engine, cap, and 100-token quantum and that the supplied
 redemption-math sidecar has the expected implementation id. Observable core and coordinator binding mismatches fail
 closed. The supplied sidecar check is inspection-only because bootstrap cannot read back HousePool's internal
@@ -481,9 +523,10 @@ the test-user recipient/amount inputs after the intended funding run.
 
 This is useful if the first bootstrap attempt completes only partially.
 
-Bootstrap does not enable position protection or propose router configuration. Its final output reports the discovered
-Book address, current feature flag, and trigger bounty so operators can verify that ordinary trading was activated
-without exposing an unprepared conditional-order surface.
+Bootstrap does not enable position protection or submit any Router proposal. It verifies the constructor-installed
+minimum opening notional and adverse-confidence multiplier plus the unchanged `10`-bps basket confidence and
+pending-order limit `5`. Final output reports the Book address, current feature flag, and trigger bounty so operators
+can verify ordinary trading without exposing an unprepared conditional-order surface.
 
 ## Position Protection Activation
 
@@ -542,8 +585,8 @@ liquidation remain live.
 - Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
   terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, coordinator, and lenses as a single
   versioned unit.
-- Do not enable the Junior maintenance fee in the deploy or seed transaction. Verify the zero release defaults first;
-  any later enablement is a separate 48-hour governance operation with an explicitly recorded recipient.
+- Deploy Junior with the approved `100`-bps fee and the exact deployment-time protocol-treasury recipient. Do not add a
+  bootstrap fee transaction. Any later rate or recipient change is a separate 48-hour governance operation.
 - `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
   price cap, size quantum, and empty initial state were verified by the deploy transaction.
 - The bootstrap script only mints mock USDC. It does not fund users with ETH.
@@ -577,13 +620,15 @@ liquidation remain live.
    batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
    `SettlementMonitorLens` facade and its internal sidecar are bound to the same Router, Engine, pool, terminal book,
    clearinghouse, vaults, USDC, protocol lens, and planner version. Confirm Junior maintenance-fee rate, recipient,
-   pending shares, and effective supply read back as `0`, `address(0)`, `0`, and raw supply respectively. Verify the
+   pending shares, and effective supply read back as `100`, the deployment-time protocol-treasury snapshot, `0`, and
+   raw supply respectively. Also verify the constructor-installed HousePool `$40M/80%` and Router `$1,000/2,500`
+   values with zero active configuration proposals. Verify the
    `EmergencyPauseCoordinator` is bound to the exact RouterAdmin and HousePool, installed as pauser on both, and starts
    with no active settlement hold.
 5. Set bootstrap environment variables, including the printed redemption-math sidecar and coordinator, a nonzero
-   guardian, and both explicit senior limits, then run bootstrap to configure the guardian and propose the limits.
-6. Wait for the 48-hour `HousePool` timelock, then rerun the same bootstrap command to finalize the limits, seed Junior
-   then Senior, and activate trading.
+   guardian, both explicit seed receivers, and exact `$10M/$10M` seeds. Run bootstrap with `ACTIVATE_TRADING=false` to
+   configure the guardian and seed Junior then Senior without an initial governance wait.
+6. Run the seeded verifier, set `ACTIVATE_TRADING=true`, rerun bootstrap, and run the active verifier.
 7. Fund test wallets with Arbitrum Sepolia ETH as needed.
 8. Point the frontend, public lens consumers, indexer, ordinary order keeper, LP epoch keeper, trigger worker, and
    monitoring at the new release. Configure the guardian monitor and protocol-funded incident keeper. Protection

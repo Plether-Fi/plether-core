@@ -27,7 +27,7 @@ contract SeniorCapacityMaxMintHarness is TrancheVault {
     constructor(
         IERC20 usdc,
         address pool
-    ) TrancheVault(usdc, pool, true, "Senior Capacity Max-Mint Harness", "scMaxMint") {}
+    ) TrancheVault(usdc, pool, true, "Senior Capacity Max-Mint Harness", "scMaxMint", 0, address(0)) {}
 
     function setShareSupply(
         uint256 shares

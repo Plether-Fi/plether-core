@@ -138,8 +138,8 @@ contract PerpsForkTest is Test {
         engine.setTerminalNavBook(address(terminalNavBook));
         pool = new HousePool(USDC, address(engine), address(new HousePoolRedemptionMathSidecar()));
 
-        seniorVault = new TrancheVault(IERC20(USDC), address(pool), true, "Senior LP", "senUSDC");
-        juniorVault = new TrancheVault(IERC20(USDC), address(pool), false, "Junior LP", "junUSDC");
+        seniorVault = new TrancheVault(IERC20(USDC), address(pool), true, "Senior LP", "senUSDC", 0, address(0));
+        juniorVault = new TrancheVault(IERC20(USDC), address(pool), false, "Junior LP", "junUSDC", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));

@@ -17,6 +17,7 @@ import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemption
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
@@ -40,6 +41,8 @@ interface IAsyncTrancheVaultDeploymentView {
     function totalSupply() external view returns (uint256);
     function maintenanceFeeAprBps() external view returns (uint256);
     function maintenanceFeeRecipient() external view returns (address);
+    function maintenanceFeeConfigActivationTime() external view returns (uint256);
+    function pendingMaintenanceFeeConfig() external view returns (uint256 aprBps, address recipient);
     function pendingMaintenanceFeeShares() external view returns (uint256);
     function accruedTotalSupply() external view returns (uint256);
     function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
@@ -60,11 +63,78 @@ interface IPositionProtectionBookDeploymentView {
 
 }
 
+/// @dev Release-only constructor wrapper. The shared HousePool constructor intentionally retains its neutral
+///      unbounded bootstrap sentinels for generic deployments and tests; this wrapper installs and validates the
+///      approved finite Arbitrum Sepolia capacity before the contract is observable.
+contract ArbitrumSepoliaReleaseHousePool is HousePool {
+
+    constructor(
+        address usdc,
+        address engine,
+        address redemptionMathSidecar
+    ) HousePool(usdc, engine, redemptionMathSidecar) {
+        poolConfig.maxSeniorExposureUsdc = 40_000_000e6;
+        poolConfig.maxSeniorShareBps = 8000;
+        _validatePoolConfig(poolConfig);
+    }
+
+}
+
+/// @dev Release-only constructor wrapper for the oracle-backed Router confidence policy. Subsequent policy changes
+///      still flow exclusively through the existing RouterAdmin 48-hour proposal/finalization path.
+contract ArbitrumSepoliaReleaseOracle is PletherOracle {
+
+    constructor(
+        address engine,
+        address housePool,
+        address pyth,
+        bytes32[] memory feedIds,
+        uint256[] memory quantities,
+        uint256[] memory basePrices,
+        bool[] memory inversions
+    ) PletherOracle(engine, housePool, pyth, feedIds, quantities, basePrices, inversions) {
+        adverseConfidenceMultiplierBps = 2500;
+    }
+
+}
+
+/// @dev Release-only constructor wrapper for the Router opening minimum. It also fail-closes on the paired oracle's
+///      constructor-initialized adverse-confidence multiplier. Later Router changes retain the standard admin delay.
+contract ArbitrumSepoliaReleaseRouter is OrderRouter {
+
+    constructor(
+        address engine,
+        address engineLens,
+        address housePool,
+        address pletherOracle_,
+        address keeperSidecar,
+        address policyEvaluator,
+        address executionSidecar,
+        address lifecycleBook
+    )
+        OrderRouter(
+            engine,
+            engineLens,
+            housePool,
+            pletherOracle_,
+            keeperSidecar,
+            policyEvaluator,
+            executionSidecar,
+            lifecycleBook
+        )
+    {
+        minOpenNotionalUsdc = 1000e6;
+        require(pletherOracle.adverseConfidenceMultiplierBps() == 2500, "Unexpected initial adverse multiplier");
+    }
+
+}
+
 contract DeployPerpsArbitrumSepolia is Script {
 
-    address internal constant PYTH = 0x4374e5a8b9C22271E9EB878A2AA31DE97DF15DAF;
+    address internal constant PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint32 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
+    uint256 internal constant JUNIOR_MAINTENANCE_FEE_APR_BPS = 100;
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;
@@ -159,17 +229,32 @@ contract DeployPerpsArbitrumSepolia is Script {
                 == keccak256("Plether.HousePoolRedemptionMathSidecar.v1"),
             "HousePool redemption math sidecar ID mismatch"
         );
-        deployed.housePool = new HousePool(
+        deployed.housePool = new ArbitrumSepoliaReleaseHousePool(
             address(deployed.usdc), address(deployed.engine), address(deployed.housePoolRedemptionMathSidecar)
         );
         deployed.seniorVault = new TrancheVault(
-            IERC20(address(deployed.usdc)), address(deployed.housePool), true, "Plether Senior LP", "psLP"
+            IERC20(address(deployed.usdc)),
+            address(deployed.housePool),
+            true,
+            "Plether Senior LP",
+            "psLP",
+            0,
+            address(0)
         );
+        deployed.housePool.setSeniorVault(address(deployed.seniorVault));
+
+        address juniorFeeRecipient = deployed.engine.protocolTreasury();
+        require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         deployed.juniorVault = new TrancheVault(
-            IERC20(address(deployed.usdc)), address(deployed.housePool), false, "Plether Junior LP", "pjLP"
+            IERC20(address(deployed.usdc)),
+            address(deployed.housePool),
+            false,
+            "Plether Junior LP",
+            "pjLP",
+            JUNIOR_MAINTENANCE_FEE_APR_BPS,
+            juniorFeeRecipient
         );
 
-        deployed.housePool.setSeniorVault(address(deployed.seniorVault));
         deployed.housePool.setJuniorVault(address(deployed.juniorVault));
         _verifyAsyncVaultPair(deployed.housePool, deployed.seniorVault, deployed.juniorVault, deployed.usdc);
         deployed.engine.setPool(address(deployed.housePool));
@@ -177,7 +262,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.accountLens = new CfdEngineAccountLens(address(deployed.engine));
         deployed.engineLens = new CfdEngineLens(address(deployed.engine));
         deployed.pletherOracle = address(
-            new PletherOracle(
+            new ArbitrumSepoliaReleaseOracle(
                 address(deployed.engine),
                 address(deployed.housePool),
                 PYTH,
@@ -195,7 +280,7 @@ contract DeployPerpsArbitrumSepolia is Script {
             expectedRouter, address(deployed.engine), address(deployed.clearinghouse), address(deployed.housePool)
         );
         deployed.liquidationBatchSidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
-        deployed.router = new OrderRouter(
+        deployed.router = new ArbitrumSepoliaReleaseRouter(
             address(deployed.engine),
             address(deployed.engineLens),
             address(deployed.housePool),
@@ -208,6 +293,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(address(deployed.router) == expectedRouter, "OrderRouter CREATE address mismatch");
         deployed.positionProtectionBook = _verifyPositionProtectionBook(deployed.router, deployed.engine);
         deployed.routerAdmin = deployed.router.admin();
+        _verifyInitialReleaseConfig(deployed.housePool, deployed.router, OrderRouterAdmin(deployed.routerAdmin));
 
         deployed.engine.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
@@ -323,16 +409,16 @@ contract DeployPerpsArbitrumSepolia is Script {
         vm.stopBroadcast();
 
         _logDeployment(deployed);
-        console.log("Trading remains inactive until finite senior limits complete their HousePool timelock,");
-        console.log("junior and senior seed positions are initialized, and HousePool.activateTrading() is called.");
+        console.log("Trading remains inactive until junior and senior seed positions are initialized");
+        console.log("and HousePool.activateTrading() is called.");
     }
 
     function _riskParams() internal pure returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
-            vpiFactor: 0.005e18,
+            vpiFactor: 0.01e18,
             maxSkewRatio: 0.4e18,
-            maintMarginBps: 30,
-            initMarginBps: 45,
+            maintMarginBps: 10,
+            initMarginBps: 20,
             fadMarginBps: 300,
             baseCarryBps: 500,
             minBountyUsdc: 1e6,
@@ -340,6 +426,21 @@ contract DeployPerpsArbitrumSepolia is Script {
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
+    }
+
+    function _verifyInitialReleaseConfig(
+        HousePool housePool,
+        OrderRouter router,
+        OrderRouterAdmin routerAdmin
+    ) internal view {
+        require(housePool.maxSeniorExposureUsdc() == 40_000_000e6, "Initial maximum senior exposure mismatch");
+        require(housePool.maxSeniorShareBps() == 8000, "Initial maximum senior share mismatch");
+        require(housePool.poolConfigActivationTime() == 0, "Unexpected initial HousePool proposal");
+        require(router.minOpenNotionalUsdc() == 1000e6, "Initial opening notional mismatch");
+        require(router.pletherOracle().adverseConfidenceMultiplierBps() == 2500, "Initial adverse multiplier mismatch");
+        require(router.pletherOracle().basketMaxConfidenceRatioBps() == 10, "Initial basket confidence mismatch");
+        require(router.maxPendingOrders() == 5, "Initial pending-order limit mismatch");
+        require(routerAdmin.routerConfigActivationTime() == 0, "Unexpected initial Router proposal");
     }
 
     function _pythFeedIds() internal pure returns (bytes32[] memory feedIds) {
@@ -462,10 +563,18 @@ contract DeployPerpsArbitrumSepolia is Script {
             "Invalid imminent LP epoch start"
         );
 
+        address juniorFeeRecipient = CfdEngine(address(housePool.ENGINE())).protocolTreasury();
+        require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         (uint256 seniorNextRequestEpoch, uint256 seniorNextRequestCutoffTime) =
-            _verifyAsyncVault(address(seniorVault), address(housePool), address(usdc), true);
-        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) =
-            _verifyAsyncVault(address(juniorVault), address(housePool), address(usdc), false);
+            _verifyAsyncVault(address(seniorVault), address(housePool), address(usdc), true, 0, address(0));
+        (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) = _verifyAsyncVault(
+            address(juniorVault),
+            address(housePool),
+            address(usdc),
+            false,
+            JUNIOR_MAINTENANCE_FEE_APR_BPS,
+            juniorFeeRecipient
+        );
         require(seniorNextRequestEpoch == juniorNextRequestEpoch, "TrancheVault request epoch mismatch");
         require(seniorNextRequestCutoffTime == juniorNextRequestCutoffTime, "TrancheVault request cutoff mismatch");
 
@@ -491,7 +600,9 @@ contract DeployPerpsArbitrumSepolia is Script {
         address vault,
         address housePool,
         address usdc,
-        bool isSenior
+        bool isSenior,
+        uint256 expectedMaintenanceFeeAprBps,
+        address expectedMaintenanceFeeRecipient
     ) internal view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime) {
         IAsyncTrancheVaultDeploymentView candidate = IAsyncTrancheVaultDeploymentView(vault);
         require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
@@ -511,14 +622,19 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
         require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
-        if (!isSenior) {
-            require(candidate.maintenanceFeeAprBps() == 0, "Junior maintenance fee must default to zero");
-            require(candidate.maintenanceFeeRecipient() == address(0), "Junior maintenance fee recipient must be zero");
-            require(candidate.pendingMaintenanceFeeShares() == 0, "Junior pending maintenance fee must be zero");
-            require(
-                candidate.accruedTotalSupply() == candidate.totalSupply(), "Junior accrued supply must equal raw supply"
-            );
-        }
+        require(
+            candidate.maintenanceFeeAprBps() == expectedMaintenanceFeeAprBps,
+            "TrancheVault maintenance fee APR mismatch"
+        );
+        require(
+            candidate.maintenanceFeeRecipient() == expectedMaintenanceFeeRecipient,
+            "TrancheVault maintenance fee recipient mismatch"
+        );
+        require(candidate.maintenanceFeeConfigActivationTime() == 0, "Outstanding maintenance fee proposal");
+        (uint256 pendingAprBps, address pendingRecipient) = candidate.pendingMaintenanceFeeConfig();
+        require(pendingAprBps == 0 && pendingRecipient == address(0), "Pending maintenance fee config is not empty");
+        require(candidate.pendingMaintenanceFeeShares() == 0, "Pending maintenance fee shares must be zero");
+        require(candidate.accruedTotalSupply() == candidate.totalSupply(), "Accrued supply must equal raw supply");
         (nextRequestEpoch, nextRequestCutoffTime) = candidate.getRequestEpochWindow();
     }
 
@@ -540,16 +656,22 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("HousePoolRedemptionMathSidecar:", address(deployed.housePoolRedemptionMathSidecar));
         console.logBytes32(deployed.housePoolRedemptionMathSidecar.implementationId());
         console.log("HousePool:", address(deployed.housePool));
+        console.log("MaximumSeniorExposureUsdc:", deployed.housePool.maxSeniorExposureUsdc());
+        console.log("MaximumSeniorShareBps:", deployed.housePool.maxSeniorShareBps());
         console.log("LpEpochDuration:", deployed.housePool.LP_EPOCH_DURATION());
         console.log("MaxLpEpochsPerPhase:", deployed.housePool.MAX_LP_EPOCHS_PER_PHASE());
         console.log("CurrentLpEpoch:", deployed.housePool.currentLpEpoch());
         console.log("SeniorVault:", address(deployed.seniorVault));
         console.log("JuniorVault:", address(deployed.juniorVault));
+        console.log("JuniorMaintenanceFeeAprBps:", deployed.juniorVault.maintenanceFeeAprBps());
+        console.log("JuniorMaintenanceFeeRecipient:", deployed.juniorVault.maintenanceFeeRecipient());
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));
         console.log("OrderRouterV2ExecutionSidecar:", address(deployed.orderExecutionSidecar));
         console.log("OrderRouter:", address(deployed.router));
+        console.log("MinimumOpenNotionalUsdc:", deployed.router.minOpenNotionalUsdc());
+        console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));
         console.log("PositionProtectionBook:", deployed.positionProtectionBook);
         console.log("PositionProtectionCommitsEnabled:", deployed.router.positionProtectionCommitsEnabled());
