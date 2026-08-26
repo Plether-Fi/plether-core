@@ -22,7 +22,7 @@ contract AuditV3Failing_QueueGriefing is BasePerpTest {
         _fundTrader(address(0xA11CE), 10_000e6);
 
         vm.prank(address(0xA11CE));
-        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 1000e18, 1000e6, 1e8, false);
 
         assertEq(router.nextCommitId(), 2, "Commit should succeed without sending ETH");
     }
@@ -53,7 +53,7 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
     function test_2_CheckWithdrawAcceptsStaleMarkDuringLiveMarketFadWindow() public {
         address account = alice;
         _fundTrader(alice, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         // Friday 21:30 UTC: FAD active but oracle still live until 22:00.
         uint256 fridayEvening = _fridayAt(21) + 30 minutes;
@@ -73,7 +73,7 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
     function test_2_HousePoolAcceptsStaleMarkDuringLiveMarketFadWindow() public {
         address account = alice;
         _fundTrader(alice, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         uint256 fridayEvening = _fridayAt(21) + 30 minutes;
         vm.warp(fridayEvening);
@@ -138,9 +138,9 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
         address account = address(0xA11CE);
         _fundTrader(address(0xA11CE), 100_000e6);
 
-        // BULL profits when price drops. Max profit = 1e8 * 50_000e18 / 1e20 = 50_000e6
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
-        _close(account, CfdTypes.Side.BULL, 50_000e18, 0);
+        // LONG profits when price drops. Max profit = 1e8 * 50_000e18 / 1e20 = 50_000e6
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1e8);
+        _close(account, CfdTypes.Side.LONG, 50_000e18, 0);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -213,15 +213,15 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
         _fundTrader(address(0xA11CE), 600_000e6);
 
         // Round 1: Wipe junior (50k).
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
-        _close(account, CfdTypes.Side.BULL, 50_000e18, 0);
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1e8);
+        _close(account, CfdTypes.Side.LONG, 50_000e18, 0);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
 
         // Round 2: Junior is 0, further losses wipe senior completely.
-        _open(account, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(account, CfdTypes.Side.BULL, 500_000e18, 0);
+        _open(account, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
+        _close(account, CfdTypes.Side.LONG, 500_000e18, 0);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -253,11 +253,11 @@ contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
         address account = alice;
-        _open(account, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__SideMismatch.selector);
-        router.commitOrder(CfdTypes.Side.BEAR, 20_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 20_000e18, 0, 0, true);
     }
 
 }

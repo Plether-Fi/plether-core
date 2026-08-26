@@ -32,25 +32,30 @@ contract CfdMathTest is Test {
     // 1. PNL & SOLVENCY BOUNDS
     // ==========================================
 
-    function test_CalculatePnL_Bull() public pure {
+    function test_SideEncoding_PreservesLongZeroAndShortOne() public pure {
+        assertEq(uint8(CfdTypes.Side.LONG), 0);
+        assertEq(uint8(CfdTypes.Side.SHORT), 1);
+    }
+
+    function test_CalculatePnL_Long() public pure {
         // 100k Size (18 dec), Entry $1.00 (8 dec)
         CfdTypes.Position memory pos = CfdTypes.Position({
             size: 100_000 * 1e18,
             margin: 2000 * 1e6, // $2k margin (50x leverage)
             entryPrice: 1e8,
             maxProfitUsdc: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
-        // Price drops to $0.98 (BULL makes $0.02 * 100k = $2,000)
+        // Price drops to $0.98 (LONG makes $0.02 * 100k = $2,000)
         (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 0.98e8, CAP_PRICE);
         assertTrue(isProfit);
         assertEq(pnl, 2000 * 1e6); // $2,000 USDC
 
-        // Price rises to $1.05 (BULL loses $0.05 * 100k = $5,000)
+        // Price rises to $1.05 (LONG loses $0.05 * 100k = $5,000)
         (isProfit, pnl) = CfdMath.calculatePnL(pos, 1.05e8, CAP_PRICE);
         assertFalse(isProfit);
         assertEq(pnl, 5000 * 1e6); // $5,000 USDC
@@ -62,7 +67,7 @@ contract CfdMathTest is Test {
             margin: 2000 * 1e6,
             entryPrice: 1e8,
             maxProfitUsdc: 0,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
@@ -79,13 +84,13 @@ contract CfdMathTest is Test {
         uint256 size = 100_000 * 1e18;
         uint256 entryPrice = 1.0e8;
 
-        // BULL max profit (Price drops from $1.00 to $0.00)
-        uint256 bullMax = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.BULL, CAP_PRICE);
-        assertEq(bullMax, 100_000 * 1e6); // $100k max
+        // LONG max profit (Price drops from $1.00 to $0.00)
+        uint256 longMax = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.LONG, CAP_PRICE);
+        assertEq(longMax, 100_000 * 1e6); // $100k max
 
-        // BEAR max profit (Price rises from $1.00 to $2.00 CAP)
-        uint256 bearMax = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.BEAR, CAP_PRICE);
-        assertEq(bearMax, 100_000 * 1e6); // $100k max
+        // SHORT max profit (Price rises from $1.00 to $2.00 CAP)
+        uint256 shortMax = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.SHORT, CAP_PRICE);
+        assertEq(shortMax, 100_000 * 1e6); // $100k max
     }
 
     // ==========================================
@@ -141,27 +146,27 @@ contract CfdMathTest is Test {
     }
 
     // ==========================================
-    // 4. BEAR PNL & EDGE CASES
+    // 4. SHORT PNL & EDGE CASES
     // ==========================================
 
-    function test_CalculatePnL_Bear() public pure {
+    function test_CalculatePnL_Short() public pure {
         CfdTypes.Position memory pos = CfdTypes.Position({
             size: 100_000 * 1e18,
             margin: 2000 * 1e6,
             entryPrice: 0.8e8,
             maxProfitUsdc: 0,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
-        // Price rises to $0.95 → BEAR profits (profits when oracle rises)
+        // Price rises to $0.95 → SHORT profits (profits when oracle rises)
         (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 0.95e8, CAP_PRICE);
         assertTrue(isProfit);
         assertEq(pnl, 15_000 * 1e6); // $0.15 * 100k = $15,000
 
-        // Price drops to $0.70 → BEAR loses
+        // Price drops to $0.70 → SHORT loses
         (isProfit, pnl) = CfdMath.calculatePnL(pos, 0.7e8, CAP_PRICE);
         assertFalse(isProfit);
         assertEq(pnl, 10_000 * 1e6); // $0.10 * 100k = $10,000
@@ -173,7 +178,7 @@ contract CfdMathTest is Test {
             margin: 0,
             entryPrice: 1e8,
             maxProfitUsdc: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
@@ -203,9 +208,9 @@ contract CfdMathTest is Test {
         assertEq(vpi, 0, "VPI should be zero when depth is zero");
     }
 
-    function test_MaxProfit_BearAtCap_IsZero() public pure {
-        uint256 maxProfit = CfdMath.calculateMaxProfit(100_000 * 1e18, CAP_PRICE, CfdTypes.Side.BEAR, CAP_PRICE);
-        assertEq(maxProfit, 0, "BEAR at CAP entry has zero max profit");
+    function test_MaxProfit_ShortAtCap_IsZero() public pure {
+        uint256 maxProfit = CfdMath.calculateMaxProfit(100_000 * 1e18, CAP_PRICE, CfdTypes.Side.SHORT, CAP_PRICE);
+        assertEq(maxProfit, 0, "SHORT at CAP entry has zero max profit");
     }
 
 }

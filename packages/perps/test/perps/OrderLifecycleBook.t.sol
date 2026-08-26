@@ -585,7 +585,7 @@ contract OrderLifecycleBookTest is Test {
         bytes32 clientOrderId
     ) private view returns (OrderV2Types.OrderRequest memory request) {
         request.clientOrderId = clientOrderId;
-        request.side = CfdTypes.Side.BEAR;
+        request.side = CfdTypes.Side.SHORT;
         request.sizeDelta = 100e18;
         request.marginDelta = 250e6;
         request.targetPrice = 1.01e8;

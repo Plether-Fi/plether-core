@@ -99,8 +99,8 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     }
 
     function invariant_SideTotalMarginMatchesTrackedEconomicPositionMargins() public view {
-        uint256 bullTotalMargin;
-        uint256 bearTotalMargin;
+        uint256 longTotalMargin;
+        uint256 shortTotalMargin;
 
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -109,21 +109,21 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
-            if (side == CfdTypes.Side.BULL) {
-                bullTotalMargin += margin;
+            if (side == CfdTypes.Side.LONG) {
+                longTotalMargin += margin;
             } else {
-                bearTotalMargin += margin;
+                shortTotalMargin += margin;
             }
         }
 
-        (,,, uint256 liveBullTotalMargin) = engine.sides(uint256(CfdTypes.Side.BULL));
-        (,,, uint256 liveBearTotalMargin) = engine.sides(uint256(CfdTypes.Side.BEAR));
+        (,,, uint256 liveLongTotalMargin) = engine.sides(uint256(CfdTypes.Side.LONG));
+        (,,, uint256 liveShortTotalMargin) = engine.sides(uint256(CfdTypes.Side.SHORT));
 
         assertEq(
-            bullTotalMargin, liveBullTotalMargin, "Bull side totalMargin must match tracked engine position margins"
+            longTotalMargin, liveLongTotalMargin, "Long side totalMargin must match tracked engine position margins"
         );
         assertEq(
-            bearTotalMargin, liveBearTotalMargin, "Bear side totalMargin must match tracked engine position margins"
+            shortTotalMargin, liveShortTotalMargin, "Short side totalMargin must match tracked engine position margins"
         );
     }
 

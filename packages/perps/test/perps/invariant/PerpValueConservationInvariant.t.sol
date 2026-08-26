@@ -31,8 +31,8 @@ contract PerpValueConservationHandler is Test {
     address internal constant FULL_CLOSE_TRADER = address(0xA11CE01);
     address internal constant FULL_CLOSE_COUNTERPARTY = address(0xB0B01);
     address internal constant FAILED_CLOSE_KEEPER = address(0xC0FFEE01);
-    address internal constant BULL_TRADER = address(0xB01102);
-    address internal constant BEAR_TRADER = address(0xBEA202);
+    address internal constant LONG_TRADER = address(0xB01102);
+    address internal constant SHORT_TRADER = address(0xBEA202);
     address internal constant JUNIOR_ATTACKER = address(0xBAD02);
     address internal constant CARRY_TRADER = address(0xCA2203);
 
@@ -73,8 +73,8 @@ contract PerpValueConservationHandler is Test {
 
         _fundTrader(FULL_CLOSE_TRADER, 5000e6);
         _fundTrader(FULL_CLOSE_COUNTERPARTY, 50_000e6);
-        _open(FULL_CLOSE_TRADER, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(FULL_CLOSE_COUNTERPARTY, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(FULL_CLOSE_TRADER, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(FULL_CLOSE_COUNTERPARTY, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         uint256 executionPrice = bound(executionPriceFuzz, 1.8e8, 1.99e8);
         vm.prank(address(router));
@@ -89,7 +89,7 @@ contract PerpValueConservationHandler is Test {
             .call(
                 abi.encodeWithSelector(
                     bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
-                    CfdTypes.Side.BULL,
+                    CfdTypes.Side.LONG,
                     100_000e18,
                     0,
                     targetPrice,
@@ -125,10 +125,10 @@ contract PerpValueConservationHandler is Test {
         uint256 size = bound(sizeFuzz, 500, 3000) * CfdTypes.SIZE_QUANTUM;
         uint256 depositAssets = bound(depositFuzz, 10_000e6, 300_000e6);
 
-        _fundTrader(BULL_TRADER, 50_000e6);
-        _fundTrader(BEAR_TRADER, 50_000e6);
-        _open(BULL_TRADER, CfdTypes.Side.BULL, size, 10_000e6, 1e8);
-        _open(BEAR_TRADER, CfdTypes.Side.BEAR, size, 10_000e6, 1e8);
+        _fundTrader(LONG_TRADER, 50_000e6);
+        _fundTrader(SHORT_TRADER, 50_000e6);
+        _open(LONG_TRADER, CfdTypes.Side.LONG, size, 10_000e6, 1e8);
+        _open(SHORT_TRADER, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
 
         int256 pnl = _unrealizedTraderPnl();
         if (pnl == 0) {
@@ -148,8 +148,8 @@ contract PerpValueConservationHandler is Test {
                 juniorVault.claimDeposit(depositRequestId, claimableDepositAssets, JUNIOR_ATTACKER, JUNIOR_ATTACKER);
 
             uint256 poolAssetsBeforeCloses = pool.totalAssets();
-            _close(BULL_TRADER, CfdTypes.Side.BULL, size, 1e8);
-            _close(BEAR_TRADER, CfdTypes.Side.BEAR, size, 1e8);
+            _close(LONG_TRADER, CfdTypes.Side.LONG, size, 1e8);
+            _close(SHORT_TRADER, CfdTypes.Side.SHORT, size, 1e8);
             uint256 poolAssetsAfterCloses = pool.totalAssets();
             uint256 contemporaneousPoolInflow =
                 poolAssetsAfterCloses > poolAssetsBeforeCloses ? poolAssetsAfterCloses - poolAssetsBeforeCloses : 0;
@@ -195,7 +195,7 @@ contract PerpValueConservationHandler is Test {
         uint256 forgiven;
 
         _fundTrader(CARRY_TRADER, 150_000e6);
-        _open(CARRY_TRADER, CfdTypes.Side.BULL, 200_000e18, 100_000e6, 1e8);
+        _open(CARRY_TRADER, CfdTypes.Side.LONG, 200_000e18, 100_000e6, 1e8);
 
         uint256 balanceBeforeCheckpoint = clearinghouse.balanceUsdc(CARRY_TRADER);
         uint256 elapsed = bound(elapsedFuzz, 7 days, 60 days);
@@ -352,13 +352,14 @@ contract PerpValueConservationHandler is Test {
 
     function _unrealizedTraderPnl() internal view returns (int256) {
         uint256 price = engine.lastMarkPrice();
-        (uint256 bullMaxProfit, uint256 bullOi, uint256 bullEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        bullMaxProfit;
-        (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BEAR));
-        bearMaxProfit;
-        int256 bullPnl = (int256(bullEntryNotional) - int256(bullOi * price)) / int256(1e20);
-        int256 bearPnl = (int256(bearOi * price) - int256(bearEntryNotional)) / int256(1e20);
-        return bullPnl + bearPnl;
+        (uint256 longMaxProfit, uint256 longOi, uint256 longEntryNotional,) = engine.sides(uint8(CfdTypes.Side.LONG));
+        longMaxProfit;
+        (uint256 shortMaxProfit, uint256 shortOi, uint256 shortEntryNotional,) =
+            engine.sides(uint8(CfdTypes.Side.SHORT));
+        shortMaxProfit;
+        int256 longPnl = (int256(longEntryNotional) - int256(longOi * price)) / int256(1e20);
+        int256 shortPnl = (int256(shortOi * price) - int256(shortEntryNotional)) / int256(1e20);
+        return longPnl + shortPnl;
     }
 
     function _claimantLedgerUsdc() internal view returns (uint256) {

@@ -41,8 +41,8 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function test_BatchSynchronizesClaimsForEveryProcessedOrderOwner() public {
-        handler.commitOpenOrder(0, uint8(CfdTypes.Side.BULL), 20, 1000e6, 1e8);
-        handler.commitOpenOrder(1, uint8(CfdTypes.Side.BULL), 20, 1000e6, 1e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 20, 1000e6, 1e8);
+        handler.commitOpenOrder(1, uint8(CfdTypes.Side.LONG), 20, 1000e6, 1e8);
         handler.executeNextOrderModelled();
         handler.executeNextOrderModelled();
 
@@ -68,7 +68,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function test_ExpiredModelledTerminalCloseDoesNotCreateExecutionGhosts() public {
-        handler.commitOpenOrder(0, uint8(CfdTypes.Side.BULL), 20, 1000e6, 1e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 20, 1000e6, 1e8);
         handler.executeNextOrderModelled();
 
         address account = _account(handler.actorAt(0));

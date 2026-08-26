@@ -40,7 +40,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 7,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
@@ -331,7 +331,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         snapshot.traderClaimBalanceForAccount = 0;
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         delta.positionMarginAfterOpen = 0;
-        delta.posSide = CfdTypes.Side.BEAR;
+        delta.posSide = CfdTypes.Side.SHORT;
         delta.newPosEntryPrice = 2 * PRICE;
         delta.newPosEntryCostUsdcAtoms = 2 * PRICE;
 
@@ -368,7 +368,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         snapshot.position.size = CfdTypes.SIZE_QUANTUM;
         snapshot.position.entryPrice = PRICE;
-        snapshot.position.side = CfdTypes.Side.BEAR;
+        snapshot.position.side = CfdTypes.Side.SHORT;
         snapshot.positionEntryCostUsdcAtoms = PRICE;
 
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
@@ -477,7 +477,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function _baseOpenDelta() private pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         delta.valid = true;
         delta.openState.notionalUsdc = 100e6;
-        delta.posSide = CfdTypes.Side.BEAR;
+        delta.posSide = CfdTypes.Side.SHORT;
         delta.newPosSize = CfdTypes.SIZE_QUANTUM;
         delta.newPosEntryPrice = PRICE;
         delta.newPosEntryCostUsdcAtoms = PRICE;
@@ -495,7 +495,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         snapshot.position.size = 2 * CfdTypes.SIZE_QUANTUM;
         snapshot.position.margin = 300e6;
         snapshot.position.entryPrice = PRICE;
-        snapshot.position.side = CfdTypes.Side.BULL;
+        snapshot.position.side = CfdTypes.Side.LONG;
         snapshot.positionEntryCostUsdcAtoms = 2 * PRICE;
         snapshot.accountBuckets.settlementBalanceUsdc = 500e6;
         snapshot.traderClaimBalanceForAccount = 10e6;
@@ -553,7 +553,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         vm.mockCall(
             ENGINE,
             abi.encodeWithSignature("positions(address)", ACCOUNT),
-            abi.encode(uint256(0), uint256(0), uint256(0), uint256(0), CfdTypes.Side.BULL, uint64(0), int256(0))
+            abi.encode(uint256(0), uint256(0), uint256(0), uint256(0), CfdTypes.Side.LONG, uint64(0), int256(0))
         );
         vm.mockCall(ENGINE, abi.encodeWithSignature("positionEntryCostUsdcAtoms(address)", ACCOUNT), abi.encode(0));
         vm.mockCall(

@@ -16,16 +16,16 @@ abstract contract OrderLiquidationHandler is OrderValidation {
     /// @dev Callable only by this router through its immutable liquidation-batch sidecar. This function deliberately
     ///      has no reentrancy modifier because the outer public batch call already holds the router's transient guard.
     /// @param account Candidate liquidation account.
-    /// @param bullPrice Shared oracle price adverse to BULL positions.
-    /// @param bearPrice Shared oracle price adverse to BEAR positions.
+    /// @param longPrice Shared oracle price adverse to LONG positions.
+    /// @param shortPrice Shared oracle price adverse to SHORT positions.
     /// @param publishTime Shared oracle publish timestamp.
     /// @param keeper Original external caller credited with any liquidation bounty.
     /// @param riskOffCutoff Inclusive persistent invalidation cutoff cached by the outer batch call.
     /// @return outcome Keeper bounty on liquidation, or `uint256.max` when refunds restored solvency.
     function executeLiquidationBatchItem(
         address account,
-        uint256 bullPrice,
-        uint256 bearPrice,
+        uint256 longPrice,
+        uint256 shortPrice,
         uint256 neutralMarkPrice,
         uint64 publishTime,
         address keeper,
@@ -38,7 +38,7 @@ abstract contract OrderLiquidationHandler is OrderValidation {
         if (size == 0) {
             revert ICfdEngineTypes.CfdEngine__NoPositionToLiquidate();
         }
-        uint256 executionPrice = side == CfdTypes.Side.BULL ? bullPrice : bearPrice;
+        uint256 executionPrice = side == CfdTypes.Side.LONG ? longPrice : shortPrice;
         return _executeLiquidationAtPrice(account, executionPrice, neutralMarkPrice, publishTime, keeper, riskOffCutoff);
     }
 

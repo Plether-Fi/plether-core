@@ -18,8 +18,8 @@ interface IOrderRouterLiquidationBatchHost {
 
     function executeLiquidationBatchItem(
         address account,
-        uint256 bullPrice,
-        uint256 bearPrice,
+        uint256 longPrice,
+        uint256 shortPrice,
         uint256 neutralMarkPrice,
         uint64 publishTime,
         address keeper,

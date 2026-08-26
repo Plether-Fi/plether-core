@@ -24,7 +24,7 @@ library SolvencyAccountingLib {
 
     /// @notice Solvency values and degraded-mode flags after a previewed operation.
     /// @param effectiveAssetsAfterUsdc Physical assets net of trader claims and pending payout, floored at zero.
-    /// @param maxLiabilityAfterUsdc Maximum remaining BULL/BEAR liability envelope.
+    /// @param maxLiabilityAfterUsdc Maximum remaining LONG/SHORT liability envelope.
     /// @param triggersDegradedMode Whether `alreadyDegraded` was false and projected effective assets are below liability;
     ///        callers must keep that flag consistent with pre-operation solvency.
     /// @param postOpDegradedMode Whether projected effective assets are below projected maximum liability.
@@ -54,36 +54,36 @@ library SolvencyAccountingLib {
         uint256 effectiveAssetsUsdc;
     }
 
-    /// @notice Returns the larger BULL or BEAR maximum-profit envelope.
-    /// @param bullMaxProfitUsdc Aggregate BULL-side maximum-profit liability.
-    /// @param bearMaxProfitUsdc Aggregate BEAR-side maximum-profit liability.
+    /// @notice Returns the larger LONG or SHORT maximum-profit envelope.
+    /// @param longMaxProfitUsdc Aggregate LONG-side maximum-profit liability.
+    /// @param shortMaxProfitUsdc Aggregate SHORT-side maximum-profit liability.
     /// @return Maximum of the two liabilities; equal inputs return that common value.
     function getMaxLiability(
-        uint256 bullMaxProfitUsdc,
-        uint256 bearMaxProfitUsdc
+        uint256 longMaxProfitUsdc,
+        uint256 shortMaxProfitUsdc
     ) internal pure returns (uint256) {
-        return bullMaxProfitUsdc > bearMaxProfitUsdc ? bullMaxProfitUsdc : bearMaxProfitUsdc;
+        return longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
     }
 
     /// @notice Returns maximum liability after reducing one side's maximum-profit envelope for a close.
     /// @dev Reverts on subtraction underflow if `maxProfitReductionUsdc` exceeds the selected side's envelope.
-    /// @param bullMaxProfitUsdc BULL-side maximum-profit liability before the close.
-    /// @param bearMaxProfitUsdc BEAR-side maximum-profit liability before the close.
+    /// @param longMaxProfitUsdc LONG-side maximum-profit liability before the close.
+    /// @param shortMaxProfitUsdc SHORT-side maximum-profit liability before the close.
     /// @param side Side whose position liability is being reduced.
     /// @param maxProfitReductionUsdc Amount removed from the selected side's envelope.
     /// @return Remaining maximum of the two side liabilities.
     function getMaxLiabilityAfterClose(
-        uint256 bullMaxProfitUsdc,
-        uint256 bearMaxProfitUsdc,
+        uint256 longMaxProfitUsdc,
+        uint256 shortMaxProfitUsdc,
         CfdTypes.Side side,
         uint256 maxProfitReductionUsdc
     ) internal pure returns (uint256) {
-        if (side == CfdTypes.Side.BULL) {
-            bullMaxProfitUsdc -= maxProfitReductionUsdc;
+        if (side == CfdTypes.Side.LONG) {
+            longMaxProfitUsdc -= maxProfitReductionUsdc;
         } else {
-            bearMaxProfitUsdc -= maxProfitReductionUsdc;
+            shortMaxProfitUsdc -= maxProfitReductionUsdc;
         }
-        return getMaxLiability(bullMaxProfitUsdc, bearMaxProfitUsdc);
+        return getMaxLiability(longMaxProfitUsdc, shortMaxProfitUsdc);
     }
 
     /// @notice Builds current solvency and withdrawal-reservation accounting.

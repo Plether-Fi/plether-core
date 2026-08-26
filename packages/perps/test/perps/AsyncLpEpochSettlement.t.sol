@@ -482,7 +482,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(firstPaid, first.juniorFundedAssets);
         assertEq(_claimableRedeem(juniorVault, requestId, ALICE), 0);
 
-        _close(TRADER, CfdTypes.Side.BULL, positionSize, 1e8);
+        _close(TRADER, CfdTypes.Side.LONG, positionSize, 1e8);
         _warpToEpoch(pool.currentLpEpoch() + 1);
         _refreshMark();
         IHousePool.LpEpochSettlementResult memory second = _settleLpEpochForTest();
@@ -763,7 +763,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 margin = reservedUsdc / 10 + 10e6;
         _fundTrader(TRADER, margin);
         positionSize = reservedUsdc * 1e12;
-        _open(TRADER, CfdTypes.Side.BULL, positionSize, margin, 1e8);
+        _open(TRADER, CfdTypes.Side.LONG, positionSize, margin, 1e8);
         assertApproxEqAbs(pool.getFreeUSDC(), targetFreeUsdc, 2, "position must create the intended cash budget");
     }
 

@@ -19,12 +19,12 @@ contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
 
         uint64 expiredOrderId = router.nextCommitId();
         vm.prank(EXPIRED_TRADER);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, MARK_PRICE, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, MARK_PRICE, false);
 
         vm.warp(block.timestamp + router.maxOrderAge() + 1);
         uint64 targetOrderId = router.nextCommitId();
         vm.prank(TARGET_TRADER);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, MARK_PRICE, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, MARK_PRICE, false);
 
         uint256 pythUpdatesBefore = baseMockPyth.updatePriceFeedsCallCount();
         uint256 uniqueParsesBefore = baseMockPyth.parseUniqueCallCount();

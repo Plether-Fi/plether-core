@@ -50,7 +50,7 @@ contract VpiRebateReserveTest is Test {
         uint256 liquidationReserveUsdc = 1e6;
         uint256 actionReserveUsdc = vpiReserveUsdc + protectedBountyUsdc;
         uint256 settlementBalanceUsdc = marginUsdc + liquidationReserveUsdc + actionReserveUsdc;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.BULL, CAP_PRICE);
+        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.LONG, CAP_PRICE);
 
         snap.account = address(0xBEEF);
         snap.position = CfdTypes.Position({
@@ -58,7 +58,7 @@ contract VpiRebateReserveTest is Test {
             margin: marginUsdc,
             entryPrice: ENTRY_PRICE,
             maxProfitUsdc: maxProfitUsdc,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             lastUpdateTime: 1,
             lastCarryTimestamp: 1,
             vpiAccrued: -10e6
@@ -67,7 +67,7 @@ contract VpiRebateReserveTest is Test {
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = ENTRY_PRICE;
         snap.lastMarkTime = 1;
-        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+        snap.longSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: maxProfitUsdc,
             openInterest: size,
             entryNotional: entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
@@ -75,7 +75,7 @@ contract VpiRebateReserveTest is Test {
             borrowBaseUsdc: 0,
             carryIndex: 0
         });
-        snap.bearSide = CfdEnginePlanTypes.SideSnapshot({
+        snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0
         });
         snap.poolAssetsUsdc = 1_000_000e6;
@@ -114,7 +114,7 @@ contract VpiRebateReserveTest is Test {
             commitTime: 1,
             commitBlock: 1,
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
     }
@@ -159,7 +159,7 @@ contract VpiRebateReserveTest is Test {
         uint256 vpiReserveUsdc = 10e6;
         uint256 totalLockedUsdc = marginUsdc + liquidationReserveUsdc + vpiReserveUsdc;
         uint256 settlementBalanceUsdc = totalLockedUsdc + orderMarginUsdc;
-        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.BULL, CAP_PRICE);
+        uint256 maxProfitUsdc = CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, CfdTypes.Side.LONG, CAP_PRICE);
 
         snap.account = address(0xCAFE);
         snap.position = CfdTypes.Position({
@@ -167,7 +167,7 @@ contract VpiRebateReserveTest is Test {
             margin: marginUsdc,
             entryPrice: ENTRY_PRICE,
             maxProfitUsdc: maxProfitUsdc,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             lastUpdateTime: 1,
             lastCarryTimestamp: 1,
             vpiAccrued: -10e6
@@ -176,7 +176,7 @@ contract VpiRebateReserveTest is Test {
         snap.currentTimestamp = 1;
         snap.lastMarkPrice = ENTRY_PRICE;
         snap.lastMarkTime = 1;
-        snap.bullSide = CfdEnginePlanTypes.SideSnapshot({
+        snap.longSide = CfdEnginePlanTypes.SideSnapshot({
             maxProfitUsdc: maxProfitUsdc,
             openInterest: size,
             entryNotional: entryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
@@ -213,7 +213,7 @@ contract VpiRebateReserveTest is Test {
             commitTime: 1,
             commitBlock: 1,
             orderId: 1,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE, 1);
@@ -230,9 +230,9 @@ contract VpiRebateReserveTest is Test {
     function test_GrossRebateBackingIncludesFeeOffset() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap;
         snap.account = address(0xD00D);
-        snap.position.side = CfdTypes.Side.BEAR;
-        snap.bullSide.openInterest = 300_000e18;
-        snap.bullSide.entryNotional = 300_000e6 * CfdMath.USDC_TO_TOKEN_SCALE;
+        snap.position.side = CfdTypes.Side.SHORT;
+        snap.longSide.openInterest = 300_000e18;
+        snap.longSide.entryNotional = 300_000e6 * CfdMath.USDC_TO_TOKEN_SCALE;
         snap.poolAssetsUsdc = 2_000_000e6;
         snap.poolCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
@@ -254,7 +254,7 @@ contract VpiRebateReserveTest is Test {
             commitTime: 1,
             commitBlock: 1,
             orderId: 1,
-            side: CfdTypes.Side.BEAR,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE, 1);

@@ -2607,10 +2607,10 @@ contract SettlementMonitorLensTest is BasePerpTest {
     }
 
     function test_HealthDetectsIndividualSideDivisibilityAndZeroSideAggregateCorruption() public {
-        bytes memory bullSideCall = abi.encodeWithSelector(bytes4(keccak256("sides(uint256)")), uint256(0));
+        bytes memory longSideCall = abi.encodeWithSelector(bytes4(keccak256("sides(uint256)")), uint256(0));
         uint256 branch = vm.snapshotState();
 
-        vm.mockCall(address(engine), bullSideCall, abi.encode(uint256(0), uint256(1), uint256(0), uint256(0)));
+        vm.mockCall(address(engine), longSideCall, abi.encode(uint256(0), uint256(1), uint256(0), uint256(0)));
         SettlementMonitorViewTypes.SettlementHealth memory indivisible = monitorLens.getSettlementHealth();
         assertEq(uint8(indivisible.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
         assertTrue(
@@ -2618,7 +2618,7 @@ contract SettlementMonitorLensTest is BasePerpTest {
         );
 
         vm.revertToState(branch);
-        vm.mockCall(address(engine), bullSideCall, abi.encode(uint256(0), uint256(0), uint256(0), uint256(1)));
+        vm.mockCall(address(engine), longSideCall, abi.encode(uint256(0), uint256(0), uint256(0), uint256(1)));
         SettlementMonitorViewTypes.SettlementHealth memory emptySide = monitorLens.getSettlementHealth();
         assertEq(uint8(emptySide.state), uint8(SettlementMonitorViewTypes.HealthState.Critical));
         assertTrue(
@@ -2826,7 +2826,7 @@ contract SettlementMonitorLensTest is BasePerpTest {
 
     function _openMonitorPosition() internal {
         _fundTrader(TRADER, 200e6);
-        _open(TRADER, CfdTypes.Side.BULL, 1000e18, 100e6, 100_000_000);
+        _open(TRADER, CfdTypes.Side.LONG, 1000e18, 100e6, 100_000_000);
     }
 
     function _setCurrentBasket(

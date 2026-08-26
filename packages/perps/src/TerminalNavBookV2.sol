@@ -158,13 +158,13 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         }
 
         ITerminalNavEngineView engine = ITerminalNavEngineView(ENGINE);
-        (uint256 bullMaxProfit, uint256 bullOpenInterest, uint256 bullEntryNotional, uint256 bullMargin) =
+        (uint256 longMaxProfit, uint256 longOpenInterest, uint256 longEntryNotional, uint256 longMargin) =
             engine.sides(0);
-        (uint256 bearMaxProfit, uint256 bearOpenInterest, uint256 bearEntryNotional, uint256 bearMargin) =
+        (uint256 shortMaxProfit, uint256 shortOpenInterest, uint256 shortEntryNotional, uint256 shortMargin) =
             engine.sides(1);
-        return engine.CAP_PRICE() == CAP_PRICE && bullMaxProfit == 0 && bullOpenInterest == 0 && bullEntryNotional == 0
-            && bullMargin == 0 && bearMaxProfit == 0 && bearOpenInterest == 0 && bearEntryNotional == 0
-            && bearMargin == 0 && _totalEntryCostUsdcAtoms == 0 && _totalEffectiveCapUsdcAtoms == 0 && _base.slope == 0
+        return engine.CAP_PRICE() == CAP_PRICE && longMaxProfit == 0 && longOpenInterest == 0 && longEntryNotional == 0
+            && longMargin == 0 && shortMaxProfit == 0 && shortOpenInterest == 0 && shortEntryNotional == 0
+            && shortMargin == 0 && _totalEntryCostUsdcAtoms == 0 && _totalEffectiveCapUsdcAtoms == 0 && _base.slope == 0
             && _base.intercept == 0;
     }
 
@@ -207,10 +207,10 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
     /// @inheritdoc ITerminalNavBookV2
     function terminalNavSnapshot() external view returns (ICfdEngineTypes.TerminalNavSnapshot memory snapshot) {
         ITerminalNavEngineView engine = ITerminalNavEngineView(ENGINE);
-        (uint256 bullMaxProfit, uint256 bullOpenInterest, uint256 bullEntryNotional,) = engine.sides(0);
-        (uint256 bearMaxProfit, uint256 bearOpenInterest, uint256 bearEntryNotional,) = engine.sides(1);
-        uint256 totalOpenInterest = bullOpenInterest + bearOpenInterest;
-        uint256 totalEntryNotional = bullEntryNotional + bearEntryNotional;
+        (uint256 longMaxProfit, uint256 longOpenInterest, uint256 longEntryNotional,) = engine.sides(0);
+        (uint256 shortMaxProfit, uint256 shortOpenInterest, uint256 shortEntryNotional,) = engine.sides(1);
+        uint256 totalOpenInterest = longOpenInterest + shortOpenInterest;
+        uint256 totalEntryNotional = longEntryNotional + shortEntryNotional;
         if (
             uint256(_totalLots) * SIZE_QUANTUM != totalOpenInterest
                 || uint256(_totalEntryCostUsdcAtoms) * SIZE_QUANTUM != totalEntryNotional
@@ -231,7 +231,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         snapshot.markPrice = uint32(markPrice);
         snapshot.markTime = markTime;
         snapshot.totalTraderClaimsUsdc = engine.totalTraderClaimBalanceUsdc();
-        snapshot.maxDirectionalLiabilityUsdc = bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+        snapshot.maxDirectionalLiabilityUsdc = longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
         snapshot.bookVersion = _bookVersion;
         snapshot.degradedMode = engine.degradedMode();
     }
@@ -398,7 +398,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
             revert TerminalNavBookV2__EntryCostAboveCap(next.entryCostUsdcAtoms, maximumEntryCostUsdcAtoms);
         }
 
-        uint256 maximumCollectibleUsdcAtoms = next.side == CfdTypes.Side.BULL
+        uint256 maximumCollectibleUsdcAtoms = next.side == CfdTypes.Side.LONG
             ? maximumEntryCostUsdcAtoms - uint256(next.entryCostUsdcAtoms)
             : uint256(next.entryCostUsdcAtoms);
         uint144 effectiveCap = next.collectibleCapUsdcAtoms;
@@ -576,7 +576,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         int144 entryCost = int144(record.entryCostUsdcAtoms);
         uint256 cap = uint256(record.effectiveCapUsdcAtoms);
 
-        if (record.side == CfdTypes.Side.BULL) {
+        if (record.side == CfdTypes.Side.LONG) {
             encoding.base = Coeff({slope: lots, intercept: -entryCost});
 
             uint256 maximumCollectible = uint256(record.lots) * uint256(CAP_PRICE) - record.entryCostUsdcAtoms;

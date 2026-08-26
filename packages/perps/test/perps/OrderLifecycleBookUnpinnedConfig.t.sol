@@ -45,7 +45,7 @@ contract OrderLifecycleBookUnpinnedConfigTest is Test {
         bytes32 expectedConfigHash
     ) private view returns (OrderV2Types.OrderRequest memory request) {
         request.clientOrderId = clientOrderId;
-        request.side = CfdTypes.Side.BULL;
+        request.side = CfdTypes.Side.LONG;
         request.sizeDelta = 100e18;
         request.targetPrice = 1e8;
         request.bounds = OrderV2Types.ExecutionBounds({

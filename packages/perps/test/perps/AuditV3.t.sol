@@ -112,7 +112,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         vm.deal(alice, 1 ether);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         vm.warp(SATURDAY_NOON);
         mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
@@ -137,21 +137,21 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
 
     function test_C01_CloseOrderBlockedByOpenInFrozenQueue() public {
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         // Bob commits an OPEN order on Thursday (before FAD window)
         address bob = address(0xB0B);
         _fundTrader(bob, 50_000e6);
         vm.deal(bob, 1 ether);
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1e8, false);
 
         vm.warp(SATURDAY_NOON);
         mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
 
         // Alice commits a CLOSE order → behind Bob (order 2)
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         // Keeper processes both: order 1 soft-fails, order 2 closes Alice's position.
         // Bug: order 1 hard reverts, blocking order 2 entirely (FIFO deadlock).
@@ -237,7 +237,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
 
         // Set fresh mark on Friday before freeze
         vm.warp(FRIDAY_BEFORE_FREEZE);
@@ -279,7 +279,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
 
         // Fresh mark on Friday
         vm.warp(FRIDAY_BEFORE_FREEZE);
@@ -350,7 +350,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
         // Alice commits order with 0.01 ETH keeper fee
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         // Warp past maxOrderAge — order expires
         _warpForward(61);
@@ -396,7 +396,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
         // Order 1: will succeed (execute immediately)
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1e8, false);
 
         usdc.burn(keeper, usdc.balanceOf(keeper));
         vm.prank(keeper);
@@ -406,7 +406,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 
         // Order 2: will expire
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1e8, false);
 
         _warpForward(61);
         bytes[] memory expiredData = _mockPythUpdateData();
@@ -467,13 +467,13 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
         uint256 lpShares = juniorVault.balanceOf(lp);
         assertGt(lpShares, 0, "LP should have shares");
 
-        // Trader opens a BULL position. Max profit = $50K = pool total.
+        // Trader opens a LONG position. Max profit = $50K = pool total.
         _fundTrader(trader, 50_000e6);
         address traderAccount = trader;
-        _open(traderAccount, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1e8);
 
-        // BULL profits when oracle drops. Close at 0 for exact max payout.
-        _close(traderAccount, CfdTypes.Side.BULL, 50_000e18, 0);
+        // LONG profits when oracle drops. Close at 0 for exact max payout.
+        _close(traderAccount, CfdTypes.Side.LONG, 50_000e18, 0);
 
         // Reconcile: loss exceeds juniorPrincipal → junior wiped to exactly 0.
         vm.prank(address(router));
@@ -526,7 +526,7 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
         vm.deal(alice, 1 ether);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
@@ -564,7 +564,7 @@ contract AuditV3_M02_CarryDesyncTest is BasePerpTest {
     function obsolete_M02_UpdateMarkPriceDoesNotRealizeCarry() public {
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
 
         // Warp forward 1 hour in the carry model
         _warpForward(3600);

@@ -11,7 +11,7 @@ import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewT
 
 contract PerpsReadParityTest is BasePerpTest {
 
-    function test_OpenPreview_NewBullMatchesLiveOpenStorage() public {
+    function test_OpenPreview_NewLongMatchesLiveOpenStorage() public {
         address trader = address(0xAA01);
         address account = trader;
         uint256 size = 100_000e18;
@@ -21,7 +21,7 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(trader, 9500e6);
 
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(account, CfdTypes.Side.BULL, size, margin, price, publishTime);
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, size, margin, price, publishTime);
 
         assertTrue(preview.valid, "Open preview should be valid");
         assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "Open reason");
@@ -59,15 +59,15 @@ contract PerpsReadParityTest is BasePerpTest {
         );
         assertFalse(preview.postLiquidatable, "Post position should be healthy");
         assertTrue(preview.postHealthBps > 10_000, "Health should be above maintenance");
-        assertTrue(preview.hasLiquidationPrice, "Bull should have a liquidation threshold");
-        assertTrue(preview.liquidationPrice > price, "Bull liquidation should be above entry");
+        assertTrue(preview.hasLiquidationPrice, "Long should have a liquidation threshold");
+        assertTrue(preview.liquidationPrice > price, "Long liquidation should be above entry");
 
         ICfdEngineTypes.OpenPreview memory capped =
-            engineLens.previewOpen(account, CfdTypes.Side.BULL, size, margin, CAP_PRICE + 1, publishTime);
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, size, margin, CAP_PRICE + 1, publishTime);
         assertEq(capped.executionPrice, CAP_PRICE, "Execution price should cap");
         assertEq(capped.notionalUsdc, 200_000e6, "Capped notional should use cap price");
 
-        _open(account, CfdTypes.Side.BULL, size, margin, price);
+        _open(account, CfdTypes.Side.LONG, size, margin, price);
 
         (uint256 liveSize, uint256 liveMargin, uint256 liveEntryPrice,,, int256 liveVpiAccrued) =
             _livePositionPreviewFields(account);
@@ -82,7 +82,7 @@ contract PerpsReadParityTest is BasePerpTest {
         );
     }
 
-    function test_OpenPreview_NewBearAndIncreaseExposePostTradeFields() public {
+    function test_OpenPreview_NewShortAndIncreaseExposePostTradeFields() public {
         address trader = address(0xAA02);
         address account = trader;
         uint256 firstSize = 80_000e18;
@@ -91,17 +91,17 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         ICfdEngineTypes.OpenPreview memory first =
-            engineLens.previewOpen(account, CfdTypes.Side.BEAR, firstSize, 8000e6, price, uint64(block.timestamp));
-        assertTrue(first.valid, "Bear open should be valid");
-        assertEq(first.postSize, firstSize, "Bear post size should match");
-        assertEq(first.postEntryPrice, price, "Bear post entry should match");
-        assertTrue(first.hasLiquidationPrice, "Bear should have a liquidation threshold");
-        assertTrue(first.liquidationPrice < price, "Bear liquidation should be below entry");
+            engineLens.previewOpen(account, CfdTypes.Side.SHORT, firstSize, 8000e6, price, uint64(block.timestamp));
+        assertTrue(first.valid, "Short open should be valid");
+        assertEq(first.postSize, firstSize, "Short post size should match");
+        assertEq(first.postEntryPrice, price, "Short post entry should match");
+        assertTrue(first.hasLiquidationPrice, "Short should have a liquidation threshold");
+        assertTrue(first.liquidationPrice < price, "Short liquidation should be below entry");
 
-        _open(account, CfdTypes.Side.BEAR, firstSize, 8000e6, price);
+        _open(account, CfdTypes.Side.SHORT, firstSize, 8000e6, price);
 
         ICfdEngineTypes.OpenPreview memory increase = engineLens.previewOpen(
-            account, CfdTypes.Side.BEAR, secondSize, 2000e6, 120_000_000, uint64(block.timestamp)
+            account, CfdTypes.Side.SHORT, secondSize, 2000e6, 120_000_000, uint64(block.timestamp)
         );
         assertTrue(increase.valid, "Same-side increase should be valid");
         assertEq(increase.postSize, firstSize + secondSize, "Increase post size should add");
@@ -115,23 +115,23 @@ contract PerpsReadParityTest is BasePerpTest {
         params.vpiFactor = 0.0005e18;
         _setRiskParams(params);
 
-        address bullTrader = address(0xAA03);
-        address bearTrader = address(0xAA04);
+        address longTrader = address(0xAA03);
+        address shortTrader = address(0xAA04);
         uint256 size = 100_000e18;
         uint256 price = 1e8;
-        _fundTrader(bullTrader, 20_000e6);
-        _fundTrader(bearTrader, 20_000e6);
+        _fundTrader(longTrader, 20_000e6);
+        _fundTrader(shortTrader, 20_000e6);
 
         ICfdEngineTypes.OpenPreview memory skewing =
-            engineLens.previewOpen(bullTrader, CfdTypes.Side.BULL, size, 10_000e6, price, uint64(block.timestamp));
+            engineLens.previewOpen(longTrader, CfdTypes.Side.LONG, size, 10_000e6, price, uint64(block.timestamp));
         assertTrue(skewing.valid, "Skewing open should be valid");
         assertTrue(skewing.vpiUsdc > 0, "Skewing open should pay VPI");
         assertEq(skewing.tradeCostUsdc, skewing.vpiUsdc + int256(skewing.executionFeeUsdc), "Charge trade cost");
 
-        _open(bullTrader, CfdTypes.Side.BULL, size, 10_000e6, price);
+        _open(longTrader, CfdTypes.Side.LONG, size, 10_000e6, price);
 
         ICfdEngineTypes.OpenPreview memory healing =
-            engineLens.previewOpen(bearTrader, CfdTypes.Side.BEAR, size, 10_000e6, price, uint64(block.timestamp));
+            engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, size, 10_000e6, price, uint64(block.timestamp));
         assertTrue(healing.valid, "Healing open should be valid");
         assertTrue(healing.vpiUsdc < 0, "Healing open should receive VPI rebate");
         assertEq(healing.tradeCostUsdc, healing.vpiUsdc + int256(healing.executionFeeUsdc), "Rebate trade cost");
@@ -144,11 +144,11 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(trader, 100e6);
 
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(account, CfdTypes.Side.BULL, 100_000e18, 0, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8, uint64(block.timestamp));
         uint8 legacyCode =
-            engineLens.previewOpenRevertCode(account, CfdTypes.Side.BULL, 100_000e18, 0, 1e8, uint64(block.timestamp));
+            engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8, uint64(block.timestamp));
         CfdEnginePlanTypes.OpenFailurePolicyCategory legacyCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.BULL, 100_000e18, 0, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8, uint64(block.timestamp)
         );
 
         assertFalse(preview.valid, "Preview should be invalid");
@@ -162,38 +162,38 @@ contract PerpsReadParityTest is BasePerpTest {
     }
 
     function test_OpenPreview_LiquidationThresholdAgreesWithLiquidationPreview() public {
-        address bullTrader = address(0xAA06);
-        address bearTrader = address(0xAA07);
+        address longTrader = address(0xAA06);
+        address shortTrader = address(0xAA07);
         uint256 size = 100_000e18;
         uint256 margin = 9000e6;
         uint256 price = 1e8;
-        _fundTrader(bullTrader, 9500e6);
-        _fundTrader(bearTrader, 9500e6);
+        _fundTrader(longTrader, 9500e6);
+        _fundTrader(shortTrader, 9500e6);
 
-        ICfdEngineTypes.OpenPreview memory bullPreview =
-            engineLens.previewOpen(bullTrader, CfdTypes.Side.BULL, size, margin, price, uint64(block.timestamp));
-        _open(bullTrader, CfdTypes.Side.BULL, size, margin, price);
-        assertTrue(bullPreview.hasLiquidationPrice, "Bull threshold should exist");
+        ICfdEngineTypes.OpenPreview memory longPreview =
+            engineLens.previewOpen(longTrader, CfdTypes.Side.LONG, size, margin, price, uint64(block.timestamp));
+        _open(longTrader, CfdTypes.Side.LONG, size, margin, price);
+        assertTrue(longPreview.hasLiquidationPrice, "Long threshold should exist");
         assertFalse(
-            engineLens.previewLiquidation(bullTrader, bullPreview.liquidationPrice - 1).liquidatable,
-            "Bull should be solvent below threshold"
+            engineLens.previewLiquidation(longTrader, longPreview.liquidationPrice - 1).liquidatable,
+            "Long should be solvent below threshold"
         );
         assertTrue(
-            engineLens.previewLiquidation(bullTrader, bullPreview.liquidationPrice).liquidatable,
-            "Bull should liquidate at threshold"
+            engineLens.previewLiquidation(longTrader, longPreview.liquidationPrice).liquidatable,
+            "Long should liquidate at threshold"
         );
 
-        ICfdEngineTypes.OpenPreview memory bearPreview =
-            engineLens.previewOpen(bearTrader, CfdTypes.Side.BEAR, size, margin, price, uint64(block.timestamp));
-        _open(bearTrader, CfdTypes.Side.BEAR, size, margin, price);
-        assertTrue(bearPreview.hasLiquidationPrice, "Bear threshold should exist");
+        ICfdEngineTypes.OpenPreview memory shortPreview =
+            engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, size, margin, price, uint64(block.timestamp));
+        _open(shortTrader, CfdTypes.Side.SHORT, size, margin, price);
+        assertTrue(shortPreview.hasLiquidationPrice, "Short threshold should exist");
         assertTrue(
-            engineLens.previewLiquidation(bearTrader, bearPreview.liquidationPrice).liquidatable,
-            "Bear should liquidate at threshold"
+            engineLens.previewLiquidation(shortTrader, shortPreview.liquidationPrice).liquidatable,
+            "Short should liquidate at threshold"
         );
         assertFalse(
-            engineLens.previewLiquidation(bearTrader, bearPreview.liquidationPrice + 1).liquidatable,
-            "Bear should be solvent above threshold"
+            engineLens.previewLiquidation(shortTrader, shortPreview.liquidationPrice + 1).liquidatable,
+            "Short should be solvent above threshold"
         );
     }
 
@@ -204,12 +204,12 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(trader, 310_000e6);
 
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(trader, CfdTypes.Side.BULL, size, 300_000e6, price, uint64(block.timestamp));
+            engineLens.previewOpen(trader, CfdTypes.Side.LONG, size, 300_000e6, price, uint64(block.timestamp));
 
         assertTrue(preview.valid, "Overcollateralized open should be valid");
         assertFalse(preview.hasLiquidationPrice, "No in-range liquidation threshold should exist");
         assertEq(preview.liquidationPrice, 0, "Missing threshold price should be zero");
-        _open(trader, CfdTypes.Side.BULL, size, 300_000e6, price);
+        _open(trader, CfdTypes.Side.LONG, size, 300_000e6, price);
         assertFalse(engineLens.previewLiquidation(trader, CAP_PRICE).liquidatable, "Cap price should stay solvent");
     }
 
@@ -218,11 +218,11 @@ contract PerpsReadParityTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
@@ -239,7 +239,7 @@ contract PerpsReadParityTest is BasePerpTest {
         address keeper = address(0xAA13);
 
         _fundTrader(trader, 900e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 70e6);
@@ -260,7 +260,7 @@ contract PerpsReadParityTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BEAR, 80_000e18, 8000e6, 1e8);
+        _open(account, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
         ICfdEngineTypes.AccountCollateralView memory collateralView =
@@ -326,7 +326,7 @@ contract PerpsReadParityTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -338,7 +338,7 @@ contract PerpsReadParityTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory traderView = publicLens.getTraderAccount(account);
         PerpsViewTypes.PositionView memory positionView = publicLens.getPosition(account);
         ICfdEngineTypes.OpenPreview memory carryProjection =
-            engineLens.previewOpen(account, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 0, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 0, 1e8, uint64(block.timestamp));
 
         assertGt(carryProjection.pendingCarryUsdc, 0, "Setup should accrue a nonzero action-side carry charge");
         assertGe(
@@ -378,13 +378,13 @@ contract PerpsReadParityTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 11_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolSnapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();

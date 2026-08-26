@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Iterable, Literal, Sequence
 
 
-Side = Literal["SHORT", "LONG"]
+Side = Literal["LONG", "SHORT"]
 SettlementPriority = Literal["liquidations_first", "scheduled_closes_first"]
 AccountOrder = Literal["fifo", "reverse"]
 
@@ -197,9 +197,9 @@ def calculate_pnl(
     if size_18 == 0:
         return False, 0
     price_8 = clamp_price(current_price_8, cap_price_8)
-    if side == "SHORT":
+    if side == "LONG":
         is_profit = price_8 <= entry_price_8
-    elif side == "LONG":
+    elif side == "SHORT":
         is_profit = price_8 >= entry_price_8
     else:
         raise ValueError(f"unknown side: {side}")
@@ -217,9 +217,9 @@ def calculate_max_profit(
 
     if size_18 == 0:
         return 0
-    if side == "SHORT":
+    if side == "LONG":
         max_price_diff_8 = entry_price_8
-    elif side == "LONG":
+    elif side == "SHORT":
         max_price_diff_8 = max(cap_price_8 - entry_price_8, 0)
     else:
         raise ValueError(f"unknown side: {side}")
@@ -302,17 +302,17 @@ def conservative_mtm_liability(
     if max_profit_usdc_6 == 0 or cap_price_8 == 0:
         return 0
     price_8 = clamp_price(price_8, cap_price_8)
-    if side == "SHORT":
-        return _mul_div_ceil(max_profit_usdc_6, cap_price_8 - price_8, cap_price_8)
     if side == "LONG":
+        return _mul_div_ceil(max_profit_usdc_6, cap_price_8 - price_8, cap_price_8)
+    if side == "SHORT":
         return _mul_div_ceil(max_profit_usdc_6, price_8, cap_price_8)
     raise ValueError(f"unknown side: {side}")
 
 
-def max_liability(short_max_profit_usdc_6: int, long_max_profit_usdc_6: int) -> int:
+def max_liability(long_max_profit_usdc_6: int, short_max_profit_usdc_6: int) -> int:
     """Mirror SolvencyAccountingLib.getMaxLiability."""
 
-    return max(short_max_profit_usdc_6, long_max_profit_usdc_6)
+    return max(long_max_profit_usdc_6, short_max_profit_usdc_6)
 
 
 def skew_cost(
@@ -805,7 +805,7 @@ def _max_forward_reserve_utilization(
     side: Side,
     cap: float = 2.0,
 ) -> dict[str, object]:
-    if side == "SHORT":
+    if side == "LONG":
         future_extreme = observations[-1]
         best: dict[str, object] = {"reserve_utilization": 0.0}
         for entry in reversed(observations[:-1]):
@@ -916,8 +916,8 @@ def run_historical_replay(
     active: list[ReplayPosition] = []
     claims: list[ReplayClaim] = []
     next_account_id = 1
-    short_liability = 0
     long_liability = 0
+    short_liability = 0
     claim_total = 0
     bad_debt = 0
     carry_assessed = 0
@@ -942,8 +942,8 @@ def run_historical_replay(
     no_admissible_scale_rejections = 0
     target_notional_requested = 0
     admitted_notional = 0
-    admitted_short_notional = 0
     admitted_long_notional = 0
+    admitted_short_notional = 0
     degraded = False
     degraded_triggers = 0
     degraded_clears = 0
@@ -968,13 +968,13 @@ def run_historical_replay(
     conservative_minimum_distributable = initial_cash
     utilization_day_sum = 0.0
     aggregate_borrow_ratio_day_sum = 0.0
-    short_borrow_utilization_day_sum = 0.0
     long_borrow_utilization_day_sum = 0.0
+    short_borrow_utilization_day_sum = 0.0
     elapsed_days_total = 0
     maximum_reserve_utilization = 0.0
     maximum_aggregate_borrow_ratio = 0.0
-    maximum_short_borrow_utilization = 0.0
     maximum_long_borrow_utilization = 0.0
+    maximum_short_borrow_utilization = 0.0
     maximum_post_admission_skew_ratio = 0.0
     admission_checks = 0
     monthly_key: tuple[int, int] | None = None
@@ -984,7 +984,7 @@ def run_historical_replay(
         return cash - claim_total
 
     def endpoint_envelope() -> int:
-        return max(short_liability, long_liability)
+        return max(long_liability, short_liability)
 
     def side_open_interest(side: Side) -> int:
         return sum(
@@ -994,13 +994,13 @@ def run_historical_replay(
         )
 
     def book_skew_usdc(price_8: int) -> int:
-        short_notional = (
-            side_open_interest("SHORT") * price_8 // USDC_TO_TOKEN_SCALE
-        )
         long_notional = (
             side_open_interest("LONG") * price_8 // USDC_TO_TOKEN_SCALE
         )
-        return abs(short_notional - long_notional)
+        short_notional = (
+            side_open_interest("SHORT") * price_8 // USDC_TO_TOKEN_SCALE
+        )
+        return abs(long_notional - short_notional)
 
     def checkpoint_coupons(elapsed_seconds: int) -> None:
         nonlocal waterfall, conservative_waterfall
@@ -1068,13 +1068,13 @@ def run_historical_replay(
         nonlocal conservative_minimum_distributable
 
         mtm = conservative_mtm_liability(
-            short_liability,
-            "SHORT",
+            long_liability,
+            "LONG",
             price_8,
             cap_price_8,
         ) + conservative_mtm_liability(
-            long_liability,
-            "LONG",
+            short_liability,
+            "SHORT",
             price_8,
             cap_price_8,
         )
@@ -1156,11 +1156,11 @@ def run_historical_replay(
         claim_total = 0
 
     def remove_position(position: ReplayPosition) -> None:
-        nonlocal short_liability, long_liability
-        if position.side == "SHORT":
-            short_liability -= position.max_profit_usdc
-        else:
+        nonlocal long_liability, short_liability
+        if position.side == "LONG":
             long_liability -= position.max_profit_usdc
+        else:
+            short_liability -= position.max_profit_usdc
         active.remove(position)
 
     def price_pnl(position: ReplayPosition, price_8: int) -> int:
@@ -1308,7 +1308,7 @@ def run_historical_replay(
         if elapsed_days <= 0 or not active:
             return
         elapsed_seconds = elapsed_days * 86_400
-        for side in ("SHORT", "LONG"):
+        for side in ("LONG", "SHORT"):
             side_positions = [
                 position for position in active if position.side == side
             ]
@@ -1333,10 +1333,10 @@ def run_historical_replay(
     def open_monthly_cohort(
         index: int, observation: BasketObservation
     ) -> None:
-        nonlocal next_account_id, short_liability, long_liability
+        nonlocal next_account_id, long_liability, short_liability
         nonlocal opened_positions, admitted_cohorts, scaled_cohorts
         nonlocal rejected_cohorts, target_notional_requested, admitted_notional
-        nonlocal admitted_short_notional, admitted_long_notional
+        nonlocal admitted_long_notional, admitted_short_notional
         nonlocal treasury_fees, maximum_post_admission_skew_ratio
         nonlocal admission_checks
         nonlocal capacity_bound_cohorts, skew_bound_cohorts
@@ -1354,22 +1354,22 @@ def run_historical_replay(
             index - 1 - signal_lookback_observations
         ]
         momentum_side: Side = (
-            "LONG" if signal_end.basket >= signal_start.basket else "SHORT"
+            "SHORT" if signal_end.basket >= signal_start.basket else "LONG"
         )
-        short_share = (
+        long_share = (
             momentum_fraction
-            if momentum_side == "SHORT"
+            if momentum_side == "LONG"
             else 1 - momentum_fraction
         )
-        long_share = 1 - short_share
-        target_short_notional = (
-            target_notional * short_share.numerator // short_share.denominator
+        short_share = 1 - long_share
+        target_long_notional = (
+            target_notional * long_share.numerator // long_share.denominator
         )
-        target_long_notional = target_notional - target_short_notional
+        target_short_notional = target_notional - target_long_notional
         entry_price_8 = round(observation.basket * PRICE)
         effective_assets = max(cash - claim_total, 0)
-        current_short_oi = side_open_interest("SHORT")
         current_long_oi = side_open_interest("LONG")
+        current_short_oi = side_open_interest("SHORT")
         max_skew_usdc = (
             max(cash, 0)
             * max_skew_fraction.numerator
@@ -1381,8 +1381,8 @@ def run_historical_replay(
         ) -> list[tuple[Side, int, int, int, int]]:
             planned: list[tuple[Side, int, int, int, int]] = []
             for side, target_side_notional in (
-                ("SHORT", target_short_notional),
                 ("LONG", target_long_notional),
+                ("SHORT", target_short_notional),
             ):
                 notional = target_side_notional * scale_wad // WAD
                 if notional == 0:
@@ -1405,41 +1405,41 @@ def run_historical_replay(
         def candidate_liabilities(
             planned: Sequence[tuple[Side, int, int, int, int]],
         ) -> tuple[int, int]:
-            added_short = sum(
-                row[3] for row in planned if row[0] == "SHORT"
-            )
             added_long = sum(
                 row[3] for row in planned if row[0] == "LONG"
             )
+            added_short = sum(
+                row[3] for row in planned if row[0] == "SHORT"
+            )
             return (
-                short_liability + added_short,
                 long_liability + added_long,
+                short_liability + added_short,
             )
 
         def capacity_valid(scale_wad: int) -> bool:
             planned = candidate(scale_wad)
-            post_short, post_long = candidate_liabilities(planned)
-            return max(post_short, post_long) <= effective_assets
+            post_long, post_short = candidate_liabilities(planned)
+            return max(post_long, post_short) <= effective_assets
 
         def candidate_skew(scale_wad: int) -> int:
             planned = candidate(scale_wad)
-            added_short_oi = sum(
-                row[2] for row in planned if row[0] == "SHORT"
-            )
             added_long_oi = sum(
                 row[2] for row in planned if row[0] == "LONG"
             )
-            short_notional = (
-                (current_short_oi + added_short_oi)
-                * entry_price_8
-                // USDC_TO_TOKEN_SCALE
+            added_short_oi = sum(
+                row[2] for row in planned if row[0] == "SHORT"
             )
             long_notional = (
                 (current_long_oi + added_long_oi)
                 * entry_price_8
                 // USDC_TO_TOKEN_SCALE
             )
-            return abs(short_notional - long_notional)
+            short_notional = (
+                (current_short_oi + added_short_oi)
+                * entry_price_8
+                // USDC_TO_TOKEN_SCALE
+            )
+            return abs(long_notional - short_notional)
 
         low = 0
         high = WAD
@@ -1510,16 +1510,16 @@ def run_historical_replay(
             )
             next_account_id += 1
             active.append(position)
-            if side == "SHORT":
-                short_liability += max_profit
-            else:
+            if side == "LONG":
                 long_liability += max_profit
+            else:
+                short_liability += max_profit
             opened_positions += 1
             admitted_notional += notional
-            if side == "SHORT":
-                admitted_short_notional += notional
-            else:
+            if side == "LONG":
                 admitted_long_notional += notional
+            else:
+                admitted_short_notional += notional
             treasury_fees += notional * execution_fee_bps // 10_000
 
         admission_checks += 1
@@ -1547,39 +1547,39 @@ def run_historical_replay(
                 if effective_assets
                 else (1.0 if endpoint_envelope() else 0.0)
             )
-            short_borrow = sum(
-                position.borrow_base_usdc
-                for position in active
-                if position.side == "SHORT"
-            )
             long_borrow = sum(
                 position.borrow_base_usdc
                 for position in active
                 if position.side == "LONG"
             )
-            total_borrow = short_borrow + long_borrow
+            short_borrow = sum(
+                position.borrow_base_usdc
+                for position in active
+                if position.side == "SHORT"
+            )
+            total_borrow = long_borrow + short_borrow
             aggregate_borrow_ratio = (
                 min(total_borrow / cash, 1.0)
                 if cash > 0
                 else float(bool(total_borrow))
             )
-            short_borrow_utilization = (
-                compute_borrow_utilization_bps(short_borrow, max(cash, 0))
-                / UTILIZATION_BPS
-            )
             long_borrow_utilization = (
                 compute_borrow_utilization_bps(long_borrow, max(cash, 0))
+                / UTILIZATION_BPS
+            )
+            short_borrow_utilization = (
+                compute_borrow_utilization_bps(short_borrow, max(cash, 0))
                 / UTILIZATION_BPS
             )
             utilization_day_sum += reserve_utilization * elapsed_days
             aggregate_borrow_ratio_day_sum += (
                 aggregate_borrow_ratio * elapsed_days
             )
-            short_borrow_utilization_day_sum += (
-                short_borrow_utilization * elapsed_days
-            )
             long_borrow_utilization_day_sum += (
                 long_borrow_utilization * elapsed_days
+            )
+            short_borrow_utilization_day_sum += (
+                short_borrow_utilization * elapsed_days
             )
             elapsed_days_total += elapsed_days
             maximum_reserve_utilization = max(
@@ -1589,13 +1589,13 @@ def run_historical_replay(
                 maximum_aggregate_borrow_ratio,
                 aggregate_borrow_ratio,
             )
-            maximum_short_borrow_utilization = max(
-                maximum_short_borrow_utilization,
-                short_borrow_utilization,
-            )
             maximum_long_borrow_utilization = max(
                 maximum_long_borrow_utilization,
                 long_borrow_utilization,
+            )
+            maximum_short_borrow_utilization = max(
+                maximum_short_borrow_utilization,
+                short_borrow_utilization,
             )
             accrue_interval(elapsed_days)
             checkpoint_coupons(elapsed_days * 86_400)
@@ -1708,7 +1708,7 @@ def run_historical_replay(
             "minimum_liquidation_bounty_usd": minimum_bounty_usd,
             "max_skew_ratio": max_skew_ratio,
             "cohort_admission": (
-                "Paired LONG/SHORT allocations are scaled on an integer 1e18 "
+                "Paired SHORT/LONG allocations are scaled on an integer 1e18 "
                 "grid until endpoint solvency and the final hard-skew ratio "
                 "pass. The paired legs are assumed to be interleaved; this is "
                 "not a transaction-level order/VPI simulation."
@@ -1764,11 +1764,11 @@ def run_historical_replay(
                 target_notional_requested / USDC
             ),
             "admitted_notional_usd": admitted_notional / USDC,
-            "admitted_short_notional_usd": (
-                admitted_short_notional / USDC
-            ),
             "admitted_long_notional_usd": (
                 admitted_long_notional / USDC
+            ),
+            "admitted_short_notional_usd": (
+                admitted_short_notional / USDC
             ),
             "time_weighted_endpoint_reserve_utilization": (
                 utilization_day_sum / elapsed_days_total
@@ -1786,21 +1786,21 @@ def run_historical_replay(
             "maximum_capped_aggregate_borrow_to_assets": (
                 maximum_aggregate_borrow_ratio
             ),
-            "time_weighted_short_borrow_utilization": (
-                short_borrow_utilization_day_sum / elapsed_days_total
-                if elapsed_days_total
-                else 0
-            ),
             "time_weighted_long_borrow_utilization": (
                 long_borrow_utilization_day_sum / elapsed_days_total
                 if elapsed_days_total
                 else 0
             ),
-            "maximum_short_borrow_utilization": (
-                maximum_short_borrow_utilization
+            "time_weighted_short_borrow_utilization": (
+                short_borrow_utilization_day_sum / elapsed_days_total
+                if elapsed_days_total
+                else 0
             ),
             "maximum_long_borrow_utilization": (
                 maximum_long_borrow_utilization
+            ),
+            "maximum_short_borrow_utilization": (
+                maximum_short_borrow_utilization
             ),
             "maximum_post_admission_skew_ratio": (
                 maximum_post_admission_skew_ratio
@@ -1986,33 +1986,33 @@ def build_analysis(
 
     cap_sensitivity = []
     pool_assets = 100_000_000
-    short_size = 30_000_000
-    long_size = 50_000_000
+    long_size = 30_000_000
+    short_size = 50_000_000
     entry = 1.0
     for cap in (1.10, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00):
-        short_liability = round(short_size * entry, 2)
-        long_liability = round(long_size * max(cap - entry, 0.0), 2)
-        liability = max(short_liability, long_liability)
+        long_liability = round(long_size * entry, 2)
+        short_liability = round(short_size * max(cap - entry, 0.0), 2)
+        liability = max(long_liability, short_liability)
         cap_sensitivity.append(
             {
                 "cap": cap,
-                "short_endpoint_liability_usd": short_liability,
                 "long_endpoint_liability_usd": long_liability,
+                "short_endpoint_liability_usd": short_liability,
                 "max_liability_usd": liability,
                 "pool_reserve_utilization": liability / pool_assets,
             }
         )
 
     pool_6 = 100_000_000 * USDC
-    short_borrow_6 = compute_borrow_base(40_000_000 * USDC, 4_000_000 * USDC)
-    long_borrow_6 = compute_borrow_base(25_000_000 * USDC, 2_500_000 * USDC)
-    short_util_bps = compute_borrow_utilization_bps(short_borrow_6, pool_6)
+    long_borrow_6 = compute_borrow_base(40_000_000 * USDC, 4_000_000 * USDC)
+    short_borrow_6 = compute_borrow_base(25_000_000 * USDC, 2_500_000 * USDC)
     long_util_bps = compute_borrow_utilization_bps(long_borrow_6, pool_6)
-    short_index = compute_current_carry_index(
-        0, 0, SECONDS_PER_YEAR, short_borrow_6, pool_6, 500
-    )
+    short_util_bps = compute_borrow_utilization_bps(short_borrow_6, pool_6)
     long_index = compute_current_carry_index(
         0, 0, SECONDS_PER_YEAR, long_borrow_6, pool_6, 500
+    )
+    short_index = compute_current_carry_index(
+        0, 0, SECONDS_PER_YEAR, short_borrow_6, pool_6, 500
     )
 
     waterfall_initial = WaterfallState(50_000_000 * USDC, 50_000_000 * USDC, 50_000_000 * USDC)
@@ -2169,8 +2169,8 @@ def build_analysis(
             "observed_maximum_as_fraction_of_cap": maximum.basket / 2.0,
             "maximum_drawdown": _max_drawdown(observations),
             "max_forward_reserve_utilization": {
-                "short": _max_forward_reserve_utilization(observations, "SHORT"),
                 "long": _max_forward_reserve_utilization(observations, "LONG"),
+                "short": _max_forward_reserve_utilization(observations, "SHORT"),
             },
         },
         "intervals": {
@@ -2193,8 +2193,8 @@ def build_analysis(
             "assumptions": {
                 "pool_assets_usd": pool_assets,
                 "entry_price": entry,
-                "short_size_units": short_size,
                 "long_size_units": long_size,
+                "short_size_units": short_size,
             },
             "results": cap_sensitivity,
         },
@@ -2202,24 +2202,10 @@ def build_analysis(
             "assumptions": {
                 "pool_assets_usd": 100_000_000,
                 "base_carry_bps_at_full_utilization": 500,
-                "short_max_profit_usd": 40_000_000,
-                "short_margin_usd": 4_000_000,
-                "long_max_profit_usd": 25_000_000,
-                "long_margin_usd": 2_500_000,
-            },
-            "short": {
-                "borrow_base_usd": short_borrow_6 / USDC,
-                "utilization_bps": short_util_bps,
-                "annualized_rate_bps": compute_utilized_carry_rate_bps(
-                    500, short_util_bps
-                ),
-                "economic_annualized_rate_bps": (
-                    500 * short_util_bps / UTILIZATION_BPS
-                ),
-                "one_year_carry_usd": compute_indexed_carry(
-                    short_borrow_6, short_index
-                )
-                / USDC,
+                "long_max_profit_usd": 40_000_000,
+                "long_margin_usd": 4_000_000,
+                "short_max_profit_usd": 25_000_000,
+                "short_margin_usd": 2_500_000,
             },
             "long": {
                 "borrow_base_usd": long_borrow_6 / USDC,
@@ -2232,6 +2218,20 @@ def build_analysis(
                 ),
                 "one_year_carry_usd": compute_indexed_carry(
                     long_borrow_6, long_index
+                )
+                / USDC,
+            },
+            "short": {
+                "borrow_base_usd": short_borrow_6 / USDC,
+                "utilization_bps": short_util_bps,
+                "annualized_rate_bps": compute_utilized_carry_rate_bps(
+                    500, short_util_bps
+                ),
+                "economic_annualized_rate_bps": (
+                    500 * short_util_bps / UTILIZATION_BPS
+                ),
+                "one_year_carry_usd": compute_indexed_carry(
+                    short_borrow_6, short_index
                 )
                 / USDC,
             },
@@ -2623,8 +2623,8 @@ def write_cap_sensitivity_svg(
             f'y2="{top + plot_h}" class="axis"/>',
             (
                 '<text x="78" y="407" class="small">'
-                "Assumptions: pool $100m; entry 1.00; Long size 50m; "
-                "Short size 30m. Envelope = max(30m, 50m x (cap - 1))."
+                "Assumptions: pool $100m; entry 1.00; Short size 50m; "
+                "Long size 30m. Envelope = max(30m, 50m x (cap - 1))."
                 "</text>"
             ),
             "</svg>",

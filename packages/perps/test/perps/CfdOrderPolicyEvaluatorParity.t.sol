@@ -43,7 +43,7 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
 
     function test_AssessPartialCloseMatchesDirectSidecarSnapshotPlanAndEvaluation() public {
         _fundTrader(ACCOUNT, 20_000e6);
-        _open(ACCOUNT, CfdTypes.Side.BULL, 100_000e18, 10_000e6, PRICE);
+        _open(ACCOUNT, CfdTypes.Side.LONG, 100_000e18, 10_000e6, PRICE);
 
         CfdTypes.Order memory order = _partialCloseOrder();
         uint256 depth = pool.totalAssets();
@@ -98,7 +98,7 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
     }
@@ -112,7 +112,7 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: true
         });
     }

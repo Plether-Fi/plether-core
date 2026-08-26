@@ -616,7 +616,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         request.side = side;
         request.sizeDelta = sizeDelta;
         request.marginDelta = marginDelta;
-        request.targetPrice = targetPrice == 0 ? (side == CfdTypes.Side.BULL ? 1 : ENGINE.CAP_PRICE()) : targetPrice;
+        request.targetPrice = targetPrice == 0 ? (side == CfdTypes.Side.LONG ? 1 : ENGINE.CAP_PRICE()) : targetPrice;
         request.bounds.validUntil = uint64(block.timestamp + router.maxOrderAge());
         request.bounds.allowedExecutionModes = 1 | 2 | 4;
         // Zero is a Router-authenticated internal wildcard. Public V2 commits reject it.
@@ -732,13 +732,13 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert OrderRouter__InvalidProtectionPrices();
         }
         if (takeProfit != 0 && stopLoss != 0) {
-            bool invalidOrdering = side == CfdTypes.Side.BULL ? takeProfit >= stopLoss : stopLoss >= takeProfit;
+            bool invalidOrdering = side == CfdTypes.Side.LONG ? takeProfit >= stopLoss : stopLoss >= takeProfit;
             if (invalidOrdering) {
                 revert OrderRouter__InvalidProtectionPrices();
             }
         }
 
-        bool alreadyTriggered = side == CfdTypes.Side.BULL
+        bool alreadyTriggered = side == CfdTypes.Side.LONG
             ? (takeProfit != 0 && markPrice <= takeProfit) || (stopLoss != 0 && markPrice >= stopLoss)
             : (takeProfit != 0 && markPrice >= takeProfit) || (stopLoss != 0 && markPrice <= stopLoss);
         if (alreadyTriggered) {
@@ -822,11 +822,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 stopLoss = protection.stopLossTriggerPrice;
         if (
             takeProfit != 0
-                && (protection.side == CfdTypes.Side.BULL ? markPrice <= takeProfit : markPrice >= takeProfit)
+                && (protection.side == CfdTypes.Side.LONG ? markPrice <= takeProfit : markPrice >= takeProfit)
         ) {
             return PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit;
         }
-        if (stopLoss != 0 && (protection.side == CfdTypes.Side.BULL ? markPrice >= stopLoss : markPrice <= stopLoss)) {
+        if (stopLoss != 0 && (protection.side == CfdTypes.Side.LONG ? markPrice >= stopLoss : markPrice <= stopLoss)) {
             return PositionProtectionTypes.PositionProtectionTriggerLeg.StopLoss;
         }
         return PositionProtectionTypes.PositionProtectionTriggerLeg.None;

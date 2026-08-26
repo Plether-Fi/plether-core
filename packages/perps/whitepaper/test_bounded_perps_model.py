@@ -15,26 +15,26 @@ class SolidityKernelVectorTests(unittest.TestCase):
     def test_pnl_and_max_profit(self) -> None:
         size = 100_000 * model.SIZE
         is_profit, pnl = model.calculate_pnl(
-            size, 1 * model.PRICE, 98_000_000, "SHORT"
+            size, 1 * model.PRICE, 98_000_000, "LONG"
         )
         self.assertTrue(is_profit)
         self.assertEqual(pnl, 2_000 * model.USDC)
         self.assertEqual(
-            model.calculate_max_profit(size, model.PRICE, "SHORT"),
+            model.calculate_max_profit(size, model.PRICE, "LONG"),
             100_000 * model.USDC,
         )
         self.assertEqual(
-            model.calculate_max_profit(size, model.PRICE, "LONG"),
+            model.calculate_max_profit(size, model.PRICE, "SHORT"),
             100_000 * model.USDC,
         )
 
     def test_price_clamps_to_cap(self) -> None:
         size = 100_000 * model.SIZE
         _, capped = model.calculate_pnl(
-            size, model.PRICE, model.CAP_PRICE_8, "LONG"
+            size, model.PRICE, model.CAP_PRICE_8, "SHORT"
         )
         _, over_cap = model.calculate_pnl(
-            size, model.PRICE, 5 * model.PRICE, "LONG"
+            size, model.PRICE, 5 * model.PRICE, "SHORT"
         )
         self.assertEqual(capped, over_cap)
 
@@ -88,13 +88,13 @@ class SolidityKernelVectorTests(unittest.TestCase):
 
     def test_conservative_mtm_rounds_up(self) -> None:
         self.assertEqual(
-            model.conservative_mtm_liability(1, "SHORT", model.PRICE),
+            model.conservative_mtm_liability(1, "LONG", model.PRICE),
             1,
         )
         self.assertEqual(
             model.conservative_mtm_liability(
                 10_000 * model.USDC,
-                "LONG",
+                "SHORT",
                 model.PRICE,
             ),
             5_000 * model.USDC,
@@ -205,17 +205,17 @@ class SolidityKernelVectorTests(unittest.TestCase):
         stored_max_profit = model.calculate_max_profit(
             size_delta,
             first_price,
-            "LONG",
+            "SHORT",
         ) + model.calculate_max_profit(
             size_delta,
             second_price,
-            "LONG",
+            "SHORT",
         )
         _, endpoint_pnl = model.calculate_pnl(
             2 * size_delta,
             combined_entry,
             model.CAP_PRICE_8,
-            "LONG",
+            "SHORT",
         )
         self.assertEqual(combined_entry, first_price)
         self.assertEqual(endpoint_pnl - stored_max_profit, 1)
@@ -286,23 +286,23 @@ class LiabilityEnvelopeTests(unittest.TestCase):
         rng = random.Random(0xB0A1DED)
         cap = 2.0
         for _ in range(500):
-            shorts = [
-                (rng.uniform(0.1, 10.0), rng.uniform(0.0, cap))
-                for _ in range(rng.randint(0, 12))
-            ]
             longs = [
                 (rng.uniform(0.1, 10.0), rng.uniform(0.0, cap))
                 for _ in range(rng.randint(0, 12))
             ]
-            short_endpoint = sum(size * entry for size, entry in shorts)
-            long_endpoint = sum(size * (cap - entry) for size, entry in longs)
-            envelope = max(short_endpoint, long_endpoint)
+            shorts = [
+                (rng.uniform(0.1, 10.0), rng.uniform(0.0, cap))
+                for _ in range(rng.randint(0, 12))
+            ]
+            long_endpoint = sum(size * entry for size, entry in longs)
+            short_endpoint = sum(size * (cap - entry) for size, entry in shorts)
+            envelope = max(long_endpoint, short_endpoint)
             for point in range(101):
                 price = cap * point / 100
                 gross_positive_pnl = sum(
-                    size * max(entry - price, 0.0) for size, entry in shorts
+                    size * max(entry - price, 0.0) for size, entry in longs
                 ) + sum(
-                    size * max(price - entry, 0.0) for size, entry in longs
+                    size * max(price - entry, 0.0) for size, entry in shorts
                 )
                 self.assertLessEqual(gross_positive_pnl, envelope + 1e-9)
 
@@ -311,21 +311,21 @@ class LiabilityEnvelopeTests(unittest.TestCase):
         cap_price = model.CAP_PRICE_8
         for _ in range(200):
             positions = []
-            short_endpoint = 0
             long_endpoint = 0
+            short_endpoint = 0
             for _ in range(rng.randint(1, 20)):
-                side = rng.choice(("SHORT", "LONG"))
+                side = rng.choice(("LONG", "SHORT"))
                 size = rng.randint(1, 10_000) * model.SIZE
                 entry = rng.randint(0, cap_price)
                 maximum = model.calculate_max_profit(
                     size, entry, side, cap_price
                 )
                 positions.append((side, size, entry))
-                if side == "SHORT":
-                    short_endpoint += maximum
-                else:
+                if side == "LONG":
                     long_endpoint += maximum
-            envelope = max(short_endpoint, long_endpoint)
+                else:
+                    short_endpoint += maximum
+            envelope = max(long_endpoint, short_endpoint)
             for _ in range(20):
                 price = rng.randint(0, cap_price)
                 gross_positive = 0
@@ -339,18 +339,18 @@ class LiabilityEnvelopeTests(unittest.TestCase):
 
     def test_common_mark_envelope_is_not_a_pathwise_reserve(self) -> None:
         cap = 2.0
-        short_size, short_entry = 1.0, 1.0
         long_size, long_entry = 1.0, 1.0
+        short_size, short_entry = 1.0, 1.0
         envelope = max(
-            short_size * short_entry,
-            long_size * (cap - long_entry),
+            long_size * long_entry,
+            short_size * (cap - short_entry),
         )
-        short_closes_at_zero = short_size * (short_entry - 0.0)
-        long_closes_later_at_cap = long_size * (cap - long_entry)
+        long_closes_at_zero = long_size * (long_entry - 0.0)
+        short_closes_later_at_cap = short_size * (cap - short_entry)
         self.assertEqual(envelope, 1.0)
-        self.assertEqual(short_closes_at_zero + long_closes_later_at_cap, 2.0)
+        self.assertEqual(long_closes_at_zero + short_closes_later_at_cap, 2.0)
         self.assertGreater(
-            short_closes_at_zero + long_closes_later_at_cap,
+            long_closes_at_zero + short_closes_later_at_cap,
             envelope,
         )
 
@@ -412,8 +412,8 @@ class HistoricalReplayTests(unittest.TestCase):
             signal_lookback_observations=1,
         )
         book = result["book"]
-        self.assertGreater(book["admitted_short_notional_usd"], 0)
-        self.assertEqual(book["admitted_long_notional_usd"], 0)
+        self.assertGreater(book["admitted_long_notional_usd"], 0)
+        self.assertEqual(book["admitted_short_notional_usd"], 0)
         self.assertLessEqual(
             book["maximum_post_admission_skew_ratio"],
             0.40,
@@ -551,7 +551,7 @@ class PublicationArtifactTests(unittest.TestCase):
             self.assertIn(expected_row, paper)
         self.assertIn(results["data"]["raw_sha256"], paper)
 
-    def test_publication_uses_long_short_terminology(self) -> None:
+    def test_publication_uses_short_long_terminology(self) -> None:
         whitepaper_dir = Path(__file__).resolve().parent
         publication_text = (
             (whitepaper_dir.parent / "WHITEPAPER.md").read_text(encoding="utf-8")

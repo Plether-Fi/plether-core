@@ -76,7 +76,7 @@ contract AuditC1SequencerDriftFailing is BasePerpTest {
 
         vm.warp(104);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         vm.roll(block.number + 1);
         vm.warp(105);

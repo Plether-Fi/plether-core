@@ -255,7 +255,7 @@ contract PerpAccountingHandler is Test {
         uint256 neededUsdc = marginDelta + 2e6;
         _ensureFreeSettlement(actor, neededUsdc);
 
-        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
         uint64 orderId = router.nextCommitId();
         address account = _account(actor);
         lastOpenCommitAttempt = OpenCommitAttempt({
@@ -580,7 +580,7 @@ contract PerpAccountingHandler is Test {
             _ensureFreeSettlement(actor, 25_000e6);
             uint64 openOrderId = router.nextCommitId();
             vm.prank(actor);
-            try router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 20_000e6, 0, false) {
+            try router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 20_000e6, 0, false) {
                 _registerPendingOrder(openOrderId, account, 20_000e6);
             } catch {
                 return;
@@ -605,7 +605,7 @@ contract PerpAccountingHandler is Test {
         }
 
         housePool.setAssets(0);
-        uint256 closeOraclePrice = side == CfdTypes.Side.BULL ? uint256(5e7) : uint256(15e7);
+        uint256 closeOraclePrice = side == CfdTypes.Side.LONG ? uint256(5e7) : uint256(15e7);
 
         _recordTerminalReservationSet(account);
 
@@ -677,9 +677,9 @@ contract PerpAccountingHandler is Test {
     function restoreSolvencyAndClearDegradedMode() external {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
-        (uint256 bullMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.BULL));
-        (uint256 bearMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.BEAR));
-        uint256 maxLiabilityUsdc = bullMaxProfitUsdc > bearMaxProfitUsdc ? bullMaxProfitUsdc : bearMaxProfitUsdc;
+        (uint256 longMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.LONG));
+        (uint256 shortMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.SHORT));
+        uint256 maxLiabilityUsdc = longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
         housePool.setAssets(engine.totalTraderClaimBalanceUsdc() + maxLiabilityUsdc + 1e6);
 
         if (engine.degradedMode()) {

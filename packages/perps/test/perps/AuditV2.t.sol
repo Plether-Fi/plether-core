@@ -49,10 +49,10 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         address aliceAccount = alice;
         _fundTrader(alice, 100_000e6);
 
-        // BULL profits when price drops, loses when price rises
-        _open(aliceAccount, CfdTypes.Side.BULL, 500_000e18, 10_000e6, 1e8);
+        // LONG profits when price drops, loses when price rises
+        _open(aliceAccount, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
 
-        // Price rises to 1.15e8 → BULL unrealized loss ≈ 75K.
+        // Price rises to 1.15e8 → LONG unrealized loss ≈ 75K.
         // Alice's true cross-margin equity = 100K deposit - fees - 75K loss ≈ 25K.
         // She should only withdraw ~15K (25K equity minus 10K margin requirement).
         uint256 underwaterPrice = 1.15e8;
@@ -120,7 +120,7 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
 
         uint256 seniorBefore = pool.seniorPrincipal();
 
@@ -247,7 +247,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         address aliceAccount = alice;
 
         // Open position directly via engine (bypass router oracle timing)
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should be open");
@@ -258,7 +258,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
 
         // Alice commits a close order (commitOrder allows closes even when paused)
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         // executeOrder hard-reverts with OracleFrozen for ALL orders including closes.
         // executeLiquidation relaxes staleness and proceeds — asymmetric DoS.
@@ -297,7 +297,7 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -319,7 +319,7 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -359,7 +359,7 @@ contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
 
         _fundTrader(alice, 50_000e6);
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 200_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 200_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -421,10 +421,10 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
     function test_M01_ZeroMarginPositionViaVPIRebate() public {
         _fundTrader(alice, 200_000e6);
         address aliceAccount = alice;
-        // Alice creates BULL skew; pays VPI to open
-        _open(aliceAccount, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        // Alice creates LONG skew; pays VPI to open
+        _open(aliceAccount, CfdTypes.Side.LONG, 300_000e18, 50_000e6, 1e8);
 
-        // Bob opens opposing BEAR with 0 margin — the VPI rebate (skew reduction)
+        // Bob opens opposing SHORT with 0 margin — the VPI rebate (skew reduction)
         // should NOT satisfy IMR. With vpiFactor=0.05, rebate ≈ 2250 USDC > exec fee 180.
         _fundTrader(bob, 1e6);
         address bobAccount = bob;
@@ -441,7 +441,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 0,
-                side: CfdTypes.Side.BEAR,
+                side: CfdTypes.Side.SHORT,
                 isClose: false
             }),
             1e8,
@@ -452,12 +452,13 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
 
     function test_M01_NonzeroMarginRebateOpenProjectsFreshVpiLiability() public {
         _fundTrader(alice, 200_000e6);
-        _open(alice, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(alice, CfdTypes.Side.LONG, 300_000e18, 50_000e6, 1e8);
 
         _fundTrader(bob, 4000e6);
 
-        uint8 code =
-            engineLens.previewOpenRevertCode(bob, CfdTypes.Side.BEAR, 300_000e18, 4000e6, 1e8, uint64(block.timestamp));
+        uint8 code = engineLens.previewOpenRevertCode(
+            bob, CfdTypes.Side.SHORT, 300_000e18, 4000e6, 1e8, uint64(block.timestamp)
+        );
         assertEq(
             code,
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
@@ -476,7 +477,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 0,
-                side: CfdTypes.Side.BEAR,
+                side: CfdTypes.Side.SHORT,
                 isClose: false
             }),
             1e8,
@@ -506,7 +507,7 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
 
         // Alice commits a valid order
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         uint64 orderId = router.nextCommitId() - 1;
         bytes[] memory priceData = _mockPythUpdateData();

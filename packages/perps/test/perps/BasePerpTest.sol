@@ -918,9 +918,9 @@ abstract contract BasePerpTest is Test {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        ICfdEngineTypes.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngineTypes.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
-        return bull.maxProfitUsdc > bear.maxProfitUsdc ? bull.maxProfitUsdc : bear.maxProfitUsdc;
+        ICfdEngineTypes.SideState memory long = _sideState(CfdTypes.Side.LONG);
+        ICfdEngineTypes.SideState memory short = _sideState(CfdTypes.Side.SHORT);
+        return long.maxProfitUsdc > short.maxProfitUsdc ? long.maxProfitUsdc : short.maxProfitUsdc;
     }
 
     function _withdrawalReservedUsdc() internal view returns (uint256) {
@@ -932,13 +932,13 @@ abstract contract BasePerpTest is Test {
         if (price == 0) {
             return 0;
         }
-        ICfdEngineTypes.SideState memory bull = _sideState(CfdTypes.Side.BULL);
-        ICfdEngineTypes.SideState memory bear = _sideState(CfdTypes.Side.BEAR);
-        int256 bullPnl =
-            (SafeCast.toInt256(bull.entryNotional) - SafeCast.toInt256(bull.openInterest * price)) / int256(1e20);
-        int256 bearPnl =
-            (SafeCast.toInt256(bear.openInterest * price) - SafeCast.toInt256(bear.entryNotional)) / int256(1e20);
-        return bullPnl + bearPnl;
+        ICfdEngineTypes.SideState memory long = _sideState(CfdTypes.Side.LONG);
+        ICfdEngineTypes.SideState memory short = _sideState(CfdTypes.Side.SHORT);
+        int256 longPnl =
+            (SafeCast.toInt256(long.entryNotional) - SafeCast.toInt256(long.openInterest * price)) / int256(1e20);
+        int256 shortPnl =
+            (SafeCast.toInt256(short.openInterest * price) - SafeCast.toInt256(short.entryNotional)) / int256(1e20);
+        return longPnl + shortPnl;
     }
 
     function _maintenanceMarginUsdc(
@@ -1194,7 +1194,7 @@ abstract contract BasePerpTest is Test {
         uint256 lots = size / CfdTypes.SIZE_QUANTUM;
         uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
         uint256 maximumCollectibleUsdc =
-            side == CfdTypes.Side.BULL ? lots * CAP_PRICE - entryCostUsdcAtoms : entryCostUsdcAtoms;
+            side == CfdTypes.Side.LONG ? lots * CAP_PRICE - entryCostUsdcAtoms : entryCostUsdcAtoms;
         uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
         uint256 expectedCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
 

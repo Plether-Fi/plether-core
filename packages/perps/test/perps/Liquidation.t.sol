@@ -120,7 +120,7 @@ contract LiquidationTest is BasePerpTest {
     {
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
@@ -158,9 +158,9 @@ contract LiquidationTest is BasePerpTest {
         vm.warp(WEDNESDAY_NOON);
         assertEq(_maintenanceMarginUsdc(100_000 * 1e18, 1e8), 1000 * 1e6, "MMR should be 1.0% ($1k) on Wednesday");
 
-        // Alice opens 50x BULL (Size $100k, Margin $2k)
+        // Alice opens 50x LONG (Size $100k, Margin $2k)
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 10e6);
@@ -216,13 +216,13 @@ contract LiquidationTest is BasePerpTest {
     function test_LiquidationOnPriceDrop() public {
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
         address account = alice;
 
-        // BULL loses when price rises. Price rises to $1.015
+        // LONG loses when price rises. Price rises to $1.015
         // PnL = -$0.015 * 100k = -$1500. Equity = $2000 - $1500 = $500
         // Required margin = 1% of $101.5k = $1015. $500 < $1015 → liquidatable
         bytes[] memory pythData = new bytes[](1);
@@ -252,7 +252,7 @@ contract LiquidationTest is BasePerpTest {
         vm.warp(WEDNESDAY_NOON);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 1e6);
@@ -347,7 +347,7 @@ contract LiquidationTest is BasePerpTest {
 
         // 6000 tokens at $1 = $6000 notional (above the $5000 minimum)
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 6000 * 1e18, 200 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 6000 * 1e18, 200 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
@@ -355,7 +355,7 @@ contract LiquidationTest is BasePerpTest {
         address account = alice;
         (, uint256 posMargin,,,,,) = engine.positions(account);
 
-        // BULL loses when price rises. At $1.06:
+        // LONG loses when price rises. At $1.06:
         // PnL = 6000 * $0.06 = -$360. equity = posMargin - $360 < 0 → liquidatable.
         // Total charge is capped at reachable collateral (the pool never pays more than it recovers).
         bytes[] memory pythData = new bytes[](1);
@@ -392,9 +392,9 @@ contract LiquidationTest is BasePerpTest {
 
         vm.warp(WEDNESDAY_NOON);
 
-        // Alice opens a lone BULL — will accumulate legacy negative spread
+        // Alice opens a lone LONG — will accumulate legacy negative spread
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 3000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 3000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
@@ -422,7 +422,7 @@ contract LiquidationTest is BasePerpTest {
         vm.warp(WEDNESDAY_NOON);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 
@@ -472,7 +472,7 @@ contract LiquidationTest is BasePerpTest {
 
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
         _withdrawFreeUsdc(alice, 0);
 

@@ -16,7 +16,7 @@ contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTe
     function test_C1_KeeperReserveMustNotComeFromLockedPositionMargin() public {
         address account = trader;
         _fundTrader(trader, 175e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 175e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 175e6, 1e8);
 
         uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
         uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
@@ -24,7 +24,7 @@ contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTe
 
         vm.prank(trader);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         assertEq(
             clearinghouse.pnlPledgeUsdc(account),
@@ -50,11 +50,11 @@ contract AuditLatestStateFindingsFailing_QueueEconomics is BasePerpTest {
         _fundTrader(attacker, 21e6);
 
         vm.prank(attacker);
-        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 20e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 1000e18, 20e6, 0, false);
 
         vm.prank(attacker);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 1, 0, 0, true);
 
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
         assertEq(reservation.pendingOrderCount, 1, "Rejected close intent should not be queued behind the pending open");
@@ -163,7 +163,7 @@ contract AuditLatestStateFindingsFailing_SeniorCouponCheckpoint is BasePerpTest 
         _fundTrader(trader, 50_000e6);
 
         address traderAccount = trader;
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 before = pool.lastReconcileTime();
 
@@ -208,7 +208,7 @@ contract AuditLatestStateFindingsFailing_StaleSeniorMutationCoupon is BasePerpTe
 
         _fundTrader(trader, 50_000e6);
         address traderAccount = trader;
-        _open(traderAccount, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8);
 
         uint256 staleStart = block.timestamp;
         uint256 staleMutationTime = staleStart + 30 days;

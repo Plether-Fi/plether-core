@@ -12,7 +12,7 @@ read [`WHITEPAPER.md`](WHITEPAPER.md) or the
 [publication PDF](../../output/pdf/plether-perps-bounded-credit-whitepaper.pdf).
 
 Traders post USDC margin, submit delayed orders through `OrderRouter`, and take
-`BULL` or `BEAR` exposure against a tranched USDC `HousePool`. LP capital sits
+`LONG` or `SHORT` exposure against a tranched USDC `HousePool`. LP capital sits
 behind senior and junior tranche vaults. The system is designed so worst-case
 trader liability is bounded at entry because the market price is capped:
 
@@ -27,9 +27,10 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 ### What traders are trading
 
 - There is one bounded directional market.
-- The mark is the Plether basket's raw `BEAR`-leg price, not a raw DXY index print.
-- `BULL` profits when that mark falls (USD strengthens).
-- `BEAR` profits when that mark rises (USD weakens).
+- The instrument tracks Plether's dollar index through a raw FX-basket mark, not a raw DXY index print.
+- That raw mark moves inversely to dollar strength.
+- `LONG` profits when that mark falls (USD strengthens).
+- `SHORT` profits when that mark rises (USD weakens).
 - Payouts are bounded because the mark is clamped to `CAP_PRICE`.
 
 ### Who does what
@@ -163,7 +164,7 @@ Preview units match the rest of perps:
 
 `executionPrice` is clamped to `CAP_PRICE`. `valid`, `invalidReason`, and `failureCategory` are authoritative for whether the order would pass planner validation. For invalid previews, numeric economics or post-trade fields may be zero or partial depending on where planning stopped.
 
-For valid previews, `postSize`, `postMarginUsdc`, `postEntryPrice`, `postVpiAccrued`, post-trade health, and liquidation fields are projected from the same planner/accounting logic used by live execution. `hasLiquidationPrice == false` means no liquidation threshold exists inside `[0, CAP_PRICE]`. For `BULL` positions, `liquidationPrice` is the lowest price in the high-price liquidatable region. For `BEAR` positions, it is the highest price in the low-price liquidatable region.
+For valid previews, `postSize`, `postMarginUsdc`, `postEntryPrice`, `postVpiAccrued`, post-trade health, and liquidation fields are projected from the same planner/accounting logic used by live execution. `hasLiquidationPrice == false` means no liquidation threshold exists inside `[0, CAP_PRICE]`. For `LONG` positions, `liquidationPrice` is the lowest price in the high-price liquidatable region. For `SHORT` positions, it is the highest price in the low-price liquidatable region.
 
 Close previews expose frozen-market pricing separately from VPI. `frozenSpreadUsdc` is the fixed spread assessed on the reduced notional, `frozenSpreadPaidUsdc` is the portion actually retained or collected for LPs, and `frozenSpreadWaivedUsdc` is the uncollectible portion waived on a terminal full close. These values are zero outside `oracleFrozen`, and a valid preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`. Successful closes with a nonzero assessment emit `FrozenCloseSpreadSettled(account, assessedUsdc, paidUsdc, waivedUsdc)` from `CfdEngineSettlementSidecar`, so the live result is reconstructible from durable logs.
 
@@ -358,7 +359,7 @@ commit open with protection
 - `triggerPositionProtection(...)` is a permissionless payable keeper call. It ingests current Pyth data, requires a
   later block and publish time after arming, and cannot trigger while `oracleFrozen`.
 - A valid trigger pays the trigger keeper and appends one full-size market-style close to the ordinary global FIFO
-  tail using the internal side-dependent nonbinding target sentinel (`CAP_PRICE` for a BULL close and `1` for a BEAR
+  tail using the internal side-dependent nonbinding target sentinel (`CAP_PRICE` for a LONG close and `1` for a SHORT
   close). The linked close is binding and inherits ordinary
   post-commit oracle timing, adverse execution pricing, expiry, terminal failure, and liquidation behavior.
 - Both the attached parent open and triggered linked close are typed V2 requests constructed inside the authenticated
@@ -374,8 +375,8 @@ The raw basket-price conditions follow the protocol's position sides:
 
 | Protected side | Take profit | Stop loss |
 |---|---:|---:|
-| `BULL` | mark at or below TP | mark at or above SL |
-| `BEAR` | mark at or above TP | mark at or below SL |
+| `LONG` | mark at or below TP | mark at or above SL |
+| `SHORT` | mark at or above TP | mark at or below SL |
 
 Frontends that display the inverse dollar-oriented price must convert both values and inequalities before submitting
 the 8-decimal raw basket triggers.
@@ -702,7 +703,7 @@ This is why the LP docs distinguish freshness-gated repricing from already-funde
 Before increasing risk, the engine checks that the HousePool can cover the worst-case side payout after the trade.
 
 ```text
-pool total assets >= max(globalBullMaxProfit, globalBearMaxProfit)
+pool total assets >= max(globalLongMaxProfit, globalShortMaxProfit)
 ```
 
 This does not mean LPs can never take loss. It means trader upside is bounded and the system can reason about the worst case without iterating positions.
@@ -723,7 +724,7 @@ Carry behavior:
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.
 - Is assessed per position on a stored borrow base, not on a checkpoint-time mark price.
-- Both `BULL` and `BEAR` positions can accrue carry at the same time if both sides have nonzero borrow base.
+- Both `LONG` and `SHORT` positions can accrue carry at the same time if both sides have nonzero borrow base.
 - Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
 - Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
 - On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
@@ -936,7 +937,7 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
   mark. Use `policyValid` and the configured ratio for monitoring; do not reinterpret that post-cap quotient as an
   independent oracle-policy proof.
 - The neutral, pre-cap basket is accepted when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`. The initial `basketMaxConfidenceRatioBps` is `10` (0.10%), equality passes, and there is no separate per-component confidence ceiling.
-- Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `BULL` opens are priced lower, `BEAR` opens are priced higher, `BULL` closes are priced higher, and `BEAR` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
+- Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `LONG` opens are priced lower, `SHORT` opens are priced higher, `LONG` closes are priced higher, and `SHORT` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
 - The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
@@ -1051,7 +1052,7 @@ The important runtime invariants are:
 
 - each account holds at most one live directional position,
 - side-local cached accounting stays consistent with the live position set and never overstates bounded payoff or margin state,
-- the sum of `BULL`-side and `BEAR`-side `totalMargin` equals `sum(pos.margin)` across live positions,
+- the sum of `LONG`-side and `SHORT`-side `totalMargin` equals `sum(pos.margin)` across live positions,
 - commit-time open preview must not admit orders the router can already classify as commit-time rejectable, and close/liquidation preview math must match live accounting semantics,
 - clearinghouse USDC execution-bounty reservations and admin-custodied ETH refund claims are each conserved across their respective lifecycle transitions.
 - each account has at most one `PendingOpen`, `Armed`, or `Triggered` protection; an armed record is never in FIFO and a

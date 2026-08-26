@@ -17,8 +17,8 @@ contract CfdEnginePublishTimeRegression is BasePerpTest {
         _fundTrader(alice, 25_000e6);
         _fundTrader(bob, 25_000e6);
 
-        _open(aliceAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
-        _open(bobAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
+        _open(bobAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(SATURDAY_NOON);
         assertTrue(engine.isOracleFrozen(), "setup should be inside a frozen-oracle window");
@@ -26,10 +26,10 @@ contract CfdEnginePublishTimeRegression is BasePerpTest {
         uint64 fridayPublishTime = SATURDAY_NOON - 18 hours;
         uint256 depth = pool.totalAssets();
 
-        _closeAt(aliceAccount, CfdTypes.Side.BEAR, 100_000e18, 1e8, depth, fridayPublishTime);
+        _closeAt(aliceAccount, CfdTypes.Side.SHORT, 100_000e18, 1e8, depth, fridayPublishTime);
         assertEq(engine.lastMarkTime(), fridayPublishTime, "close should store oracle publish time");
 
-        _closeAt(bobAccount, CfdTypes.Side.BEAR, 100_000e18, 1e8, depth, fridayPublishTime);
+        _closeAt(bobAccount, CfdTypes.Side.SHORT, 100_000e18, 1e8, depth, fridayPublishTime);
         assertEq(engine.lastMarkTime(), fridayPublishTime, "repeated frozen close should keep the same publish time");
 
         (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
@@ -47,8 +47,8 @@ contract CfdEnginePublishTimeRegression is BasePerpTest {
         _fundTrader(alice, 2000e6);
         _fundTrader(bob, 2000e6);
 
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
-        _open(bobAccount, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        _open(bobAccount, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.warp(SATURDAY_NOON);
         assertTrue(engine.isOracleFrozen(), "setup should be inside a frozen-oracle window");

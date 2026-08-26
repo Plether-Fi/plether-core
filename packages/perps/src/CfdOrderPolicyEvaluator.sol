@@ -212,10 +212,10 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         snapshot.lastMarkTime = engine.lastMarkTime();
         snapshot.riskParams = engine.riskParams();
 
-        snapshot.bullSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.BULL, poolDepthUsdc, snapshot.riskParams.baseCarryBps);
-        snapshot.bearSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.BEAR, poolDepthUsdc, snapshot.riskParams.baseCarryBps);
+        snapshot.longSide =
+            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, poolDepthUsdc, snapshot.riskParams.baseCarryBps);
+        snapshot.shortSide =
+            _sideSnapshot(engine, planner, CfdTypes.Side.SHORT, poolDepthUsdc, snapshot.riskParams.baseCarryBps);
         snapshot.poolAssetsUsdc = poolDepthUsdc;
         snapshot.poolCashUsdc = IHousePool(engine.pool()).totalAssets();
 

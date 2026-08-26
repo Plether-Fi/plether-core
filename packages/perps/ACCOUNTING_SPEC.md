@@ -63,9 +63,9 @@ Operational rules:
 
 ### Liability terms
 
-- `bullMaxProfit`: worst-case payout to all live BULL positions at one price extreme
-- `bearMaxProfit`: worst-case payout to all live BEAR positions at the opposite price extreme
-- `maxLiability = max(bullMaxProfit, bearMaxProfit)`
+- `longMaxProfit`: worst-case payout to all live LONG positions at one price extreme
+- `shortMaxProfit`: worst-case payout to all live SHORT positions at the opposite price extreme
+- `maxLiability = max(longMaxProfit, shortMaxProfit)`
 - `badDebt`: a realized protocol-side shortfall that remains after its authorized settlement paths; it excludes
   uncollateralized trader price loss above the account's collectible cap
 
@@ -93,8 +93,8 @@ For one account at mark `p`, let `E` be exact entry cost and let
 `K = pnlPledgeUsdc + sameAccountTraderClaimUsdc`. Its LP-side terminal price delta is:
 
 ```text
-BULL: min(lots * p - E, K)
-BEAR: min(E - lots * p, K)
+LONG: min(lots * p - E, K)
+SHORT: min(E - lots * p, K)
 ```
 
 A negative result is an amount owed by LPs to the trader. A positive result is capped at value reachable from that

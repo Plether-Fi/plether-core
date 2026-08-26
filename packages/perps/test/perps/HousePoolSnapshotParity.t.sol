@@ -60,11 +60,11 @@ contract HousePoolSnapshotParityTest is BasePerpTest {
         address account = trader;
         _fundJunior(juniorLp, 1_000_000e6);
         _fundTrader(trader, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
-        _close(account, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingSeniorWithdraw, uint256 pendingJuniorWithdraw) =
             pool.getPendingTrancheState();

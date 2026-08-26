@@ -32,8 +32,8 @@ contract AuditCurrentFindingsFailing is BasePerpTest {
         _fundTrader(winner, 200_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.LONG, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -104,7 +104,7 @@ contract AuditCurrentFindingsFailing_BountyCap is BasePerpTest {
         address trader = ACCOUNT_ID;
         _fundTrader(trader, 100e6);
 
-        _open(ACCOUNT_ID, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
+        _open(ACCOUNT_ID, CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
 
         uint256 freeSettlementUsdc = _freeSettlementUsdc(ACCOUNT_ID);
         vm.prank(trader);
@@ -145,7 +145,7 @@ contract AuditCurrentFindingsVerifiedInvalid is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 0, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 0, 500e6, 1e8, false);
     }
 
     function test_M1_WipedTrancheRejectsOrdinaryRecapitalizationDeposits() public {
@@ -228,7 +228,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1006);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1006);
@@ -275,14 +275,14 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         address bobAccount = bob;
 
         _fundTrader(alice, 200_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 300_000e18, 50_000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
         uint8 code = engineLens.previewOpenRevertCode(
-            bobAccount, CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp)
+            bobAccount, CfdTypes.Side.SHORT, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp)
         );
         assertEq(
             code,
@@ -296,12 +296,12 @@ contract AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity is BasePerpTest {
         address bobAccount = bob;
 
         _fundTrader(alice, 200_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 300_000e18, 50_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 300_000e18, 50_000e6, 1e8);
 
         _fundTrader(bob, 20_000e6);
         vm.deal(bob, 1 ether);
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BEAR, 300_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 300_000e18, 10_000e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
@@ -341,7 +341,7 @@ contract AuditCurrentFindingsFuturePublishSafety is BasePerpTest {
 
         _fundSenior(address(0xBEEF), 100_000e6);
         _fundTrader(alice, 50_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp + 5));

@@ -441,7 +441,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         bytes32 clientOrderId
     ) internal view returns (OrderV2Types.OrderRequest memory request) {
         request.clientOrderId = clientOrderId;
-        request.side = CfdTypes.Side.BULL;
+        request.side = CfdTypes.Side.LONG;
         request.sizeDelta = OPEN_SIZE;
         request.marginDelta = OPEN_MARGIN_USDC;
         request.targetPrice = 1;

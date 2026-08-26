@@ -14,7 +14,7 @@ contract ArchitectureRegression_ReservationShielding is BasePerpTest {
     function test_LiquidationSolvency_MustIgnoreLockedMarginInReachableEquity() public {
         address account = alice;
         _fundTrader(alice, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(125_000_000));
@@ -35,7 +35,7 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
     function test_ProtocolFees_AreCustodiedInTreasuryMargin() public {
         address account = alice;
         _fundTrader(alice, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertGt(fees, 0, "Setup should accrue protocol fees");
@@ -52,21 +52,21 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         _fundTrader(alice, 11_000e6);
         _fundTrader(bob, 11_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
-        _open(bobAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
+        _open(bobAccount, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
         uint256 aliceClaim = engine.traderClaimBalanceUsdc(aliceAccount);
         assertGt(aliceClaim, 0, "setup must create a trader claim");
 
         usdc.mint(address(pool), aliceClaim);
 
         uint256 bobSettlementBefore = clearinghouse.balanceUsdc(bobAccount);
-        _close(bobAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(bobAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         assertGt(
             engine.traderClaimBalanceUsdc(bobAccount),
@@ -83,13 +83,13 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
     function test_TraderClaimStatus_ViewReportsTraderPath() public {
         address aliceAccount = alice;
         _fundTrader(alice, 11_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
         uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
         assertGt(traderClaim, 0, "setup must create a trader claim");
 
@@ -107,15 +107,15 @@ contract ArchitectureRegression_SolvencyViews is BasePerpTest {
 
         _fundTrader(alice, 11_000e6);
         _fundTrader(bob, 11_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
-        _open(bobAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
+        _open(bobAccount, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
-        _close(bobAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
+        _close(bobAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         uint256 aliceClaim = engine.traderClaimBalanceUsdc(aliceAccount);
         uint256 bobClaim = engine.traderClaimBalanceUsdc(bobAccount);
@@ -149,11 +149,11 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
     function test_InvalidCloseMustBeRejectedAtCommit() public {
         address account = alice;
         _fundTrader(alice, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(alice);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BEAR, 100_001e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_001e18, 0, 0, true);
     }
 
     function test_FullyMarginedCloseCommit_MustNotConsumePnlPledgeForBounty() public {
@@ -161,15 +161,15 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         address bobAccount = bob;
         _fundTrader(alice, 5000e6);
         _fundTrader(bob, 50_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(bobAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(bobAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         assertEq(_freeSettlementUsdc(aliceAccount), 0, "setup must leave no idle settlement");
         (, uint256 marginBefore,,,,,) = engine.positions(aliceAccount);
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(aliceAccount);
         assertEq(marginAfter, marginBefore, "rejected close bounty must preserve PnL pledge");

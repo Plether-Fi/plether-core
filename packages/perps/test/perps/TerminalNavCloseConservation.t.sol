@@ -16,7 +16,7 @@ contract TerminalNavCloseConservationTest is Test {
     address private constant ACCOUNT = address(0xA11CE);
 
     function test_OneAtomBasisRemainderConsumesMoreThanProRataPledge() public pure {
-        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(2, 1, CfdTypes.Side.BULL, 1, 0);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(2, 1, CfdTypes.Side.LONG, 1, 0);
         CfdEnginePlanTypes.CloseDelta memory delta = _plan(snap, 1, 1);
 
         assertTrue(delta.valid, "exact-atom partial close must be valid");
@@ -30,7 +30,7 @@ contract TerminalNavCloseConservationTest is Test {
     }
 
     function test_MaterialClaimAndPledgeSplitMatchesOneShotTerminalRecovery() public pure {
-        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(2, 20, CfdTypes.Side.BULL, 100, 100);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(2, 20, CfdTypes.Side.LONG, 100, 100);
         CfdEnginePlanTypes.CloseDelta memory firstHalf = _plan(snap, 1, 100);
         CfdEnginePlanTypes.CloseDelta memory oneShot = _plan(snap, 2, 100);
 
@@ -57,20 +57,20 @@ contract TerminalNavCloseConservationTest is Test {
         uint144 entrySeed,
         uint144 pledgeSeed,
         uint144 claimSeed,
-        bool isBear
+        bool isShort
     ) public pure {
         uint256 lots = bound(uint256(lotsSeed), 2, 1000);
         uint256 closeLots = bound(uint256(closeLotsSeed), 1, lots - 1);
-        CfdTypes.Side side = isBear ? CfdTypes.Side.BEAR : CfdTypes.Side.BULL;
+        CfdTypes.Side side = isShort ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
         uint256 price;
         uint256 entryCost;
-        if (side == CfdTypes.Side.BULL) {
+        if (side == CfdTypes.Side.LONG) {
             price = bound(uint256(priceSeed), 1, CAP_PRICE);
-            // BULL loses when the mark rises; keep every lot at least one atom below the mark.
+            // LONG loses when the mark rises; keep every lot at least one atom below the mark.
             entryCost = bound(uint256(entrySeed), 0, lots * (price - 1));
         } else {
             price = bound(uint256(priceSeed), 0, CAP_PRICE - 1);
-            // BEAR loses when the mark falls; keep every lot at least one atom above the mark.
+            // SHORT loses when the mark falls; keep every lot at least one atom above the mark.
             entryCost = bound(uint256(entrySeed), lots * (price + 1), lots * CAP_PRICE);
         }
         uint256 pledge = bound(uint256(pledgeSeed), 0, 1e12);
@@ -123,10 +123,10 @@ contract TerminalNavCloseConservationTest is Test {
             borrowBaseUsdc: 0,
             carryIndex: 0
         });
-        if (side == CfdTypes.Side.BULL) {
-            snap.bullSide = selected;
+        if (side == CfdTypes.Side.LONG) {
+            snap.longSide = selected;
         } else {
-            snap.bearSide = selected;
+            snap.shortSide = selected;
         }
         snap.poolAssetsUsdc = POOL_LIQUIDITY;
         snap.poolCashUsdc = POOL_LIQUIDITY;
@@ -216,7 +216,7 @@ contract TerminalNavCloseConservationTest is Test {
         uint256 price
     ) private pure returns (uint256 lossUsdc) {
         uint256 exitValueUsdcAtoms = lots * price;
-        if (side == CfdTypes.Side.BULL) {
+        if (side == CfdTypes.Side.LONG) {
             lossUsdc = exitValueUsdcAtoms - entryCostUsdcAtoms;
         } else {
             lossUsdc = entryCostUsdcAtoms - exitValueUsdcAtoms;

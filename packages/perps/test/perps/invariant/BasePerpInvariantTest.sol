@@ -192,9 +192,9 @@ abstract contract BasePerpInvariantTest is Test {
     }
 
     function _maxLiability() internal view returns (uint256) {
-        (uint256 bullMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        (uint256 bearMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.BEAR));
-        return bullMaxProfit > bearMaxProfit ? bullMaxProfit : bearMaxProfit;
+        (uint256 longMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.LONG));
+        (uint256 shortMaxProfit,,,) = engine.sides(uint8(CfdTypes.Side.SHORT));
+        return longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
     }
 
     function _withdrawalReservedUsdc() internal view returns (uint256) {
@@ -206,13 +206,14 @@ abstract contract BasePerpInvariantTest is Test {
         if (price == 0) {
             return 0;
         }
-        (uint256 bullMaxProfit, uint256 bullOi, uint256 bullEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BULL));
-        bullMaxProfit;
-        (uint256 bearMaxProfit, uint256 bearOi, uint256 bearEntryNotional,) = engine.sides(uint8(CfdTypes.Side.BEAR));
-        bearMaxProfit;
-        int256 bullPnl = (SafeCast.toInt256(bullEntryNotional) - SafeCast.toInt256(bullOi * price)) / int256(1e20);
-        int256 bearPnl = (SafeCast.toInt256(bearOi * price) - SafeCast.toInt256(bearEntryNotional)) / int256(1e20);
-        return bullPnl + bearPnl;
+        (uint256 longMaxProfit, uint256 longOi, uint256 longEntryNotional,) = engine.sides(uint8(CfdTypes.Side.LONG));
+        longMaxProfit;
+        (uint256 shortMaxProfit, uint256 shortOi, uint256 shortEntryNotional,) =
+            engine.sides(uint8(CfdTypes.Side.SHORT));
+        shortMaxProfit;
+        int256 longPnl = (SafeCast.toInt256(longEntryNotional) - SafeCast.toInt256(longOi * price)) / int256(1e20);
+        int256 shortPnl = (SafeCast.toInt256(shortOi * price) - SafeCast.toInt256(shortEntryNotional)) / int256(1e20);
+        return longPnl + shortPnl;
     }
 
     function _maintenanceMarginUsdc(

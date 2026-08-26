@@ -215,7 +215,7 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Bounded entry solvency | Risk-increasing opens require `pool.totalAssets() >= max(globalBullMaxProfit, globalBearMaxProfit)` using canonical physical backing rather than raw token balance |
+| Bounded entry solvency | Risk-increasing opens require `pool.totalAssets() >= max(globalLongMaxProfit, globalShortMaxProfit)` using canonical physical backing rather than raw token balance |
 | Degraded containment | If a close or liquidation reveals post-op insolvency, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions |
 | Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
 | Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after accounting for bounded liability and trader claim liabilities |
@@ -231,7 +231,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Single direction per account | An account address holds at most one live directional position at a time |
 | Margin sufficiency | Opens and withdraw-facing checks use explicit initial/maintenance/FAD margin policy surfaces |
 | Side symmetry | Side-local cached accounting stays consistent with the live position set |
-| Total margin conservation | `sides[BULL].totalMargin + sides[BEAR].totalMargin == sum(pos.margin)` across all live positions |
+| Total margin conservation | `sides[LONG].totalMargin + sides[SHORT].totalMargin == sum(pos.margin)` across all live positions |
 | Preview/live parity | Close and liquidation preview math should match live execution semantics |
 | Frozen-spread conservation | For a valid frozen voluntary close, assessed spread equals LP-paid spread plus terminally waived spread; none is credited to protocol treasury |
 | Exact-lot basis | Every live position uses whole 100-token lots and exact entry cost is conserved across increases and partial closes |

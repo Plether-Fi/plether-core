@@ -49,7 +49,7 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         uint256 executionPrice = 1e8;
 
         _fundTrader(trader, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 850e6, executionPrice);
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 850e6, executionPrice);
         vm.warp(block.timestamp + 3 * 365 days);
 
         uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
@@ -99,7 +99,7 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         uint256 executionPrice = 1e8;
 
         _fundTrader(trader, 3500e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 3000e6, executionPrice);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 3000e6, executionPrice);
         uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
         assertGt(withdrawableUsdc, 0, "setup must initially have removable free settlement");
         vm.prank(trader);
@@ -142,12 +142,12 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         // The opening action leaves a healthy isolated PnL pledge plus a small amount of free settlement.
         // Ten years of indexed carry exceeds both the free settlement and the position's risk headroom.
         _fundTrader(account, 3500e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 3000e6, executionPrice);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 3000e6, executionPrice);
 
         {
             vm.warp(block.timestamp + 10 * 365 days);
             engine.checkpointCarryIndexes();
-            uint64 refreshedAt = engine.sideCarryTimestamp(uint256(CfdTypes.Side.BULL));
+            uint64 refreshedAt = engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG));
             vm.prank(address(router));
             engine.updateMarkPrice(executionPrice, refreshedAt);
             assertEq(engine.lastMarkPrice(), executionPrice, "setup must keep the intended live mark");

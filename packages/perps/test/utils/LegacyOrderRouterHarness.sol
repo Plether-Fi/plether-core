@@ -52,9 +52,9 @@ contract LegacyOrderRouterHarness is OrderRouter {
         uint256 translatedTargetPrice = targetPrice;
         if (translatedTargetPrice == 0) {
             if (isClose) {
-                translatedTargetPrice = side == CfdTypes.Side.BULL ? type(uint256).max : 1;
+                translatedTargetPrice = side == CfdTypes.Side.LONG ? type(uint256).max : 1;
             } else {
-                translatedTargetPrice = side == CfdTypes.Side.BULL ? 1 : type(uint256).max;
+                translatedTargetPrice = side == CfdTypes.Side.LONG ? 1 : type(uint256).max;
             }
         }
 
