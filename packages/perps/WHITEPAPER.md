@@ -1296,6 +1296,8 @@ trader account rather than HousePool.
 | Liquidations after a 3+ day gap | 25 | 38 | 18 |
 | Carry assessed | $7.600m | $8.100m | $5.340m |
 | Carry conservatively realized | $7.531m | $8.060m | $5.319m |
+| Maximum conservative MtM | $50.424m | $78.368m | $66.418m |
+| Minimum senior principal | $50.000m | $22.944m | $36.854m |
 | Legacy loss telemetry | $0.991m | $0.919m | $0.654m |
 | Trader claims created | $0 | $0 | $0 |
 | Ending LP economic equity | $103.493m | $99.817m | $99.196m |
