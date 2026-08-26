@@ -21,6 +21,8 @@ interface IOrderLifecycleBook {
     error OrderLifecycleBook__ClientIdConflict(
         address account, bytes32 clientOrderId, bytes32 existingIntentHash, bytes32 suppliedIntentHash
     );
+    /// @notice A fresh request used the public client-id namespace for an internal intent, or vice versa.
+    error OrderLifecycleBook__ClientIdDomainMismatch(bytes32 clientOrderId, bool protocolIntent);
     /// @notice An order id already has a pending or terminal lifecycle record.
     error OrderLifecycleBook__OrderIdAlreadyUsed(uint64 orderId);
     /// @notice The actual quoted bounty exceeds the user's committed maximum.
@@ -86,7 +88,8 @@ interface IOrderLifecycleBook {
     ) external view returns (OrderV2Types.ClientIntentResolution resolution, uint64 orderId, bytes32 intentHash);
 
     /// @notice Permanently binds a new client id and stores its pending policy.
-    /// @dev Exact replay is a no-op and returns the original order id; conflicting reuse reverts.
+    /// @dev Exact replay is a no-op and returns the original order id; conflicting reuse reverts. Fresh requests with
+    ///      a zero expected-config hash must use the reserved protocol namespace, which public requests cannot claim.
     function registerPending(
         address account,
         uint64 proposedOrderId,

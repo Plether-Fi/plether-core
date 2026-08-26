@@ -7,6 +7,7 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Production-stack integration coverage for the agent-facing V2 order lifecycle.
@@ -132,6 +133,41 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertTrue(aliceIntent.intentHash != bobIntent.intentHash, "the account is part of the intent domain");
         assertEq(router.pendingOrderCounts(ALICE), 1);
         assertEq(router.pendingOrderCounts(BOB), 1);
+    }
+
+    function test_PublicCommitCannotClaimProtocolClientIdNamespace() public {
+        bytes32 clientOrderId = OrderV2Types.protocolClientOrderId(keccak256("predictable-protection-id"));
+        OrderV2Types.OrderRequest memory request = _openRequest(clientOrderId);
+        uint64 nextCommitIdBefore = router.nextCommitId();
+        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+
+        vm.prank(ALICE);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, clientOrderId, false
+            )
+        );
+        router.commitOrder(request);
+
+        assertEq(book.clientIntent(ALICE, clientOrderId).orderId, 0, "rejection must not bind the reserved id");
+        assertEq(book.pendingIntent(nextCommitIdBefore).account, address(0), "rejection must not create policy state");
+        assertEq(router.nextCommitId(), nextCommitIdBefore, "rejection must not consume an order id");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "rejection must not append an account order");
+        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "rejection must not reserve capital");
+
+        request.bounds.expectedConfigHash = bytes32(0);
+        vm.prank(ALICE);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__ExecutionConfigMismatch.selector,
+                bytes32(0),
+                book.currentExecutionConfigHash()
+            )
+        );
+        router.commitOrder(request);
+
+        assertEq(book.clientIntent(ALICE, clientOrderId).orderId, 0, "public zero-config request must not bind id");
+        assertEq(router.nextCommitId(), nextCommitIdBefore, "public zero-config request must not consume an id");
     }
 
     function test_RevertedFirstAttemptDoesNotConsumeClientIdOrReservation() public {

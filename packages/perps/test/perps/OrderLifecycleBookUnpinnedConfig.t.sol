@@ -20,7 +20,8 @@ contract OrderLifecycleBookUnpinnedConfigTest is Test {
     }
 
     function test_UnpinnedInternalIntentAcceptsOracleReceiptAndRecordsObservedConfig() public {
-        OrderV2Types.OrderRequest memory request = _request(bytes32("protected-child"), bytes32(0));
+        bytes32 clientOrderId = OrderV2Types.protocolClientOrderId(keccak256("protected-child"));
+        OrderV2Types.OrderRequest memory request = _request(clientOrderId, bytes32(0));
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, 0);
 
         book.finalize(_executedReceipt(1, request, intentHash, OBSERVED_CONFIG_HASH));

@@ -912,6 +912,92 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(liveSize, POSITION_SIZE, "parent should open the position");
     }
 
+    function test_AttachedOpen_PublicRawIdPreclaimCannotPoisonProtocolParent() public {
+        uint64 poisonOrderId = router.nextCommitId();
+        uint64 predictedParentOrderId = poisonOrderId + 1;
+        bytes32 rawParentDigest = keccak256(
+            abi.encode(
+                "PLETHER_POSITION_PROTECTION_PARENT_V2", block.chainid, address(router), ALICE, predictedParentOrderId
+            )
+        );
+        bytes32 protocolClientOrderId = OrderV2Types.protocolClientOrderId(rawParentDigest);
+
+        OrderV2Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawParentDigest, false);
+        poisonRequest.bounds.validUntil = uint64(block.timestamp + 1);
+        vm.prank(ALICE);
+        assertEq(router.commitOrder(poisonRequest), poisonOrderId, "public preclaim order id");
+
+        vm.warp(uint256(poisonRequest.bounds.validUntil) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV2Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
+        assertEq(uint8(poisonResult.terminalReason), uint8(OrderV2Types.TerminalReason.Expired));
+        _refreshMark(MARK_PRICE);
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
+            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
+        );
+
+        assertEq(parentOrderId, predictedParentOrderId, "fixture must target the formerly colliding parent");
+        assertTrue(OrderV2Types.isProtocolClientOrderId(protocolClientOrderId));
+        assertEq(router.lifecycleBook().clientIntent(ALICE, rawParentDigest).orderId, poisonOrderId);
+        assertEq(router.lifecycleBook().clientIntent(ALICE, protocolClientOrderId).orderId, parentOrderId);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen),
+            "raw public preclaim must not block the protected parent"
+        );
+    }
+
+    function test_Trigger_PublicRawIdPreclaimCannotPoisonProtocolClose() public {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+
+        uint64 protectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
+        uint64 poisonOrderId = router.nextCommitId();
+        uint64 predictedLinkedOrderId = poisonOrderId + 1;
+        bytes32 rawTriggerDigest = keccak256(
+            abi.encode(
+                "PLETHER_POSITION_PROTECTION_TRIGGER_V2",
+                block.chainid,
+                address(router),
+                ALICE,
+                protectionId,
+                predictedLinkedOrderId
+            )
+        );
+        bytes32 protocolClientOrderId = OrderV2Types.protocolClientOrderId(rawTriggerDigest);
+
+        OrderV2Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawTriggerDigest, true);
+        poisonRequest.bounds.validUntil = uint64(block.timestamp + 1);
+        vm.prank(ALICE);
+        assertEq(router.commitOrder(poisonRequest), poisonOrderId, "public preclaim order id");
+
+        vm.warp(uint256(poisonRequest.bounds.validUntil) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV2Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
+        assertEq(uint8(poisonResult.terminalReason), uint8(OrderV2Types.TerminalReason.Expired));
+        _refreshMark(MARK_PRICE);
+
+        vm.prank(ALICE);
+        assertEq(
+            protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)),
+            protectionId,
+            "fixture protection id"
+        );
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+
+        assertEq(linkedOrderId, predictedLinkedOrderId, "fixture must target the formerly colliding close");
+        assertTrue(OrderV2Types.isProtocolClientOrderId(protocolClientOrderId));
+        assertEq(router.lifecycleBook().clientIntent(ALICE, rawTriggerDigest).orderId, poisonOrderId);
+        assertEq(router.lifecycleBook().clientIntent(ALICE, protocolClientOrderId).orderId, linkedOrderId);
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            LONG_TAKE_PROFIT
+        );
+    }
+
     function test_AttachedOpen_ThresholdCrossedBeforeFillArmsThenTriggersOnLaterTick() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
 
@@ -1274,6 +1360,32 @@ contract PositionProtectionTest is BasePerpTest {
     ) internal pure returns (PositionProtectionTypes.PositionProtectionParams memory params) {
         params.takeProfitTriggerPrice = takeProfit;
         params.stopLossTriggerPrice = stopLoss;
+    }
+
+    function _publicBoundedRequest(
+        bytes32 clientOrderId,
+        bool isClose
+    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+        request.clientOrderId = clientOrderId;
+        request.side = CfdTypes.Side.LONG;
+        request.sizeDelta = POSITION_SIZE;
+        request.marginDelta = isClose ? 0 : POSITION_MARGIN_USDC;
+        request.targetPrice = isClose ? engine.CAP_PRICE() : 1;
+        request.isClose = isClose;
+        request.bounds = OrderV2Types.ExecutionBounds({
+            validUntil: uint64(block.timestamp + router.maxOrderAge()),
+            allowedExecutionModes: 1 | 2 | 4,
+            expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
+            maxExecutionBountyUsdc: type(uint256).max,
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max,
+            maxPostPositionSize: type(uint256).max,
+            minPostSettlementBalanceUsdc: 0,
+            minPostPositionEquityUsdc: 0,
+            maxPostLeverageBps: type(uint32).max
+        });
     }
 
     function _totalProtectionBountyUsdc() internal view returns (uint256) {

@@ -10,7 +10,8 @@ interface IPerpsTraderActions {
     /// @dev An exact replay of a permanently bound `clientOrderId` returns the original order id without consulting
     ///      current protocol state or mutating reservations, counters, queues, or events. Reusing the id with any
     ///      different request field reverts. Fresh requests must pin the active execution-config hash and a finite
-    ///      deadline no later than the router's current maximum order age.
+    ///      deadline no later than the router's current maximum order age. The `0x504c455448455221` client-id prefix
+    ///      is reserved for protocol-generated protection orders and must not be used by fresh public requests.
     /// @param request Canonical V2 order request and caller-authorized execution bounds.
     /// @return orderId Newly assigned order id or the original id for an exact replay.
     function commitOrder(

@@ -229,7 +229,8 @@ leverage cannot be zero.
 Fresh commits additionally require a nonzero `clientOrderId`, a nonzero lot-aligned `sizeDelta`,
 `validUntil > block.timestamp`, and `validUntil - block.timestamp <= OrderRouter.maxOrderAge`. Close requests require
 `marginDelta == 0`, the same side as the account's bounded queued-position projection, and a size no larger than that
-projection.
+projection. Fresh public client ids must not start with `0x504c455448455221`; that prefix is reserved for
+protocol-generated position-protection orders.
 
 | Bound | What it limits |
 |-------|----------------|

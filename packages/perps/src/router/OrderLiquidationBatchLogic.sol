@@ -520,14 +520,16 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         // Solidity zero-initializes margin and minimum-bound fields omitted from this synthetic close request.
         // slither-disable-next-line uninitialized-local
         OrderV2Types.OrderRequest memory request;
-        request.clientOrderId = keccak256(
-            abi.encode(
-                "PLETHER_POSITION_PROTECTION_TRIGGER_V2",
-                block.chainid,
-                address(this),
-                plan.account,
-                protectionId,
-                linkedOrderId
+        request.clientOrderId = OrderV2Types.protocolClientOrderId(
+            keccak256(
+                abi.encode(
+                    "PLETHER_POSITION_PROTECTION_TRIGGER_V2",
+                    block.chainid,
+                    address(this),
+                    plan.account,
+                    protectionId,
+                    linkedOrderId
+                )
             )
         );
         request.side = plan.side;

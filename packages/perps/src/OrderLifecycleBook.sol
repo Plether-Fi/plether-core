@@ -85,7 +85,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @inheritdoc IOrderLifecycleBook
     address public immutable override HOUSE_POOL;
 
-    /// @notice Permanent account-scoped client id commitments.
+    /// @notice Permanent account-scoped client id commitments with enforced public and protocol subdomains.
     mapping(address account => mapping(bytes32 clientOrderId => OrderV2Types.ClientIntent intent)) private
         _clientIntents;
 
@@ -211,6 +211,11 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
                 );
             }
             return (existing.orderId, intentHash, true);
+        }
+
+        bool protocolIntent = request.bounds.expectedConfigHash == bytes32(0);
+        if (OrderV2Types.isProtocolClientOrderId(request.clientOrderId) != protocolIntent) {
+            revert OrderLifecycleBook__ClientIdDomainMismatch(request.clientOrderId, protocolIntent);
         }
 
         if (proposedOrderId == 0) {

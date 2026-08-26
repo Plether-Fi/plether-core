@@ -74,7 +74,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @dev `clientOrderId` is permanent within the caller's account namespace. An exact replay returns the
     ///      original order id before consulting current configuration or market state and creates no reservation,
     ///      queue entry, counter increment, or event. A fresh request pins its execution configuration, permitted
-    ///      execution modes, absolute deadline, and financial limits in the immutable lifecycle book.
+    ///      execution modes, absolute deadline, and financial limits in the immutable lifecycle book. The
+    ///      `0x504c455448455221` client-id prefix is reserved for protocol-generated protection orders.
     /// @param request Canonical account-scoped V2 order intent and execution bounds.
     /// @return orderId Newly assigned order id or the original id for an exact replay.
     function commitOrder(

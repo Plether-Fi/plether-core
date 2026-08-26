@@ -125,6 +125,47 @@ contract OrderLifecycleBookTest is Test {
         assertEq(uint8(book.lifecycleStatus(17)), uint8(OrderV2Types.LifecycleStatus.Pending));
     }
 
+    function test_RegisterEnforcesFreshPublicAndProtocolClientIdDomains() public {
+        bytes32 protocolClientOrderId = OrderV2Types.protocolClientOrderId(keccak256("protected-intent"));
+
+        OrderV2Types.OrderRequest memory publicRequest = _request(protocolClientOrderId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, protocolClientOrderId, false
+            )
+        );
+        book.registerPending(ACCOUNT, 20, publicRequest, EXECUTION_BOUNTY_USDC);
+        assertEq(book.clientIntent(ACCOUNT, protocolClientOrderId).orderId, 0);
+        assertEq(book.pendingIntent(20).account, address(0));
+
+        bytes32 publicClientOrderId = bytes32("public-intent");
+        OrderV2Types.OrderRequest memory protocolRequest = _request(publicClientOrderId);
+        protocolRequest.bounds.expectedConfigHash = bytes32(0);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, publicClientOrderId, true
+            )
+        );
+        book.registerPending(ACCOUNT, 21, protocolRequest, EXECUTION_BOUNTY_USDC);
+        assertEq(book.clientIntent(ACCOUNT, publicClientOrderId).orderId, 0);
+        assertEq(book.pendingIntent(21).account, address(0));
+
+        protocolRequest.clientOrderId = protocolClientOrderId;
+        (uint64 registeredOrderId,, bool replayed) =
+            book.registerPending(ACCOUNT, 21, protocolRequest, EXECUTION_BOUNTY_USDC);
+        assertEq(registeredOrderId, 21);
+        assertFalse(replayed);
+
+        (registeredOrderId,, replayed) = book.registerPending(ACCOUNT, 99, protocolRequest, type(uint256).max);
+        assertEq(registeredOrderId, 21, "exact replay must retain the original order id");
+        assertTrue(replayed, "domain enforcement must not alter exact-replay semantics");
+
+        publicRequest.clientOrderId = publicClientOrderId;
+        (registeredOrderId,, replayed) = book.registerPending(OTHER_ACCOUNT, 22, publicRequest, EXECUTION_BOUNTY_USDC);
+        assertEq(registeredOrderId, 22);
+        assertFalse(replayed);
+    }
+
     function test_HashOrderRequestMatchesCanonicalFlatEncoding() public view {
         OrderV2Types.OrderRequest memory request = _request(bytes32("canonical-hash"));
         OrderV2Types.ExecutionBounds memory bounds = request.bounds;
