@@ -6,10 +6,6 @@ privileges. For externally submitted bounded orders, it gives every account a ty
 permanently identified intent. Position-protection actions add retained OCO geometry and synthesize typed parent or
 linked-close orders. Both paths have deterministic execution semantics and authenticated terminal evidence.
 
-Some Solidity identifiers retain a `V2` suffix, including `OrderV2Types` and `OrderRouterV2ExecutionSidecar`. The
-suffix is part of those code names, not a separate integration mode exposed by the Router. This guide uses
-**bounded order** for the public `commitOrder(OrderRequest)` flow.
-
 This document explains the core protocol surfaces available to agent developers. It covers order integration, policy
 enforcement, execution, and verification. Wallet delegation, session keys, strategy design, model hosting, market-data
 selection, and user-facing approvals remain application-layer concerns.
