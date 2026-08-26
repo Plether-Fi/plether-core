@@ -10,34 +10,21 @@ This document explains the core protocol surfaces available to agent developers.
 enforcement, execution, and verification. Wallet delegation, session keys, strategy design, model hosting, market-data
 selection, and user-facing approvals remain application-layer concerns.
 
-## The instrument: Plether dollar-index exposure
+## Dollar-index exposure for agents
 
-Plether Perps provides one bounded, USDC-margined, oracle-settled perpetual market for USD direction against a
-six-currency basket. Its raw on-chain mark is a normalized linear combination of EUR, JPY, GBP, CAD, SEK, and CHF
-against USD. The reference weights are 57.6%, 13.6%, 11.9%, 9.1%, 4.2%, and 3.6%, respectively. They are
-DXY-oriented, but Plether's basket is not the ICE U.S. Dollar Index and must not be presented as a raw DXY quote.
-Exact feed IDs, weights, normalization bases, inversion flags, and the price cap are deployment-specific. The
-Router's verified current Oracle binding and execution configuration hash—not this reference list—are authoritative
-for an order.
+Plether Perps lets an agent isolate or partially hedge USD direction as a bounded sleeve of a larger portfolio,
+without changing unrelated positions.
 
-The raw basket mark rises when those foreign currencies strengthen against USD and falls when USD strengthens.
-Product-facing direction therefore maps to the current Solidity ABI as follows:
+The contract's raw FX-basket mark moves opposite to dollar strength, so agents must use this mapping:
 
-| Product position | Economic exposure | Positive price PnL when the raw FX-basket mark | Solidity encoding |
-|------------------|-------------------|------------------------------------------------|-------------------|
-| **LONG dollar index** | USD strengthens against the basket | Falls | `CfdTypes.Side.BULL` (`0`) |
-| **SHORT dollar index** | USD weakens against the basket | Rises | `CfdTypes.Side.BEAR` (`1`) |
+| Product instruction | Positive price PnL when the raw mark | Solidity encoding |
+|---------------------|--------------------------------------|-------------------|
+| **LONG dollar index** | Falls | `CfdTypes.Side.BULL` (`0`) |
+| **SHORT dollar index** | Rises | `CfdTypes.Side.BEAR` (`1`) |
 
-Those enum labels are compatibility names in the current perps source, not the perps product terminology. Reserve
-**BULL** and **BEAR** as user-facing names for Plether's spot tokens. Perps agent policies, prompts, interfaces, and
-reports should use **LONG dollar index** and **SHORT dollar index**, translating only at the contract boundary. An
-integration must not infer economic direction from the English meaning of the enum label.
-
-Within a larger portfolio, this market can be used as a discrete dollar-factor overlay: an agent can express or
-partially hedge USD-against-basket direction without changing every asset-specific position or assembling six
-separate FX legs. That can help isolate a dollar exposure from the rest of a portfolio mandate. It is not a perfect
-hedge or an ICE USDX replica; agents must model basket basis, the price cap, leverage, carry, fees, oracle regimes,
-protocol and USDC risk, and the actual correlations of the portfolio they manage.
+Use LONG/SHORT dollar index in agent policies and reports. Reserve BULL/BEAR for the spot tokens and translate only
+at the contract boundary. Bind the intended market through the Router's verified Oracle and execution configuration
+hash.
 
 ## Why the protocol is suitable for autonomous capital
 
@@ -452,8 +439,7 @@ the observed post-liquidation state.
 ### 2. Read and model
 
 - Read compact market/account state from `PerpsPublicLens`.
-- Verify the deployed FX-basket feed IDs, weights, normalization bases, inversion flags, and price cap against the
-  intended market manifest; do not assume they match ICE USDX or another deployment.
+- Verify that the Router-bound Oracle and execution configuration identify the intended dollar-index market.
 - Translate the strategy's LONG/SHORT dollar-index decision to the ABI side and raw FX-basket price domain.
 - Use Engine previews for the intended trade.
 - Read `currentExecutionConfigHash()` from the Book.
@@ -555,8 +541,7 @@ protocol-synthesized execution envelope.
   configuration instead.
 - **Dynamic state:** the configuration hash is not a price, liquidity, pause, or oracle-regime snapshot. Use bounds
   and fresh reads as well.
-- **Index basis:** the Plether dollar index is a capped normalized linear FX basket, not ICE USDX. A portfolio hedge
-  can retain basket, cap, and correlation basis risk even when its directional mapping is correct.
+- **Index basis:** a dollar-index sleeve is not a perfect portfolio hedge; model basket, cap, and correlation basis.
 - **Oracle dependency:** live execution requires valid Pyth data and ETH for its fee. A data API is not authoritative;
   the contracts validate payloads and publish-time policy.
 - **Event finality:** wait for the confirmation depth appropriate to the chain and handle reorgs before treating an
@@ -577,7 +562,7 @@ protocol-synthesized execution envelope.
 - [ ] Put agent authority behind a revocable smart account or session policy.
 - [ ] Use LONG/SHORT dollar-index terminology in policies and reports; apply the product/ABI mapping above only at the
       contract boundary.
-- [ ] Verify the deployed FX-basket configuration and model basis against the portfolio exposure being managed.
+- [ ] Verify the bound Oracle/configuration and model basis against the portfolio exposure being managed.
 - [ ] For bounded orders, read the Book's current execution configuration hash.
 - [ ] For bounded orders, use a permanent account-scoped client id and resolve it before submission.
 - [ ] For bounded orders, set every financial bound explicitly; never treat zero as unbounded.
@@ -594,7 +579,7 @@ protocol-synthesized execution envelope.
 
 - [`CfdTypes.sol`](src/CfdTypes.sol): current perps ABI side encoding and core position types; apply the product-facing
   direction mapping defined above.
-- [`PletherOracle.sol`](src/PletherOracle.sol): deployment-bound FX-basket construction, confidence, and timing policy.
+- [`PletherOracle.sol`](src/PletherOracle.sol): authoritative dollar-index pricing configuration and timing policy.
 - [`OrderV2Types.sol`](src/OrderV2Types.sol): request, bounds, lifecycle, failure, economics, and result types.
 - [`IOrderLifecycleBook.sol`](src/interfaces/IOrderLifecycleBook.sol): authoritative identity, policy, outcome, and
   configuration reads.
