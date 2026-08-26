@@ -70,8 +70,8 @@ library CfdEnginePlanTypes {
     /// @param lastMarkTime Latest stored mark publish time; retained as context but currently not read by plans.
     /// @param positionBorrowBaseUsdc Position carry borrow base.
     /// @param positionLastCarryIndex Side carry index last checkpointed for the position, scaled by 1e18.
-    /// @param bullSide Aggregate BULL-side state.
-    /// @param bearSide Aggregate BEAR-side state.
+    /// @param longSide Aggregate LONG-side state.
+    /// @param shortSide Aggregate SHORT-side state.
     /// @param poolAssetsUsdc Planner pool-depth/physical-asset input used for VPI, skew, and close/liquidation solvency.
     /// @param poolCashUsdc Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
     /// @param accountBuckets Aggregate clearinghouse custody buckets for `account`.
@@ -98,8 +98,8 @@ library CfdEnginePlanTypes {
         uint256 positionBorrowBaseUsdc;
         uint256 positionLastCarryIndex;
 
-        SideSnapshot bullSide;
-        SideSnapshot bearSide;
+        SideSnapshot longSide;
+        SideSnapshot shortSide;
 
         uint256 poolAssetsUsdc;
         uint256 poolCashUsdc;
@@ -270,8 +270,8 @@ library CfdEnginePlanTypes {
     /// @param valid Whether all planning checks passed.
     /// @param revertCode Typed failure code, or `OK` on success.
     /// @param closeState Detailed PnL, VPI, fee, spread, released-margin, and remaining-position calculation.
-    /// @param postBullOi Projected BULL open interest, with 18 decimals.
-    /// @param postBearOi Projected BEAR open interest, with 18 decimals.
+    /// @param postLongOi Projected LONG open interest, with 18 decimals.
+    /// @param postShortOi Projected SHORT open interest, with 18 decimals.
     /// @param posMarginAfter Canonical position margin remaining after the close, in 6-decimal USDC.
     /// @param posSizeDelta Position size removed, with 18 decimals.
     /// @param posMaxProfitReduction Reduction in the position maximum-profit envelope, in 6-decimal USDC.
@@ -310,8 +310,8 @@ library CfdEnginePlanTypes {
         CloseRevertCode revertCode;
 
         CloseAccountingLib.CloseState closeState;
-        uint256 postBullOi;
-        uint256 postBearOi;
+        uint256 postLongOi;
+        uint256 postShortOi;
 
         uint256 posMarginAfter;
         uint256 posSizeDelta;

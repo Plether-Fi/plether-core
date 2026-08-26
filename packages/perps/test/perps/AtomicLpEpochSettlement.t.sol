@@ -60,8 +60,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         uint256 pythEth;
         uint256 markPrice;
         uint64 markTime;
-        uint256 bullCarryIndex;
-        uint256 bearCarryIndex;
+        uint256 longCarryIndex;
+        uint256 shortCarryIndex;
         uint256 lastReconcileTime;
         uint256 lastSeniorCouponCheckpointTime;
         uint256 seniorPrincipal;
@@ -744,8 +744,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         PythStructs.Price memory pythBefore = baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_A);
         uint256 markPriceBefore = engine.lastMarkPrice();
         uint64 markTimeBefore = engine.lastMarkTime();
-        uint256 bullCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.BULL));
-        uint256 bearCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR));
+        uint256 longCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.LONG));
+        uint256 shortCarryBefore = engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT));
         uint256 reconcileBefore = pool.lastReconcileTime();
         uint256 couponBefore = pool.lastSeniorCouponCheckpointTime();
         uint256 seniorBefore = pool.seniorPrincipal();
@@ -761,8 +761,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(pythAfter.publishTime, pythBefore.publishTime, "Pyth timestamp must roll back");
         assertEq(engine.lastMarkPrice(), markPriceBefore, "Engine price must roll back");
         assertEq(engine.lastMarkTime(), markTimeBefore, "Engine timestamp must roll back");
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)), bullCarryBefore, "bull carry must roll back");
-        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)), bearCarryBefore, "bear carry must roll back");
+        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), longCarryBefore, "long carry must roll back");
+        assertEq(engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)), shortCarryBefore, "short carry must roll back");
         assertEq(pool.lastReconcileTime(), reconcileBefore, "reconcile checkpoint must roll back");
         assertEq(pool.lastSeniorCouponCheckpointTime(), couponBefore, "coupon checkpoint must roll back");
         assertEq(pool.seniorPrincipal(), seniorBefore);
@@ -906,7 +906,7 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
 
     function _openMarkSensitivePosition() internal {
         _fundTrader(TRADER, 200e6);
-        _open(TRADER, CfdTypes.Side.BULL, 1000e18, 100e6, 100_000_000);
+        _open(TRADER, CfdTypes.Side.LONG, 1000e18, 100e6, 100_000_000);
     }
 
     function _seedJuniorLp(
@@ -1005,8 +1005,8 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         snapshot.pythEth = address(baseMockPyth).balance;
         snapshot.markPrice = engine.lastMarkPrice();
         snapshot.markTime = engine.lastMarkTime();
-        snapshot.bullCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.BULL));
-        snapshot.bearCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR));
+        snapshot.longCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.LONG));
+        snapshot.shortCarryIndex = engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT));
         snapshot.lastReconcileTime = pool.lastReconcileTime();
         snapshot.lastSeniorCouponCheckpointTime = pool.lastSeniorCouponCheckpointTime();
         snapshot.seniorPrincipal = pool.seniorPrincipal();
@@ -1041,10 +1041,10 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(engine.lastMarkPrice(), expected.markPrice, "Engine price must roll back");
         assertEq(engine.lastMarkTime(), expected.markTime, "Engine timestamp must roll back");
         assertEq(
-            engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)), expected.bullCarryIndex, "bull carry must roll back"
+            engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)), expected.longCarryIndex, "long carry must roll back"
         );
         assertEq(
-            engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)), expected.bearCarryIndex, "bear carry must roll back"
+            engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)), expected.shortCarryIndex, "short carry must roll back"
         );
         assertEq(pool.lastReconcileTime(), expected.lastReconcileTime, "reconcile checkpoint must roll back");
         assertEq(

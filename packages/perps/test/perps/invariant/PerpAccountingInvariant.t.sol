@@ -80,7 +80,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 assertEq(curve.effectiveCapUsdcAtoms, 0, "Absent Engine position must not have a curve cap");
                 assertEq(
                     uint256(curve.side),
-                    uint256(CfdTypes.Side.BULL),
+                    uint256(CfdTypes.Side.LONG),
                     "Absent Engine position must have default curve side"
                 );
                 continue;
@@ -89,7 +89,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             assertEq(size % CfdTypes.SIZE_QUANTUM, 0, "Live Engine position must contain exact terminal lots");
             uint256 expectedLots = size / CfdTypes.SIZE_QUANTUM;
             uint256 expectedEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-            uint256 maximumCollectibleUsdcAtoms = side == CfdTypes.Side.BULL
+            uint256 maximumCollectibleUsdcAtoms = side == CfdTypes.Side.LONG
                 ? expectedLots * uint256(book.CAP_PRICE()) - expectedEntryCostUsdcAtoms
                 : expectedEntryCostUsdcAtoms;
             uint256 candidateCapUsdcAtoms =

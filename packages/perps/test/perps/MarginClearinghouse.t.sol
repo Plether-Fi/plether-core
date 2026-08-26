@@ -1523,7 +1523,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -1546,11 +1546,11 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         address account = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 0, 1e8, true);
         router.executeOrder(2, _mockPythUpdateData());
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -1568,7 +1568,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
 
         address account = alice;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         WithdrawParityState memory state = _observeWithdrawParity(account, alice, 5000e6);
@@ -1581,7 +1581,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
 
         address account = alice;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
@@ -1600,7 +1600,7 @@ contract MarginClearinghouseAuditTest is BasePerpTest {
         _fundTrader(alice, 10_000 * 1e6);
         address account = alice;
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 1600e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 1600e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
 
         vm.prank(address(router));

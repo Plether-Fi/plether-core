@@ -15,7 +15,7 @@ contract AuditFullSecurityFailing_LiquidationFreeUsdc is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.09e8);
 
@@ -80,7 +80,7 @@ contract AuditFullSecurityFailing_SeniorRateRetroactive is BasePerpTest {
         _fundTrader(trader, 50_000e6);
 
         address traderAccount = trader;
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
@@ -106,8 +106,8 @@ contract AuditFullSecurityFailing_PriceWriteoff is BasePerpTest {
         _fundTrader(winner, 200_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.LONG, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));

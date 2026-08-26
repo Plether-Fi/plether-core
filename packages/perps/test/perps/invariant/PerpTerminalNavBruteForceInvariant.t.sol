@@ -26,22 +26,22 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
 
         // Start every campaign with independently priced positions on both sides. This prevents an empty-book
         // campaign from satisfying the differential invariant vacuously before the fuzzer reaches execution.
-        handler.commitOpenOrder(0, uint8(CfdTypes.Side.BULL), 20, 1000e6, 0.8e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 20, 1000e6, 0.8e8);
         handler.executeNextOrderModelled();
-        handler.commitOpenOrder(1, uint8(CfdTypes.Side.BEAR), 30, 1500e6, 1.2e8);
+        handler.commitOpenOrder(1, uint8(CfdTypes.Side.SHORT), 30, 1500e6, 1.2e8);
         handler.executeNextOrderModelled();
 
         // Increase at a non-divisible weighted basis, then partially close into an empty HousePool. Every campaign
         // therefore begins with exact-entry dust, a live residual curve, and a same-account deferred trader claim.
-        handler.commitOpenOrder(0, uint8(CfdTypes.Side.BULL), 13, 500e6, 1.11e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 13, 500e6, 1.11e8);
         handler.executeNextOrderModelled();
         handler.setPoolAssets(0);
         handler.commitPartialCloseOrder(0, 13, 0.5e8);
         handler.executeNextOrderModelled();
         handler.restoreSolvencyAndClearDegradedMode();
 
-        _assertSeedPosition(handler.actorAt(0), CfdTypes.Side.BULL);
-        _assertSeedPosition(handler.actorAt(1), CfdTypes.Side.BEAR);
+        _assertSeedPosition(handler.actorAt(0), CfdTypes.Side.LONG);
+        _assertSeedPosition(handler.actorAt(1), CfdTypes.Side.SHORT);
         _assertPartialCloseSeed();
 
         bytes4[] memory selectors = new bytes4[](15);
@@ -68,7 +68,7 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
     function test_LiquidationRemovalMatchesIndependentEnumeration() public {
         address account = handler.actorAt(2);
         handler.setPoolAssets(1_000_000_000e6);
-        handler.commitOpenOrder(2, uint8(CfdTypes.Side.BULL), 1000, 2000e6, 1e8);
+        handler.commitOpenOrder(2, uint8(CfdTypes.Side.LONG), 1000, 2000e6, 1e8);
         handler.executeNextOrderModelled();
         (uint256 sizeBefore,,,,,,) = engine.positions(account);
         assertGt(sizeBefore, 0, "Liquidation regression position must open");
@@ -92,8 +92,8 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
 
         // These equalities prove that the handler-owned address domain is exhaustive. Without them, a missing
         // position could be absent from both the enumeration and its expected value and silently mask a mismatch.
-        _assertSideEnumeration(CfdTypes.Side.BULL, totals.bull);
-        _assertSideEnumeration(CfdTypes.Side.BEAR, totals.bear);
+        _assertSideEnumeration(CfdTypes.Side.LONG, totals.long);
+        _assertSideEnumeration(CfdTypes.Side.SHORT, totals.short);
         assertEq(
             totals.totalTraderClaimsUsdc,
             engine.totalTraderClaimBalanceUsdc(),

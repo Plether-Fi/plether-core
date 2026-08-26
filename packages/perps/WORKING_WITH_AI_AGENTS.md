@@ -19,12 +19,11 @@ The contract's raw FX-basket mark moves opposite to dollar strength, so agents m
 
 | Product instruction | Positive price PnL when the raw mark | Solidity encoding |
 |---------------------|--------------------------------------|-------------------|
-| **LONG dollar index** | Falls | `CfdTypes.Side.BULL` (`0`) |
-| **SHORT dollar index** | Rises | `CfdTypes.Side.BEAR` (`1`) |
+| **LONG dollar index** | Falls | `CfdTypes.Side.LONG` (`0`) |
+| **SHORT dollar index** | Rises | `CfdTypes.Side.SHORT` (`1`) |
 
-Use LONG/SHORT dollar index in agent policies and reports. Reserve BULL/BEAR for the spot tokens and translate only
-at the contract boundary. Bind the intended market through the Router's verified Oracle and execution configuration
-hash.
+Use LONG/SHORT dollar index consistently in policies, calldata, and reports. BULL/BEAR are names for the spot tokens,
+not perps directions. Bind the intended market through the Router's verified Oracle and execution configuration hash.
 
 ## Why the protocol is suitable for autonomous capital
 
@@ -560,8 +559,7 @@ protocol-synthesized execution envelope.
 
 - [ ] Use the canonical deployment and verify immutable bindings.
 - [ ] Put agent authority behind a revocable smart account or session policy.
-- [ ] Use LONG/SHORT dollar-index terminology in policies and reports; apply the product/ABI mapping above only at the
-      contract boundary.
+- [ ] Use LONG/SHORT dollar-index terminology consistently in policies, calldata, and reports.
 - [ ] Verify the bound Oracle/configuration and model basis against the portfolio exposure being managed.
 - [ ] For bounded orders, read the Book's current execution configuration hash.
 - [ ] For bounded orders, use a permanent account-scoped client id and resolve it before submission.

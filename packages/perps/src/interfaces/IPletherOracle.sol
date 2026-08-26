@@ -48,14 +48,14 @@ interface IPletherOracle {
     }
 
     /// @notice Validated liquidation prices shared by a batch of accounts.
-    /// @param bullPrice Price adverse to a BULL position, in 8-decimal units.
-    /// @param bearPrice Price adverse to a BEAR position, in 8-decimal units.
+    /// @param longPrice Price adverse to a LONG position, in 8-decimal units.
+    /// @param shortPrice Price adverse to a SHORT position, in 8-decimal units.
     /// @param markPrice Neutral capped basket price, in 8-decimal units.
     /// @param publishTime Earliest component publish time as a Unix timestamp.
     /// @param updateFee Pyth fee paid for the shared update, in wei.
     struct LiquidationBatchSnapshot {
-        uint256 bullPrice;
-        uint256 bearPrice;
+        uint256 longPrice;
+        uint256 shortPrice;
         uint256 markPrice;
         uint64 publishTime;
         uint256 updateFee;
@@ -261,7 +261,7 @@ interface IPletherOracle {
     ///      confidence. The engine mark is not updated; excess ETH is refunded or deferred.
     /// @param refundRecipient Recipient for any ETH left after paying Pyth fees.
     /// @param pythUpdateData Nonempty Pyth update payloads.
-    /// @return snapshot BULL-adverse, BEAR-adverse, and neutral prices with the shared publish time and update fee.
+    /// @return snapshot LONG-adverse, SHORT-adverse, and neutral prices with the shared publish time and update fee.
     function updateLiquidationBatchPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData

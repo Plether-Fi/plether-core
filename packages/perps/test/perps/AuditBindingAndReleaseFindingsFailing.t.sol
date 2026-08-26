@@ -16,7 +16,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 350_000e18, 35_000e6, 1e8, false);
 
         vm.prank(address(engine));
         clearinghouse.consumeAccountOrderReservations(aliceAccount, 35_000e6);
@@ -55,7 +55,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperBefore = usdc.balanceOf(address(this));

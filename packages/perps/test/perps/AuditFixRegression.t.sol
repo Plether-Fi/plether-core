@@ -18,13 +18,13 @@ contract AuditFixRegressionTest is BasePerpTest {
         );
 
         uint256 depositUsdc = 300_000e6;
-        address bull = address(0xB011);
-        address bear = address(0xBEA2);
+        address long = address(0xB011);
+        address short = address(0xBEA2);
         uint256 size = 400_000e18;
-        _fundTrader(bull, 20_000e6);
-        _fundTrader(bear, 20_000e6);
-        _open(bull, CfdTypes.Side.BULL, size, 20_000e6, 1e8);
-        _open(bear, CfdTypes.Side.BEAR, size, 20_000e6, 1e8);
+        _fundTrader(long, 20_000e6);
+        _fundTrader(short, 20_000e6);
+        _open(long, CfdTypes.Side.LONG, size, 20_000e6, 1e8);
+        _open(short, CfdTypes.Side.SHORT, size, 20_000e6, 1e8);
 
         (, uint256 depositJuniorAssets) = pool.getPendingDepositTrancheState();
         uint256 withdrawalJuniorAssets = juniorVault.totalAssets();
@@ -46,13 +46,13 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 sharesBeforeMtm = juniorVault.estimateDepositShares(depositUsdc);
         uint256 juniorAssetsBeforeMtm = juniorVault.totalAssets();
 
-        address bull = address(0xB012);
-        address bear = address(0xBEA3);
+        address long = address(0xB012);
+        address short = address(0xBEA3);
         uint256 size = 300_000e18;
-        _fundTrader(bull, 20_000e6);
-        _fundTrader(bear, 20_000e6);
-        _open(bull, CfdTypes.Side.BULL, size, 20_000e6, 1e8);
-        _open(bear, CfdTypes.Side.BEAR, size, 20_000e6, 1e8);
+        _fundTrader(long, 20_000e6);
+        _fundTrader(short, 20_000e6);
+        _open(long, CfdTypes.Side.LONG, size, 20_000e6, 1e8);
+        _open(short, CfdTypes.Side.SHORT, size, 20_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
@@ -102,7 +102,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 attackerDepositUsdc = 100_000e6;
 
         _fundTrader(trader, 20_000e6);
-        _open(trader, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
@@ -127,7 +127,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 attackerDepositUsdc = 100_000e6;
 
         _fundTrader(trader, 20_000e6);
-        _open(trader, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 immediateSharesBeforeLiquidation = juniorVault.estimateDepositShares(attackerDepositUsdc);
 
@@ -310,7 +310,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 depositUsdc = 25_000e6;
 
         _fundTrader(trader, 20_000e6);
-        _open(trader, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         assertEq(seniorVault.maxDeposit(seniorLp), 0, "no finalized request should expose claim capacity");
         assertGt(seniorVault.maxRequestDeposit(seniorLp), 0, "senior pending deposit requests should remain available");
@@ -340,12 +340,12 @@ contract AuditFixRegressionTest is BasePerpTest {
         address lp = address(0x1A11CE);
 
         _fundTrader(trader, 5000e6);
-        _open(trader, CfdTypes.Side.BEAR, 10_000e18, 2000e6, CAP_PRICE);
+        _open(trader, CfdTypes.Side.SHORT, 10_000e18, 2000e6, CAP_PRICE);
 
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
-        assertEq(snapshot.maxLiabilityUsdc, 0, "BEAR opened at the cap has no bounded upside liability");
+        assertEq(snapshot.maxLiabilityUsdc, 0, "SHORT opened at the cap has no bounded upside liability");
         assertTrue(snapshot.hasOpenPositions, "snapshot must still expose live open interest");
         assertEq(juniorVault.maxDeposit(lp), 0, "no finalized request should expose claim capacity");
         assertGt(juniorVault.maxRequestDeposit(lp), 0, "pending deposit requests should remain available");
@@ -359,8 +359,8 @@ contract AuditFixRegressionTest is BasePerpTest {
 
         _fundTrader(checkpointed, margin + 300e6);
         _fundTrader(lazy, margin + 300e6);
-        _open(checkpointed, CfdTypes.Side.BULL, size, margin, 1e8);
-        _open(lazy, CfdTypes.Side.BULL, size, margin, 1e8);
+        _open(checkpointed, CfdTypes.Side.LONG, size, margin, 1e8);
+        _open(lazy, CfdTypes.Side.LONG, size, margin, 1e8);
 
         vm.warp(block.timestamp + 10 days);
         vm.prank(address(router));
@@ -397,7 +397,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 margin = 10_000e6;
 
         _fundTrader(account, margin + 20_000e6);
-        _open(account, CfdTypes.Side.BULL, size, margin, 1e8);
+        _open(account, CfdTypes.Side.LONG, size, margin, 1e8);
         uint256 borrowBaseBefore = _positionBorrowBaseUsdc(account);
 
         vm.warp(block.timestamp + 10 days);
@@ -423,7 +423,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 size = 100_000e18;
 
         _fundTrader(account, 2000e6);
-        _open(account, CfdTypes.Side.BULL, size, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, size, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
@@ -433,7 +433,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         uint256 bountyUsdc = router.closeOrderExecutionBountyUsdc();
 
         vm.prank(account);
-        router.commitOrder(CfdTypes.Side.BULL, size, 0, 100_000_000, true);
+        router.commitOrder(CfdTypes.Side.LONG, size, 0, 100_000_000, true);
 
         bytes[] memory priceData = _mockPythUpdateData(150_000_000);
         vm.prank(keeper);
@@ -488,7 +488,7 @@ contract AuditFixRegressionConservativePendingDepositImpairmentTest is BasePerpT
         vm.stopPrank();
 
         _fundTrader(trader, 100e6);
-        _open(trader, CfdTypes.Side.BEAR, 1600e18, 50e6, 1e8);
+        _open(trader, CfdTypes.Side.SHORT, 1600e18, 50e6, 1e8);
 
         uint256 activationTime = juniorVault.depositEpochStart(epochId);
         vm.warp(activationTime);

@@ -35,11 +35,11 @@ contract AccountDomainParityTest is BasePerpTest {
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 2000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 10_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
         ICfdEngineTypes.AccountCollateralView memory collateralView =
@@ -90,7 +90,7 @@ contract AccountDomainParityTest is BasePerpTest {
     function test_AccountCollateralView_ClipsTerminalPriceCapToReachableEndpointLoss() public {
         address account = address(0xD011A4);
         _fundTrader(account, 300_000e6);
-        _open(account, CfdTypes.Side.BULL, 1000e18, 200_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 1000e18, 200_000e6, 1e8);
 
         ICfdEngineTypes.AccountCollateralView memory collateralView =
             engineAccountLens.getAccountCollateralView(account);
@@ -109,7 +109,7 @@ contract AccountDomainParityTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -135,7 +135,7 @@ contract AccountDomainParityTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 10_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));

@@ -11,7 +11,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         address trader = address(0xA001);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertEq(preview.traderClaimBalanceUsdc, 0, "Immediate close payout should not defer trader funds");
@@ -22,7 +22,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         address trader = address(0xA002);
         address account = trader;
         _fundTrader(trader, 11_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
         usdc.burn(address(pool), pool.totalAssets());
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 80_000_000);
@@ -36,7 +36,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         address keeper = address(0xA103);
         address keeperAccount = keeper;
         _fundTrader(trader, 900e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 70e6);
@@ -58,7 +58,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         address trader = address(0xA005);
         address account = trader;
         _fundTrader(trader, 400e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 180_000_000);
         assertTrue(preview.liquidatable, "Deeply underwater position should be liquidatable");

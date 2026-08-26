@@ -84,7 +84,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1005);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1005);
@@ -104,7 +104,7 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1002);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1002);

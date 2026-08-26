@@ -50,8 +50,8 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
         _fundTrader(winner, 200_000e6);
         _fundTrader(loser, 2000e6);
 
-        _open(winnerAccount, CfdTypes.Side.BULL, 100_000e18, 100_000e6, 1.5e8);
-        _open(loserAccount, CfdTypes.Side.BULL, 100_000e18, 1000e6, 0.5e8);
+        _open(winnerAccount, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1.5e8);
+        _open(loserAccount, CfdTypes.Side.LONG, 100_000e18, 1000e6, 0.5e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -78,14 +78,14 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_H1_MarginOnlyUpdateViaRouterReverts() public {
         address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
             .call(
                 abi.encodeWithSelector(
                     bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
-                    CfdTypes.Side.BULL,
+                    CfdTypes.Side.LONG,
                     0,
                     500e6,
                     1e8,
@@ -101,9 +101,9 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
 
         uint256 equityBefore = pool.seniorPrincipal() + pool.juniorPrincipal();
 
-        _open(aliceAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
@@ -146,14 +146,14 @@ contract AuditLatestFindingsFailing_Core is BasePerpTest {
     function test_I1_CloseWithMarginDeltaMustRevert() public {
         address aliceAccount = alice;
         _fundTrader(alice, 50_000e6);
-        _open(aliceAccount, CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
 
         vm.prank(alice);
         (bool ok,) = address(router)
             .call(
                 abi.encodeWithSelector(
                     bytes4(keccak256("commitOrder(uint8,uint256,uint256,uint256,bool)")),
-                    CfdTypes.Side.BULL,
+                    CfdTypes.Side.LONG,
                     20_000e18,
                     500e6,
                     0,
@@ -195,7 +195,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
 
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 200_000e18, 40_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 200_000e18, 40_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         router.executeOrder(1, empty);
 
@@ -204,7 +204,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         uint256 aliceBalBefore = clearinghouse.balanceUsdc(aliceAccount);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
         router.executeOrder(2, _mockPythUpdateData(1e8));
 
         usdc.mint(address(pool), 9_000_000e6);
@@ -212,7 +212,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         pool.recordProtocolInflow(9_000_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
         bytes[] memory closePrice = _mockPythUpdateData(1e8);
         router.executeOrder(3, closePrice);
 
@@ -286,7 +286,7 @@ contract AuditLatestFindingsFailing_MevDrift is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 1001);

@@ -171,7 +171,7 @@ contract TerminalNavBookV2Test is Test {
         vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__ZeroAccount.selector);
         driver.sync(address(0), bytes32(0));
 
-        driver.setPosition(address(1), _curveInput(1, uint144(uint256(CAP_PRICE) + 1), 0, CfdTypes.Side.BEAR));
+        driver.setPosition(address(1), _curveInput(1, uint144(uint256(CAP_PRICE) + 1), 0, CfdTypes.Side.SHORT));
         vm.expectRevert(
             abi.encodeWithSelector(
                 ITerminalNavBookV2.TerminalNavBookV2__EntryCostAboveCap.selector,
@@ -182,13 +182,13 @@ contract TerminalNavBookV2Test is Test {
         driver.sync(address(1), bytes32(0));
     }
 
-    function test_BullUncappedCurveMatchesExactPricePnl() public {
+    function test_LongUncappedCurveMatchesExactPricePnl() public {
         address account = address(1);
         uint112 lots = 1000;
         uint144 entryCost = 100_000e6;
         uint144 maximumCollectible = 100_000e6;
 
-        _set(account, _curveInput(lots, entryCost, maximumCollectible, CfdTypes.Side.BULL));
+        _set(account, _curveInput(lots, entryCost, maximumCollectible, CfdTypes.Side.LONG));
 
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), -int256(uint256(entryCost)));
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(1e8), 0);
@@ -199,14 +199,14 @@ contract TerminalNavBookV2Test is Test {
         assertEq(state.base.intercept, -int256(uint256(entryCost)));
     }
 
-    function test_BullCappedCurveUsesInclusiveBreakpoint() public {
+    function test_LongCappedCurveUsesInclusiveBreakpoint() public {
         address account = address(1);
         uint112 lots = 1000;
         uint144 entryCost = 100_000e6;
         uint144 cap = 20_000e6;
         uint32 breakpoint = 1.2e8;
 
-        _set(account, _curveInput(lots, entryCost, cap, CfdTypes.Side.BULL));
+        _set(account, _curveInput(lots, entryCost, cap, CfdTypes.Side.LONG));
 
         assertEq(
             book.terminalLpPriceDeltaUsdcAtoms(breakpoint - 1),
@@ -220,14 +220,14 @@ contract TerminalNavBookV2Test is Test {
         assertEq(leaf.intercept, int256(uint256(entryCost) + uint256(cap)));
     }
 
-    function test_BearCappedCurveUsesInclusiveBreakpoint() public {
+    function test_ShortCappedCurveUsesInclusiveBreakpoint() public {
         address account = address(1);
         uint112 lots = 1000;
         uint144 entryCost = 100_000e6;
         uint144 cap = 20_000e6;
         uint32 breakpoint = 0.8e8;
 
-        _set(account, _curveInput(lots, entryCost, cap, CfdTypes.Side.BEAR));
+        _set(account, _curveInput(lots, entryCost, cap, CfdTypes.Side.SHORT));
 
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), int256(uint256(cap)));
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(breakpoint - 1), int256(uint256(cap)));
@@ -240,21 +240,21 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_CeilingBreakpointsAreExactForNonDivisibleNumerators() public {
-        address bull = address(1);
-        address bear = address(2);
+        address long = address(1);
+        address short = address(2);
 
-        _set(bull, _curveInput(3, 10, 2, CfdTypes.Side.BULL));
+        _set(long, _curveInput(3, 10, 2, CfdTypes.Side.LONG));
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(3), -1);
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 2);
 
-        _set(bear, _curveInput(3, 10, 2, CfdTypes.Side.BEAR));
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(2), -2); // BULL is -4 and BEAR is capped at +2.
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(3), 0); // BULL is -1 and BEAR affine value is +1.
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 0); // BULL is +2 and BEAR is -2.
+        _set(short, _curveInput(3, 10, 2, CfdTypes.Side.SHORT));
+        assertEq(book.terminalLpPriceDeltaUsdcAtoms(2), -2); // LONG is -4 and SHORT is capped at +2.
+        assertEq(book.terminalLpPriceDeltaUsdcAtoms(3), 0); // LONG is -1 and SHORT affine value is +1.
+        assertEq(book.terminalLpPriceDeltaUsdcAtoms(4), 0); // LONG is +2 and SHORT is -2.
     }
 
-    function test_BullZeroBreakpointIsIncludedAtMarkZero() public {
-        _set(address(1), _curveInput(17, 0, 0, CfdTypes.Side.BULL));
+    function test_LongZeroBreakpointIsIncludedAtMarkZero() public {
+        _set(address(1), _curveInput(17, 0, 0, CfdTypes.Side.LONG));
 
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(0), 0);
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 0);
@@ -265,27 +265,27 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_BreakpointCanEqualCapForEitherSide() public {
-        uint144 bullEntryCost = uint144(uint256(2) * CAP_PRICE - 2);
-        _set(address(1), _curveInput(2, bullEntryCost, 1, CfdTypes.Side.BULL));
+        uint144 longEntryCost = uint144(uint256(2) * CAP_PRICE - 2);
+        _set(address(1), _curveInput(2, longEntryCost, 1, CfdTypes.Side.LONG));
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE - 1), 0);
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 1);
 
-        uint144 bearEntryCost = uint144(uint256(2) * CAP_PRICE);
-        _set(address(2), _curveInput(2, bearEntryCost, 1, CfdTypes.Side.BEAR));
+        uint144 shortEntryCost = uint144(uint256(2) * CAP_PRICE);
+        _set(address(2), _curveInput(2, shortEntryCost, 1, CfdTypes.Side.SHORT));
         assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE - 1), 1);
-        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 1); // BULL contributes one; BEAR contributes zero.
+        assertEq(book.terminalLpPriceDeltaUsdcAtoms(CAP_PRICE), 1); // LONG contributes one; SHORT contributes zero.
     }
 
     function test_ExcessCollateralIsCanonicalizedAndIdenticalReplacementIsNoOp() public {
         address account = address(1);
-        TestCurveInput memory first = _curveInput(10, 500, 500, CfdTypes.Side.BEAR);
+        TestCurveInput memory first = _curveInput(10, 500, 500, CfdTypes.Side.SHORT);
         (bytes32 firstHash, uint64 firstVersion) = _set(account, first);
         assertEq(firstVersion, 1);
 
         ITerminalNavBookV2.CurveRecord memory stored = book.curveOf(account);
         assertEq(stored.effectiveCapUsdcAtoms, 500);
 
-        TestCurveInput memory sameCanonical = _curveInput(10, 500, 5000, CfdTypes.Side.BEAR);
+        TestCurveInput memory sameCanonical = _curveInput(10, 500, 5000, CfdTypes.Side.SHORT);
         driver.setPosition(account, sameCanonical);
         (bytes32 secondHash, uint64 secondVersion) = driver.sync(account, firstHash);
         assertEq(secondHash, firstHash);
@@ -298,7 +298,7 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_CurveHashIsDeploymentAndAccountDomainSeparated() public {
-        TestCurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.BEAR);
+        TestCurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.SHORT);
         bytes32 accountOneHash;
         (accountOneHash,) = _set(address(1), input);
         bytes32 accountTwoHash;
@@ -315,11 +315,11 @@ contract TerminalNavBookV2Test is Test {
 
     function test_StrictExpectedHashRejectsStaleLivePositionSynchronization() public {
         address account = address(1);
-        TestCurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.BEAR);
+        TestCurveInput memory input = _curveInput(10, 500, 100, CfdTypes.Side.SHORT);
         bytes32 currentHash;
         (currentHash,) = _set(account, input);
         bytes32 staleHash = keccak256("stale");
-        driver.setPosition(account, _curveInput(11, 550, 100, CfdTypes.Side.BEAR));
+        driver.setPosition(account, _curveInput(11, 550, 100, CfdTypes.Side.SHORT));
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -332,7 +332,7 @@ contract TerminalNavBookV2Test is Test {
     function test_SyncAuthenticatesStoredHashBeforeReadingEnginePostState() public {
         address account = address(1);
         bytes32 currentHash;
-        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.SHORT));
         bytes32 staleHash = keccak256("stale before Engine read");
         driver.setRejectPositionReads(true);
 
@@ -347,7 +347,7 @@ contract TerminalNavBookV2Test is Test {
     function test_StrictExpectedHashRejectsStalePositionRemoval() public {
         address account = address(1);
         bytes32 currentHash;
-        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.SHORT));
         driver.clearPosition(account);
         bytes32 staleHash = keccak256("stale removal");
 
@@ -362,7 +362,7 @@ contract TerminalNavBookV2Test is Test {
     function test_OrphanStoredCurveCannotBeSkippedWithZeroExpectedHash() public {
         address account = address(1);
         bytes32 currentHash;
-        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        (currentHash,) = _set(account, _curveInput(10, 500, 100, CfdTypes.Side.SHORT));
         driver.clearPosition(account);
 
         vm.expectRevert(
@@ -374,7 +374,7 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_AbsentPositionAndCurveSyncIsVersionPreservingNoOp() public {
-        _set(address(2), _curveInput(10, 500, 100, CfdTypes.Side.BEAR));
+        _set(address(2), _curveInput(10, 500, 100, CfdTypes.Side.SHORT));
         ITerminalNavBookV2.BookState memory beforeState = book.bookState();
 
         (bytes32 newHash, uint64 newVersion) = driver.sync(address(1), bytes32(0));
@@ -387,9 +387,9 @@ contract TerminalNavBookV2Test is Test {
     function test_ReplacementAndRemovalRestoreEveryAggregate() public {
         address account = address(1);
         bytes32 firstHash;
-        (firstHash,) = _set(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.BULL));
+        (firstHash,) = _set(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.LONG));
 
-        TestCurveInput memory replacement = _curveInput(1500, 150_000e6, 25_000e6, CfdTypes.Side.BEAR);
+        TestCurveInput memory replacement = _curveInput(1500, 150_000e6, 25_000e6, CfdTypes.Side.SHORT);
         driver.setPosition(account, replacement);
         (bytes32 replacementHash, uint64 replacementVersion) = driver.sync(account, firstHash);
         assertEq(replacementVersion, 2);
@@ -413,7 +413,7 @@ contract TerminalNavBookV2Test is Test {
     }
 
     function test_DuplicateBreakpointsAggregateAndCancelExactly() public {
-        TestCurveInput memory input = _curveInput(3, 10, 2, CfdTypes.Side.BULL);
+        TestCurveInput memory input = _curveInput(3, 10, 2, CfdTypes.Side.LONG);
         bytes32 firstHash;
         (firstHash,) = _set(address(1), input);
         _set(address(2), input);
@@ -450,11 +450,11 @@ contract TerminalNavBookV2Test is Test {
     function test_PackedSlopeLimitIsAcceptedAndPlusOneGrossLotIsRejected() public {
         (TerminalNavEngineDriver maxDriver, TerminalNavBookV2 maxBook) = _deployBook(type(uint32).max);
         uint112 maximumLots = uint112(uint256(int256(type(int112).max)));
-        TestCurveInput memory maximum = _curveInput(maximumLots, 0, 0, CfdTypes.Side.BULL);
+        TestCurveInput memory maximum = _curveInput(maximumLots, 0, 0, CfdTypes.Side.LONG);
         maxDriver.setPosition(address(1), maximum);
         maxDriver.sync(address(1), bytes32(0));
 
-        maxDriver.setPosition(address(2), _curveInput(1, 0, 0, CfdTypes.Side.BULL));
+        maxDriver.setPosition(address(2), _curveInput(1, 0, 0, CfdTypes.Side.LONG));
         vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__AggregateBoundsExceeded.selector);
         maxDriver.sync(address(2), bytes32(0));
         assertEq(maxBook.bookState().activeCurveCount, 1);
@@ -466,7 +466,7 @@ contract TerminalNavBookV2Test is Test {
         uint256 entryCost = uint256(maximumLots) * uint256(type(uint32).max);
         uint256 maximumSignedIntercept = uint256(int256(type(int144).max));
         uint256 cap = maximumSignedIntercept - entryCost;
-        TestCurveInput memory exact = _curveInput(maximumLots, uint144(entryCost), uint144(cap), CfdTypes.Side.BEAR);
+        TestCurveInput memory exact = _curveInput(maximumLots, uint144(entryCost), uint144(cap), CfdTypes.Side.SHORT);
         maxDriver.setPosition(address(1), exact);
         (bytes32 exactHash,) = maxDriver.sync(address(1), bytes32(0));
 
@@ -476,7 +476,7 @@ contract TerminalNavBookV2Test is Test {
         );
 
         TestCurveInput memory tooLarge =
-            _curveInput(maximumLots, uint144(entryCost), uint144(cap + 1), CfdTypes.Side.BEAR);
+            _curveInput(maximumLots, uint144(entryCost), uint144(cap + 1), CfdTypes.Side.SHORT);
         maxDriver.setPosition(address(1), tooLarge);
         vm.expectRevert(ITerminalNavBookV2.TerminalNavBookV2__AggregateBoundsExceeded.selector);
         maxDriver.sync(address(1), exactHash);
@@ -484,7 +484,7 @@ contract TerminalNavBookV2Test is Test {
 
     function test_Gas_CappedInsertAndRelocationStayWithinBookGate() public {
         address account = address(1);
-        driver.setPosition(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.BULL));
+        driver.setPosition(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.LONG));
         uint256 gasBefore = gasleft();
         (bytes32 firstHash,) = driver.sync(account, bytes32(0));
         uint256 insertGas = gasBefore - gasleft();
@@ -492,7 +492,7 @@ contract TerminalNavBookV2Test is Test {
             assertLt(insertGas, 500_000);
         }
 
-        driver.setPosition(account, _curveInput(1000, 100_000e6, 50_000e6, CfdTypes.Side.BULL));
+        driver.setPosition(account, _curveInput(1000, 100_000e6, 50_000e6, CfdTypes.Side.LONG));
         gasBefore = gasleft();
         driver.sync(account, firstHash);
         uint256 relocationGas = gasBefore - gasleft();
@@ -525,14 +525,14 @@ contract TerminalNavBookV2Test is Test {
         uint144 rawEntryCost,
         uint144 rawCap,
         uint32 rawMark,
-        bool isBear
+        bool isShort
     ) public {
         uint112 lots = uint112(bound(rawLots, 1, 1e12));
         uint256 maximumEntryCost = uint256(lots) * CAP_PRICE;
         uint144 entryCost = uint144(bound(rawEntryCost, 0, maximumEntryCost));
         uint144 cap = uint144(bound(rawCap, 0, maximumEntryCost));
         uint32 mark = uint32(bound(rawMark, 0, CAP_PRICE));
-        CfdTypes.Side side = isBear ? CfdTypes.Side.BEAR : CfdTypes.Side.BULL;
+        CfdTypes.Side side = isShort ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
         address account = address(1);
 
         _set(account, _curveInput(lots, entryCost, cap, side));
@@ -603,7 +603,7 @@ contract TerminalNavBookV2Test is Test {
         uint256 maximumEntryCost = uint256(lots) * CAP_PRICE;
         uint144 entryCost = uint144(uint256(keccak256(abi.encode(entropy, "entry"))) % (maximumEntryCost + 1));
         uint144 cap = uint144(uint256(keccak256(abi.encode(entropy, "cap"))) % (maximumEntryCost + 1));
-        CfdTypes.Side side = (uint256(entropy) & 1) == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = (uint256(entropy) & 1) == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
         return _curveInput(lots, entryCost, cap, side);
     }
 
@@ -671,7 +671,7 @@ contract TerminalNavBookV2Test is Test {
     ) private pure returns (int256 value) {
         int256 markedNotional = int256(uint256(curve.lots) * uint256(mark));
         int256 entryCost = int256(uint256(curve.entryCostUsdcAtoms));
-        int256 uncapped = curve.side == CfdTypes.Side.BULL ? markedNotional - entryCost : entryCost - markedNotional;
+        int256 uncapped = curve.side == CfdTypes.Side.LONG ? markedNotional - entryCost : entryCost - markedNotional;
         int256 cap = int256(uint256(curve.effectiveCapUsdcAtoms));
         return uncapped > cap ? cap : uncapped;
     }
@@ -680,7 +680,7 @@ contract TerminalNavBookV2Test is Test {
         ITerminalNavBookV2.CurveRecord memory curve
     ) private pure returns (uint32 breakpoint) {
         uint256 numerator;
-        if (curve.side == CfdTypes.Side.BULL) {
+        if (curve.side == CfdTypes.Side.LONG) {
             numerator = uint256(curve.entryCostUsdcAtoms) + uint256(curve.effectiveCapUsdcAtoms);
         } else if (curve.effectiveCapUsdcAtoms < curve.entryCostUsdcAtoms) {
             numerator = uint256(curve.entryCostUsdcAtoms) - uint256(curve.effectiveCapUsdcAtoms);

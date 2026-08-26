@@ -367,7 +367,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
                 account: account,
                 sizeDelta: size,
                 marginDelta: 0,
-                targetPrice: side == CfdTypes.Side.BULL ? engine.CAP_PRICE() : 1,
+                targetPrice: side == CfdTypes.Side.LONG ? engine.CAP_PRICE() : 1,
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: linkedOrderId,

@@ -52,13 +52,13 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
 
     address internal constant ALICE = address(0xA11CE);
     uint256 internal constant MARK_PRICE = 1e8;
-    uint256 internal constant UNSAFE_BULL_PRICE = 1.98e8;
+    uint256 internal constant UNSAFE_LONG_PRICE = 1.98e8;
     uint256 internal constant PYTH_FEE = 1 ether;
     uint256 internal constant OVERPAYMENT = 0.25 ether;
 
     function test_SingleLiquidationHonorsCutoffAdvancedDuringOracleRefund() public {
         (uint64 invalidatedOrderId, PauseOnOracleRefundKeeper keeper) = _setupCallbackLiquidation();
-        bytes[] memory updateData = _mockPythUpdateData(UNSAFE_BULL_PRICE);
+        bytes[] memory updateData = _mockPythUpdateData(UNSAFE_LONG_PRICE);
 
         vm.deal(address(this), PYTH_FEE + OVERPAYMENT);
         keeper.executeSingle{value: PYTH_FEE + OVERPAYMENT}(address(router), ALICE, updateData);
@@ -69,7 +69,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
 
     function test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund() public {
         (uint64 invalidatedOrderId, PauseOnOracleRefundKeeper keeper) = _setupCallbackLiquidation();
-        bytes[] memory updateData = _mockPythUpdateData(UNSAFE_BULL_PRICE);
+        bytes[] memory updateData = _mockPythUpdateData(UNSAFE_LONG_PRICE);
         address[] memory accounts = new address[](1);
         accounts[0] = ALICE;
 
@@ -88,7 +88,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
             _fundTrader(account, 2000e6);
             orderIds[i] = router.nextCommitId();
             vm.prank(account);
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, MARK_PRICE, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, MARK_PRICE, false);
         }
 
         routerAdmin.pause();
@@ -143,15 +143,15 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
         returns (uint64 invalidatedOrderId, PauseOnOracleRefundKeeper keeper)
     {
         _fundTrader(ALICE, 300_000e6);
-        _open(ALICE, CfdTypes.Side.BULL, 100_000e18, 2000e6, MARK_PRICE);
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
 
         invalidatedOrderId = router.nextCommitId();
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 2000e6, MARK_PRICE, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 2000e6, MARK_PRICE, false);
 
         assertEq(routerAdmin.riskOffOrderCutoff(), 0, "cutoff must begin below the queued open");
         assertTrue(
-            engineLens.isLiquidatableAt(ALICE, UNSAFE_BULL_PRICE, pool.totalAssets()),
+            engineLens.isLiquidatableAt(ALICE, UNSAFE_LONG_PRICE, pool.totalAssets()),
             "setup position must be liquidatable at the adverse price"
         );
 

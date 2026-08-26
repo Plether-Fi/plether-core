@@ -77,7 +77,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // GLOBAL STATE & SOLVENCY BOUNDS
     // ==========================================
 
-    /// @notice Aggregate position accounting by `CfdTypes.Side` index: `0` is BULL and `1` is BEAR.
+    /// @notice Aggregate position accounting by `CfdTypes.Side` index: `0` is LONG and `1` is SHORT.
     /// @dev Each entry contains the sum of maximum-profit envelopes, synthetic open interest, raw entry notional, and
     ///      active position margin for that side. Maximum profit and margin use 6-decimal USDC, open interest uses
     ///      18 decimals, and raw `size * entryPrice` entry notional uses 26 decimals.
@@ -86,11 +86,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 public lastMarkPrice;
     /// @notice Oracle publish timestamp associated with `lastMarkPrice`, in Unix seconds.
     uint64 public lastMarkTime;
-    /// @notice Aggregate carry borrow base by side index (`0` BULL; `1` BEAR), in 6-decimal USDC units.
+    /// @notice Aggregate carry borrow base by side index (`0` LONG; `1` SHORT), in 6-decimal USDC units.
     uint256[2] public sideBorrowBaseUsdc;
-    /// @notice Cumulative utilization-adjusted carry multiplier by side index (`0` BULL; `1` BEAR), scaled by 1e18.
+    /// @notice Cumulative utilization-adjusted carry multiplier by side index (`0` LONG; `1` SHORT), scaled by 1e18.
     uint256[2] public sideCarryIndex;
-    /// @notice Wall-clock Unix timestamp through which each side carry index (`0` BULL; `1` BEAR) has been advanced.
+    /// @notice Wall-clock Unix timestamp through which each side carry index (`0` LONG; `1` SHORT) has been advanced.
     uint64[2] public sideCarryTimestamp;
 
     /// @notice Account carry checkpointed but not yet physically collected, in 6-decimal USDC units.
@@ -153,7 +153,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _oppositeSide(
         CfdTypes.Side side
     ) internal pure returns (CfdTypes.Side) {
-        return side == CfdTypes.Side.BULL ? CfdTypes.Side.BEAR : CfdTypes.Side.BULL;
+        return side == CfdTypes.Side.LONG ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
     }
 
     function _sideAndOppositeStates(
@@ -163,9 +163,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         opposite = _sideState(_oppositeSide(side));
     }
 
-    function _bullAndBearStates() internal view returns (SideState storage bullState, SideState storage bearState) {
-        bullState = _sideState(CfdTypes.Side.BULL);
-        bearState = _sideState(CfdTypes.Side.BEAR);
+    function _longAndShortStates() internal view returns (SideState storage longState, SideState storage shortState) {
+        longState = _sideState(CfdTypes.Side.LONG);
+        shortState = _sideState(CfdTypes.Side.SHORT);
     }
 
     function _requireTerminalNavBook() internal view returns (ITerminalNavBookV2 book) {
@@ -1054,8 +1054,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     function _maxLiability() internal view returns (uint256) {
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        return bullState.maxProfitUsdc > bearState.maxProfitUsdc ? bullState.maxProfitUsdc : bearState.maxProfitUsdc;
+        (SideState storage longState, SideState storage shortState) = _longAndShortStates();
+        return longState.maxProfitUsdc > shortState.maxProfitUsdc ? longState.maxProfitUsdc : shortState.maxProfitUsdc;
     }
 
     // ==========================================
@@ -1109,8 +1109,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _advanceAllCarryIndexes(
         uint256 timestampNow
     ) internal {
-        _advanceSideCarryIndex(CfdTypes.Side.BULL, timestampNow);
-        _advanceSideCarryIndex(CfdTypes.Side.BEAR, timestampNow);
+        _advanceSideCarryIndex(CfdTypes.Side.LONG, timestampNow);
+        _advanceSideCarryIndex(CfdTypes.Side.SHORT, timestampNow);
     }
 
     function _advanceSideCarryIndex(
@@ -1527,9 +1527,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         uint256 price = lastMarkPrice;
-        (SideState storage bullState, SideState storage bearState) = _bullAndBearStates();
-        return CfdMath.conservativeMtmLiability(bullState.maxProfitUsdc, CfdTypes.Side.BULL, price, CAP_PRICE)
-            + CfdMath.conservativeMtmLiability(bearState.maxProfitUsdc, CfdTypes.Side.BEAR, price, CAP_PRICE);
+        (SideState storage longState, SideState storage shortState) = _longAndShortStates();
+        return CfdMath.conservativeMtmLiability(longState.maxProfitUsdc, CfdTypes.Side.LONG, price, CAP_PRICE)
+            + CfdMath.conservativeMtmLiability(shortState.maxProfitUsdc, CfdTypes.Side.SHORT, price, CAP_PRICE);
     }
 
 }

@@ -96,9 +96,9 @@ contract CfdEngineSolvencyTimingHarness is CfdEngine {
 
 contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
 
-    address bullTraderA = address(0xB011);
-    address bullTraderB = address(0xB012);
-    address bearTrader = address(0xBEA2);
+    address longTraderA = address(0xB011);
+    address longTraderB = address(0xB012);
+    address shortTrader = address(0xBEA2);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -173,17 +173,17 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
     }
 
     function test_H2_SolvencyCheckInputsMustMatchCommittedPostOpSideMargins() public {
-        _fundTrader(bullTraderA, 15_000e6);
-        _fundTrader(bullTraderB, 400_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTraderA, 15_000e6);
+        _fundTrader(longTraderB, 400_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        address bullIdA = bullTraderA;
-        address bullIdB = bullTraderB;
-        address bearAccount = bearTrader;
+        address longIdA = longTraderA;
+        address longIdB = longTraderB;
+        address shortAccount = shortTrader;
 
-        _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
-        _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(longIdA, CfdTypes.Side.LONG, 390_000e18, 6500e6, 1e8);
+        _open(longIdB, CfdTypes.Side.LONG, 10_000e18, 300_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
@@ -193,25 +193,25 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         (
             uint256 staleEffectiveAssets,
             uint256 syncedEffectiveAssets,
-            uint256 staleBullMargin,
-            uint256 syncedBullMargin
+            uint256 staleLongMargin,
+            uint256 syncedLongMargin
         ) = harness.previewEffectiveAssetsWithoutMarginSync(
             CfdTypes.Order({
-                account: bullIdA,
+                account: longIdA,
                 sizeDelta: 390_000e18,
                 marginDelta: 0,
                 targetPrice: 0,
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 0,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: true
             })
         );
 
         assertEq(
-            staleBullMargin,
-            syncedBullMargin,
+            staleLongMargin,
+            syncedLongMargin,
             "Solvency/degraded checks must use the same side margins that would be committed after carry realization"
         );
         assertEq(
@@ -235,11 +235,11 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertGt(committedBefore, 0, "Should have committed margin from pending open order");
@@ -247,7 +247,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 freeSettlement = _freeSettlementUsdc(account);
         assertLt(freeSettlement, 1100e6, "Free settlement should be small after committing margin");
 
-        _close(account, CfdTypes.Side.BULL, 50_000e18, 1.05e8);
+        _close(account, CfdTypes.Side.LONG, 50_000e18, 1.05e8);
 
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
@@ -259,11 +259,11 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
 
         _fundTrader(trader, 10_000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 4000e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 4000e6, type(uint256).max, false);
 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
@@ -280,7 +280,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         );
         assertEq(preview.badDebtUsdc, 0, "Any price-loss tail beyond the close slice's cap is a writeoff, not debt");
 
-        _close(account, CfdTypes.Side.BULL, 50_000e18, 1.08e8);
+        _close(account, CfdTypes.Side.LONG, 50_000e18, 1.08e8);
 
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(sizeAfter, preview.remainingSize, "Live partial close should match the accepted preview");
@@ -319,8 +319,8 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
 
         _fundTrader(trader, 5000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         assertEq(_freeSettlementUsdc(account), 0, "Trader should be fully utilized before commit");
     }
@@ -331,8 +331,8 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
 
         _fundTrader(trader, 5001e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8);
-        _open(counterAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+        _open(counterAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         assertEq(
             _freeSettlementUsdc(account), 1e6, "Setup should leave one USDC of free settlement before close reservation"
@@ -346,7 +346,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(marginAfter, marginBefore, "Rejected close order must preserve the account's PnL pledge");
@@ -358,7 +358,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         uint64 headOrderId = router.nextExecuteId();
         uint256 reservedBounty = _executionBountyReserve(headOrderId);
@@ -380,7 +380,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         _setupCloseBountyBacked();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 90_000_000, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 90_000_000, true);
 
         uint256 keeperBalanceBefore = usdc.balanceOf(KEEPER);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
@@ -404,7 +404,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
             maxOrderAge: 60,
@@ -459,7 +459,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         (address account,) = _setupCloseBountyBacked();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.96e8);
         assertTrue(preview.liquidatable, "Setup should be liquidatable at the execution price");
@@ -505,7 +505,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
 
         vm.prank(trader);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 1e18, 0, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 1e18, 0, type(uint256).max, false);
     }
 
 }
@@ -522,7 +522,7 @@ contract AuditBlockingAccountingFindingsFailing_StaleSeniorCoupon is BasePerpTes
         _fundSenior(seniorLp, 200_000e6);
         _fundJunior(juniorLp, 200_000e6);
         _fundTrader(trader, 50_000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;

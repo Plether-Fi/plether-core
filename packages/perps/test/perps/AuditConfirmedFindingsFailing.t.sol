@@ -90,7 +90,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
@@ -130,7 +130,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         vm.warp(t0 + 10);
         vm.roll(200);
@@ -138,7 +138,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), t0 + 10);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         vm.warp(t0 + 61);
         vm.roll(300);
@@ -174,7 +174,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
@@ -256,7 +256,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.roll(100);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, 1020);
@@ -284,9 +284,9 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
         vm.roll(100);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 500e6, 1e8, false);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, 1020);
@@ -423,8 +423,8 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
 contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
 
-    address bullTrader = address(0xB011);
-    address bearTrader = address(0xBEA2);
+    address longTrader = address(0xB011);
+    address shortTrader = address(0xBEA2);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -448,55 +448,55 @@ contract AuditConfirmedFindingsFailing_LegacySpreadReserve is BasePerpTest {
     function obsolete_C2_GetFreeUsdcMustReserveCappedLegacySpreadLiability() public {
         _fundJunior(address(this), 1_000_000e6);
 
-        _fundTrader(bullTrader, 20_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 20_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _open(bullAccount, CfdTypes.Side.BULL, 400_000e18, 10_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 400_000e18, 10_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        (uint256 bullSize, uint256 bullMargin, uint256 bullEntryPrice,, CfdTypes.Side bullSide,,) =
-            engine.positions(bullAccount);
-        (uint256 bearSize, uint256 bearMargin, uint256 bearEntryPrice,, CfdTypes.Side bearSide,,) =
-            engine.positions(bearAccount);
+        (uint256 longSize, uint256 longMargin, uint256 longEntryPrice,, CfdTypes.Side longSide,,) =
+            engine.positions(longAccount);
+        (uint256 shortSize, uint256 shortMargin, uint256 shortEntryPrice,, CfdTypes.Side shortSide,,) =
+            engine.positions(shortAccount);
 
-        CfdTypes.Position memory bullPos = CfdTypes.Position({
-            size: bullSize,
-            margin: bullMargin,
-            entryPrice: bullEntryPrice,
+        CfdTypes.Position memory longPos = CfdTypes.Position({
+            size: longSize,
+            margin: longMargin,
+            entryPrice: longEntryPrice,
             maxProfitUsdc: 0,
-            side: bullSide,
+            side: longSide,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
-        CfdTypes.Position memory bearPos = CfdTypes.Position({
-            size: bearSize,
-            margin: bearMargin,
-            entryPrice: bearEntryPrice,
+        CfdTypes.Position memory shortPos = CfdTypes.Position({
+            size: shortSize,
+            margin: shortMargin,
+            entryPrice: shortEntryPrice,
             maxProfitUsdc: 0,
-            side: bearSide,
+            side: shortSide,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
-        int256 bullLegacySpread = 0;
-        int256 bearLegacySpread = 0;
-        assertLt(bullLegacySpread, -int256(bullMargin), "Setup must make bull legacy-spread debt exceed backing margin");
-        assertGt(bearLegacySpread, 0, "Setup must leave the bear side owed legacy spread");
+        int256 longLegacySpread = 0;
+        int256 shortLegacySpread = 0;
+        assertLt(longLegacySpread, -int256(longMargin), "Setup must make long legacy-spread debt exceed backing margin");
+        assertGt(shortLegacySpread, 0, "Setup must leave the short side owed legacy spread");
 
-        int256 cappedLegacySpread = bearLegacySpread;
+        int256 cappedLegacySpread = shortLegacySpread;
         assertGt(cappedLegacySpread, 0, "Positive legacy-spread liabilities should be fully reserved");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.LONG);
         uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 expectedReserved = maxLiability + pendingFees + uint256(cappedLegacySpread);
         uint256 expectedFree = bal > expectedReserved ? bal - expectedReserved : 0;
@@ -541,7 +541,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 1,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: false
             }),
             150_000_001,
@@ -551,7 +551,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
 
         (uint256 sizeBefore,, uint256 entryPriceBefore,,,,) = engine.positions(account);
         uint256 entryCostBefore = engine.positionEntryCostUsdcAtoms(account);
-        uint256 sideEntryNotionalBefore = _sideEntryNotional(CfdTypes.Side.BULL);
+        uint256 sideEntryNotionalBefore = _sideEntryNotional(CfdTypes.Side.LONG);
         uint256 poolDepth = pool.totalAssets();
 
         vm.expectRevert(
@@ -571,7 +571,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
                 commitTime: uint64(block.timestamp),
                 commitBlock: uint64(block.number),
                 orderId: 2,
-                side: CfdTypes.Side.BULL,
+                side: CfdTypes.Side.LONG,
                 isClose: false
             }),
             150_000_000,
@@ -589,7 +589,7 @@ contract AuditConfirmedFindingsFailing_EntryNotionalRounding is BasePerpTest {
             "Rejected sub-lot increase must not change exact entry-cost atoms"
         );
         assertEq(
-            _sideEntryNotional(CfdTypes.Side.BULL),
+            _sideEntryNotional(CfdTypes.Side.LONG),
             sideEntryNotionalBefore,
             "Rejected sub-lot increase must not change aggregate entry notional"
         );
@@ -617,22 +617,22 @@ contract AuditConfirmedFindingsFailing_OpenSkewCap is BasePerpTest {
     }
 
     function test_C3_OpenSkewCapMustUseSingleSizeDelta() public {
-        address bearTrader = address(0xBEA2);
-        address bullTrader = address(0xB011);
+        address shortTrader = address(0xBEA2);
+        address longTrader = address(0xB011);
 
-        address bearAccount = bearTrader;
-        address bullAccount = bullTrader;
+        address shortAccount = shortTrader;
+        address longAccount = longTrader;
 
-        _fundTrader(bearTrader, 60_000e6);
-        _fundTrader(bullTrader, 120_000e6);
+        _fundTrader(shortTrader, 60_000e6);
+        _fundTrader(longTrader, 120_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 20_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 20_000e6, 1e8);
 
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 20_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 20_000e6, 1e8);
 
-        (uint256 bullSize,,,,,,) = engine.positions(bullAccount);
-        assertEq(bullSize, 200_000e18, "Open-path skew cap should use the intended post-trade skew");
+        (uint256 longSize,,,,,,) = engine.positions(longAccount);
+        assertEq(longSize, 200_000e18, "Open-path skew cap should use the intended post-trade skew");
     }
 
 }
@@ -645,13 +645,13 @@ contract AuditConfirmedFindingsFailing_KeeperReserveLiquidation is BasePerpTest 
         address account = trader;
         _fundTrader(trader, 200e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 175e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 175e6, 1e8);
 
         uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
         uint256 liquidationReserveBefore = clearinghouse.liquidationReserveUsdc(account);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         assertEq(
             clearinghouse.pnlPledgeUsdc(account),

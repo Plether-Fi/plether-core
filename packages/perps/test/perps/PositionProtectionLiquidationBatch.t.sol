@@ -79,7 +79,7 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
     uint256 internal constant MARK_PRICE = 100_000_000;
     uint256 internal constant LIQUIDATION_PRICE = 102_000_000;
     uint256 internal constant DEEP_LIQUIDATION_PRICE = 150_000_000;
-    uint256 internal constant BULL_STOP_LOSS = 110_000_000;
+    uint256 internal constant LONG_STOP_LOSS = 110_000_000;
     uint256 internal constant POSITION_SIZE = 10_000e18;
     uint256 internal constant HEALTHY_MARGIN_USDC = 2000e6;
     uint256 internal constant THIN_MARGIN_USDC = 250e6;
@@ -192,7 +192,7 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
         uint64 protectionId = _openAndProtect(TRIGGERED_ACCOUNT, HEALTHY_MARGIN_USDC);
         _withdrawAllFreeSettlement(TRIGGERED_ACCOUNT);
 
-        bytes[] memory triggerData = _mockPythUpdateData(BULL_STOP_LOSS);
+        bytes[] memory triggerData = _mockPythUpdateData(LONG_STOP_LOSS);
         vm.prank(TRIGGER_KEEPER);
         uint64 linkedOrderId = protectionActions.triggerPositionProtection(protectionId, triggerData);
         assertEq(
@@ -303,10 +303,10 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
         uint256 marginUsdc
     ) internal returns (uint64 protectionId) {
         _fundTrader(account, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, POSITION_SIZE, marginUsdc, MARK_PRICE);
+        _open(account, CfdTypes.Side.LONG, POSITION_SIZE, marginUsdc, MARK_PRICE);
 
         PositionProtectionTypes.PositionProtectionParams memory params;
-        params.stopLossTriggerPrice = BULL_STOP_LOSS;
+        params.stopLossTriggerPrice = LONG_STOP_LOSS;
         vm.prank(account);
         protectionId = protectionActions.createPositionProtection(params);
     }

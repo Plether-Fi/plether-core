@@ -152,9 +152,9 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
     function testFuzz_InvalidatedOpenNeverRevivesAndPostCutoffOpenExecutes(
         uint16 oldLotsSeed,
         uint16 newLotsSeed,
-        bool useBullSide
+        bool useLongSide
     ) public {
-        CfdTypes.Side side = useBullSide ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = useLongSide ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
         uint256 oldSize = bound(uint256(oldLotsSeed), 10, 300) * CfdTypes.SIZE_QUANTUM;
         uint256 newSize = bound(uint256(newLotsSeed), 10, 300) * CfdTypes.SIZE_QUANTUM;
 
@@ -186,9 +186,9 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
 
     /// @notice A cutoff-invalid increase at the FIFO head cannot strand the live close behind it.
     function testFuzz_RiskOffLeavesQueuedCloseLive(
-        bool useBullSide
+        bool useLongSide
     ) public {
-        CfdTypes.Side side = useBullSide ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = useLongSide ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
         uint256 positionSize = 20_000e18;
         _open(ALICE, side, positionSize, 5000e6, 1e8);
 
@@ -221,8 +221,8 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
 
     /// @notice Risk-off invalidation and trader refunds must not disable permissionless liquidation.
     function test_RiskOffLeavesLiquidationLive() public {
-        _open(BOB, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
-        uint64 invalidatedIncreaseId = _commitOpen(BOB, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+        _open(BOB, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        uint64 invalidatedIncreaseId = _commitOpen(BOB, CfdTypes.Side.LONG, 10_000e18, 2000e6);
 
         _triggerRiskOff();
         bytes[] memory liquidationUpdate = _mockPythUpdateData(1.98e8);
@@ -314,7 +314,7 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
     ) internal returns (uint64[] memory orderIds) {
         orderIds = new uint64[](count);
         for (uint256 i; i < count; ++i) {
-            orderIds[i] = _commitOpen(account, CfdTypes.Side.BULL, 10_000e18, 2000e6);
+            orderIds[i] = _commitOpen(account, CfdTypes.Side.LONG, 10_000e18, 2000e6);
         }
     }
 

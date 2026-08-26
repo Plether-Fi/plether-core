@@ -165,7 +165,7 @@ contract PerpOracleHandler is Test {
         vm.startPrank(actor);
         usdc.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(account, 25_000e6);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 10_000e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 10_000e6, 0, false);
         vm.stopPrank();
 
         vm.roll(block.number + 1);

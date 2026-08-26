@@ -259,7 +259,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     ///      The function does not update the engine mark. Excess ETH is refunded to `refundRecipient` or deferred.
     /// @param refundRecipient Recipient of `msg.value` remaining after the Pyth fee
     /// @param pythUpdateData Nonempty Pyth update payloads passed to `updatePriceFeeds`
-    /// @return snapshot BULL-adverse, BEAR-adverse, and neutral prices with the shared publish time and update fee
+    /// @return snapshot LONG-adverse, SHORT-adverse, and neutral prices with the shared publish time and update fee
     function updateLiquidationBatchPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData
@@ -267,11 +267,11 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         (PriceSnapshot memory neutralSnapshot, uint256 confidence) = _updateLiquidationSnapshot(pythUpdateData);
         uint256 shift = _liquidationConfidenceShift(confidence);
         snapshot = LiquidationBatchSnapshot({
-            bullPrice: _clampToCap(
-                _directionalLiquidationPriceFromShift(CfdTypes.Side.BULL, neutralSnapshot.price, shift)
+            longPrice: _clampToCap(
+                _directionalLiquidationPriceFromShift(CfdTypes.Side.LONG, neutralSnapshot.price, shift)
             ),
-            bearPrice: _clampToCap(
-                _directionalLiquidationPriceFromShift(CfdTypes.Side.BEAR, neutralSnapshot.price, shift)
+            shortPrice: _clampToCap(
+                _directionalLiquidationPriceFromShift(CfdTypes.Side.SHORT, neutralSnapshot.price, shift)
             ),
             markPrice: neutralSnapshot.markPrice,
             publishTime: neutralSnapshot.publishTime,
@@ -282,7 +282,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
     /// @notice Pays for a Pyth update and returns a validated price adverse to the liquidated account's position.
     /// @dev Uses liquidation freshness policy and the minimum component publish time, rejects an out-of-order basket,
-    ///      shifts the price upward for a BULL position and downward for a BEAR position by the configured fraction of
+    ///      shifts the price upward for a LONG position and downward for a SHORT position by the configured fraction of
     ///      aggregate confidence, then caps it at `CAP_PRICE`. An account with no position receives the neutral basket.
     ///      The function does not update the engine mark. Excess ETH is refunded to `refundRecipient` or deferred.
     /// @param refundRecipient Recipient of `msg.value` remaining after the Pyth fee
@@ -687,7 +687,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             return price;
         }
 
-        bool adverseUp = request.side == CfdTypes.Side.BEAR ? !request.isClose : request.isClose;
+        bool adverseUp = request.side == CfdTypes.Side.SHORT ? !request.isClose : request.isClose;
         return adverseUp ? price + shift : price > shift ? price - shift : 0;
     }
 
@@ -734,7 +734,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         uint256 price,
         uint256 shift
     ) internal pure returns (uint256) {
-        return side == CfdTypes.Side.BULL ? price + shift : price > shift ? price - shift : 0;
+        return side == CfdTypes.Side.LONG ? price + shift : price > shift ? price - shift : 0;
     }
 
     function _canReuseHistoricalBatchBasket(

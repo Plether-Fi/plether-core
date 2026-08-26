@@ -23,7 +23,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address keeperAccount = KEEPER;
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
@@ -50,10 +50,10 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address account = ALICE;
         address keeperAccount = KEEPER;
         _fundTrader(ALICE, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 1e8, true);
 
         uint256 traderWalletBefore = usdc.balanceOf(ALICE);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
@@ -77,7 +77,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address traderAccount = ALICE;
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1.5e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
@@ -102,7 +102,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address traderAccount = ALICE;
 
         _fundTrader(ALICE, 20_000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 warpedTime = block.timestamp + 30 days;
         vm.warp(warpedTime);
@@ -110,7 +110,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(warpedTime));
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1.5e8, false);
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         bytes[] memory priceData = _mockPythUpdateData(1e8);
@@ -130,7 +130,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address traderAccount = ALICE;
 
         _fundTrader(ALICE, 20_000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -166,14 +166,14 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8, false);
         bytes[] memory openPrice = _mockPythUpdateData(1e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         router.executeOrder(1, openPrice);
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0.8e8, true);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
@@ -197,7 +197,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address keeperAccount = KEEPER;
 
         _fundTrader(KEEPER, 20_000e6);
-        _open(keeperAccount, CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8);
+        _open(keeperAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 freeSettlementBeforeDrain = _freeSettlementUsdc(keeperAccount);
         assertGt(freeSettlementBeforeDrain, 0, "Setup must leave free settlement to drain");
@@ -270,13 +270,13 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address keeperAccount = KEEPER;
 
         _fundTrader(KEEPER, 20_000e6);
-        _open(keeperAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(keeperAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
 
         _fundTrader(ALICE, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 1e8, true);
 
         bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
@@ -310,7 +310,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address keeperAccount = KEEPER;
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
 
@@ -344,7 +344,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         usdc.mint(eve, 1e6);
         usdc.approve(address(clearinghouse), 1e6);
         clearinghouse.deposit(eveAccount, 1e6);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
         vm.stopPrank();
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
@@ -370,10 +370,10 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address account = ALICE;
         address keeperAccount = KEEPER;
         _fundTrader(ALICE, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 1e8, true);
 
         bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));
@@ -400,10 +400,10 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         address account = ALICE;
         address keeperAccount = KEEPER;
         _fundTrader(ALICE, 20_000e6);
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(ALICE);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 1e8, true);
 
         bytes32 positionMarginSlot = keccak256(abi.encode(account, uint256(1)));
         vm.store(address(clearinghouse), positionMarginSlot, bytes32(uint256(0)));

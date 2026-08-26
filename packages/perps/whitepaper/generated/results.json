@@ -13,7 +13,7 @@
       "value": 0.9694729959228992
     },
     "max_forward_reserve_utilization": {
-      "long": {
+      "short": {
         "endpoint_reserve_per_unit": 1.0402652664523226,
         "entry_date": "2016-12-20",
         "entry_price": 0.9597347335476772,
@@ -21,9 +21,9 @@
         "exit_price": 1.1167548970362444,
         "price_profit_per_unit": 0.15702016348856718,
         "reserve_utilization": 0.15094242646787795,
-        "side": "LONG"
+        "side": "SHORT"
       },
-      "short": {
+      "long": {
         "endpoint_reserve_per_unit": 1.1167548970362444,
         "entry_date": "2018-02-15",
         "entry_price": 1.1167548970362444,
@@ -31,7 +31,7 @@
         "exit_price": 0.863572894921236,
         "price_profit_per_unit": 0.2531820021150084,
         "reserve_utilization": 0.22671223809891325,
-        "side": "SHORT"
+        "side": "LONG"
       }
     },
     "maximum": {
@@ -165,7 +165,7 @@
             "base_carry_bps_at_full_utilization": 500,
             "cap": 1.25,
             "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
             "daily_settlement_priority": "liquidations_first",
             "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
             "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -193,16 +193,16 @@
           },
           "book": {
             "admitted_cohorts": 92,
-            "admitted_long_notional_usd": 2678197371.259088,
+            "admitted_short_notional_usd": 2678197371.259088,
             "admitted_notional_usd": 5601458073.329757,
-            "admitted_short_notional_usd": 2923260702.070669,
+            "admitted_long_notional_usd": 2923260702.070669,
             "capacity_bound_cohorts": 1,
             "degraded_rejections": 0,
             "maximum_capped_aggregate_borrow_to_assets": 0.9389146480047466,
             "maximum_endpoint_reserve_utilization": 0.7289716582576431,
-            "maximum_long_borrow_utilization": 0.2422,
+            "maximum_short_borrow_utilization": 0.2422,
             "maximum_post_admission_skew_ratio": 0.4,
-            "maximum_short_borrow_utilization": 0.718,
+            "maximum_long_borrow_utilization": 0.718,
             "no_admissible_scale_rejections": 33,
             "opened_positions": 184,
             "post_admission_assertions": 92,
@@ -212,8 +212,8 @@
             "target_notional_requested_usd": 11250000000.0,
             "time_weighted_capped_aggregate_borrow_to_assets": 0.19871378783877222,
             "time_weighted_endpoint_reserve_utilization": 0.19427583946147914,
-            "time_weighted_long_borrow_utilization": 0.04127701209889521,
-            "time_weighted_short_borrow_utilization": 0.15738584955286716
+            "time_weighted_short_borrow_utilization": 0.04127701209889521,
+            "time_weighted_long_borrow_utilization": 0.15738584955286716
           },
           "carry": {
             "assessed_usd": 4144526.781495,
@@ -293,7 +293,7 @@
             "base_carry_bps_at_full_utilization": 500,
             "cap": 1.5,
             "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
             "daily_settlement_priority": "liquidations_first",
             "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
             "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -321,16 +321,16 @@
           },
           "book": {
             "admitted_cohorts": 92,
-            "admitted_long_notional_usd": 2673483489.863874,
+            "admitted_short_notional_usd": 2673483489.863874,
             "admitted_notional_usd": 5590816982.660302,
-            "admitted_short_notional_usd": 2917333492.796428,
+            "admitted_long_notional_usd": 2917333492.796428,
             "capacity_bound_cohorts": 1,
             "degraded_rejections": 0,
             "maximum_capped_aggregate_borrow_to_assets": 1.0,
             "maximum_endpoint_reserve_utilization": 0.7291068937620677,
-            "maximum_long_borrow_utilization": 0.4355,
+            "maximum_short_borrow_utilization": 0.4355,
             "maximum_post_admission_skew_ratio": 0.4,
-            "maximum_short_borrow_utilization": 0.7181,
+            "maximum_long_borrow_utilization": 0.7181,
             "no_admissible_scale_rejections": 33,
             "opened_positions": 184,
             "post_admission_assertions": 92,
@@ -340,8 +340,8 @@
             "target_notional_requested_usd": 11250000000.0,
             "time_weighted_capped_aggregate_borrow_to_assets": 0.2408506298015053,
             "time_weighted_endpoint_reserve_utilization": 0.23134945262110387,
-            "time_weighted_long_borrow_utilization": 0.08345639137296136,
-            "time_weighted_short_borrow_utilization": 0.1574097843240399
+            "time_weighted_short_borrow_utilization": 0.08345639137296136,
+            "time_weighted_long_borrow_utilization": 0.1574097843240399
           },
           "carry": {
             "assessed_usd": 4908559.015612,
@@ -421,7 +421,7 @@
             "base_carry_bps_at_full_utilization": 500,
             "cap": 2.0,
             "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
             "daily_settlement_priority": "liquidations_first",
             "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
             "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -449,16 +449,16 @@
           },
           "book": {
             "admitted_cohorts": 93,
-            "admitted_long_notional_usd": 2768152474.163589,
+            "admitted_short_notional_usd": 2768152474.163589,
             "admitted_notional_usd": 5758524301.812657,
-            "admitted_short_notional_usd": 2990371827.649068,
+            "admitted_long_notional_usd": 2990371827.649068,
             "capacity_bound_cohorts": 2,
             "degraded_rejections": 0,
             "maximum_capped_aggregate_borrow_to_assets": 1.0,
             "maximum_endpoint_reserve_utilization": 0.8178461829827506,
-            "maximum_long_borrow_utilization": 0.8073,
+            "maximum_short_borrow_utilization": 0.8073,
             "maximum_post_admission_skew_ratio": 0.4,
-            "maximum_short_borrow_utilization": 0.7269,
+            "maximum_long_borrow_utilization": 0.7269,
             "no_admissible_scale_rejections": 32,
             "opened_positions": 186,
             "post_admission_assertions": 93,
@@ -468,8 +468,8 @@
             "target_notional_requested_usd": 11250000000.0,
             "time_weighted_capped_aggregate_borrow_to_assets": 0.32498052176152165,
             "time_weighted_endpoint_reserve_utilization": 0.3095270476754472,
-            "time_weighted_long_borrow_utilization": 0.16793150973172075,
-            "time_weighted_short_borrow_utilization": 0.15801415044713327
+            "time_weighted_short_borrow_utilization": 0.16793150973172075,
+            "time_weighted_long_borrow_utilization": 0.15801415044713327
           },
           "carry": {
             "assessed_usd": 8100043.030068,
@@ -549,7 +549,7 @@
             "base_carry_bps_at_full_utilization": 500,
             "cap": 2.5,
             "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
             "daily_settlement_priority": "liquidations_first",
             "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
             "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -577,16 +577,16 @@
           },
           "book": {
             "admitted_cohorts": 94,
-            "admitted_long_notional_usd": 2863076909.144792,
+            "admitted_short_notional_usd": 2863076909.144792,
             "admitted_notional_usd": 5890918931.921318,
-            "admitted_short_notional_usd": 3027842022.776526,
+            "admitted_long_notional_usd": 3027842022.776526,
             "capacity_bound_cohorts": 39,
             "degraded_rejections": 2,
             "maximum_capped_aggregate_borrow_to_assets": 1.0,
             "maximum_endpoint_reserve_utilization": 1.0112323021084382,
-            "maximum_long_borrow_utilization": 1.0,
+            "maximum_short_borrow_utilization": 1.0,
             "maximum_post_admission_skew_ratio": 0.4,
-            "maximum_short_borrow_utilization": 0.7241,
+            "maximum_long_borrow_utilization": 0.7241,
             "no_admissible_scale_rejections": 29,
             "opened_positions": 188,
             "post_admission_assertions": 94,
@@ -596,8 +596,8 @@
             "target_notional_requested_usd": 11250000000.0,
             "time_weighted_capped_aggregate_borrow_to_assets": 0.38925864620888945,
             "time_weighted_endpoint_reserve_utilization": 0.37162312849485274,
-            "time_weighted_long_borrow_utilization": 0.23762827459231906,
-            "time_weighted_short_borrow_utilization": 0.15484547606522975
+            "time_weighted_short_borrow_utilization": 0.23762827459231906,
+            "time_weighted_long_borrow_utilization": 0.15484547606522975
           },
           "carry": {
             "assessed_usd": 12551117.722455,
@@ -677,7 +677,7 @@
             "base_carry_bps_at_full_utilization": 500,
             "cap": 3.0,
             "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-            "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+            "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
             "daily_settlement_priority": "liquidations_first",
             "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
             "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -705,16 +705,16 @@
           },
           "book": {
             "admitted_cohorts": 95,
-            "admitted_long_notional_usd": 2793965259.001671,
+            "admitted_short_notional_usd": 2793965259.001671,
             "admitted_notional_usd": 5702453312.707196,
-            "admitted_short_notional_usd": 2908488053.705525,
+            "admitted_long_notional_usd": 2908488053.705525,
             "capacity_bound_cohorts": 50,
             "degraded_rejections": 2,
             "maximum_capped_aggregate_borrow_to_assets": 1.0,
             "maximum_endpoint_reserve_utilization": 1.011399619084933,
-            "maximum_long_borrow_utilization": 1.0,
+            "maximum_short_borrow_utilization": 1.0,
             "maximum_post_admission_skew_ratio": 0.4,
-            "maximum_short_borrow_utilization": 0.7003,
+            "maximum_long_borrow_utilization": 0.7003,
             "no_admissible_scale_rejections": 28,
             "opened_positions": 190,
             "post_admission_assertions": 95,
@@ -724,8 +724,8 @@
             "target_notional_requested_usd": 11250000000.0,
             "time_weighted_capped_aggregate_borrow_to_assets": 0.4253680103494587,
             "time_weighted_endpoint_reserve_utilization": 0.4075055592379314,
-            "time_weighted_long_borrow_utilization": 0.2788267490794308,
-            "time_weighted_short_borrow_utilization": 0.15236175697001664
+            "time_weighted_short_borrow_utilization": 0.2788267490794308,
+            "time_weighted_long_borrow_utilization": 0.15236175697001664
           },
           "carry": {
             "assessed_usd": 16054930.073016,
@@ -856,7 +856,7 @@
           "base_carry_bps_at_full_utilization": 500,
           "cap": 2.0,
           "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-          "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+          "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
           "daily_settlement_priority": "liquidations_first",
           "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
           "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -884,16 +884,16 @@
         },
         "book": {
           "admitted_cohorts": 64,
-          "admitted_long_notional_usd": 2880000000.0,
-          "admitted_notional_usd": 5760000000.0,
           "admitted_short_notional_usd": 2880000000.0,
+          "admitted_notional_usd": 5760000000.0,
+          "admitted_long_notional_usd": 2880000000.0,
           "capacity_bound_cohorts": 0,
           "degraded_rejections": 0,
           "maximum_capped_aggregate_borrow_to_assets": 0.9975042662080614,
           "maximum_endpoint_reserve_utilization": 0.5663400365998417,
-          "maximum_long_borrow_utilization": 0.5596,
+          "maximum_short_borrow_utilization": 0.5596,
           "maximum_post_admission_skew_ratio": 0.0,
-          "maximum_short_borrow_utilization": 0.4518,
+          "maximum_long_borrow_utilization": 0.4518,
           "no_admissible_scale_rejections": 61,
           "opened_positions": 128,
           "post_admission_assertions": 64,
@@ -903,8 +903,8 @@
           "target_notional_requested_usd": 11250000000.0,
           "time_weighted_capped_aggregate_borrow_to_assets": 0.32682583117665387,
           "time_weighted_endpoint_reserve_utilization": 0.30208824561651015,
-          "time_weighted_long_borrow_utilization": 0.15640599684376505,
-          "time_weighted_short_borrow_utilization": 0.1703863492898466
+          "time_weighted_short_borrow_utilization": 0.15640599684376505,
+          "time_weighted_long_borrow_utilization": 0.1703863492898466
         },
         "carry": {
           "assessed_usd": 7600356.058508,
@@ -981,7 +981,7 @@
           "base_carry_bps_at_full_utilization": 500,
           "cap": 2.0,
           "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-          "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+          "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
           "daily_settlement_priority": "liquidations_first",
           "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
           "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -1009,16 +1009,16 @@
         },
         "book": {
           "admitted_cohorts": 105,
-          "admitted_long_notional_usd": 1883559162.022024,
+          "admitted_short_notional_usd": 1883559162.022024,
           "admitted_notional_usd": 3904494951.148475,
-          "admitted_short_notional_usd": 2020935789.126451,
+          "admitted_long_notional_usd": 2020935789.126451,
           "capacity_bound_cohorts": 19,
           "degraded_rejections": 0,
           "maximum_capped_aggregate_borrow_to_assets": 1.0,
           "maximum_endpoint_reserve_utilization": 0.9280536681676901,
-          "maximum_long_borrow_utilization": 0.9161,
+          "maximum_short_borrow_utilization": 0.9161,
           "maximum_post_admission_skew_ratio": 0.4,
-          "maximum_short_borrow_utilization": 0.8143,
+          "maximum_long_borrow_utilization": 0.8143,
           "no_admissible_scale_rejections": 20,
           "opened_positions": 105,
           "post_admission_assertions": 105,
@@ -1028,8 +1028,8 @@
           "target_notional_requested_usd": 11250000000.0,
           "time_weighted_capped_aggregate_borrow_to_assets": 0.21937480406408913,
           "time_weighted_endpoint_reserve_utilization": 0.22204183198715086,
-          "time_weighted_long_borrow_utilization": 0.11155176223040499,
-          "time_weighted_short_borrow_utilization": 0.10837864281956841
+          "time_weighted_short_borrow_utilization": 0.11155176223040499,
+          "time_weighted_long_borrow_utilization": 0.10837864281956841
         },
         "carry": {
           "assessed_usd": 5339967.783446,
@@ -1106,7 +1106,7 @@
           "base_carry_bps_at_full_utilization": 500,
           "cap": 2.0,
           "claim_service_behavior": "All beneficiaries call on the first strictly later ECB observation where physical cash covers aggregate claims.",
-          "cohort_admission": "Paired LONG/SHORT allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
+          "cohort_admission": "Paired SHORT/LONG allocations are scaled on an integer 1e18 grid until endpoint solvency and the final hard-skew ratio pass. The paired legs are assumed to be interleaved; this is not a transaction-level order/VPI simulation.",
           "daily_settlement_priority": "liquidations_first",
           "degraded_clear_behavior": "Owner clears the latch at the first observed genuinely restored state; clearing is not automatic in production.",
           "end_of_sample_behavior": "Every remaining position is forcibly full-closed at the last ECB observation in the configured within-class account order.",
@@ -1134,16 +1134,16 @@
         },
         "book": {
           "admitted_cohorts": 93,
-          "admitted_long_notional_usd": 2768152474.163589,
+          "admitted_short_notional_usd": 2768152474.163589,
           "admitted_notional_usd": 5758524301.812657,
-          "admitted_short_notional_usd": 2990371827.649068,
+          "admitted_long_notional_usd": 2990371827.649068,
           "capacity_bound_cohorts": 2,
           "degraded_rejections": 0,
           "maximum_capped_aggregate_borrow_to_assets": 1.0,
           "maximum_endpoint_reserve_utilization": 0.8178461829827506,
-          "maximum_long_borrow_utilization": 0.8073,
+          "maximum_short_borrow_utilization": 0.8073,
           "maximum_post_admission_skew_ratio": 0.4,
-          "maximum_short_borrow_utilization": 0.7269,
+          "maximum_long_borrow_utilization": 0.7269,
           "no_admissible_scale_rejections": 32,
           "opened_positions": 186,
           "post_admission_assertions": 93,
@@ -1153,8 +1153,8 @@
           "target_notional_requested_usd": 11250000000.0,
           "time_weighted_capped_aggregate_borrow_to_assets": 0.32498052176152165,
           "time_weighted_endpoint_reserve_utilization": 0.3095270476754472,
-          "time_weighted_long_borrow_utilization": 0.16793150973172075,
-          "time_weighted_short_borrow_utilization": 0.15801415044713327
+          "time_weighted_short_borrow_utilization": 0.16793150973172075,
+          "time_weighted_long_borrow_utilization": 0.15801415044713327
         },
         "carry": {
           "assessed_usd": 8100043.030068,
@@ -1301,79 +1301,79 @@
   "stylized_cap_sensitivity": {
     "assumptions": {
       "entry_price": 1.0,
-      "long_size_units": 50000000,
+      "short_size_units": 50000000,
       "pool_assets_usd": 100000000,
-      "short_size_units": 30000000
+      "long_size_units": 30000000
     },
     "results": [
       {
         "cap": 1.1,
-        "long_endpoint_liability_usd": 5000000.0,
+        "short_endpoint_liability_usd": 5000000.0,
         "max_liability_usd": 30000000.0,
         "pool_reserve_utilization": 0.3,
-        "short_endpoint_liability_usd": 30000000.0
+        "long_endpoint_liability_usd": 30000000.0
       },
       {
         "cap": 1.25,
-        "long_endpoint_liability_usd": 12500000.0,
+        "short_endpoint_liability_usd": 12500000.0,
         "max_liability_usd": 30000000.0,
         "pool_reserve_utilization": 0.3,
-        "short_endpoint_liability_usd": 30000000.0
+        "long_endpoint_liability_usd": 30000000.0
       },
       {
         "cap": 1.5,
-        "long_endpoint_liability_usd": 25000000.0,
+        "short_endpoint_liability_usd": 25000000.0,
         "max_liability_usd": 30000000.0,
         "pool_reserve_utilization": 0.3,
-        "short_endpoint_liability_usd": 30000000.0
+        "long_endpoint_liability_usd": 30000000.0
       },
       {
         "cap": 1.75,
-        "long_endpoint_liability_usd": 37500000.0,
+        "short_endpoint_liability_usd": 37500000.0,
         "max_liability_usd": 37500000.0,
         "pool_reserve_utilization": 0.375,
-        "short_endpoint_liability_usd": 30000000.0
+        "long_endpoint_liability_usd": 30000000.0
       },
       {
         "cap": 2.0,
-        "long_endpoint_liability_usd": 50000000.0,
+        "short_endpoint_liability_usd": 50000000.0,
         "max_liability_usd": 50000000.0,
         "pool_reserve_utilization": 0.5,
-        "short_endpoint_liability_usd": 30000000.0
+        "long_endpoint_liability_usd": 30000000.0
       },
       {
         "cap": 2.5,
-        "long_endpoint_liability_usd": 75000000.0,
+        "short_endpoint_liability_usd": 75000000.0,
         "max_liability_usd": 75000000.0,
         "pool_reserve_utilization": 0.75,
-        "short_endpoint_liability_usd": 30000000.0
+        "long_endpoint_liability_usd": 30000000.0
       },
       {
         "cap": 3.0,
-        "long_endpoint_liability_usd": 100000000.0,
+        "short_endpoint_liability_usd": 100000000.0,
         "max_liability_usd": 100000000.0,
         "pool_reserve_utilization": 1.0,
-        "short_endpoint_liability_usd": 30000000.0
+        "long_endpoint_liability_usd": 30000000.0
       }
     ]
   },
   "stylized_carry": {
     "assumptions": {
       "base_carry_bps_at_full_utilization": 500,
-      "long_margin_usd": 2500000,
-      "long_max_profit_usd": 25000000,
+      "short_margin_usd": 2500000,
+      "short_max_profit_usd": 25000000,
       "pool_assets_usd": 100000000,
-      "short_margin_usd": 4000000,
-      "short_max_profit_usd": 40000000
+      "long_margin_usd": 4000000,
+      "long_max_profit_usd": 40000000
     },
-    "long": {
+    "short": {
       "annualized_rate_bps": 112,
       "borrow_base_usd": 22500000.0,
       "economic_annualized_rate_bps": 112.5,
       "one_year_carry_usd": 253125.0,
       "utilization_bps": 2250
     },
-    "short": {
+    "long": {
       "annualized_rate_bps": 180,
       "borrow_base_usd": 36000000.0,
       "economic_annualized_rate_bps": 180.0,

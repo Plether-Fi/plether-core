@@ -47,7 +47,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     }
 
     function test_AuthenticatedTerminalSnapshotMatchesBookAndFixedMarkFullClose() public {
-        _openWinningBullPosition();
+        _openWinningLongPosition();
         _refreshMark(MARK_PRICE);
 
         ICfdEngineTypes.TerminalNavSnapshot memory snapshot = engine.terminalNavSnapshot();
@@ -70,7 +70,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         );
 
         CloseParitySnapshot memory beforeClose = _captureCloseParitySnapshot(TRADER);
-        _close(TRADER, CfdTypes.Side.BULL, POSITION_SIZE, MARK_PRICE);
+        _close(TRADER, CfdTypes.Side.LONG, POSITION_SIZE, MARK_PRICE);
         CloseParityObserved memory observed = _observeCloseParity(TRADER, beforeClose);
         _assertClosePreviewMatchesObserved(preview, observed, beforeClose.protocol.degradedMode);
 
@@ -85,7 +85,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     }
 
     function test_PartialCloseCashPayoutAndDeferredClaimPreserveCurveThroughClaimSettlement() public {
-        _openWinningBullPosition();
+        _openWinningLongPosition();
         _refreshMark(MARK_PRICE);
         uint256 branchPoint = vm.snapshotState();
 
@@ -94,7 +94,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         assertTrue(liquidPreview.valid, "liquid partial close must be valid");
         assertGt(liquidPreview.immediatePayoutUsdc, 0, "liquid branch must pay fresh price gain immediately");
         assertEq(liquidPreview.traderClaimBalanceUsdc, 0, "liquid branch must not leave a trader claim");
-        _close(TRADER, CfdTypes.Side.BULL, HALF_POSITION_SIZE, MARK_PRICE);
+        _close(TRADER, CfdTypes.Side.LONG, HALF_POSITION_SIZE, MARK_PRICE);
 
         CurveObservation memory liquidCurve = _observeCurve(TRADER);
         uint256 liquidPledge = clearinghouse.pnlPledgeUsdc(TRADER);
@@ -114,7 +114,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             liquidPreview.freshTraderPayoutUsdc,
             "cash availability must not change the fresh price-gain entitlement"
         );
-        _close(TRADER, CfdTypes.Side.BULL, HALF_POSITION_SIZE, MARK_PRICE);
+        _close(TRADER, CfdTypes.Side.LONG, HALF_POSITION_SIZE, MARK_PRICE);
 
         CurveObservation memory deferredCurve = _observeCurve(TRADER);
         uint256 deferredPledge = clearinghouse.pnlPledgeUsdc(TRADER);
@@ -171,7 +171,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         assertEq(remainingSize, HALF_POSITION_SIZE, "claim settlement must leave the live position open");
         assertEq(remainingEntryPrice, ENTRY_PRICE, "claim settlement must not change the remaining entry price");
         assertEq(
-            _sideTotalMargin(CfdTypes.Side.BULL),
+            _sideTotalMargin(CfdTypes.Side.LONG),
             livePledgeUsdc,
             "side total margin must include claim value converted into live PnL pledge"
         );
@@ -181,19 +181,19 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             "position borrow base must be recomputed from the increased live PnL pledge"
         );
         assertEq(
-            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)),
+            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)),
             expectedBorrowBaseUsdc,
             "single-position side borrow base must match its recomputed position borrow base"
         );
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(TRADER, remainingSize, MARK_PRICE);
         assertTrue(preview.valid, "cache-synchronized live position must remain closable");
-        _close(TRADER, CfdTypes.Side.BULL, remainingSize, MARK_PRICE);
+        _close(TRADER, CfdTypes.Side.LONG, remainingSize, MARK_PRICE);
 
         (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
         assertEq(sizeAfter, 0, "full close after claim settlement must remove the position");
-        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0, "full close must clear side margin");
-        assertEq(engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)), 0, "full close must clear side borrow base");
+        assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0, "full close must clear side margin");
+        assertEq(engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)), 0, "full close must clear side borrow base");
     }
 
     function test_LiveClaimSettlementSynchronizesCachesAndAllowsLiquidation() public {
@@ -209,9 +209,9 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
         (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
         assertEq(sizeAfter, 0, "liquidation after claim settlement must remove the position");
-        assertEq(_sideTotalMargin(CfdTypes.Side.BULL), 0, "liquidation must clear side margin without underflow");
+        assertEq(_sideTotalMargin(CfdTypes.Side.LONG), 0, "liquidation must clear side margin without underflow");
         assertEq(
-            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)),
+            engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)),
             0,
             "liquidation must clear side borrow base without underflow"
         );
@@ -219,7 +219,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
     function test_JuniorDepositAndRedeemUseIdenticalSignedNavWithLiveUnrealizedPnl() public {
         _finishJuniorCooldown(address(this));
-        _openWinningBullPosition();
+        _openWinningLongPosition();
         _refreshMark(MARK_PRICE);
 
         {
@@ -293,7 +293,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     }
 
     function test_EngineRejectsStaleCurveInsteadOfHealingUnsynchronizedPnlPledge() public {
-        _openWinningBullPosition();
+        _openWinningLongPosition();
         bytes32 committedHash = terminalNavBook.curveHashOf(TRADER);
         uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(TRADER);
 
@@ -313,7 +313,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
     function test_EngineRejectsUnexpectedCurveForAccountWithoutPosition() public {
         _fundTrader(DEPOSITOR, 60_000e6);
-        _open(DEPOSITOR, CfdTypes.Side.BULL, POSITION_SIZE, 40_000e6, ENTRY_PRICE);
+        _open(DEPOSITOR, CfdTypes.Side.LONG, POSITION_SIZE, 40_000e6, ENTRY_PRICE);
 
         bytes32 committedHash = terminalNavBook.curveHashOf(DEPOSITOR);
         assertTrue(committedHash != bytes32(0), "setup must create a canonical live curve");
@@ -335,12 +335,12 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
 
     function test_LiquidationSynchronizesDistinctKeeperWithOpenPosition() public {
         _fundTrader(TRADER, 300e6);
-        _open(TRADER, CfdTypes.Side.BULL, 10_000e18, 200e6, ENTRY_PRICE);
+        _open(TRADER, CfdTypes.Side.LONG, 10_000e18, 200e6, ENTRY_PRICE);
         vm.prank(TRADER);
         clearinghouse.withdraw(TRADER, 100e6);
 
         _fundTrader(KEEPER, 2000e6);
-        _open(KEEPER, CfdTypes.Side.BEAR, 10_000e18, 1000e6, ENTRY_PRICE);
+        _open(KEEPER, CfdTypes.Side.SHORT, 10_000e18, 1000e6, ENTRY_PRICE);
 
         uint256 liquidationPrice = 101_000_000;
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(TRADER, liquidationPrice);
@@ -377,7 +377,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     }
 
     function test_FinalTerminalSyncFailureRollsBackEngineClearinghouseAndBook() public {
-        _openWinningBullPosition();
+        _openWinningLongPosition();
 
         bytes32 curveHashBefore = terminalNavBook.curveHashOf(TRADER);
         bytes32 engineStateBefore = _engineStateHash(TRADER);
@@ -410,13 +410,13 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         );
     }
 
-    function _openWinningBullPosition() private {
+    function _openWinningLongPosition() private {
         _fundTrader(TRADER, 60_000e6);
-        _open(TRADER, CfdTypes.Side.BULL, POSITION_SIZE, 40_000e6, ENTRY_PRICE);
+        _open(TRADER, CfdTypes.Side.LONG, POSITION_SIZE, 40_000e6, ENTRY_PRICE);
     }
 
     function _settleDeferredClaimOnLivePosition() private returns (uint256 claimAmountUsdc) {
-        _openWinningBullPosition();
+        _openWinningLongPosition();
         _refreshMark(MARK_PRICE);
 
         uint256 removedPoolCash = usdc.balanceOf(address(pool));
@@ -426,7 +426,7 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         assertGt(preview.freshTraderPayoutUsdc, 0, "setup must create a fresh trader entitlement");
         assertEq(preview.immediatePayoutUsdc, 0, "empty pool must defer the fresh payout");
 
-        _close(TRADER, CfdTypes.Side.BULL, HALF_POSITION_SIZE, MARK_PRICE);
+        _close(TRADER, CfdTypes.Side.LONG, HALF_POSITION_SIZE, MARK_PRICE);
         claimAmountUsdc = engine.traderClaimBalanceUsdc(TRADER);
         assertEq(claimAmountUsdc, preview.freshTraderPayoutUsdc, "fresh payout must become the deferred claim");
 
@@ -490,14 +490,14 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     function _aggregateSideStateHash() private view returns (bytes32 stateHash) {
         stateHash = keccak256(
             abi.encode(
-                _sideState(CfdTypes.Side.BULL),
-                _sideState(CfdTypes.Side.BEAR),
-                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BULL)),
-                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.BEAR)),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.BULL)),
-                engine.sideCarryIndex(uint256(CfdTypes.Side.BEAR)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.BULL)),
-                engine.sideCarryTimestamp(uint256(CfdTypes.Side.BEAR))
+                _sideState(CfdTypes.Side.LONG),
+                _sideState(CfdTypes.Side.SHORT),
+                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.LONG)),
+                engine.sideBorrowBaseUsdc(uint256(CfdTypes.Side.SHORT)),
+                engine.sideCarryIndex(uint256(CfdTypes.Side.LONG)),
+                engine.sideCarryIndex(uint256(CfdTypes.Side.SHORT)),
+                engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG)),
+                engine.sideCarryTimestamp(uint256(CfdTypes.Side.SHORT))
             )
         );
     }

@@ -72,7 +72,7 @@ contract PerpFeeHandler is Test {
         uint256 beforeFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 margin = bound(marginFuzz, 2000e6, 10_000e6);
         vm.prank(actor);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, margin, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, margin, 0, false);
         bytes[] memory empty;
         router.executeOrderBatch(1, empty);
         _syncFeeDelta(beforeFees, clearinghouse.balanceUsdc(engine.protocolTreasury()));

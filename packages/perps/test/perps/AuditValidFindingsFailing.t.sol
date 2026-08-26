@@ -20,7 +20,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         address account = trader;
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 5000 * 1e6, 1e8, false);
 
         vm.prank(trader);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
@@ -34,10 +34,10 @@ contract AuditValidFindingsFailing is BasePerpTest {
         address aAccount = traderA;
         address bAccount = traderB;
 
-        // A enters BULL at 1.5e8 → profits when price drops to 1e8 (+$50K)
-        // B enters BULL at 0.5e8 → loses when price rises to 1e8 (-$50K, but only $1K margin)
-        _open(aAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 100_000 * 1e6, 1.5e8);
-        _open(bAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1000 * 1e6, 0.5e8);
+        // A enters LONG at 1.5e8 → profits when price drops to 1e8 (+$50K)
+        // B enters LONG at 0.5e8 → loses when price rises to 1e8 (-$50K, but only $1K margin)
+        _open(aAccount, CfdTypes.Side.LONG, 100_000 * 1e18, 100_000 * 1e6, 1.5e8);
+        _open(bAccount, CfdTypes.Side.LONG, 100_000 * 1e18, 1000 * 1e6, 0.5e8);
 
         // Move mark to 1e8 — both positions still open (no liquidation).
         // A is winning $50K, B is losing $50K but has only $1K margin.
@@ -66,7 +66,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _fundTrader(trader, 10_000 * 1e6);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 200e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 200e6, 1.5e8, false);
 
         uint256 executionBountyUsdc = _executionBountyReserve(1);
         uint256 keeperEthBefore = keeper.balance;
@@ -103,8 +103,8 @@ contract AuditValidFindingsFailing is BasePerpTest {
 
         // Each open funds a $100 dedicated liquidation reserve in addition to execution
         // fees and the exact PnL pledge used for price health.
-        _open(positiveAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1700 * 1e6, 1e8);
-        _open(negativeAccount, CfdTypes.Side.BULL, 100_000 * 1e18, 1700 * 1e6, 1e8);
+        _open(positiveAccount, CfdTypes.Side.LONG, 100_000 * 1e18, 1700 * 1e6, 1e8);
+        _open(negativeAccount, CfdTypes.Side.LONG, 100_000 * 1e18, 1700 * 1e6, 1e8);
 
         uint256 positiveFreeSettlementUsdc = _freeSettlementUsdc(positiveAccount);
         uint256 negativeFreeSettlementUsdc = _freeSettlementUsdc(negativeAccount);
@@ -193,7 +193,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _fundTrader(trader, 100_000 * 1e6);
         address account = trader;
 
-        _open(account, CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.warp(block.timestamp + 1 days);
 
@@ -208,7 +208,7 @@ contract AuditValidFindingsFailing is BasePerpTest {
         _fundTrader(trader, 50_000 * 1e6);
 
         address account = trader;
-        _open(account, CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
         uint256 beforeTime = pool.lastReconcileTime();
         vm.warp(block.timestamp + 121);
@@ -253,11 +253,11 @@ contract AuditValidFindingsFailingVpi is BasePerpTest {
         address mmAccount = marketMaker;
         address flipAccount = flipper;
 
-        _open(skewAccount, CfdTypes.Side.BEAR, 500_000 * 1e18, 50_000 * 1e6, 1e8);
-        _open(mmAccount, CfdTypes.Side.BULL, 500_000 * 1e18, 50_000 * 1e6, 1e8);
-        _open(flipAccount, CfdTypes.Side.BULL, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
+        _open(skewAccount, CfdTypes.Side.SHORT, 500_000 * 1e18, 50_000 * 1e6, 1e8);
+        _open(mmAccount, CfdTypes.Side.LONG, 500_000 * 1e18, 50_000 * 1e6, 1e8);
+        _open(flipAccount, CfdTypes.Side.LONG, 1_000_000 * 1e18, 100_000 * 1e6, 1e8);
 
-        _close(mmAccount, CfdTypes.Side.BULL, 500_000 * 1e18, 1e8);
+        _close(mmAccount, CfdTypes.Side.LONG, 500_000 * 1e18, 1e8);
 
         uint256 mmAfter = clearinghouse.balanceUsdc(mmAccount);
         uint256 depositAmount = 500_000 * 1e6;

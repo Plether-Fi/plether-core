@@ -69,8 +69,8 @@ interface IOrderLiquidationBatchHost {
 
     function executeLiquidationBatchItem(
         address account,
-        uint256 bullPrice,
-        uint256 bearPrice,
+        uint256 longPrice,
+        uint256 shortPrice,
         uint256 neutralMarkPrice,
         uint64 publishTime,
         address keeper,
@@ -532,7 +532,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         );
         request.side = plan.side;
         request.sizeDelta = plan.size;
-        request.targetPrice = plan.side == CfdTypes.Side.BULL ? host.engine().CAP_PRICE() : 1;
+        request.targetPrice = plan.side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
         request.isClose = true;
         request.bounds.validUntil = uint64(block.timestamp + host.maxOrderAge());
         request.bounds.allowedExecutionModes = 1 | 2 | 4;
@@ -615,8 +615,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
             try host.executeLiquidationBatchItem{gas: itemGas}(
                 account,
-                snapshot.bullPrice,
-                snapshot.bearPrice,
+                snapshot.longPrice,
+                snapshot.shortPrice,
                 snapshot.markPrice,
                 snapshot.publishTime,
                 msg.sender,

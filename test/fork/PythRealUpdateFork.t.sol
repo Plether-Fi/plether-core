@@ -97,7 +97,7 @@ contract PythRealUpdateForkTest is Test {
         uint64 orderId = router.nextCommitId();
 
         vm.prank(alice);
-        router.commitOrder(_orderRequest(alice, CfdTypes.Side.BULL, 100_000e18, 5000e6));
+        router.commitOrder(_orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6));
 
         uint256 fee = IPyth(REAL_PYTH).getUpdateFee(updateData);
         vm.deal(keeper, fee);
@@ -230,7 +230,7 @@ contract PythRealUpdateForkTest is Test {
             side: side,
             sizeDelta: size,
             marginDelta: margin,
-            targetPrice: side == CfdTypes.Side.BULL ? 1 : type(uint256).max,
+            targetPrice: side == CfdTypes.Side.LONG ? 1 : type(uint256).max,
             isClose: false,
             bounds: OrderV2Types.ExecutionBounds({
                 validUntil: uint64(block.timestamp + router.maxOrderAge()),

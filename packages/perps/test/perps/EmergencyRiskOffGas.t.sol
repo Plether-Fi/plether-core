@@ -115,7 +115,7 @@ contract EmergencyRiskOffGasTest is BasePerpTest {
         address account
     ) internal {
         vm.prank(account);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 2000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8, false);
     }
 
     function _activateRiskOff() internal returns (uint64 cutoff) {

@@ -76,7 +76,7 @@ contract PerpHandler is Test {
         sizeFuzz = bound(sizeFuzz, 10, 1000) * CfdTypes.SIZE_QUANTUM;
         marginFuzz = bound(marginFuzz, 100e6, 10_000e6);
 
-        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
 
         usdc.mint(trader, marginFuzz);
         vm.startPrank(trader);
@@ -344,9 +344,9 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_NoLegacySideIndexState() public view {
-        int256 bullIdx = _legacySideIndexZero(CfdTypes.Side.BULL);
-        int256 bearIdx = _legacySideIndexZero(CfdTypes.Side.BEAR);
-        assertEq(bullIdx + bearIdx, 0, "Legacy side indices must stay zeroed");
+        int256 longIdx = _legacySideIndexZero(CfdTypes.Side.LONG);
+        int256 shortIdx = _legacySideIndexZero(CfdTypes.Side.SHORT);
+        assertEq(longIdx + shortIdx, 0, "Legacy side indices must stay zeroed");
     }
 
     function invariant_NoNegativePrincipal() public {
@@ -464,24 +464,24 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_AggregateOIMatchesPositions() public view {
-        uint256 sumBullSize;
-        uint256 sumBearSize;
+        uint256 sumLongSize;
+        uint256 sumShortSize;
 
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             address account = trader;
             (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
             if (size > 0) {
-                if (side == CfdTypes.Side.BULL) {
-                    sumBullSize += size;
+                if (side == CfdTypes.Side.LONG) {
+                    sumLongSize += size;
                 } else {
-                    sumBearSize += size;
+                    sumShortSize += size;
                 }
             }
         }
 
-        assertEq(_sideOpenInterest(CfdTypes.Side.BULL), sumBullSize, "Bull OI must match sum of bull positions");
-        assertEq(_sideOpenInterest(CfdTypes.Side.BEAR), sumBearSize, "Bear OI must match sum of bear positions");
+        assertEq(_sideOpenInterest(CfdTypes.Side.LONG), sumLongSize, "Long OI must match sum of long positions");
+        assertEq(_sideOpenInterest(CfdTypes.Side.SHORT), sumShortSize, "Short OI must match sum of short positions");
     }
 
     function invariant_LivePositionsRemainSingleDirectionAndBounded() public view {
@@ -502,11 +502,11 @@ contract PerpInvariantTest is BasePerpTest {
             }
 
             assertTrue(
-                side == CfdTypes.Side.BULL || side == CfdTypes.Side.BEAR,
+                side == CfdTypes.Side.LONG || side == CfdTypes.Side.SHORT,
                 "Live positions must encode exactly one directional side"
             );
 
-            uint256 sideBound = side == CfdTypes.Side.BULL
+            uint256 sideBound = side == CfdTypes.Side.LONG
                 ? (size * entryPrice) / 1e20
                 : (size * (capPrice > entryPrice ? capPrice - entryPrice : 0)) / 1e20;
             assertLe(
@@ -523,8 +523,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_EntryNotionalsMatchPositions() public view {
-        uint256 sumBullNotional;
-        uint256 sumBearNotional;
+        uint256 sumLongNotional;
+        uint256 sumShortNotional;
 
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
@@ -532,16 +532,16 @@ contract PerpInvariantTest is BasePerpTest {
             (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
             if (size > 0) {
                 uint256 exactEntryNotional = engine.positionEntryCostUsdcAtoms(account) * CfdMath.USDC_TO_TOKEN_SCALE;
-                if (side == CfdTypes.Side.BULL) {
-                    sumBullNotional += exactEntryNotional;
+                if (side == CfdTypes.Side.LONG) {
+                    sumLongNotional += exactEntryNotional;
                 } else {
-                    sumBearNotional += exactEntryNotional;
+                    sumShortNotional += exactEntryNotional;
                 }
             }
         }
 
-        assertEq(_sideEntryNotional(CfdTypes.Side.BULL), sumBullNotional, "Bull entry notional must match positions");
-        assertEq(_sideEntryNotional(CfdTypes.Side.BEAR), sumBearNotional, "Bear entry notional must match positions");
+        assertEq(_sideEntryNotional(CfdTypes.Side.LONG), sumLongNotional, "Long entry notional must match positions");
+        assertEq(_sideEntryNotional(CfdTypes.Side.SHORT), sumShortNotional, "Short entry notional must match positions");
     }
 
     function invariant_PositionMarginsBackedByClearinghouse() public view {
@@ -565,8 +565,8 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function invariant_GlobalSideMarginsMatchPositions() public view {
-        uint256 sumBullMargin;
-        uint256 sumBearMargin;
+        uint256 sumLongMargin;
+        uint256 sumShortMargin;
 
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
@@ -574,22 +574,22 @@ contract PerpInvariantTest is BasePerpTest {
             if (size == 0) {
                 continue;
             }
-            if (side == CfdTypes.Side.BULL) {
-                sumBullMargin += margin;
+            if (side == CfdTypes.Side.LONG) {
+                sumLongMargin += margin;
             } else {
-                sumBearMargin += margin;
+                sumShortMargin += margin;
             }
         }
 
         assertEq(
-            _sideTotalMargin(CfdTypes.Side.BULL),
-            sumBullMargin,
-            "Bull side margin mirror must equal live bull position margins"
+            _sideTotalMargin(CfdTypes.Side.LONG),
+            sumLongMargin,
+            "Long side margin mirror must equal live long position margins"
         );
         assertEq(
-            _sideTotalMargin(CfdTypes.Side.BEAR),
-            sumBearMargin,
-            "Bear side margin mirror must equal live bear position margins"
+            _sideTotalMargin(CfdTypes.Side.SHORT),
+            sumShortMargin,
+            "Short side margin mirror must equal live short position margins"
         );
     }
 
@@ -864,7 +864,7 @@ contract AdversarialPerpHandler is Test {
             _seedTrader(actor, margin + 5e6);
         }
 
-        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.BULL : CfdTypes.Side.BEAR;
+        CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
 
         uint64 commitId = router.nextCommitId();
         vm.prank(actor);
@@ -889,7 +889,7 @@ contract AdversarialPerpHandler is Test {
 
         for (uint256 i = 0; i < count; i++) {
             vm.prank(actor);
-            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, 2e8, false);
         }
     }
 
@@ -1015,7 +1015,7 @@ contract AdversarialPerpHandler is Test {
             _seedTrader(actor, 2500e6);
         }
 
-        CfdTypes.Side side = CfdTypes.Side.BULL;
+        CfdTypes.Side side = CfdTypes.Side.LONG;
         (uint256 size,,,, CfdTypes.Side existingSide,,) = engine.positions(account);
         if (size > 0) {
             side = existingSide;
@@ -1075,12 +1075,12 @@ contract AdversarialPerpHandler is Test {
             return true;
         }
         if (order.isClose) {
-            if (order.side == CfdTypes.Side.BULL) {
+            if (order.side == CfdTypes.Side.LONG) {
                 return executionPrice <= order.targetPrice;
             }
             return executionPrice >= order.targetPrice;
         }
-        if (order.side == CfdTypes.Side.BULL) {
+        if (order.side == CfdTypes.Side.LONG) {
             return executionPrice >= order.targetPrice;
         }
         return executionPrice <= order.targetPrice;

@@ -16,8 +16,8 @@ contract TrancheCooldownBypassReceiver {}
 
 contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
 
-    address bullTrader = address(0xB011);
-    address bearTrader = address(0xBEA2);
+    address longTrader = address(0xB011);
+    address shortTrader = address(0xBEA2);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -35,33 +35,33 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
     }
 
     function test_C3_ProfitableCloseEntersDegradedModeInsteadOfReverting() public {
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
 
-        _fundTrader(bullTrader, 100_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 100_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 1_000_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
 
-        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _close(longAccount, CfdTypes.Side.LONG, 500_000e18, 20_000_000);
 
         assertTrue(engine.degradedMode(), "Profitable close should latch degraded mode when it reveals insolvency");
     }
 
     function test_C3_DegradedModeBlocksNewOpensUntilRecapitalized() public {
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
         address newTrader = address(0xCAFE);
         address newTraderAccount = newTrader;
 
-        _fundTrader(bullTrader, 100_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 100_000e6);
+        _fundTrader(shortTrader, 100_000e6);
         _fundTrader(newTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _open(shortAccount, CfdTypes.Side.SHORT, 1_000_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
+        _close(longAccount, CfdTypes.Side.LONG, 500_000e18, 20_000_000);
 
         assertTrue(engine.degradedMode(), "Setup must enter degraded mode");
         CfdTypes.Order memory blockedOpen = CfdTypes.Order({
@@ -72,7 +72,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 0,
-            side: CfdTypes.Side.BULL,
+            side: CfdTypes.Side.LONG,
             isClose: false
         });
 
@@ -87,18 +87,18 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
     }
 
     function test_C3_OwnerCanClearDegradedModeAfterRecapitalization() public {
-        address bullAccount = bullTrader;
-        address bearAccount = bearTrader;
+        address longAccount = longTrader;
+        address shortAccount = shortTrader;
         address newTrader = address(0xCAFE);
         address newTraderAccount = newTrader;
 
-        _fundTrader(bullTrader, 100_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTrader, 100_000e6);
+        _fundTrader(shortTrader, 100_000e6);
         _fundTrader(newTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
-        _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
-        _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
+        _open(shortAccount, CfdTypes.Side.SHORT, 1_000_000e18, 50_000e6, 1e8);
+        _open(longAccount, CfdTypes.Side.LONG, 500_000e18, 50_000e6, 1e8);
+        _close(longAccount, CfdTypes.Side.LONG, 500_000e18, 20_000_000);
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
@@ -113,22 +113,22 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         engine.clearDegradedMode();
 
         assertFalse(engine.degradedMode(), "Owner should clear degraded mode after recapitalization restores solvency");
-        _open(newTraderAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(newTraderAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
     }
 
     function test_C3_TraderClaimDoesNotRequireDegradedModeWithoutOpenLiability() public {
-        address bullAccount = bullTrader;
+        address longAccount = longTrader;
 
-        _fundTrader(bullTrader, 11_000e6);
-        _open(bullAccount, CfdTypes.Side.BULL, 100_000e18, 9000e6, 1e8);
+        _fundTrader(longTrader, 11_000e6);
+        _open(longAccount, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
 
-        _close(bullAccount, CfdTypes.Side.BULL, 100_000e18, 80_000_000);
+        _close(longAccount, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
-        assertGt(engine.traderClaimBalanceUsdc(bullAccount), 0, "Setup should create a trader claim liability");
+        assertGt(engine.traderClaimBalanceUsdc(longAccount), 0, "Setup should create a trader claim liability");
         assertFalse(
             engine.degradedMode(),
             "A standalone trader claim should not force degraded mode once bounded open liability is gone"
@@ -145,7 +145,7 @@ contract AuditFollowupFindingsFailing_LiquidationBadDebt is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
-        _open(account, CfdTypes.Side.BULL, 100_000e18, 2000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         vm.prank(trader);
         clearinghouse.withdraw(account, 8000e6);
@@ -193,7 +193,7 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
 
         _fundTrader(trader, 100e6);
 
-        _open(account, CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 12e6, 1e8);
 
         uint256 freeSettlementUsdc = _freeSettlementUsdc(account);
         vm.prank(trader);
@@ -221,9 +221,9 @@ contract AuditFollowupFindingsFailing_LiquidationBounty is BasePerpTest {
 
 contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
 
-    address bullTraderA = address(0xB011);
-    address bullTraderB = address(0xB012);
-    address bearTrader = address(0xBEA2);
+    address longTraderA = address(0xB011);
+    address longTraderB = address(0xB012);
+    address shortTrader = address(0xBEA2);
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory) {
         return CfdTypes.RiskParams({
@@ -247,58 +247,58 @@ contract AuditFollowupFindingsFailing_LegacySpreadReserve is BasePerpTest {
     function obsolete_H2_GetFreeUsdcMustReservePositiveLegacySpreadWithoutNettingAgainstGlobalMargin() public {
         _fundJunior(address(this), 1_000_000e6);
 
-        _fundTrader(bullTraderA, 15_000e6);
-        _fundTrader(bullTraderB, 400_000e6);
-        _fundTrader(bearTrader, 100_000e6);
+        _fundTrader(longTraderA, 15_000e6);
+        _fundTrader(longTraderB, 400_000e6);
+        _fundTrader(shortTrader, 100_000e6);
 
-        address bullIdA = bullTraderA;
-        address bullIdB = bullTraderB;
-        address bearAccount = bearTrader;
+        address longIdA = longTraderA;
+        address longIdB = longTraderB;
+        address shortAccount = shortTrader;
 
-        _open(bullIdA, CfdTypes.Side.BULL, 390_000e18, 6500e6, 1e8);
-        _open(bullIdB, CfdTypes.Side.BULL, 10_000e18, 300_000e6, 1e8);
-        _open(bearAccount, CfdTypes.Side.BEAR, 100_000e18, 50_000e6, 1e8);
+        _open(longIdA, CfdTypes.Side.LONG, 390_000e18, 6500e6, 1e8);
+        _open(longIdB, CfdTypes.Side.LONG, 10_000e18, 300_000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         vm.warp(block.timestamp + 180 days);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        CfdTypes.Position memory bullPosA;
-        CfdTypes.Position memory bullPosB;
-        CfdTypes.Position memory bearPos;
+        CfdTypes.Position memory longPosA;
+        CfdTypes.Position memory longPosB;
+        CfdTypes.Position memory shortPos;
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullIdA);
-            bullPosA = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(longIdA);
+            longPosA = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bullIdB);
-            bullPosB = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(longIdB);
+            longPosB = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
         {
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(bearAccount);
-            bearPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
+            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(shortAccount);
+            shortPos = CfdTypes.Position(size, margin, entryPrice, 0, side, 0, 0, 0);
         }
 
-        int256 bullLegacySpreadA = 0;
-        int256 bullLegacySpreadB = 0;
-        int256 bearLegacySpread = 0;
+        int256 longLegacySpreadA = 0;
+        int256 longLegacySpreadB = 0;
+        int256 shortLegacySpread = 0;
         assertLt(
-            bullLegacySpreadA,
-            -int256(bullPosA.margin),
-            "Large undercollateralized bull should owe more legacy spread than its own margin in the obsolete model"
+            longLegacySpreadA,
+            -int256(longPosA.margin),
+            "Large undercollateralized long should owe more legacy spread than its own margin in the obsolete model"
         );
         assertGt(
-            bullLegacySpreadA + bullLegacySpreadB,
-            -int256(bullPosA.margin + bullPosB.margin),
-            "Global bull margin should mask the single-account deficit"
+            longLegacySpreadA + longLegacySpreadB,
+            -int256(longPosA.margin + longPosB.margin),
+            "Global long margin should mask the single-account deficit"
         );
-        assertGt(bearLegacySpread, 0, "Setup must make the bear side owed legacy spread");
+        assertGt(shortLegacySpread, 0, "Setup must make the short side owed legacy spread");
 
         uint256 bal = usdc.balanceOf(address(pool));
-        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.BULL);
+        uint256 maxLiability = _sideMaxProfit(CfdTypes.Side.LONG);
         uint256 pendingFees = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        uint256 expectedFree = bal > maxLiability + pendingFees + uint256(bearLegacySpread)
-            ? bal - maxLiability - pendingFees - uint256(bearLegacySpread)
+        uint256 expectedFree = bal > maxLiability + pendingFees + uint256(shortLegacySpread)
+            ? bal - maxLiability - pendingFees - uint256(shortLegacySpread)
             : 0;
 
         assertEq(
@@ -377,9 +377,9 @@ contract AuditFollowupFindingsFailing_AsyncCloseIntent is BasePerpTest {
         _fundTrader(trader, 50_000e6);
 
         vm.startPrank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 5000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8, false);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 20_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 0, 0, true);
         vm.stopPrank();
 
         assertEq(
@@ -398,11 +398,11 @@ contract AuditFollowupFindingsFailing_SkewCap is BasePerpTest {
         address counterpartyAccount = address(0xBEEF);
         _fundTrader(trader, 100_000e6);
         _fundTrader(address(0xBEEF), 100_000e6);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 100_000e18, 10_000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
         uint256 depth = pool.totalAssets();
 
         vm.expectRevert();
-        _open(account, CfdTypes.Side.BULL, 600_000e18, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.LONG, 600_000e18, 50_000e6, 1e8, depth);
     }
 
 }

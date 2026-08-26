@@ -134,10 +134,10 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
         );
 
         assertEq(
@@ -158,7 +158,7 @@ contract AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity is BasePerpT
                 uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
             )
         );
-        router.commitOrder(CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, false);
     }
 
 }

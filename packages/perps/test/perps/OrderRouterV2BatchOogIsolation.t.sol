@@ -79,9 +79,9 @@ contract OrderRouterV2BatchOogIsolationTest is BasePerpTest {
         _fundTrader(SECOND_TRADER, 2000e6);
 
         vm.prank(FIRST_TRADER);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
         vm.prank(SECOND_TRADER);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
         uint64 firstOrderId = 1;
         uint64 secondOrderId = 2;
 

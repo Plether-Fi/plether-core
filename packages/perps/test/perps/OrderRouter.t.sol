@@ -131,7 +131,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_UnbrickableQueue_OnEngineRevert() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 1 hours);
         uint256 bobMaxWithdraw = _maxRequestableJuniorAssets(bob);
@@ -157,14 +157,14 @@ contract OrderRouterTest is BasePerpTest {
     function test_WithdrawalFirewall() public {
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperUsdcBefore = _settlementBalance(address(this));
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        assertEq(_sideMaxProfit(CfdTypes.Side.BULL), 50_000 * 1e6, "Max liability = $50k for 50k BULL at $1.00");
+        assertEq(_sideMaxProfit(CfdTypes.Side.LONG), 50_000 * 1e6, "Max liability = $50k for 50k LONG at $1.00");
 
         uint256 freeUsdc = pool.getFreeUSDC();
         uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
@@ -195,7 +195,7 @@ contract OrderRouterTest is BasePerpTest {
     function test_CommitOrder_OpenRejectsNonLotSize() public {
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidSizeQuantum.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 99e18, 2e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 99e18, 2e6, 1e8, false);
     }
 
     function test_CommitOrder_AlignedOpenStillRejectsBelowMinimumNotional() public {
@@ -204,7 +204,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11));
-        router.commitOrder(CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 2e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 2e6, 1e8, false);
     }
 
     function test_IncreaseOrder_DoesNotUsePnlPledgeToPayTradeCost() public {
@@ -215,7 +215,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 executionBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(sizeDelta);
 
         _fundTrader(trader, marginDelta + executionBountyUsdc);
-        _open(account, CfdTypes.Side.BULL, sizeDelta, marginDelta, 1e8);
+        _open(account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8);
 
         assertEq(
             _freeSettlementUsdc(account),
@@ -224,7 +224,7 @@ contract OrderRouterTest is BasePerpTest {
         );
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, sizeDelta, 0, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, sizeDelta, 0, 1e8, false);
 
         assertLt(
             _freeSettlementUsdc(account),
@@ -265,16 +265,16 @@ contract OrderRouterTest is BasePerpTest {
     function test_ZeroSizeCommit_Reverts() public {
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ZeroSize.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 0, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 0, 500 * 1e6, 1e8, false);
     }
 
     function test_NonLotPartialCloseCommit_RevertsBeforeQueueMutation() public {
         _fundTrader(alice, 2000e6);
-        _open(alice, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidSizeQuantum.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 1, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 1, 0, 0, true);
 
         assertEq(router.pendingOrderCounts(alice), 0, "Rejected non-lot close should not enter the FIFO queue");
         assertEq(router.nextCommitId(), 1, "Rejected non-lot close should not consume an order id");
@@ -284,14 +284,14 @@ contract OrderRouterTest is BasePerpTest {
         uint256 minCloseSize = 1000e18;
 
         _fundTrader(alice, 2000e6);
-        _open(alice, CfdTypes.Side.BULL, minCloseSize + CfdTypes.SIZE_QUANTUM, 1000e6, 1e8);
+        _open(alice, CfdTypes.Side.LONG, minCloseSize + CfdTypes.SIZE_QUANTUM, 1000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, minCloseSize, 0, 0, true);
-        router.commitOrder(CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, minCloseSize, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 0, 0, true);
         vm.stopPrank();
 
         assertEq(router.pendingOrderCounts(alice), 2, "Both meaningful partial and full-residual closes should queue");
@@ -305,7 +305,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_ExecuteNonPendingOrder_Reverts() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -327,14 +327,14 @@ contract OrderRouterTest is BasePerpTest {
         address otherAccount = other;
 
         _fundTrader(other, 1000e6);
-        _open(otherAccount, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(otherAccount, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 1, head
         vm.prank(other);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false); // order 2, non-head
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false); // order 2, non-head
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false); // order 3, next live order
 
         vm.prank(other);
         clearinghouse.withdraw(otherAccount, 70e6);
@@ -371,8 +371,8 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         bytes[] memory empty = _mockPythUpdateData();
@@ -385,8 +385,8 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 500 * 1e6, 2e8, false);
         vm.stopPrank();
 
         assertEq(
@@ -439,10 +439,10 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.startPrank(alice);
         for (uint256 i = 0; i < limit; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 1e8, false);
+            router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, 1e8, false);
         }
         vm.expectRevert(IOrderRouterErrors.OrderRouter__TooManyPendingOrders.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, 1e8, false);
         vm.stopPrank();
     }
 
@@ -450,8 +450,8 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
@@ -468,7 +468,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_OrderRecord_UnifiesPendingState() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         OrderRouter.OrderRecord memory record = _orderRecord(1);
         assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.Pending));
@@ -483,7 +483,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_OrderRecord_DeletesExecutedStateAndBookPreservesLifecycle() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -504,8 +504,8 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
@@ -522,10 +522,10 @@ contract OrderRouterTest is BasePerpTest {
         address account = trader;
 
         _fundTrader(trader, 1001e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 1000e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         assertEq(_executionBountyReserve(1), 200_000, "Close orders should pre-seize the flat router bounty");
     }
@@ -538,15 +538,15 @@ contract OrderRouterTest is BasePerpTest {
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 50_000e18, 50_000e6, 1e8);
 
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(marginAfter, marginBefore, "Rejected close bounty must not consume PnL pledge");
@@ -567,8 +567,8 @@ contract OrderRouterTest is BasePerpTest {
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 50_000e18, 50_000e6, 1e8);
 
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
         (, uint256 marginBefore,,,,,) = engine.positions(account);
@@ -577,7 +577,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
         vm.prank(trader);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 50_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(marginAfter, marginBefore, "Reverted stale-mark commit must roll back carry and preserve PnL pledge");
@@ -599,7 +599,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8, false);
         bytes[] memory openPrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -616,7 +616,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 expectedCarry = _expectedIndexedCarryUsdc(account);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still reservation the full bounty");
         assertEq(
@@ -636,7 +636,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8, false);
         bytes[] memory openPrice = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
@@ -658,7 +658,7 @@ contract OrderRouterTest is BasePerpTest {
         uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         uint256 marginConsumed = marginBefore - marginAfter;
@@ -685,8 +685,8 @@ contract OrderRouterTest is BasePerpTest {
 
         _fundTrader(trader, 1000e6);
         _fundTrader(counterparty, 50_000e6);
-        _open(account, CfdTypes.Side.BULL, 50_000e18, 1000e6, 1e8);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 50_000e18, 50_000e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 50_000e18, 1000e6, 1e8);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 50_000e18, 50_000e6, 1e8);
 
         vm.prank(address(router));
         engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
@@ -707,18 +707,18 @@ contract OrderRouterTest is BasePerpTest {
         uint256 depth = 5_000_000 * 1e6;
         _fundTrader(trader, 50_000e6);
         _fundTrader(counterparty, 500_000e6);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 500_000e18, 50_000e6, 1e8, depth);
 
         uint256 positionSize = 1100e18;
         uint256 invalidPartialCloseSize = 1000e18;
-        _open(account, CfdTypes.Side.BULL, positionSize, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.LONG, positionSize, 50_000e6, 1e8, depth);
 
         (, uint256 marginBeforeCommit,,,,,) = engine.positions(account);
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(trader);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
-        router.commitOrder(CfdTypes.Side.BULL, invalidPartialCloseSize, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, invalidPartialCloseSize, 0, 0, true);
 
         (, uint256 marginAfterCommit,,,,,) = engine.positions(account);
         assertEq(marginAfterCommit, marginBeforeCommit, "Rejected commit must preserve PnL pledge");
@@ -735,18 +735,18 @@ contract OrderRouterTest is BasePerpTest {
         uint256 depth = 5_000_000 * 1e6;
         _fundTrader(trader, 55_000e6);
         _fundTrader(counterparty, 500_000e6);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 500_000e18, 50_000e6, 1e8, depth);
 
         uint256 positionSize = 1100e18;
         uint256 partialCloseSize = 1000e18;
-        _open(account, CfdTypes.Side.BULL, positionSize, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.LONG, positionSize, 50_000e6, 1e8, depth);
 
         uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(account);
         assertGt(freeSettlementBeforeCommit, 200_000, "setup must leave free settlement to back the bounty");
         assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, partialCloseSize, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, partialCloseSize, 0, 0, true);
 
         assertEq(
             _freeSettlementUsdc(account),
@@ -778,8 +778,8 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
@@ -799,13 +799,13 @@ contract OrderRouterTest is BasePerpTest {
         _fundTrader(bob, 10_000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BEAR, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceAccount);
         assertEq(alicePending.length, 2, "Alice should see only her own queued orders");
@@ -817,10 +817,10 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
         assertEq(
@@ -835,7 +835,7 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.prank(address(engine));
         clearinghouse.consumeAccountOrderReservations(account, 400 * 1e6);
@@ -858,10 +858,10 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 1e8, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
         vm.prank(address(engine));
@@ -904,8 +904,8 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 250 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
         uint256 freeSettlement = _freeSettlementUsdc(account);
@@ -953,7 +953,7 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 250 * 1e6, 1e8, false);
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(1);
         IMarginClearinghouse.AccountReservationSummary memory summary =
@@ -983,8 +983,8 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 250 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 250 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 250 * 1e6, 2e8, false);
         vm.stopPrank();
 
         uint256 freeSettlement = _freeSettlementUsdc(account);
@@ -1011,8 +1011,8 @@ contract OrderRouterTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
         bytes[] memory empty = _mockPythUpdateData();
@@ -1039,13 +1039,13 @@ contract OrderRouterTest is BasePerpTest {
         _fundTrader(bob, 10_000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BEAR, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -1066,11 +1066,11 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperBefore = _settlementBalance(address(this));
@@ -1082,11 +1082,11 @@ contract OrderRouterTest is BasePerpTest {
 
         address aliceAccount = alice;
         (uint256 aliceSize,,,,,,) = engine.positions(aliceAccount);
-        assertEq(aliceSize, 15_000 * 1e18, "Alice should have 15k BULL");
+        assertEq(aliceSize, 15_000 * 1e18, "Alice should have 15k LONG");
 
         address carolAccount = carol;
         (uint256 carolSize,,,,,,) = engine.positions(carolAccount);
-        assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k BEAR");
+        assertEq(carolSize, 10_000 * 1e18, "Carol should have 10k SHORT");
 
         uint256 keeperAfter = _settlementBalance(address(this));
         assertEq(
@@ -1110,9 +1110,9 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -1130,13 +1130,13 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_BatchExecution_MixedResults() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1.5e8, false);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
@@ -1159,7 +1159,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_BatchExecution_EmptyQueueAfterDrain_RevertsBeforeOracleWork() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -1172,7 +1172,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_BatchExecution_UncommittedMaxId_Reverts() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty;
         vm.expectRevert(IOrderRouterErrors.OrderRouter__BatchOrderNotCommitted.selector);
@@ -1182,9 +1182,9 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_BatchExecution_SingleETHTransfer() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperEthBefore = address(this).balance;
@@ -1221,11 +1221,11 @@ contract OrderRouterTest is BasePerpTest {
         uint256 spamCount = 5;
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 100 * 1e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.LONG, 1000 * 1e18, 100 * 1e6, 2e8, false);
         }
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -1253,7 +1253,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -1263,10 +1263,10 @@ contract OrderRouterTest is BasePerpTest {
         _fundTrader(bob, 1000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 90_000_000, true);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory batchData = _mockPythUpdateData();
         vm.warp(block.timestamp + 1);
@@ -1296,7 +1296,7 @@ contract OrderRouterTest is BasePerpTest {
 
         for (uint256 i = 0; i < failedCycles; ++i) {
             vm.prank(alice);
-            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
             vm.warp(block.timestamp + router.maxOrderAge() + 1);
             uint256 historicalPublishTime = block.timestamp - router.maxOrderAge();
@@ -1315,10 +1315,10 @@ contract OrderRouterTest is BasePerpTest {
         }
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 1);
         baseMockPyth.setAllUniquePrices(
@@ -1348,19 +1348,19 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         uint256 spamCount = 5;
         for (uint256 i = 0; i < spamCount; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 2e8, false);
+            router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 2e8, false);
         }
 
         bytes[] memory closeData = _mockPythUpdateData();
@@ -1392,7 +1392,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -1402,13 +1402,13 @@ contract OrderRouterTest is BasePerpTest {
         _fundTrader(bob, 5000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 90_000_000, true);
 
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 2e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 2e8, false);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         bytes[] memory batchData = _mockPythUpdateData();
         uint256 executorBefore = _settlementBalance(address(this));
@@ -1562,7 +1562,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
         vm.warp(1050);
@@ -1581,7 +1581,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1010);
         vm.warp(1005);
@@ -1599,7 +1599,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
         vm.warp(1050);
@@ -1621,7 +1621,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1150);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1100);
         vm.warp(1200);
@@ -1655,7 +1655,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.warp(1050);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1051, 1050);
         bytes[] memory empty = _pythUpdateData();
@@ -1688,7 +1688,7 @@ contract OrderRouterPythTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         mockPyth.setAllUniquePrices(
@@ -1710,7 +1710,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.basketMaxConfidenceRatioBps = 100;
@@ -1731,7 +1731,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
         mockPyth.setAllPrices(feedIds, int64(105_000_000), int32(-8), 1006);
         vm.warp(1050);
@@ -1767,7 +1767,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_PostCommitDegradedModePaysClearerBounty() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         _setDegradedModeForTest();
         assertTrue(engine.degradedMode(), "Setup must latch degraded mode");
@@ -1800,9 +1800,9 @@ contract OrderRouterPythTest is BasePerpTest {
         address aliceAccount = alice;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
         vm.prank(bob);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         _setDegradedModeForTest();
         vm.warp(block.timestamp + 6);
@@ -1837,12 +1837,12 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.prank(eve);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 100e6, 1e8, false);
     }
 
     function test_CommitOrder_RevertsOnPredictableMustCloseOpposing() public {
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
         vm.expectRevert(
@@ -1851,7 +1851,7 @@ contract OrderRouterPythTest is BasePerpTest {
                 uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING)
             )
         );
-        router.commitOrder(CfdTypes.Side.BEAR, 5000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 500e6, 1e8, false);
     }
 
     function test_CommitOrder_RevertsOnPredictablePositionTooSmall() public {
@@ -1860,7 +1860,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, CfdTypes.SIZE_QUANTUM, 5000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 5000e6, 1e8, false);
     }
 
     function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
@@ -1871,7 +1871,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
 
         vm.prank(eve);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 100e6, 1e8, false);
 
         IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(eveAccount);
         assertEq(pending.length, 1, "Stale cached marks should skip commit-time predictable-open rejection");
@@ -1887,22 +1887,22 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
     }
 
     function _assertAboveCapPreviewPolicy(
-        address healingBearTrader,
-        address crossingBearTrader,
+        address healingShortTrader,
+        address crossingShortTrader,
         uint256 healingSize
     ) internal {
         CfdEngineLens previewLens = new CfdEngineLens(address(engine));
         ICfdEngineTypes.OpenPreview memory preview = previewLens.previewOpen(
-            crossingBearTrader, CfdTypes.Side.BEAR, 580_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+            crossingShortTrader, CfdTypes.Side.SHORT, 580_000e18, 20_000e6, 1e8, uint64(block.timestamp)
         );
         assertTrue(preview.valid, "Crossing balance may end exactly at the cap");
 
         preview = previewLens.previewOpen(
-            crossingBearTrader, CfdTypes.Side.BEAR, 590_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+            crossingShortTrader, CfdTypes.Side.SHORT, 590_000e18, 20_000e6, 1e8, uint64(block.timestamp)
         );
         assertFalse(
             preview.valid,
@@ -1915,7 +1915,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
 
         preview = previewLens.previewOpen(
-            crossingBearTrader, CfdTypes.Side.BEAR, 600_000e18, 20_000e6, 1e8, uint64(block.timestamp)
+            crossingShortTrader, CfdTypes.Side.SHORT, 600_000e18, 20_000e6, 1e8, uint64(block.timestamp)
         );
         assertFalse(preview.valid, "An above-cap order with unchanged absolute skew should remain invalid");
         assertEq(
@@ -1925,7 +1925,7 @@ contract OrderRouterPythTest is BasePerpTest {
         );
 
         preview = previewLens.previewOpen(
-            healingBearTrader, CfdTypes.Side.BEAR, healingSize, 1000e6, 1e8, uint64(block.timestamp)
+            healingShortTrader, CfdTypes.Side.SHORT, healingSize, 1000e6, 1e8, uint64(block.timestamp)
         );
         assertTrue(preview.valid, "Preview should admit an incremental skew reduction above the cap");
     }
@@ -1933,13 +1933,13 @@ contract OrderRouterPythTest is BasePerpTest {
     /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" permits above-cap recovery only while the order
     ///      side remains lighter; crossing balance may reach the cap but must not rebuild an above-cap imbalance.
     function test_AboveCapSkewReduction_PreviewCommitAndExecutionSucceed() public {
-        address bullTrader = address(0xB011);
-        address healingBearTrader = address(0xBEA1);
-        address crossingBearTrader = address(0xBEA2);
-        _fundTrader(bullTrader, 50_000e6);
-        _fundTrader(healingBearTrader, 20_000e6);
-        _fundTrader(crossingBearTrader, 30_000e6);
-        _open(bullTrader, CfdTypes.Side.BULL, 300_000e18, 30_000e6, 1e8);
+        address longTrader = address(0xB011);
+        address healingShortTrader = address(0xBEA1);
+        address crossingShortTrader = address(0xBEA2);
+        _fundTrader(longTrader, 50_000e6);
+        _fundTrader(healingShortTrader, 20_000e6);
+        _fundTrader(crossingShortTrader, 30_000e6);
+        _open(longTrader, CfdTypes.Side.LONG, 300_000e18, 30_000e6, 1e8);
 
         uint256 targetPoolAssetsUsdc = 700_000e6;
         uint256 poolAssetsBeforeDrainUsdc = pool.totalAssets();
@@ -1955,11 +1955,11 @@ contract OrderRouterPythTest is BasePerpTest {
         assertGt(preSkewUsdc, maxSkewUsdc, "Setup should begin above the configured skew cap");
         assertGt(postHealingSkewUsdc, maxSkewUsdc, "The healing order should remain above the skew cap");
 
-        _assertAboveCapPreviewPolicy(healingBearTrader, crossingBearTrader, healingSize);
+        _assertAboveCapPreviewPolicy(healingShortTrader, crossingShortTrader, healingSize);
 
-        vm.prank(healingBearTrader);
-        router.commitOrder(CfdTypes.Side.BEAR, healingSize, 1000e6, 1e8, false);
-        assertEq(router.pendingOrderCounts(healingBearTrader), 1, "Skew-reducing order should pass commit validation");
+        vm.prank(healingShortTrader);
+        router.commitOrder(CfdTypes.Side.SHORT, healingSize, 1000e6, 1e8, false);
+        assertEq(router.pendingOrderCounts(healingShortTrader), 1, "Skew-reducing order should pass commit validation");
 
         vm.warp(block.timestamp + 6);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
@@ -1967,22 +1967,22 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, updateData);
 
-        (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(healingBearTrader);
+        (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(healingShortTrader);
         assertEq(liveSize, healingSize, "Skew-reducing order should execute");
-        assertEq(uint8(liveSide), uint8(CfdTypes.Side.BEAR), "Executed position should use the healing side");
+        assertEq(uint8(liveSide), uint8(CfdTypes.Side.SHORT), "Executed position should use the healing side");
         assertEq(
-            _sideOpenInterest(CfdTypes.Side.BULL) - _sideOpenInterest(CfdTypes.Side.BEAR),
+            _sideOpenInterest(CfdTypes.Side.LONG) - _sideOpenInterest(CfdTypes.Side.SHORT),
             postHealingSkewUsdc * 1e12,
             "Execution should leave the expected reduced open-interest skew"
         );
     }
 
     function test_CommitOrder_RevertsOnPredictableSolvencyInvalidation() public {
-        address bearTrader = address(0xC333);
-        address bearAccount = bearTrader;
+        address shortTrader = address(0xC333);
+        address shortAccount = shortTrader;
 
-        _fundTrader(bearTrader, 50_000e6);
-        _open(bearAccount, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _fundTrader(shortTrader, 50_000e6);
+        _open(shortAccount, CfdTypes.Side.SHORT, 300_000e18, 30_000e6, 1e8);
         _fundTrader(alice, 40_000e6);
 
         vm.prank(address(pool));
@@ -1990,12 +1990,12 @@ contract OrderRouterPythTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 350_000e18, 35_000e6, 1e8, false);
     }
 
     function test_PostCommitSkewInvalidationPaysClearerBounty() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 800_000e6);
@@ -2024,16 +2024,16 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PostCommitSolvencyInvalidationPaysClearerBounty() public {
-        address bearTrader = address(0xC333);
-        address bearAccount = bearTrader;
+        address shortTrader = address(0xC333);
+        address shortAccount = shortTrader;
         address aliceAccount = alice;
 
-        _fundTrader(bearTrader, 50_000e6);
-        _open(bearAccount, CfdTypes.Side.BEAR, 300_000e18, 30_000e6, 1e8);
+        _fundTrader(shortTrader, 50_000e6);
+        _open(shortAccount, CfdTypes.Side.SHORT, 300_000e18, 30_000e6, 1e8);
         _fundTrader(alice, 40_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 350_000e18, 35_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 350_000e18, 35_000e6, 1e8, false);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 700_000e6);
@@ -2062,10 +2062,10 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_PostCommitMarginDrainInvalidationPaysClearerBounty() public {
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
 
@@ -2095,10 +2095,10 @@ contract OrderRouterPythTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
@@ -2125,10 +2125,10 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_BatchPostCommitMarginDrainInvalidationPaysClearerBounty() public {
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
 
@@ -2160,10 +2160,10 @@ contract OrderRouterPythTest is BasePerpTest {
         routerAdmin.finalizeRouterConfig();
 
         address aliceAccount = alice;
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         _forcePnlPledgeForMarginDrain(aliceAccount, 1e6);
@@ -2202,7 +2202,7 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 basePublishTime = block.timestamp + 6;
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
 
         mockPyth.setPrice(feedIds[0], int64(100_000_000), int32(-8), basePublishTime);
         for (uint256 i = 1; i < feedIds.length; i++) {
@@ -2231,7 +2231,7 @@ contract OrderRouterPythTest is BasePerpTest {
         address aliceAccount = alice;
 
         vm.warp(minPublishTime - 1);
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000e18, 500e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8);
 
         mockPyth.setPrice(feedIds[0], int64(100_000_000), int32(-8), minPublishTime);
         mockPyth.setPrice(feedIds[1], int64(100_000_000), int32(-8), minPublishTime + 2 hours);
@@ -2239,7 +2239,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(saturdayNoon);
         uint64 orderId = router.nextCommitId();
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         vm.roll(block.number + 1);
         router.executeOrder(orderId, _pythUpdateData());
@@ -2314,7 +2314,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_BatchPostCommitSkewInvalidationPaysClearerBounty() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 5000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
 
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 800_000e6);
@@ -2345,16 +2345,16 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
         address aliceAccount = alice;
 
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
         uint64 closeOrderId = router.nextCommitId();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(closeOrderId);
         uint64 historicalPublishTime =
             uint64(uint256(pending.commitTime) + router.pletherOracle().orderSettlementWindow());
 
-        _close(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
+        _close(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1e8);
 
         bytes[] memory empty = _pythUpdateData();
         vm.warp(block.timestamp + 120);
@@ -2381,13 +2381,13 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_ExitedAccount_InvalidCloseOrderPaysReservedBounty() public {
         address aliceAccount = alice;
 
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
         uint64 closeOrderId = router.nextCommitId();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
-        _close(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1e8);
+        _close(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1e8);
 
         vm.warp(block.timestamp + 6);
         bytes[] memory empty = _pythUpdateData();
@@ -2419,18 +2419,18 @@ contract OrderRouterPythTest is BasePerpTest {
         uint256 depth = 5_000_000 * 1e6;
         _fundTrader(trader, 55_000e6);
         _fundTrader(counterparty, 500_000e6);
-        _open(counterpartyAccount, CfdTypes.Side.BEAR, 500_000e18, 50_000e6, 1e8, depth);
+        _open(counterpartyAccount, CfdTypes.Side.SHORT, 500_000e18, 50_000e6, 1e8, depth);
 
         uint256 positionSize = 1100e18;
         uint256 partialCloseSize = 1000e18;
-        _open(account, CfdTypes.Side.BULL, positionSize, 50_000e6, 1e8, depth);
+        _open(account, CfdTypes.Side.LONG, positionSize, 50_000e6, 1e8, depth);
 
         uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(account);
         assertGt(freeSettlementBeforeCommit, 200_000, "setup must leave free settlement to back the bounty");
         assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, partialCloseSize, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, partialCloseSize, 0, 0, true);
 
         assertEq(
             _freeSettlementUsdc(account),
@@ -2463,12 +2463,12 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {
         address aliceAccount = alice;
 
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 6000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 6000 * 1e18, 0, 0, true);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 0, true);
         vm.stopPrank();
 
         assertEq(
@@ -2480,9 +2480,9 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_CloseCommit_BehindPendingOpenIsRejected() public {
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
         vm.stopPrank();
 
         assertEq(router.nextCommitId(), 2, "Rejected close intents should not queue against pending open exposure");
@@ -2492,8 +2492,8 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BEAR, 8000 * 1e18, 400 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 8000 * 1e18, 400 * 1e6, 1e8, false);
         vm.stopPrank();
 
         address account = alice;
@@ -2526,12 +2526,12 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
         vm.roll(block.number + 1);
         vm.warp(1050);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         address account = alice;
         bytes[] memory empty = _pythUpdateData();
@@ -2558,10 +2558,10 @@ contract OrderRouterPythTest is BasePerpTest {
         address account = alice;
 
         vm.startPrank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 8000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 8000 * 1e6, 1e8, false);
         vm.expectRevert();
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0, true);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         bytes[] memory priceData = _pythUpdateData();
@@ -2598,7 +2598,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(2000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         address account = alice;
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000 - age);
@@ -2630,7 +2630,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(3000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, adverseTarget, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, adverseTarget, false);
 
         address account = alice;
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
@@ -2649,7 +2649,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_SingleExecute_EmptyQueueRevertsNoOrders() public {
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty = _pythUpdateData();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp + 6));
@@ -2666,11 +2666,11 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_SlippageFailedCloseOrderForfeitsReservedBountyToProtocol() public {
         address aliceAccount = alice;
 
-        _open(aliceAccount, CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8);
+        _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
         uint64 closeOrderId = router.nextCommitId();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 90_000_000, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 90_000_000, true);
 
         vm.warp(block.timestamp + 6);
         bytes[] memory empty = _pythUpdateData();
@@ -2700,7 +2700,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setFee(1 ether);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory data = new bytes[](1);
         data[0] = hex"00";
@@ -2716,7 +2716,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
@@ -2753,7 +2753,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
@@ -2790,7 +2790,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
         vm.warp(1050);
@@ -2800,11 +2800,11 @@ contract OrderRouterPythTest is BasePerpTest {
 
         address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
-        assertGt(size, 0, "BULL open at favorable price should succeed");
+        assertGt(size, 0, "LONG open at favorable price should succeed");
 
         vm.warp(2000);
         vm.prank(trader2);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2006);
         vm.warp(2050);
@@ -2813,11 +2813,11 @@ contract OrderRouterPythTest is BasePerpTest {
 
         address trader2Account = trader2;
         (size,,,,,,) = engine.positions(trader2Account);
-        assertGt(size, 0, "BEAR open at favorable price should succeed");
+        assertGt(size, 0, "SHORT open at favorable price should succeed");
 
         vm.warp(3000);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1.1e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 3006);
         vm.warp(3050);
@@ -2825,11 +2825,11 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(3, empty);
 
         (size,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 10_000 * 1e18, "BULL open at adverse price should be rejected");
+        assertEq(size, 10_000 * 1e18, "LONG open at adverse price should be rejected");
 
         vm.warp(4000);
         vm.prank(trader2);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 0.9e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 4006);
         vm.warp(4050);
@@ -2837,7 +2837,7 @@ contract OrderRouterPythTest is BasePerpTest {
         router.executeOrder(4, empty);
 
         (size,,,,,,) = engine.positions(trader2Account);
-        assertEq(size, 10_000 * 1e18, "BEAR open at adverse price should be rejected");
+        assertEq(size, 10_000 * 1e18, "SHORT open at adverse price should be rejected");
     }
 
     function test_Slippage_CloseOrders_Protected() public {
@@ -2845,7 +2845,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 100_000_000, false);
 
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
@@ -2860,7 +2860,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2006);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 0, 150_000_000, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 0, 150_000_000, true);
 
         vm.warp(2050);
         vm.roll(10);
@@ -2875,12 +2875,12 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1008);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1010);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         vm.warp(1050);
 
@@ -2900,7 +2900,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         address keeper = address(0xBEEF);
         vm.deal(keeper, 1 ether);
@@ -2919,7 +2919,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
         vm.warp(1006);
@@ -2935,7 +2935,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1000, 999);
 
@@ -2951,7 +2951,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 0, false);
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
         mockPyth.setAllPrices(feedIds, int64(120_000_000), int32(-8), 1050);
@@ -2970,7 +2970,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.roll(100);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 0, false);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
         uint64 historicalPublishTime = pending.commitTime + 10;
@@ -3005,7 +3005,7 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 0, false);
 
         mockPyth.setAllUniquePrices(feedIds, int64(120_000_000), 0, int32(-8), 1012, 1006);
 
@@ -3022,9 +3022,9 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setFee(1 ether);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
 
@@ -3048,12 +3048,12 @@ contract OrderRouterPythTest is BasePerpTest {
     function test_BatchExecution_DoesNotReuseTickAtCommitTimestamp() public {
         vm.warp(1000);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1006);
         vm.roll(block.number + 1);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 300 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 300 * 1e6, 1e8, false);
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
 
@@ -3072,7 +3072,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
@@ -3091,7 +3091,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(90_000_000), int32(-8), 1006);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
@@ -3134,7 +3134,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 999);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
@@ -3152,7 +3152,7 @@ contract OrderRouterPythTest is BasePerpTest {
         mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1001);
         bytes[] memory empty = _pythUpdateData();
@@ -3175,12 +3175,12 @@ contract OrderRouterPythTest is BasePerpTest {
         harness.computeBasketPrice(3 days, 60);
     }
 
-    function test_Slippage_ClampedBeforeCheck_BullClose() public {
+    function test_Slippage_ClampedBeforeCheck_LongClose() public {
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         vm.warp(1050);
         bytes[] memory empty = _pythUpdateData();
@@ -3189,20 +3189,20 @@ contract OrderRouterPythTest is BasePerpTest {
 
         address account = alice;
         (uint256 size,,,,,,) = engine.positions(account);
-        assertGt(size, 0, "BULL position should exist");
+        assertGt(size, 0, "LONG position should exist");
 
         vm.warp(2000);
         mockPyth.setAllPrices(feedIds, int64(250_000_000), int32(-8), 2006);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 240_000_000, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 240_000_000, true);
 
         vm.warp(2050);
         vm.roll(10);
         router.executeOrder(2, empty);
 
         (size,,,,,,) = engine.positions(account);
-        assertEq(size, 0, "BULL close should succeed against clamped price");
+        assertEq(size, 0, "LONG close should succeed against clamped price");
     }
 
 }
@@ -3326,7 +3326,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         vm.warp(TEST_FRIDAY_18UTC);
         uint64 orderId = router.nextCommitId();
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
@@ -3384,7 +3384,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
         vm.warp(TEST_FRIDAY_18UTC);
         uint64 orderId = router.nextCommitId();
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
@@ -3606,7 +3606,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(address(this));
 
@@ -3631,7 +3631,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 150_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, address(this));
@@ -3660,12 +3660,12 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -3722,12 +3722,12 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -3766,11 +3766,11 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 350e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, 0, true);
-        router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 5000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 5000e18, 0, 0, true);
         clearinghouse.withdraw(account, 68e6);
         vm.stopPrank();
 
@@ -3825,12 +3825,12 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         address account = trader;
         _fundTrader(trader, 900e6);
 
-        _open(account, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();
@@ -3867,17 +3867,17 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         _fundTrader(trader, 900e6);
         _fundTrader(otherTrader, 2000e6);
 
-        _open(traderAccount, CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
 
         vm.startPrank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 100e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 100e6, type(uint256).max, false);
         clearinghouse.withdraw(traderAccount, 70e6);
         vm.stopPrank();
 
         vm.startPrank(otherTrader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
         vm.stopPrank();
 
         assertEq(router.pendingOrderCounts(traderAccount), 2, "Liquidated account should start with two queued orders");
@@ -3906,18 +3906,18 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         _fundTrader(trader, 2000e6);
         _fundTrader(otherTrader, 2000e6);
-        _open(traderAccount, CfdTypes.Side.BULL, 20_000e18, 500e6, 1e8);
+        _open(traderAccount, CfdTypes.Side.LONG, 20_000e18, 500e6, 1e8);
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 5000e18, 0, type(uint256).max, true);
+        router.commitOrder(CfdTypes.Side.LONG, 5000e18, 0, type(uint256).max, true);
 
         vm.startPrank(otherTrader);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 500e6, type(uint256).max, false);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000e18, 500e6, type(uint256).max, false);
         vm.stopPrank();
 
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.BULL, 15_000e18, 0, type(uint256).max, true);
+        router.commitOrder(CfdTypes.Side.LONG, 15_000e18, 0, type(uint256).max, true);
 
         IOrderRouterAccounting.PendingOrderView[] memory traderPending = _pendingOrders(traderAccount);
         assertEq(traderPending.length, 2, "Trader should be able to queue closes using only its own pending orders");
@@ -4010,7 +4010,7 @@ contract FadStalenessTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), uint64(WEDNESDAY_BEFORE + 6));
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
 
         vm.warp(WEDNESDAY_BEFORE + 50);
         bytes[] memory setupPyth = _pythUpdateData();
@@ -4073,7 +4073,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(fridayClose - 6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(fridayClose + 1);
         bytes[] memory empty = _pythUpdateData();
@@ -4090,7 +4090,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
     function helper_FadWindow_OpenOrderStaysPendingAtExecution() public {
@@ -4106,7 +4106,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_18UTC);
         uint64 orderId = router.nextCommitId();
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
@@ -4163,7 +4163,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(FRIDAY_18UTC);
         uint64 orderId = router.nextCommitId();
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         uint256 keeperBefore = _settlementBalance(address(this));
         uint256 reservedBounty = _executionBountyReserve(orderId);
@@ -4208,7 +4208,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4225,7 +4225,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4285,7 +4285,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(fridayClose - 6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 0, true);
 
         vm.warp(fridayClose + 1);
         bytes[] memory empty = _pythUpdateData();
@@ -4302,7 +4302,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 0, true);
 
         vm.warp(SATURDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4316,7 +4316,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(WEDNESDAY_NOON);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 5000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 0, true);
 
         vm.warp(WEDNESDAY_NOON + 67);
         bytes[] memory empty = _pythUpdateData();
@@ -4347,7 +4347,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(WEDNESDAY_NOON);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 0.8e8, false);
 
         vm.warp(WEDNESDAY_NOON + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4422,7 +4422,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
     function test_FridayFadOnly_MevCheckStillActive() public {
@@ -4434,7 +4434,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(fridayFadStart);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(fridayFadStart + 30);
         bytes[] memory empty = _pythUpdateData();
@@ -4451,7 +4451,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(fridayFadStart);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(fridayFadStart + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4470,7 +4470,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
     function test_FridayFadOnly_HistoricalSettlementWindowAllowsDelayedReveal() public {
@@ -4488,7 +4488,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(fridayFadStart);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(fridayFadStart + 63);
         bytes[] memory empty = _pythUpdateData();
@@ -4518,7 +4518,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4537,7 +4537,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SUNDAY_21UTC + 30);
         bytes[] memory empty = _pythUpdateData();
@@ -4551,7 +4551,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
     }
 
     function test_SundayDst_PreOpenStalenessRejects() public {
@@ -4560,7 +4560,7 @@ contract FadStalenessTest is BasePerpTest {
         vm.warp(SUNDAY_21UTC);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(SUNDAY_21UTC + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4602,11 +4602,11 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
-        router.commitOrder(CfdTypes.Side.BEAR, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 300 * 1e6, 0.8e8, false);
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), runwayStart + 6);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(runwayStart + 50);
         bytes[] memory empty = _pythUpdateData();
@@ -4630,7 +4630,7 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(runwayTime);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 0, 0, true);
 
         vm.warp(runwayTime + 30);
         bytes[] memory empty = _pythUpdateData();
@@ -4813,13 +4813,13 @@ contract OrderRouterAuditTest is BasePerpTest {
         _fundTrader(carol, 50_000 * 1e6);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 0, 0.9e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 0, 0.9e8, true);
 
         bytes[] memory pythData = _mockPythUpdateData(1.5e8);
         (IOrderRouterAccounting.PendingOrderView memory closeOrder,) = router.getPendingOrderView(2);
@@ -4885,7 +4885,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         address account = alice;
         uint64 commitId = router.nextCommitId();
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         vm.warp(block.timestamp + 600);
 
@@ -4901,7 +4901,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 1000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 1000e18, 1000e6, 1e8, false);
 
         assertEq(router.nextCommitId(), 2, "Commit should succeed without an ETH execution fee");
     }
@@ -4912,7 +4912,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         _fundTrader(alice, 50_000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 10_000 * 1e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
@@ -4925,10 +4925,10 @@ contract OrderRouterAuditTest is BasePerpTest {
 
         vm.prank(alice);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        router.commitOrder(CfdTypes.Side.BULL, 1000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 1000 * 1e18, 1000 * 1e6, 1e8, false);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, size, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, size, 0, 0, true);
 
         routerAdmin.unpause();
         bytes[] memory closeData = _mockPythUpdateData();
@@ -4985,10 +4985,10 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
         for (uint256 i = 0; i < 5; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         }
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         assertEq(router.nextExecuteId(), 1);
 
@@ -5007,7 +5007,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         _fundTrader(alice, 50_000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
@@ -5022,12 +5022,12 @@ contract StaleOrderExpiryTest is BasePerpTest {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(spammer, 10_000 * 1e6);
         vm.prank(spammer);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
         _fundTrader(alice, 50_000 * 1e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
@@ -5046,11 +5046,11 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
         for (uint256 i = 0; i < 3; i++) {
             vm.prank(spammer);
-            router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+            router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         }
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
@@ -5073,13 +5073,13 @@ contract StaleOrderExpiryTest is BasePerpTest {
             _fundTrader(trader, 10_000 * 1e6);
             for (uint256 orderIndex = 0; orderIndex < ordersPerTrader; orderIndex++) {
                 vm.prank(trader);
-                router.commitOrder(CfdTypes.Side.BULL, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
+                router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
             }
         }
 
         _fundTrader(alice, 50_000 * 1e6);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
@@ -5114,12 +5114,12 @@ contract StaleOrderExpiryTest is BasePerpTest {
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(spammer, 10_000e6);
         vm.prank(spammer);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         _fundTrader(alice, 50_000e6);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
@@ -5136,7 +5136,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         _fundTrader(spammer, 10_000e6);
 
         vm.prank(spammer);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
 
@@ -5167,7 +5167,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         _fundTrader(spammer, 10_000e6);
 
         vm.prank(spammer);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
         uint256 traderSettlementBefore = _settlementBalance(spammer);
@@ -5405,7 +5405,7 @@ contract StalenessGriefTest is BasePerpTest {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         vm.warp(block.timestamp + 120);
 
@@ -5620,7 +5620,7 @@ contract VpiImrBypassTest is Test {
 
         _fundTrader(carol, 50_000e6);
         vm.prank(carol);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 20_000e6, 1e8, false);
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
@@ -5638,7 +5638,7 @@ contract VpiImrBypassTest is Test {
         assertEq(clearinghouse.balanceUsdc(eveAccount), 1e6, "Trader only funds the reserved execution bounty");
 
         vm.prank(eve);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
 
         assertEq(router.nextCommitId(), 3, "Rebate-backed open should remain committable under the planner");
     }
@@ -5651,7 +5651,7 @@ contract VpiImrBypassTest is Test {
         usdc.mint(eve, 1e6);
         usdc.approve(address(clearinghouse), 1e6);
         clearinghouse.deposit(eveAccount, 1e6);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 0, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 1e8, false);
         vm.stopPrank();
 
         uint256 keeperBefore = _settlementBalance(address(this));
@@ -5904,7 +5904,7 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         clearinghouse.deposit(account, 50_000e6);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
@@ -5924,7 +5924,7 @@ contract KeeperFeeRefundTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
         clearinghouse.deposit(account, 50_000e6);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
         vm.stopPrank();
 
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
@@ -5955,8 +5955,8 @@ contract KeeperFeeRefundTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), 50_000e6);
         clearinghouse.deposit(account, 50_000e6);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
         vm.stopPrank();
 
         uint256 parseCallsBefore = mockPyth.parseUniqueCallCount();
@@ -5992,7 +5992,7 @@ contract KeeperFeeRefundTest is Test {
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 keeperBefore = keeper.balance;
         bytes[] memory priceData = _mockPythUpdateData();
@@ -6019,7 +6019,7 @@ contract KeeperFeeRefundTest is Test {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 100_000e18, 10_000e6, 1.5e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1.5e8, false);
 
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
@@ -6051,7 +6051,7 @@ contract KeeperFeeRefundTest is Test {
         vm.stopPrank();
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 250e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8, false);
         bytes[] memory openPrice = _mockPythUpdateData();
         router.executeOrder(1, openPrice);
 
@@ -6061,7 +6061,7 @@ contract KeeperFeeRefundTest is Test {
         );
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 0, 0.8e8, true);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0.8e8, true);
 
         uint256 keeperUsdcBefore = _settlementBalance(keeper);
         uint256 protocolFeesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
@@ -6094,7 +6094,7 @@ contract KeeperFeeRefundTest is Test {
         vm.prank(alice);
         clearinghouse.deposit(account, 50_000e6);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BULL, 10_000e18, 1000e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
         vm.warp(block.timestamp + 301);
 
@@ -6273,7 +6273,7 @@ contract WeekendArbitrageTest is Test {
         router.updateMarkPrice(updateData);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 20_000e6, 0, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 20_000e6, 0, false);
         vm.warp(block.timestamp + 6);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
         vm.roll(block.number + 1);
@@ -6296,7 +6296,7 @@ contract WeekendArbitrageTest is Test {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), fridayPublishTime);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.BEAR, 100_000e18, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.SHORT, 100_000e18, 0, 0, true);
 
         vm.roll(10);
         router.executeOrder(2, updateData);
