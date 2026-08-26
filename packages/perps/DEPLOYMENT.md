@@ -116,8 +116,8 @@ Important:
   maintenance-fee release is monitor schema/domain V3 because its observable configuration digest also commits to the
   active Junior fee rate and recipient. With optimizer 200, V3 measures 23,339 bytes of facade runtime, 49,010 bytes
   of facade creation input (142 bytes below EIP-3860), and 19,298 bytes of sidecar runtime. The combined V4 release
-  also commits the Engine settlement buffer and measures 23,339 bytes of facade runtime, 49,109 bytes of facade
-  creation input (43 bytes below EIP-3860), and 19,397 bytes of sidecar runtime. Keep the dedicated runtime and
+  also commits the Engine settlement buffer and measures 23,339 bytes of facade runtime, 49,057 bytes of facade
+  creation input (95 bytes below EIP-3860), and 19,345 bytes of sidecar runtime. Keep the dedicated runtime and
   creation-input size regressions green and remeasure the exact release commit before deployment.
 - `EmergencyPauseCoordinator` is deployed after the monitor and immutable-bound to the exact RouterAdmin and
   HousePool. The deploy transaction verifies its code, bindings, owner, disabled initial guardian, zero initial

@@ -1032,20 +1032,40 @@ contract SettlementMonitorLensSidecar {
     function _enginePolicyConfigDigest() internal view returns (bool available, bytes32 digest) {
         (bool riskOk, uint256[16] memory risk) =
             _readWords(address(ENGINE), abi.encodeWithSelector(CfdEngine.riskParams.selector), 10);
-        (bool engineCapOk, uint256 engineCap) = _readUint(address(ENGINE), bytes4(keccak256("CAP_PRICE()")));
-        (bool sizeOk, uint256 sizeQuantum) =
-            _readUint(address(TERMINAL_NAV_BOOK), ITerminalNavBookV2.SIZE_QUANTUM.selector);
-        (bool liveAgeOk, uint256 liveAge) = _readUint(address(ENGINE), bytes4(keccak256("engineMarkStalenessLimit()")));
-        (bool frozenAgeOk, uint256 frozenAge) = _readUint(address(ENGINE), bytes4(keccak256("fadMaxStaleness()")));
-        (bool fadRunwayOk, uint256 fadRunway) = _readUint(address(ENGINE), bytes4(keccak256("fadRunwaySeconds()")));
-        (bool settlementBufferOk, uint256 settlementBufferBps) =
-            _readUint(address(ENGINE), bytes4(keccak256("settlementBufferBps()")));
-        available = riskOk && engineCapOk && sizeOk && liveAgeOk && frozenAgeOk && fadRunwayOk && settlementBufferOk;
-        if (!available) {
+        if (!riskOk) {
             return (false, bytes32(0));
         }
-        digest =
-            keccak256(abi.encode(engineCap, sizeQuantum, liveAge, frozenAge, fadRunway, risk[5], settlementBufferBps));
+
+        uint256[7] memory values;
+        bool ok;
+        (ok, values[0]) = _readUint(address(ENGINE), bytes4(keccak256("CAP_PRICE()")));
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[1]) = _readUint(address(TERMINAL_NAV_BOOK), ITerminalNavBookV2.SIZE_QUANTUM.selector);
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[2]) = _readUint(address(ENGINE), bytes4(keccak256("engineMarkStalenessLimit()")));
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[3]) = _readUint(address(ENGINE), bytes4(keccak256("fadMaxStaleness()")));
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        (ok, values[4]) = _readUint(address(ENGINE), bytes4(keccak256("fadRunwaySeconds()")));
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+        values[5] = risk[5];
+        (ok, values[6]) = _readUint(address(ENGINE), bytes4(keccak256("settlementBufferBps()")));
+        if (!ok) {
+            return (false, bytes32(0));
+        }
+
+        available = true;
+        digest = keccak256(abi.encode(values));
     }
 
     function _oraclePolicyConfigDigest(

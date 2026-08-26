@@ -7,6 +7,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
@@ -211,6 +212,13 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
     function test_4_SeniorCannotBeRecapitalizedAfterFullWipeoutViaOrdinaryDeposit() public {
         address account = address(0xA11CE);
         _fundTrader(address(0xA11CE), 600_000e6);
+
+        // Exercise the terminal-wipeout path independently of the optional admission buffer.
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
+        config.settlementBufferBps = 0;
+        engineAdmin.proposeRiskConfig(config);
+        vm.warp(engineAdmin.riskConfigActivationTime());
+        engineAdmin.finalizeRiskConfig();
 
         // Round 1: Wipe junior (50k).
         _open(account, CfdTypes.Side.BULL, 50_000e18, 10_000e6, 1e8);

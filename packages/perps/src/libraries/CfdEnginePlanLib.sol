@@ -417,13 +417,10 @@ library CfdEnginePlanLib {
             delta.sideTotalMarginBefore, effectiveSnap.position.margin, delta.positionMarginAfterOpen
         );
 
-        (bool hasSettlementBuffer, uint256 requiredEffectiveAssetsAfterUsdc) =
-            _openSettlementBufferAfterPlan(effectiveSnap, delta);
-        if (!hasSettlementBuffer) {
+        if (!_applyOpenSettlementBufferAfterPlan(effectiveSnap, delta)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return delta;
         }
-        delta.requiredEffectiveAssetsAfterUsdc = requiredEffectiveAssetsAfterUsdc;
 
         PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState =
             _buildPostOpenRiskState(effectiveSnap, delta);
@@ -553,19 +550,18 @@ library CfdEnginePlanLib {
         );
     }
 
-    /// @notice Tests whether a planned open preserves maximum liability plus protected settlement headroom.
+    /// @notice Applies the effective-asset requirement when a planned open preserves protected settlement headroom.
     /// @dev The selected side copies are increased by the delta. Current assets use `snap.poolCashUsdc`; the physical
     ///      asset delta is trade cost net of execution fee, so only VPI enters pool assets. Trader claims and pending
-    ///      payouts are unchanged. The protected buffer is liability-scaled and rounded up. This helper does not mutate
-    ///      storage, but it does mutate the supplied memory side views (and any memory aliases) while projecting them.
+    ///      payouts are unchanged. The protected buffer is liability-scaled and rounded up. This helper writes the
+    ///      required effective-asset target into `delta` on success and mutates memory side aliases while projecting.
     /// @param snap Current pool, claim, degradation, and side-liability snapshot.
     /// @param delta Partially built open delta with side and economic changes.
     /// @return satisfied Whether projected effective assets cover liability and the configured settlement buffer.
-    /// @return requiredEffectiveAssetsAfterUsdc Minimum effective assets the apply-time backstop must observe.
-    function _openSettlementBufferAfterPlan(
+    function _applyOpenSettlementBufferAfterPlan(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
-    ) private pure returns (bool satisfied, uint256 requiredEffectiveAssetsAfterUsdc) {
+    ) private pure returns (bool satisfied) {
         CfdEnginePlanTypes.SideSnapshot memory bull = snap.bullSide;
         CfdEnginePlanTypes.SideSnapshot memory bear = snap.bearSide;
         if (delta.posSide == CfdTypes.Side.BULL) {
@@ -601,7 +597,7 @@ library CfdEnginePlanLib {
             result.effectiveAssetsAfterUsdc, result.maxLiabilityAfterUsdc, snap.settlementBufferBps
         );
         if (satisfied) {
-            requiredEffectiveAssetsAfterUsdc = result.maxLiabilityAfterUsdc
+            delta.requiredEffectiveAssetsAfterUsdc = result.maxLiabilityAfterUsdc
                 + SolvencyAccountingLib.settlementBufferTargetUsdc(
                     result.maxLiabilityAfterUsdc, snap.settlementBufferBps
                 );

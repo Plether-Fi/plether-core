@@ -8,6 +8,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 contract JuniorMaintenanceFeeTest is BasePerpTest {
 
@@ -1016,11 +1017,22 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         uint256 assets = pool.totalAssets();
         assertGt(assets, targetFreeUsdc, "target free cash must be below pool assets");
         uint256 reservedUsdc = assets - targetFreeUsdc;
-        uint256 margin = reservedUsdc / 10 + 10e6;
+        uint256 maxLiabilityUsdc = reservedUsdc * 10_000 / (10_000 + engine.settlementBufferBps());
+        maxLiabilityUsdc -= maxLiabilityUsdc % 100e6;
+        uint256 margin = maxLiabilityUsdc / 10 + 10e6;
         _fundTrader(TRADER, margin);
-        positionSize = reservedUsdc * 1e12;
+        positionSize = maxLiabilityUsdc * 1e12;
         _open(TRADER, CfdTypes.Side.BULL, positionSize, margin, 1e8);
-        assertApproxEqAbs(pool.getFreeUSDC(), targetFreeUsdc, 2, "position must create the intended cash budget");
+        uint256 settlementBufferUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engine.settlementBufferBps());
+        uint256 expectedFreeUsdc = assets - maxLiabilityUsdc - settlementBufferUsdc;
+        assertEq(pool.getFreeUSDC(), expectedFreeUsdc, "position must create the quantized cash budget");
+        assertGe(expectedFreeUsdc, targetFreeUsdc, "lot quantization must not over-reserve the target budget");
+        assertLe(
+            expectedFreeUsdc - targetFreeUsdc,
+            101e6,
+            "one liability lot plus its buffer bounds the target-budget rounding"
+        );
     }
 
     function _economicSnapshot() internal view returns (EconomicSnapshot memory snapshot) {
