@@ -392,7 +392,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
     function obsolete_M1_ProposeRiskParamsRejectsEqualKinkAndMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maxSkewRatio = params.maxSkewRatio;
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -402,7 +402,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
     function obsolete_M1_ProposeRiskParamsRejectsZeroKinkSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -412,7 +412,7 @@ contract AuditConfirmedFindingsFailing_RiskParams is BasePerpTest {
 
     function obsolete_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();

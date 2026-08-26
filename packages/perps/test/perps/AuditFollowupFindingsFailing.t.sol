@@ -41,7 +41,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _fundTrader(bullTrader, 100_000e6);
         _fundTrader(bearTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
 
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
@@ -59,7 +59,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _fundTrader(bearTrader, 100_000e6);
         _fundTrader(newTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
@@ -96,7 +96,7 @@ contract AuditFollowupFindingsFailing_CloseSolvency is BasePerpTest {
         _fundTrader(bearTrader, 100_000e6);
         _fundTrader(newTrader, 100_000e6);
 
-        _open(bearAccount, CfdTypes.Side.BEAR, 1_000_000e18, 50_000e6, 1e8);
+        _open(bearAccount, CfdTypes.Side.BEAR, 999_000e18, 50_000e6, 1e8);
         _open(bullAccount, CfdTypes.Side.BULL, 500_000e18, 50_000e6, 1e8);
         _close(bullAccount, CfdTypes.Side.BULL, 500_000e18, 20_000_000);
 
@@ -411,7 +411,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
 
     function obsolete_M2_ProposeRiskParamsRejectsBaseApyAboveMaxApy() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -422,7 +422,7 @@ contract AuditFollowupFindingsFailing_RiskParamValidation is BasePerpTest {
     function test_M2_ProposeRiskParamsRejectsMaxSkewRatioAboveOne() public {
         CfdTypes.RiskParams memory params = _riskParams();
         params.maxSkewRatio = 1e18 + 1;
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();

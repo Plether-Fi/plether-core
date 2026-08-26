@@ -38,8 +38,8 @@ interface ISettlementMonitorSidecarVaultView {
 ///      Bindings are constructor-only storage: this non-proxy contract exposes no setter or delegatecall path.
 contract SettlementMonitorLensSidecar {
 
-    uint256 internal constant CONFIG_SCHEMA_VERSION = 3;
-    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V3");
+    uint256 internal constant CONFIG_SCHEMA_VERSION = 4;
+    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V4");
     uint256 internal constant STATIC_READ_GAS = 500_000;
     uint256 internal constant MAX_STATIC_WORDS = 16;
 
@@ -1038,11 +1038,14 @@ contract SettlementMonitorLensSidecar {
         (bool liveAgeOk, uint256 liveAge) = _readUint(address(ENGINE), bytes4(keccak256("engineMarkStalenessLimit()")));
         (bool frozenAgeOk, uint256 frozenAge) = _readUint(address(ENGINE), bytes4(keccak256("fadMaxStaleness()")));
         (bool fadRunwayOk, uint256 fadRunway) = _readUint(address(ENGINE), bytes4(keccak256("fadRunwaySeconds()")));
-        available = riskOk && engineCapOk && sizeOk && liveAgeOk && frozenAgeOk && fadRunwayOk;
+        (bool settlementBufferOk, uint256 settlementBufferBps) =
+            _readUint(address(ENGINE), bytes4(keccak256("settlementBufferBps()")));
+        available = riskOk && engineCapOk && sizeOk && liveAgeOk && frozenAgeOk && fadRunwayOk && settlementBufferOk;
         if (!available) {
             return (false, bytes32(0));
         }
-        digest = keccak256(abi.encode(engineCap, sizeQuantum, liveAge, frozenAge, fadRunway, risk[5]));
+        digest =
+            keccak256(abi.encode(engineCap, sizeQuantum, liveAge, frozenAge, fadRunway, risk[5], settlementBufferBps));
     }
 
     function _oraclePolicyConfigDigest(

@@ -38,8 +38,9 @@ library HousePoolAccountingLib {
     }
 
     /// @notice Builds the base withdrawal reserve and free-cash snapshot.
-    /// @dev `reserved` uses the engine maximum-profit envelope rather than an MtM liability. Free cash saturates at
-    ///      zero when reservations equal or exceed assets. Callers may layer additional reservations on the result.
+    /// @dev `reserved` uses the engine maximum-profit envelope rather than an MtM liability and includes the engine's
+    ///      supplemental protected headroom. Free cash saturates at zero when reservations equal or exceed assets.
+    ///      Callers may layer additional reservations on the result.
     /// @param engineSnapshot Engine-supplied physical assets and liability reservations.
     /// @return snapshot Withdrawal accounting values in 6-decimal USDC.
     function buildWithdrawalSnapshot(

@@ -111,9 +111,9 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertEq(health.poolAccountedAssetsUsdc, pool.accountedAssets());
         assertEq(health.poolCustodyDeficitUsdc, 0);
         assertEq(health.seniorImpairmentUsdc, 0);
-        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 3);
-        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V3"));
-        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V2"));
+        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 4);
+        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V4"));
+        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V3"));
         assertTrue(monitorLens.observableConfigDigest() != bytes32(0));
     }
 
@@ -2004,6 +2004,21 @@ contract SettlementMonitorLensTest is BasePerpTest {
             monitorLens.getSettlementObservation(observedEpoch);
         assertEq(missingRecipient.observableConfigDigest, bytes32(0));
         assertFalse(missingRecipient.observationComplete);
+    }
+
+    function test_ObservableConfigDigestChangesWithSettlementBuffer() public {
+        bytes32 beforeDigest = monitorLens.observableConfigDigest();
+        vm.mockCall(
+            address(engine),
+            abi.encodeWithSelector(bytes4(keccak256("settlementBufferBps()"))),
+            abi.encode(engine.settlementBufferBps() + 1)
+        );
+
+        bytes32 afterDigest = monitorLens.observableConfigDigest();
+
+        assertTrue(beforeDigest != bytes32(0));
+        assertTrue(afterDigest != bytes32(0));
+        assertTrue(afterDigest != beforeDigest, "settlement buffer policy must change the observable config digest");
     }
 
     function test_SharedClockFaultIsReflectedByBothTranches() public {

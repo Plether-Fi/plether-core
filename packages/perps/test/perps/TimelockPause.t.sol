@@ -103,6 +103,7 @@ contract TimelockPauseTest is BasePerpTest {
         ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         assertEq(config.riskParams.keeperShareBps, 5000, "Default keeper share should be 50%");
         assertEq(config.riskParams.protocolShareBps, 0, "Protocol liquidation fee should default to zero");
+        assertEq(config.settlementBufferBps, 25, "Settlement buffer should default to 25 bps");
         config.riskParams.keeperShareBps = 2500;
         config.riskParams.protocolShareBps = 2500;
 
@@ -120,6 +121,7 @@ contract TimelockPauseTest is BasePerpTest {
         (,,,,,,,, uint256 keeperShareAfter, uint256 protocolShareAfter) = engine.riskParams();
         assertEq(keeperShareAfter, 2500, "Finalization should apply the configured keeper share");
         assertEq(protocolShareAfter, 2500, "Finalization should apply the configured protocol share");
+        assertEq(engine.settlementBufferBps(), 25, "Unchanged settlement buffer should be preserved");
     }
 
     function test_ProposeRiskConfig_RevertsWhenKeeperShareExceedsBpsDenominator() public {
@@ -173,7 +175,7 @@ contract TimelockPauseTest is BasePerpTest {
             protocolShareBps: 0
         });
 
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = newParams;
         config.executionFeeBps = 7;
         config.frozenCloseSpreadBps = 70;
@@ -195,7 +197,7 @@ contract TimelockPauseTest is BasePerpTest {
             protocolShareBps: 0
         });
 
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = newParams;
         config.executionFeeBps = 7;
         config.frozenCloseSpreadBps = 70;
@@ -219,7 +221,7 @@ contract TimelockPauseTest is BasePerpTest {
             protocolShareBps: 0
         });
 
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = newParams;
         config.executionFeeBps = 7;
         config.frozenCloseSpreadBps = 70;
@@ -231,6 +233,7 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(maintMarginBps, 200);
         assertEq(engine.executionFeeBps(), 7);
         assertEq(engine.frozenCloseSpreadBps(), 70);
+        assertEq(engine.settlementBufferBps(), 25);
         assertEq(engineAdmin.riskConfigActivationTime(), 0);
     }
 
@@ -281,7 +284,7 @@ contract TimelockPauseTest is BasePerpTest {
             protocolShareBps: 0
         });
 
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = newParams;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = 70;
@@ -309,7 +312,7 @@ contract TimelockPauseTest is BasePerpTest {
             protocolShareBps: 0
         });
 
-        ICfdEngineAdminHost.EngineRiskConfig memory config;
+        ICfdEngineAdminHost.EngineRiskConfig memory config = _engineRiskConfig();
         config.riskParams = newParams;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -362,7 +365,7 @@ contract TimelockPauseTest is BasePerpTest {
             protocolShareBps: 0
         });
 
-        ICfdEngineAdminHost.EngineRiskConfig memory firstConfig;
+        ICfdEngineAdminHost.EngineRiskConfig memory firstConfig = _engineRiskConfig();
         firstConfig.riskParams = first;
         firstConfig.executionFeeBps = engine.executionFeeBps();
         firstConfig.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -384,7 +387,7 @@ contract TimelockPauseTest is BasePerpTest {
             protocolShareBps: 0
         });
 
-        ICfdEngineAdminHost.EngineRiskConfig memory secondConfig;
+        ICfdEngineAdminHost.EngineRiskConfig memory secondConfig = _engineRiskConfig();
         secondConfig.riskParams = second;
         secondConfig.executionFeeBps = engine.executionFeeBps();
         secondConfig.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();

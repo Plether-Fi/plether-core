@@ -785,6 +785,7 @@ abstract contract BasePerpTest is Test {
         config.riskParams = ICfdEngineRiskParamsView(address(engine)).riskParams();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.executionFeeBps = engine.executionFeeBps();
+        config.settlementBufferBps = engine.settlementBufferBps();
     }
 
     function _engineCalendarConfig() internal view returns (ICfdEngineAdminHost.EngineCalendarConfig memory config) {
@@ -803,6 +804,7 @@ abstract contract BasePerpTest is Test {
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
+        config.settlementBufferBps = engine.settlementBufferBps();
         engineAdmin.proposeRiskConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         engineAdmin.finalizeRiskConfig();
