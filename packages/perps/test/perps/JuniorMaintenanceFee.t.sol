@@ -236,7 +236,13 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
         candidateJunior.proposeMaintenanceFeeConfig(200, address(futureSenior));
 
         TrancheVault imposterJunior = new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), false, "Imposter Junior LP", "imposterJuniorUSDC", 0, address(0)
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            false,
+            "Imposter Junior LP",
+            "imposterJuniorUSDC",
+            0,
+            address(0)
         );
         vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeVaultPairNotReady.selector);
         imposterJunior.proposeMaintenanceFeeConfig(200, FEE_RECIPIENT);
@@ -1075,10 +1081,22 @@ contract JuniorMaintenanceFeeTest is BasePerpTest {
     {
         deploymentPool = new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
         deploymentSenior = new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), true, "Deployment Senior LP", "deploymentSeniorUSDC", 0, address(0)
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            true,
+            "Deployment Senior LP",
+            "deploymentSeniorUSDC",
+            0,
+            address(0)
         );
         deploymentJunior = new TrancheVault(
-            IERC20(address(usdc)), address(deploymentPool), false, "Deployment Junior LP", "deploymentJuniorUSDC", 0, address(0)
+            IERC20(address(usdc)),
+            address(deploymentPool),
+            false,
+            "Deployment Junior LP",
+            "deploymentJuniorUSDC",
+            0,
+            address(0)
         );
     }
 

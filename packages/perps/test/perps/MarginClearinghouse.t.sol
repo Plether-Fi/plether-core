@@ -1651,7 +1651,8 @@ contract NonUsdcCollateralTest is Test {
         pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         TrancheVault seniorVault =
             new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior LP", "seniorUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC", 0, address(0));
+        juniorVault =
+            new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior LP", "juniorUSDC", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
