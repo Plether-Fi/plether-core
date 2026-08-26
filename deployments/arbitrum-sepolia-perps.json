@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 2,
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "release": {
+    "date": "2026-08-26",
+    "sourceCommit": "69fa3e2bc2d2c9d32a5808e26e62b59c11119fb9",
+    "forgeVersion": "1.5.1-stable",
+    "phase": "active",
+    "deploymentBlock": 302257125,
+    "deployer": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "owner": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "guardian": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "deploymentTimeProtocolTreasury": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B"
+  },
+  "contracts": {
+    "mockUsdc": {
+      "address": "0x1647e41f49ED6D688936092B5a291c4B28106343",
+      "runtimeCodeHash": "0x0a676f7acc79e65481c863769713256b84394629a0ed89adcb7567575a5ac18c"
+    },
+    "marginClearinghouse": {
+      "address": "0x2f98787F6dCC3b1f2E4a2AFa5acf410159b9F211",
+      "runtimeCodeHash": "0xe761ef9f2249d04f20264dfb1f04895f2864aeaa407782e74d7b555f8a39f7e9"
+    },
+    "cfdEngine": {
+      "address": "0x3dc9C0A1f9C745A4B08BD5C2E6c7aE613561c20D",
+      "runtimeCodeHash": "0xf61a42cb75e6b83ccbbb1c7046f41d75c9d793de4105a6fe259eb8174c9b8b42"
+    },
+    "terminalNavBookV2": {
+      "address": "0xf8679A1a877BFB44D26C4cb0500FB11cf3dd8BdB",
+      "runtimeCodeHash": "0x7f2b4eeec89bd46cee3d70e83ab8629dfd85bda2c4596ade77024c7fdadd0185"
+    },
+    "cfdEnginePlanner": {
+      "address": "0x76E990Cc6d89D7C80E4f05c388d01dab05926a53",
+      "runtimeCodeHash": "0x7e88d3cd03a313a7a341ae8c6bd26f0a4544961fda9c23d0c49db24151627ac9"
+    },
+    "cfdEngineSettlementSidecar": {
+      "address": "0x288F70eC7cF0e16ae4FE4b91B5c266B047c83aFF",
+      "runtimeCodeHash": "0xac32791971e28718c62887f60097563781d12a1a820a1a79cc50a1ed42b6d6e1"
+    },
+    "cfdEngineAdmin": {
+      "address": "0xda1240c36f3a4ddcAB3028F66B15Dfe91702dE2A",
+      "runtimeCodeHash": "0xb680206e08dd56c28af7bfb867b3a2ad106c7a85e7b14eded95bdab185d62d1d"
+    },
+    "housePoolRedemptionMathSidecar": {
+      "address": "0xB76001Bff218eC45f07051Bcba1304766e0FaB1D",
+      "runtimeCodeHash": "0xe1e105b27bb5dee63b4b647d31e307503b8db8587b67dd9d8db8e607f82318f0"
+    },
+    "housePool": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool",
+      "address": "0x86939a377A78EDe8EEe5445765ac77c9016E35E2",
+      "runtimeCodeHash": "0x730fe4c35663b034934191001a219c487b53cad00a5ad706b9767103a61f18c1"
+    },
+    "seniorVault": {
+      "address": "0xB5A9a9d634197B8F0EA7c4042CF8d5701767D710",
+      "runtimeCodeHash": "0xe370e3cb4330e38ee9836598bba279cde16d51a5c68375c2bc6afe18a5ba4cea"
+    },
+    "juniorVault": {
+      "address": "0xdf306B52eaC722D5994E2cc93D2818F391d68Adb",
+      "runtimeCodeHash": "0x36a4714a180c98221b06f0cb6edf85a525fb36cfa3d511183507140e341920ba"
+    },
+    "cfdEngineAccountLens": {
+      "address": "0x429DA61a7a616DeDD84d2a51eB6Dc1bD72427dC1",
+      "runtimeCodeHash": "0x752b978846606e9fceee2ade1a15f19556fc34367b9640b729183468ca4d860e"
+    },
+    "cfdEngineLens": {
+      "address": "0x140067daAdd28bE4b04e649EEaCf6F5ECbEe8C79",
+      "runtimeCodeHash": "0x89ec9f74da61419d5ffca63ff485b8a399f4625e0d097cb4db2539048ff518e7"
+    },
+    "cfdOrderPolicyEvaluator": {
+      "address": "0xaa4703B190684b5A57b8a9aA432fA043B169D171",
+      "runtimeCodeHash": "0xbf5d49312d5ca849e2719bef0dda2a45c552fb9b5af3e626537ff72adaa85882"
+    },
+    "orderRouterV2ExecutionSidecar": {
+      "address": "0x5e0C505dC98e7FbC7081dd7d05901711c46b55C8",
+      "runtimeCodeHash": "0x42c47f40725e5cff1122661e82a20b88b8361e29406b831a480388a17350a4ed"
+    },
+    "pletherOracle": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
+      "address": "0xC69ec16EfB71F62984E9b2688396F34062277FdC",
+      "runtimeCodeHash": "0xe25325224a61a901d6bb7d9f0000c054252d350fdb3ca103a6e3b60c59b64850"
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "address": "0xcfD2061A93fe2e355837843a7dD89e236f4c9948",
+      "runtimeCodeHash": "0xfd66a2669788da1b11dbcba9affebeb4071420a0dccdf36fe36901914ee73e46"
+    },
+    "orderLifecycleBook": {
+      "address": "0xa210928a7E0AE27626B8d0E67Bbd82305438aB9E",
+      "runtimeCodeHash": "0xaf0f48b06282386e245935921b72f8f4a2fe8e43afb89bb1a7d3eba3962e9517",
+      "executionConfigHash": "0x026912e499109571c7d06b483649002a268f1736a83286aef5fbfd78658665a2"
+    },
+    "orderRouter": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter",
+      "address": "0x97A901dE2B267c307E264FD5F71403F8072F73e7",
+      "runtimeCodeHash": "0x74f3676e93f5175dddec2298ad0fdc67bdc7436c8ecabc59ed980f8ee8a7881a"
+    },
+    "orderRouterAdmin": {
+      "address": "0x3d0e430D670D74988C1B3e76b6ef018e79ab1E37",
+      "runtimeCodeHash": "0xa92ce5322fafc59ad7877e7ab3c9f396789e52bca78d5b530a7e66af543c1bc6"
+    },
+    "positionProtectionBook": {
+      "address": "0xC009E2159146188b272420cF273B0fc12e5Fdfc8",
+      "runtimeCodeHash": "0xb24932b1130c74c32279aef54032368fdf61a16ff4fedbc8c0e3d6e6430fc42c"
+    },
+    "perpsPublicLens": {
+      "address": "0xC41e92F541cCF19FA203a96CecF3Ae4D2Ed7F60A",
+      "runtimeCodeHash": "0x8503b7db5845a8aff3dc7cb82c9418351136b1e7aa10ecbb374ea5df78c014b3"
+    },
+    "settlementMonitorLens": {
+      "address": "0xd251AC0BD90780c48F31F575152808315200664E",
+      "runtimeCodeHash": "0x625558c5479800ddf19d07fd537c53659f4f731d6327fd6dd10ca8cee4759c0c"
+    },
+    "settlementMonitorLensSidecar": {
+      "address": "0xe1fC0A465dAbDFD8Ee33d4aa960108F800b3F151",
+      "runtimeCodeHash": "0xbfdeb3f070877333e2c60ca071f2e2048ec675d35bf403da901e688635757268"
+    },
+    "emergencyPauseCoordinator": {
+      "address": "0x137C5EE5b8895226506270b75D3D825D19b3fa27",
+      "runtimeCodeHash": "0x880611691c360352c4e0859871cf224d5fe1eb13c9fd2d6d638b153ae89e642f"
+    }
+  },
+  "economics": {
+    "vpiFactorWad": "10000000000000000",
+    "maxSkewRatioWad": "400000000000000000",
+    "maintenanceMarginBps": 10,
+    "initialMarginBps": 20,
+    "liquidationChargeBps": 10,
+    "minimumLiquidationChargeUsdc": "1000000",
+    "keeperShareBps": 5000,
+    "minimumKeeperPayoutUsdc": "500000",
+    "fadMarginBps": 300,
+    "baseCarryBps": 500,
+    "executionFeeBps": 4,
+    "frozenCloseSpreadBps": 50,
+    "basketMaxConfidenceRatioBps": 10,
+    "adverseConfidenceMultiplierBps": 2500,
+    "minimumOpenNotionalUsdc": "1000000000",
+    "maxPendingOrders": 5,
+    "maxSeniorExposureUsdc": "40000000000000",
+    "maxSeniorShareBps": 8000,
+    "seniorSeedUsdc": "10000000000000",
+    "juniorSeedUsdc": "10000000000000",
+    "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorMaintenanceFeeAprBps": 100,
+    "juniorMaintenanceFeeRecipient": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
+  },
+  "deploymentInitialization": {
+    "housePoolReleaseValuesConstructorInitialized": true,
+    "routerReleaseValuesConstructorInitialized": true,
+    "housePoolConfigActivationTimeAtDeployment": "0",
+    "routerConfigActivationTimeAtDeployment": "0"
+  },
+  "transactions": {
+    "deployment": [
+      "0x90d6928d5ab46305a1294f6a40c18809061347c915bafbad6e6d25f784860bf0",
+      "0x66b2cbfd198611838faa27e5d1402c3b7957f1d1ff98b963732d7540dd09e76d",
+      "0x3233e27083d46f733be1ad1556784e4c666aae11fab1d97ede546b58da2ffb8f",
+      "0xf30ebb17974a1e13334554ddd30eb6d92bf13a4e1cc19fa1a22e19b5062d0d62",
+      "0x581d78de9804dfc3d1d2e3361e4d716830eb1072180b5dabe92e048b5167532b",
+      "0x0ee0bd458dd058feac39544000fe99f682b8de0c60e173f83249306348b8b451",
+      "0xe1c92591046e0b115b1c528d56e92ef401c2cc85bb36c1894de257c17983cac6",
+      "0x79da92e693fe4ecd7e101cdadf7da39030688effa22f5cf79e596597ffa98a60",
+      "0x524d3856753175068f23a7737ca19c1aaa6cc7f1c167ed656194091ba21ecf67",
+      "0x12ecac675e9ccf80c8f9a9af91652564a95259606b644920d7727205d958c0b0",
+      "0x763c7959d6dc1ed5a2616d098032c780c54b81ef563a2e6e3b163a2999e415bf",
+      "0xa88e0422961f7843e7f3a36f358172143c76ccff8338aaed4e7466e60cf02880",
+      "0x734fa5fb221841f07b88ecd92341730af2d915b4c415b5cf73dc3ef3c0f8f9e4",
+      "0xb6b2b1b85fd9ae3ef8e8006b3efb5caededc68edef01c1179e4b56ee00169871",
+      "0x9c1ae76d2600512d3bfe172dafc8fa67bc3a7c89bfe1e234ac6a92bc78817ffa",
+      "0x0530c5267b68e9e43b48f2c1dc84e3abefd27600414c398fea6228534f3fc948",
+      "0xf26eb1ed5ae1338f6b694cd7409f1a112752954c8d098887603e7ae744291839",
+      "0xff8dcac28eef7741d53a4ef40e287f7862ce028c92c5508be4c4d85f7c3406ad",
+      "0x27fc8ba38b84db1f5820cc09d32374ea7e82c8ac19cc3711aa5dbefc00870d23",
+      "0x3fdc75853d0307b174578d44b2e67bb735fe4c1ba0bcf8b135073a2aa664ea7e",
+      "0x23c27e080c87399cc0c221197b5d640e5c224d11cdd40201efff6f961c94c336",
+      "0xadf558f644e21a19651cd3bdf0a7b09b9ba99bc24f3dbcd0d117e67c38630165",
+      "0x65beb90f13612ead5f84e6774c6bce4bc9bbfe271973b9dd9d806627224cae32",
+      "0x187186197c742bef120095275783e4c035b49e285cadb60f3196251ea1dafcf5",
+      "0xe87614a27b49cd5c1f243b646117b70b14deb6fdec7ef3a25f4ca84dc0894444",
+      "0xf709079137665ca6bd0ee8a7e07c0bf4dacab89b2b69581ca775df3cffed333a",
+      "0xcb7f5c4b2ec8280eb339d623dc03579984d75cc1b8f321847c2caafa0b123d83",
+      "0x5b6e006c883e180fcfe580d08487b7348562c99226ecd2f6f8b854e4934acf10",
+      "0x5dc7a84ba6d9923b38f9b07395824de6231958059c8312e5f41bb8e41bba3cc9",
+      "0x2d9008237ccdccc92152b55a2d773ce737ae6421b129624510375346c862427c",
+      "0x40f05fe89ad4e27f7111a35559c7879e34c5f08f5c1ad988df43b043ec6d4f23"
+    ],
+    "bootstrapSeeding": [
+      "0x792cfc004e85e71e7f07c91a7d41ea1bbd7b2e0d5af3f56487fe21e0b9f3c36b",
+      "0xce77851509e4e2eece6cd185ca09cdd2403ffbfdb1b829c42cd3242bfff012ec",
+      "0x76e4fbdc6dbe943fc7ecdb553755c60daeeaf260c099c7bcb79b64364fff7334",
+      "0xdecca2328c87d9ba623b5dedc0bef9e9f1e4a983121307338f12710cecbcb0d5",
+      "0x33efea4b5dae58e8c9adea7030c169b481ba73ff64ed5d177493ced30a9f941a"
+    ],
+    "activation": [
+      "0x753eef0d35ce68603bb9c85a41f86d6379df9f5214d494cc4570fa4adcd2c0ed"
+    ]
+  },
+  "verification": {
+    "deployedPhase": {
+      "txOrRunId": "read-only@302257569",
+      "passed": true
+    },
+    "seededPhase": {
+      "txOrRunId": "read-only@302269312",
+      "passed": true
+    },
+    "activePhase": {
+      "txOrRunId": "read-only@302270564",
+      "passed": true
+    },
+    "authenticatedPythDryRun": {
+      "timestamp": "2026-08-26",
+      "passed": true
+    }
+  }
+}
