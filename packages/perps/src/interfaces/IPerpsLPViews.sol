@@ -8,14 +8,17 @@ interface IPerpsLPViews {
 
     /// @notice Returns compact senior tranche state.
     /// @dev Reads the configured ERC4626 vault and HousePool gates. A missing vault returns a zero-valued view; an
-    ///      empty configured vault reports the lens's nominal share price. USDC fields use 6 decimals.
-    /// @return viewData Senior assets, shares, share price, fee, withdrawal cap, and current availability flags
+    ///      empty configured vault reports the lens's nominal share price. Senior effective supply equals raw supply,
+    ///      and its maintenance-fee fields are zero. USDC fields use 6 decimals.
+    /// @return viewData Senior assets, raw/effective shares, share price, fees, withdrawal cap, and availability flags
     function getSeniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData);
 
     /// @notice Returns compact junior tranche state.
     /// @dev Reads the configured ERC4626 vault and HousePool gates. A missing vault returns a zero-valued view; an
-    ///      empty configured vault reports the lens's nominal share price. USDC fields use 6 decimals.
-    /// @return viewData Junior assets, shares, share price, fee, withdrawal cap, and current availability flags
+    ///      empty configured vault reports the lens's nominal share price. Effective supply includes uncheckpointed
+    ///      maintenance-fee shares so the displayed price matches current Junior conversion economics. USDC fields
+    ///      use 6 decimals.
+    /// @return viewData Junior assets, raw/effective shares, share price, fees, withdrawal cap, and availability flags
     function getJuniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData);
 
     /// @notice Returns high-level LP status flags.

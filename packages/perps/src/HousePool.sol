@@ -29,6 +29,8 @@ import {HousePoolWithdrawalPreviewLib} from "@plether/perps/libraries/HousePoolW
 /// @dev Pool-only queue hooks implemented by both asynchronous tranche vaults.
 interface ITrancheVaultEpochSettlement {
 
+    function accruedTotalSupply() external view returns (uint256);
+
     function getMaturedRedeemHead(
         uint256 cutoffEpoch
     ) external view returns (uint256 epochId, uint256 remainingShares);
@@ -1014,7 +1016,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
                 break;
             }
 
-            uint256 supplyBefore = IERC20(vaultAddress).totalSupply();
+            uint256 supplyBefore = vault.accruedTotalSupply();
             uint256 escrowAssetsBefore = USDC.balanceOf(vaultAddress);
             USDC.safeTransfer(vaultAddress, fundedAssets);
             vault.fundRedeemEpoch(epochId, fundedShares, fundedAssets);
@@ -1082,7 +1084,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             }
 
             uint256 rawBefore = rawAssets();
-            uint256 supplyBefore = IERC20(vaultAddress).totalSupply();
+            uint256 supplyBefore = vault.accruedTotalSupply();
             uint256 settledAssets = vault.finalizeDepositEpochFromPool(epochId, shares);
             uint256 supplyAfter = IERC20(vaultAddress).totalSupply();
             if (
@@ -1731,14 +1733,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (juniorVault == address(0)) {
             return 0;
         }
-        return IERC20(juniorVault).totalSupply();
+        return ITrancheVaultEpochSettlement(juniorVault).accruedTotalSupply();
     }
 
     function _seniorShareSupply() internal view returns (uint256) {
         if (seniorVault == address(0)) {
             return 0;
         }
-        return IERC20(seniorVault).totalSupply();
+        return ITrancheVaultEpochSettlement(seniorVault).accruedTotalSupply();
     }
 
     function _buildWithdrawalSnapshot(

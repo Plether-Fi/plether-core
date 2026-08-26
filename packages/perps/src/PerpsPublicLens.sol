@@ -20,6 +20,14 @@ import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtect
 /// @dev Lightweight asynchronous-vault read surface used only by this lens.
 interface IAsyncTrancheVaultLensView {
 
+    function accruedTotalSupply() external view returns (uint256 effectiveTotalShares);
+
+    function pendingMaintenanceFeeShares() external view returns (uint256 feeShares);
+
+    function maintenanceFeeAprBps() external view returns (uint256 feeAprBps);
+
+    function maintenanceFeeRecipient() external view returns (address recipient);
+
     function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
 
     function getMaturedDepositHead(
@@ -229,9 +237,10 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @notice Returns the compact senior tranche view.
     /// @dev Asset amounts use 6-decimal USDC. `maxWithdrawUsdc` is the pool's current capacity for a synchronized
     ///      Senior redemption-funding phase, not an amount that a holder can withdraw synchronously.
-    ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / totalSupply` quotient and does not
-    ///      normalize differing asset/share decimals.
-    /// @return viewData Senior tranche balances, shares, fee, request availability, and settlement availability.
+    ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / effectiveTotalSupply` quotient and does
+    ///      not normalize differing asset/share decimals. Senior effective supply equals raw supply and its
+    ///      maintenance-fee fields are zero.
+    /// @return viewData Senior tranche balances, raw/effective shares, fees, and availability.
     function getSeniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.seniorVault(), true);
     }
@@ -239,9 +248,10 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @notice Returns the compact junior tranche view.
     /// @dev Asset amounts use 6-decimal USDC. `maxWithdrawUsdc` is the pool's current synchronized Junior-funding
     ///      capacity after the matured-Senior-priority gate, not an amount that a holder can withdraw synchronously.
-    ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / totalSupply` quotient and does not
-    ///      normalize differing asset/share decimals.
-    /// @return viewData Junior tranche balances, shares, fee, request availability, and settlement availability.
+    ///      For nonzero supply, `sharePrice` is the raw `(totalAssets * 1e18) / effectiveTotalSupply` quotient and does
+    ///      not normalize differing asset/share decimals. Effective supply includes uncheckpointed maintenance-fee
+    ///      shares.
+    /// @return viewData Junior tranche balances, raw/effective shares, fees, and availability.
     function getJuniorTranche() external view returns (PerpsViewTypes.TrancheView memory viewData) {
         return _getTrancheView(HOUSE_POOL.juniorVault(), false);
     }
@@ -384,12 +394,12 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Builds a tranche view from its ERC-4626 vault and pool-level asynchronous-entry/exit constraints.
     /// @dev Returns a zeroed view for a zero vault address. An empty vault reports a nominal `1e18`; otherwise the
-    ///      raw `(totalAssets * 1e18) / totalSupply` quotient is returned without decimal normalization.
+    ///      raw `(totalAssets * 1e18) / accruedTotalSupply` quotient is returned without decimal normalization.
     /// @param vault ERC-4626 tranche vault to inspect.
     /// @param isSenior True for the senior tranche and false for the junior tranche.
-    /// @return viewData Compact tranche view. The legacy `maxWithdrawUsdc` field is retained for ABI stability but is
-    ///         reinterpreted as the current queue-funding capacity; `withdrawEnabled` reports whether new funding can
-    ///         settle and does not gate claims already backed by vault escrow.
+    /// @return viewData Compact tranche view. The legacy `maxWithdrawUsdc` field remains available as the current
+    ///         queue-funding capacity; `withdrawEnabled` reports whether new funding can settle and does not gate
+    ///         claims already backed by vault escrow.
     function _getTrancheView(
         address vault,
         bool isSenior
@@ -398,11 +408,17 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
             return viewData;
         }
 
+        IAsyncTrancheVaultLensView vaultView = IAsyncTrancheVaultLensView(vault);
         uint256 totalAssetsUsdc = IERC4626(vault).totalAssets();
         uint256 totalShares = IERC20(vault).totalSupply();
+        uint256 effectiveTotalShares = vaultView.accruedTotalSupply();
         viewData.totalAssetsUsdc = totalAssetsUsdc;
         viewData.totalShares = totalShares;
-        viewData.sharePrice = totalShares == 0 ? 1e18 : (totalAssetsUsdc * 1e18) / totalShares;
+        viewData.effectiveTotalShares = effectiveTotalShares;
+        viewData.pendingMaintenanceFeeShares = vaultView.pendingMaintenanceFeeShares();
+        viewData.maintenanceFeeAprBps = vaultView.maintenanceFeeAprBps();
+        viewData.maintenanceFeeRecipient = vaultView.maintenanceFeeRecipient();
+        viewData.sharePrice = effectiveTotalShares == 0 ? 1e18 : (totalAssetsUsdc * 1e18) / effectiveTotalShares;
         viewData.maxWithdrawUsdc = isSenior ? HOUSE_POOL.getMaxSeniorWithdraw() : HOUSE_POOL.getMaxJuniorWithdraw();
         viewData.frozenLpFeeBps = HOUSE_POOL.frozenLpFeeBps(isSenior);
         viewData.depositEnabled = HOUSE_POOL.canAcceptTrancheDeposits(isSenior);

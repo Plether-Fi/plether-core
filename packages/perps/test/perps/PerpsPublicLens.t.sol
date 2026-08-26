@@ -425,6 +425,74 @@ contract PerpsPublicLensTest is BasePerpTest {
         assertEq(viewData.frozenLpFeeBps, 25, "Senior tranche view should expose the active frozen LP fee");
     }
 
+    function test_GetTranches_ExposeRawAndEffectiveSupplyAtDefaultZeroMaintenanceFee() public view {
+        PerpsViewTypes.TrancheView memory senior = publicLens.getSeniorTranche();
+        PerpsViewTypes.TrancheView memory junior = publicLens.getJuniorTranche();
+
+        assertEq(senior.totalShares, seniorVault.totalSupply(), "Senior raw supply should match ERC20 supply");
+        assertEq(
+            senior.effectiveTotalShares,
+            senior.totalShares,
+            "Senior effective supply should always equal its raw supply"
+        );
+        assertEq(senior.pendingMaintenanceFeeShares, 0, "Senior should never report pending maintenance shares");
+        assertEq(senior.maintenanceFeeAprBps, 0, "Senior should never report a maintenance fee rate");
+        assertEq(senior.maintenanceFeeRecipient, address(0), "Senior should never report a maintenance recipient");
+        assertEq(
+            senior.sharePrice,
+            (senior.totalAssetsUsdc * 1e18) / senior.effectiveTotalShares,
+            "Senior price should use its effective supply"
+        );
+
+        assertEq(junior.totalShares, juniorVault.totalSupply(), "Junior raw supply should match ERC20 supply");
+        assertEq(
+            junior.effectiveTotalShares,
+            junior.totalShares,
+            "Default-zero Junior effective supply should equal raw supply"
+        );
+        assertEq(junior.pendingMaintenanceFeeShares, 0, "Default Junior fee should have no pending shares");
+        assertEq(junior.maintenanceFeeAprBps, 0, "Default Junior fee rate should be zero");
+        assertEq(junior.maintenanceFeeRecipient, address(0), "Default Junior fee recipient should be unset");
+        assertEq(
+            junior.sharePrice,
+            (junior.totalAssetsUsdc * 1e18) / junior.effectiveTotalShares,
+            "Default Junior price should use effective supply"
+        );
+    }
+
+    function test_GetJuniorTranche_PricesAgainstEffectiveSupplyIncludingPendingMaintenanceFee() public {
+        uint256 feeAprBps = 750;
+        address feeRecipient = address(0xFEE);
+
+        juniorVault.proposeMaintenanceFeeConfig(feeAprBps, feeRecipient);
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 2 hours);
+
+        uint256 rawSupply = juniorVault.totalSupply();
+        uint256 pendingFeeShares = juniorVault.pendingMaintenanceFeeShares();
+        uint256 effectiveSupply = juniorVault.accruedTotalSupply();
+        assertGt(pendingFeeShares, 0, "Setup should produce uncheckpointed Junior fee shares");
+
+        PerpsViewTypes.TrancheView memory viewData = publicLens.getJuniorTranche();
+
+        assertEq(viewData.totalShares, rawSupply, "Lens must preserve raw ERC20 supply");
+        assertEq(viewData.effectiveTotalShares, effectiveSupply, "Lens must expose fee-accrued supply");
+        assertEq(viewData.pendingMaintenanceFeeShares, pendingFeeShares, "Lens must expose pending fee dilution");
+        assertEq(viewData.maintenanceFeeAprBps, feeAprBps, "Lens must expose the active fee rate");
+        assertEq(viewData.maintenanceFeeRecipient, feeRecipient, "Lens must expose the active fee recipient");
+        assertEq(
+            viewData.sharePrice,
+            (viewData.totalAssetsUsdc * 1e18) / effectiveSupply,
+            "Junior price must use effective rather than raw supply"
+        );
+        assertLt(
+            viewData.sharePrice,
+            (viewData.totalAssetsUsdc * 1e18) / rawSupply,
+            "Pending dilution should reduce the reported Junior share price"
+        );
+    }
+
     function test_GetJuniorTranche_DoesNotChargeFrozenFeeDuringFadOnlyShoulder() public {
         uint256 sunday2110 = 1_710_105_000;
         vm.warp(sunday2110);

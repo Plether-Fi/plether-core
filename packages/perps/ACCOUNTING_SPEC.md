@@ -285,7 +285,59 @@ Required consequences:
 - a wiped tranche cannot be silently revived by an ordinary asynchronous deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
 
-### 3.1 Senior exposure admission limits
+### 3.1 Junior maintenance-fee supply
+
+The Junior vault may dilute its outstanding shares to pay a maintenance fee. It never transfers USDC or changes
+`juniorPrincipal`, Senior principal/HWM, withdrawal reserves, claimant buckets, or waterfall ownership. The deployment
+default is disabled: `maintenanceFeeAprBps == 0`, `maintenanceFeeRecipient == address(0)`, and effective supply equals
+raw ERC-20 `totalSupply()`.
+
+For a configured nominal APR `r` in basis points, completed Unix hours accrue through a fixed-point hourly retention
+factor:
+
+```text
+hourlyFeeRay = floor(r * 1e27 / (10_000 * 8_760))
+retentionRay = rayPowUp(1e27 - hourlyFeeRay, chargeableHours)
+feeShares    = floor(rawSupply * (1e27 - retentionRay) / retentionRay)
+effectiveSupply = rawSupply + pendingFeeShares
+```
+
+Retention rounds up and fee shares round down, so the protocol does not exceed the configured charge. A checkpoint
+charges at most `8_760` hours; if more time elapsed, older hours are explicitly forgiven and the boundary advances to
+the latest completed Unix hour. The nominal APR is therefore not an exact annual dilution percentage: at `1_000 bps`,
+hourly retention produces approximately `9.516%` dilution over a flat year.
+
+Checkpoint partitioning is economically path-independent in exact arithmetic. Integer and RAY rounding may make a
+split checkpoint differ from a single checkpoint by a bounded number of share atoms. The acceptance bound is
+`ceil(greaterFinalSupply * (2 * elapsedHours + 64) / 1e27) + 2` atoms for at most 8,760 elapsed hours; representative
+9-decimal Junior supplies differ by only a few indivisible share atoms. Because there is no permissionless fee-only
+checkpoint, an arbitrary caller cannot deliberately amplify that dust.
+
+If raw Junior supply is zero, there is no fee-bearing ownership to charge. The next real mint advances the fee clock
+prospectively to the next Unix-hour boundary and emits a zero-share checkpoint with zero charged and forgiven hours;
+empty-supply history is not classified as one-year catch-up forgiveness.
+
+All Junior share conversions, previews, bootstrap quotes, and epoch prices use effective supply. Raw `totalSupply()`
+continues to mean actually minted shares. The vault materializes pending fee shares immediately before any nonzero
+Junior supply mutation, including a pool-authorized mint or burn and the terminal deposit-claim escrow-dust burn, or
+when governance finalizes fee configuration; there is no public fee-only checkpoint. Pending deposits enter the fee
+base only when activated. Pending redemption shares remain outstanding and fee-bearing until funding burns them;
+funded claims never reprice. Completed-hour granularity can assign less than one hour of pre-activation exposure to a
+mid-hour deposit activation, or forgive less than one hour of exposure for a mid-hour funded redemption. Callers
+cannot create arbitrary fee-only checkpoints to amplify this bounded shift.
+
+The fee continues to accrue while LP settlement is held, the oracle is frozen, or Junior NAV is zero. A reverted or
+held settlement cannot mint shares or advance the checkpoint, but the elapsed completed hours remain pending for the
+next successful crystallization. Shares minted at zero NAV initially have no asset value but participate in a later
+recovery like ordinary transferable Junior shares.
+
+Only the current HousePool owner may propose, replace, cancel, or finalize Junior fee configuration. Changes have a
+48-hour delay, `maintenanceFeeAprBps` is capped at `1_000`, and a nonzero rate requires a valid nonzero recipient.
+Finalization first pays elapsed time under the old rate and recipient, preventing retroactive enablement or recipient
+rotation. This mechanism is not a performance fee: it has no profit test, Junior HWM, equalization, cost basis, or
+per-holder accounting.
+
+### 3.2 Senior exposure admission limits
 
 Let:
 

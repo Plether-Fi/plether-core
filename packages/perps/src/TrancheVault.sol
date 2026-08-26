@@ -8,6 +8,17 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {JuniorMaintenanceFeeMathLib} from "@plether/perps/libraries/JuniorMaintenanceFeeMathLib.sol";
+
+interface IHousePoolMaintenanceFeeAdminView {
+
+    function owner() external view returns (address);
+
+    function seniorVault() external view returns (address);
+
+    function juniorVault() external view returns (address);
+
+}
 
 /// @title TrancheVault
 /// @notice Fully asynchronous ERC-7540-style entry point for one HousePool tranche.
@@ -21,6 +32,9 @@ contract TrancheVault is ERC4626 {
 
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
     uint256 public constant LP_REQUEST_CUTOFF_DURATION = 5 minutes;
+    uint256 public constant MAINTENANCE_FEE_CONFIG_DELAY = 48 hours;
+    uint256 public constant MAX_MAINTENANCE_FEE_APR_BPS = 1000;
+    uint256 public constant MAX_MAINTENANCE_FEE_CHECKPOINT_HOURS = 8760;
 
     bytes4 internal constant INTERFACE_ID_ERC165 = 0x01ffc9a7;
     bytes4 internal constant INTERFACE_ID_ERC7575 = 0x2f0a18c5;
@@ -82,6 +96,11 @@ contract TrancheVault is ERC4626 {
         bool refundClaimed;
     }
 
+    struct MaintenanceFeeConfig {
+        uint256 aprBps;
+        address recipient;
+    }
+
     /// @dev Helpers retained for exact overflow-safe frozen mint estimates.
     struct Uint768 {
         uint256 high;
@@ -118,6 +137,12 @@ contract TrancheVault is ERC4626 {
     address public seedReceiver;
     uint256 public seedShareFloor;
 
+    uint256 public maintenanceFeeAprBps;
+    address public maintenanceFeeRecipient;
+    uint256 public maintenanceFeeCheckpointBoundary;
+    MaintenanceFeeConfig public pendingMaintenanceFeeConfig;
+    uint256 public maintenanceFeeConfigActivationTime;
+
     error TrancheVault__AsyncOnly();
     error TrancheVault__AsyncPreviewUnavailable();
     error TrancheVault__DepositCooldown();
@@ -148,6 +173,13 @@ contract TrancheVault is ERC4626 {
     error TrancheVault__RedeemRefundUnavailable();
     error TrancheVault__EscrowInvariant();
     error TrancheVault__InvalidFee();
+    error TrancheVault__MaintenanceFeeSeniorUnsupported();
+    error TrancheVault__MaintenanceFeeVaultPairNotReady();
+    error TrancheVault__NotPoolOwner();
+    error TrancheVault__InvalidMaintenanceFeeRate();
+    error TrancheVault__InvalidMaintenanceFeeRecipient();
+    error TrancheVault__MaintenanceFeeTimelockNotReady();
+    error TrancheVault__NoMaintenanceFeeProposal();
     // Compatibility error declarations retained for downstream source references.
     error TrancheVault__TrancheImpaired();
     /// @dev Prevents an unapproved sender from resetting an existing holder's whole-balance cooldown with dust shares.
@@ -182,10 +214,35 @@ contract TrancheVault is ERC4626 {
     event RedeemSharesRefunded(
         address indexed controller, address indexed receiver, uint256 indexed epochId, uint256 shares
     );
+    event MaintenanceFeeConfigProposed(uint256 aprBps, address indexed recipient, uint256 activationTime);
+    event MaintenanceFeeConfigFinalized(
+        uint256 previousAprBps,
+        address indexed previousRecipient,
+        uint256 newAprBps,
+        address indexed newRecipient,
+        uint256 checkpointBoundary
+    );
+    event MaintenanceFeeConfigProposalCancelled(uint256 aprBps, address indexed recipient, uint256 activationTime);
+    event MaintenanceFeeCheckpointed(
+        uint256 indexed previousBoundary,
+        uint256 indexed newBoundary,
+        address indexed recipient,
+        uint256 aprBps,
+        uint256 mintedShares,
+        uint256 chargedHours,
+        uint256 forgivenHours
+    );
 
     modifier onlyPool() {
         if (msg.sender != address(POOL)) {
             revert TrancheVault__NotPool();
+        }
+        _;
+    }
+
+    modifier onlyPoolOwner() {
+        if (msg.sender != IHousePoolMaintenanceFeeAdminView(address(POOL)).owner()) {
+            revert TrancheVault__NotPoolOwner();
         }
         _;
     }
@@ -199,6 +256,7 @@ contract TrancheVault is ERC4626 {
     ) ERC4626(_usdc) ERC20(_name, _symbol) {
         POOL = IHousePool(_pool);
         IS_SENIOR = _isSenior;
+        maintenanceFeeCheckpointBoundary = _nextMaintenanceFeeBoundary(block.timestamp);
     }
 
     function _decimalsOffset() internal pure override returns (uint8) {
@@ -239,6 +297,9 @@ contract TrancheVault is ERC4626 {
         address to,
         uint256 amount
     ) internal override {
+        if (!IS_SENIOR && amount != 0 && (from == address(0) || to == address(0)) && maintenanceFeeAprBps != 0) {
+            _checkpointMaintenanceFee();
+        }
         if (from == seedReceiver && from != address(0) && balanceOf(from) - amount < seedShareFloor) {
             revert TrancheVault__SeedFloorBreached();
         }
@@ -253,6 +314,180 @@ contract TrancheVault is ERC4626 {
         super._update(from, to, amount);
     }
 
+    // ---------------------------------------------------------------------
+    // Junior maintenance fee
+    // ---------------------------------------------------------------------
+
+    /// @notice Shares that would be minted if the Junior maintenance fee were checkpointed now.
+    function pendingMaintenanceFeeShares() public view returns (uint256) {
+        uint256 rawSupply = totalSupply();
+        if (IS_SENIOR || maintenanceFeeAprBps == 0 || rawSupply == 0) {
+            return 0;
+        }
+        (uint256 chargeableHours,) = _elapsedMaintenanceFeeHours();
+        if (chargeableHours == 0) {
+            return 0;
+        }
+        return JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, maintenanceFeeAprBps, chargeableHours);
+    }
+
+    /// @notice Issued supply plus currently accrued, not-yet-minted Junior maintenance-fee shares.
+    function accruedTotalSupply() public view returns (uint256 rawAndPendingSupply) {
+        rawAndPendingSupply = totalSupply();
+        if (!IS_SENIOR) {
+            rawAndPendingSupply += pendingMaintenanceFeeShares();
+        }
+    }
+
+    /// @notice Stages a Junior maintenance-fee configuration behind the fixed governance delay.
+    function proposeMaintenanceFeeConfig(
+        uint256 aprBps,
+        address recipient
+    ) external onlyPoolOwner {
+        _requireJuniorMaintenanceFeeVault();
+        _validateMaintenanceFeeConfig(aprBps, recipient);
+        uint256 activationTime = block.timestamp + MAINTENANCE_FEE_CONFIG_DELAY;
+        pendingMaintenanceFeeConfig = MaintenanceFeeConfig({aprBps: aprBps, recipient: recipient});
+        maintenanceFeeConfigActivationTime = activationTime;
+        emit MaintenanceFeeConfigProposed(aprBps, recipient, activationTime);
+    }
+
+    /// @notice Checkpoints the old fee and activates a matured Junior maintenance-fee configuration.
+    function finalizeMaintenanceFeeConfig() external onlyPoolOwner {
+        _requireJuniorMaintenanceFeeVault();
+        uint256 activationTime = maintenanceFeeConfigActivationTime;
+        if (activationTime == 0) {
+            revert TrancheVault__NoMaintenanceFeeProposal();
+        }
+        if (block.timestamp < activationTime) {
+            revert TrancheVault__MaintenanceFeeTimelockNotReady();
+        }
+        MaintenanceFeeConfig memory nextConfig = pendingMaintenanceFeeConfig;
+        _validateMaintenanceFeeConfig(nextConfig.aprBps, nextConfig.recipient);
+
+        uint256 previousAprBps = maintenanceFeeAprBps;
+        address previousRecipient = maintenanceFeeRecipient;
+        if (previousAprBps != 0) {
+            _checkpointMaintenanceFee();
+        }
+
+        maintenanceFeeAprBps = nextConfig.aprBps;
+        maintenanceFeeRecipient = nextConfig.recipient;
+        maintenanceFeeCheckpointBoundary = _nextMaintenanceFeeBoundary(block.timestamp);
+        delete pendingMaintenanceFeeConfig;
+        maintenanceFeeConfigActivationTime = 0;
+
+        emit MaintenanceFeeConfigFinalized(
+            previousAprBps, previousRecipient, nextConfig.aprBps, nextConfig.recipient, maintenanceFeeCheckpointBoundary
+        );
+    }
+
+    /// @notice Cancels the currently staged Junior maintenance-fee configuration.
+    function cancelMaintenanceFeeConfigProposal() external onlyPoolOwner {
+        _requireJuniorMaintenanceFeeVault();
+        uint256 activationTime = maintenanceFeeConfigActivationTime;
+        if (activationTime == 0) {
+            revert TrancheVault__NoMaintenanceFeeProposal();
+        }
+        MaintenanceFeeConfig memory cancelledConfig = pendingMaintenanceFeeConfig;
+        delete pendingMaintenanceFeeConfig;
+        maintenanceFeeConfigActivationTime = 0;
+        emit MaintenanceFeeConfigProposalCancelled(cancelledConfig.aprBps, cancelledConfig.recipient, activationTime);
+    }
+
+    function _checkpointMaintenanceFee() internal {
+        uint256 rawSupply = totalSupply();
+        if (rawSupply == 0) {
+            uint256 oldBoundary = maintenanceFeeCheckpointBoundary;
+            uint256 nextBoundary = _nextMaintenanceFeeBoundary(block.timestamp);
+            if (nextBoundary != oldBoundary) {
+                maintenanceFeeCheckpointBoundary = nextBoundary;
+                emit MaintenanceFeeCheckpointed(
+                    oldBoundary, nextBoundary, maintenanceFeeRecipient, maintenanceFeeAprBps, 0, 0, 0
+                );
+            }
+            return;
+        }
+
+        (uint256 chargeableHours, uint256 forgivenHours) = _elapsedMaintenanceFeeHours();
+        if (chargeableHours == 0 && forgivenHours == 0) {
+            return;
+        }
+        uint256 previousBoundary = maintenanceFeeCheckpointBoundary;
+        uint256 currentBoundary = _completedMaintenanceFeeBoundary(block.timestamp);
+        uint256 feeShares =
+            JuniorMaintenanceFeeMathLib.pendingFeeShares(rawSupply, maintenanceFeeAprBps, chargeableHours);
+        maintenanceFeeCheckpointBoundary = currentBoundary;
+        if (feeShares != 0) {
+            super._update(address(0), maintenanceFeeRecipient, feeShares);
+        }
+        emit MaintenanceFeeCheckpointed(
+            previousBoundary,
+            currentBoundary,
+            maintenanceFeeRecipient,
+            maintenanceFeeAprBps,
+            feeShares,
+            chargeableHours,
+            forgivenHours
+        );
+    }
+
+    function _elapsedMaintenanceFeeHours() private view returns (uint256 chargeableHours, uint256 forgivenHours) {
+        uint256 currentBoundary = _completedMaintenanceFeeBoundary(block.timestamp);
+        uint256 checkpointBoundary = maintenanceFeeCheckpointBoundary;
+        if (currentBoundary <= checkpointBoundary) {
+            return (0, 0);
+        }
+        uint256 elapsedHours = (currentBoundary - checkpointBoundary) / 1 hours;
+        chargeableHours = Math.min(elapsedHours, MAX_MAINTENANCE_FEE_CHECKPOINT_HOURS);
+        forgivenHours = elapsedHours - chargeableHours;
+    }
+
+    function _requireJuniorMaintenanceFeeVault() private view {
+        if (IS_SENIOR) {
+            revert TrancheVault__MaintenanceFeeSeniorUnsupported();
+        }
+        IHousePoolMaintenanceFeeAdminView poolAdmin = IHousePoolMaintenanceFeeAdminView(address(POOL));
+        if (poolAdmin.seniorVault() == address(0) || poolAdmin.juniorVault() != address(this)) {
+            revert TrancheVault__MaintenanceFeeVaultPairNotReady();
+        }
+    }
+
+    function _validateMaintenanceFeeConfig(
+        uint256 aprBps,
+        address recipient
+    ) private view {
+        if (aprBps > MAX_MAINTENANCE_FEE_APR_BPS) {
+            revert TrancheVault__InvalidMaintenanceFeeRate();
+        }
+        if (aprBps != 0 && recipient == address(0)) {
+            revert TrancheVault__InvalidMaintenanceFeeRecipient();
+        }
+        if (recipient == address(0)) {
+            return;
+        }
+        IHousePoolMaintenanceFeeAdminView poolAdmin = IHousePoolMaintenanceFeeAdminView(address(POOL));
+        if (
+            recipient == address(POOL) || recipient == address(this) || recipient == poolAdmin.seniorVault()
+                || recipient == poolAdmin.juniorVault()
+        ) {
+            revert TrancheVault__InvalidMaintenanceFeeRecipient();
+        }
+    }
+
+    function _completedMaintenanceFeeBoundary(
+        uint256 timestamp
+    ) private pure returns (uint256) {
+        return timestamp - (timestamp % 1 hours);
+    }
+
+    function _nextMaintenanceFeeBoundary(
+        uint256 timestamp
+    ) private pure returns (uint256) {
+        uint256 remainder = timestamp % 1 hours;
+        return remainder == 0 ? timestamp : timestamp + (1 hours - remainder);
+    }
+
     function totalAssets() public view override returns (uint256) {
         (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc,,) = POOL.getPendingTrancheState();
         return IS_SENIOR ? seniorPrincipalUsdc : juniorPrincipalUsdc;
@@ -262,6 +497,12 @@ contract TrancheVault is ERC4626 {
         uint256 assets
     ) public view override returns (uint256) {
         return _convertToSharesUsingAssets(assets, _depositPricingAssets(), Math.Rounding.Floor);
+    }
+
+    function convertToAssets(
+        uint256 shares
+    ) public view override returns (uint256) {
+        return _convertToAssetsUsingAssets(shares, totalAssets(), Math.Rounding.Floor);
     }
 
     function currentLpEpoch() public view returns (uint256) {
@@ -1016,7 +1257,7 @@ contract TrancheVault is ERC4626 {
     function estimateDepositShares(
         uint256 assets
     ) public view returns (uint256) {
-        return quoteDepositFromState(assets, _depositPricingAssets(), totalSupply(), 0);
+        return quoteDepositFromState(assets, _depositPricingAssets(), accruedTotalSupply(), 0);
     }
 
     function estimateMintAssets(
@@ -1496,7 +1737,7 @@ contract TrancheVault is ERC4626 {
         uint256 totalAssets_,
         Math.Rounding rounding
     ) internal view returns (uint256) {
-        return Math.mulDiv(assets, totalSupply() + VIRTUAL_SHARES, totalAssets_ + 1, rounding);
+        return Math.mulDiv(assets, accruedTotalSupply() + VIRTUAL_SHARES, totalAssets_ + 1, rounding);
     }
 
     function _convertToAssetsUsingAssets(
@@ -1504,7 +1745,7 @@ contract TrancheVault is ERC4626 {
         uint256 totalAssets_,
         Math.Rounding rounding
     ) internal view returns (uint256) {
-        return Math.mulDiv(shares, totalAssets_ + 1, totalSupply() + VIRTUAL_SHARES, rounding);
+        return Math.mulDiv(shares, totalAssets_ + 1, accruedTotalSupply() + VIRTUAL_SHARES, rounding);
     }
 
     function _previewMintAssets(
@@ -1520,7 +1761,7 @@ contract TrancheVault is ERC4626 {
         if (shares > _maxFrozenMintShares(feeBps)) {
             return type(uint256).max;
         }
-        uint256 adjustedShares = totalSupply() + VIRTUAL_SHARES;
+        uint256 adjustedShares = accruedTotalSupply() + VIRTUAL_SHARES;
         uint256 adjustedAssets = _depositPricingAssets() + 1;
         (bool aFits, uint256 aProduct) = Math.tryMul(BPS - feeBps, adjustedShares);
         (bool bFits, uint256 bProduct) = Math.tryMul(feeBps, shares);
@@ -1552,7 +1793,7 @@ contract TrancheVault is ERC4626 {
             return feeBps == 0 ? type(uint256).max : _maxFrozenMintShares(feeBps);
         }
 
-        uint256 adjustedShares = totalSupply() + VIRTUAL_SHARES;
+        uint256 adjustedShares = accruedTotalSupply() + VIRTUAL_SHARES;
         uint256 adjustedAssets = _depositPricingAssets() + 1;
         if (feeBps == 0) {
             (uint256 normalProductHigh,) = Math.mul512(assetCapacity, adjustedShares);
@@ -1593,7 +1834,7 @@ contract TrancheVault is ERC4626 {
         if (feeBps == 0) {
             return type(uint256).max;
         }
-        uint256 adjustedShares = totalSupply() + VIRTUAL_SHARES;
+        uint256 adjustedShares = accruedTotalSupply() + VIRTUAL_SHARES;
         uint256 adjustedBps = BPS - feeBps;
         if (adjustedBps > feeBps) {
             uint256 maxSafe = Math.mulDiv(type(uint256).max, feeBps, adjustedBps);

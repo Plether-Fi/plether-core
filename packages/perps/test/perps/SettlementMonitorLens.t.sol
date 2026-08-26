@@ -54,6 +54,8 @@ contract SettlementMonitorLensTest is BasePerpTest {
     bytes4 internal constant MATURED_DEPOSIT_HEAD_SELECTOR = bytes4(keccak256("getMaturedDepositHead(uint256)"));
     bytes4 internal constant MATURED_REDEEM_HEAD_SELECTOR = bytes4(keccak256("getMaturedRedeemHead(uint256)"));
     bytes4 internal constant LP_EPOCH_SETTLEMENT_PAUSED_SELECTOR = bytes4(keccak256("lpEpochSettlementPaused()"));
+    bytes4 internal constant MAINTENANCE_FEE_APR_BPS_SELECTOR = bytes4(keccak256("maintenanceFeeAprBps()"));
+    bytes4 internal constant MAINTENANCE_FEE_RECIPIENT_SELECTOR = bytes4(keccak256("maintenanceFeeRecipient()"));
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
@@ -111,9 +113,9 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertEq(health.poolAccountedAssetsUsdc, pool.accountedAssets());
         assertEq(health.poolCustodyDeficitUsdc, 0);
         assertEq(health.seniorImpairmentUsdc, 0);
-        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 2);
-        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V2"));
-        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V1"));
+        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 3);
+        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V3"));
+        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V2"));
         assertTrue(monitorLens.observableConfigDigest() != bytes32(0));
     }
 
@@ -1927,6 +1929,93 @@ contract SettlementMonitorLensTest is BasePerpTest {
         assertTrue(beforeDigest != bytes32(0));
         assertTrue(afterDigest != bytes32(0));
         assertTrue(afterDigest != beforeDigest, "FAD runway changes calendar policy and must change the digest");
+    }
+
+    function test_ObservableConfigDigestChangesWithJuniorMaintenanceFeeConfig() public {
+        bytes32 beforeDigest = monitorLens.observableConfigDigest();
+        assertTrue(beforeDigest != bytes32(0));
+
+        vm.mockCall(address(juniorVault), abi.encodeWithSelector(MAINTENANCE_FEE_APR_BPS_SELECTOR), abi.encode(100));
+        bytes32 rateDigest = monitorLens.observableConfigDigest();
+        assertTrue(rateDigest != bytes32(0));
+        assertTrue(rateDigest != beforeDigest, "maintenance-fee APR must be observable configuration");
+
+        vm.clearMockedCalls();
+        vm.mockCall(address(juniorVault), abi.encodeWithSelector(MAINTENANCE_FEE_RECIPIENT_SELECTOR), abi.encode(ALICE));
+        bytes32 recipientDigest = monitorLens.observableConfigDigest();
+        assertTrue(recipientDigest != bytes32(0));
+        assertTrue(recipientDigest != beforeDigest, "maintenance-fee recipient must be observable configuration");
+        assertTrue(recipientDigest != rateDigest);
+    }
+
+    function test_PendingJuniorMaintenanceFeeKeepsQueueSupplyRawAndHealthHealthy() public {
+        _fundJunior(ALICE, 500_000e6);
+        bytes32 defaultConfigDigest = monitorLens.observableConfigDigest();
+        assertTrue(defaultConfigDigest != bytes32(0));
+
+        juniorVault.proposeMaintenanceFeeConfig(1000, EVE);
+        assertEq(
+            monitorLens.observableConfigDigest(),
+            defaultConfigDigest,
+            "a pending fee proposal is not active observable configuration"
+        );
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+
+        assertEq(juniorVault.maintenanceFeeAprBps(), 1000);
+        assertEq(juniorVault.maintenanceFeeRecipient(), EVE);
+        bytes32 activeConfigDigest = monitorLens.observableConfigDigest();
+        assertTrue(activeConfigDigest != bytes32(0));
+        assertTrue(activeConfigDigest != defaultConfigDigest);
+
+        uint256 requestedShares = juniorVault.balanceOf(ALICE) / 4;
+        uint256 observedEpoch = _requestRedeem(juniorVault, ALICE, requestedShares);
+        uint256 rawSupply = juniorVault.totalSupply();
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 1 hours);
+
+        uint256 pendingFeeShares = juniorVault.pendingMaintenanceFeeShares();
+        assertGt(pendingFeeShares, 0, "one completed fee hour must create pending dilution");
+        assertEq(juniorVault.totalSupply(), rawSupply, "a view-only pending fee must not mint shares");
+        assertEq(juniorVault.accruedTotalSupply(), rawSupply + pendingFeeShares);
+        assertEq(juniorVault.balanceOf(EVE), 0, "monitoring must not crystallize the pending fee");
+
+        SettlementMonitorViewTypes.SettlementObservation memory observation =
+            monitorLens.getSettlementObservation(observedEpoch);
+        assertEq(observation.status.junior.totalSupply, rawSupply, "queue invariants require raw ERC20 supply");
+        assertTrue(observation.status.junior.totalSupply != juniorVault.accruedTotalSupply());
+        assertEq(observation.observableConfigDigest, activeConfigDigest);
+        assertEq(monitorLens.observableConfigDigest(), activeConfigDigest, "pending dilution is not configuration");
+        assertEq(juniorVault.maintenanceFeeAprBps(), 1000);
+        assertEq(juniorVault.maintenanceFeeRecipient(), EVE);
+
+        assertEq(uint8(observation.health.state), uint8(SettlementMonitorViewTypes.HealthState.Healthy));
+        assertEq(observation.health.criticalFaultMask, 0);
+        assertEq(observation.health.dependencyFailureMask, 0);
+        assertEq(observation.health.juniorRequiredShareEscrow, requestedShares);
+        assertEq(observation.health.juniorActualShareEscrow, requestedShares);
+    }
+
+    function test_ObservationFailsClosedWhenJuniorMaintenanceFeeConfigIsUnreadable() public {
+        uint256 observedEpoch = pool.currentLpEpoch();
+        uint256 branch = vm.snapshotState();
+
+        vm.mockCallRevert(
+            address(juniorVault), abi.encodeWithSelector(MAINTENANCE_FEE_APR_BPS_SELECTOR), bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.SettlementObservation memory missingRate =
+            monitorLens.getSettlementObservation(observedEpoch);
+        assertEq(missingRate.observableConfigDigest, bytes32(0));
+        assertFalse(missingRate.observationComplete);
+
+        vm.revertToState(branch);
+        vm.clearMockedCalls();
+        vm.mockCallRevert(
+            address(juniorVault), abi.encodeWithSelector(MAINTENANCE_FEE_RECIPIENT_SELECTOR), bytes("unreadable")
+        );
+        SettlementMonitorViewTypes.SettlementObservation memory missingRecipient =
+            monitorLens.getSettlementObservation(observedEpoch);
+        assertEq(missingRecipient.observableConfigDigest, bytes32(0));
+        assertFalse(missingRecipient.observationComplete);
     }
 
     function test_SharedClockFaultIsReflectedByBothTranches() public {

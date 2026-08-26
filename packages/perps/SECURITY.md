@@ -828,6 +828,28 @@ The independent settlement hold blocks both funding and activation by reverting 
 does not block new deposit/redemption requests, Senior reservations, existing cancellation paths, reconciliation, or
 funded claims. It has no automatic expiry and only the HousePool owner can release it.
 
+### Junior maintenance-fee dilution
+
+The optional maintenance fee applies only to Junior and deploys disabled at `0 bps` with no recipient. The current
+HousePool owner may configure it through a 48-hour delay, subject to a `1,000 bps` nominal-APR cap. Finalization must
+checkpoint elapsed fees to the old recipient before changing the rate or recipient; enabling from zero starts
+prospectively.
+
+The fee mints ordinary Junior shares and never transfers USDC or mutates tranche principal, the Senior HWM, reserves,
+claim escrows, or waterfall accounting. Security review must distinguish raw ERC-20 supply from effective pricing
+supply (`raw + pending fee shares`). Every Junior conversion, preview, and settlement price uses effective supply,
+while raw supply remains the conservation quantity for actually issued balances. Pending deposits are excluded until
+activation; pending redemption shares remain exposed until funding burns them.
+
+Accrual uses completed Unix hours and is bounded to 8,760 charged hours per crystallization, with older backlog
+forgiven. It continues during settlement holds, oracle freezes, losses, and zero NAV. A held, no-progress, or reverted
+settlement must roll back both minting and checkpoint state without forgiving elapsed time. Minted zero-NAV shares are
+worthless at that instant but share in recovery; this is intentional and must be reflected in incident analysis.
+There is no public checkpoint, fee-specific guardian control, performance test, Junior HWM, equalization, cost basis,
+or privileged cash-withdrawal path. The recipient redeems through the same asynchronous LP flow as every holder.
+Settlement Monitor schema/domain V3 commits the readable active rate and recipient into observable configuration; a
+failed or malformed read makes the configuration digest unavailable rather than silently assuming a zero fee.
+
 ### Senior coupon model
 
 Senior coupon is funded from existing junior NAV and capped by available junior principal.

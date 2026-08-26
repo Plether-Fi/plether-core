@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -20,12 +21,42 @@ contract PerpHousePoolLifecycleHandler is Test {
         uint256 receiverTimestampBefore;
     }
 
+    struct JuniorFeeSnapshot {
+        uint256 rawSupply;
+        uint256 effectiveSupply;
+        uint256 pendingShares;
+        uint256 recipientShares;
+        uint256 checkpointBoundary;
+    }
+
+    struct JuniorSettlementPricingSnapshot {
+        uint256 principal;
+        uint256 rawSupply;
+        uint256 effectiveSupply;
+        uint256 feeBps;
+    }
+
+    struct RedeemEpochPricingSnapshot {
+        uint256 epochId;
+        uint256 fundedShares;
+        uint256 fundedAssets;
+    }
+
+    struct DepositEpochPricingSnapshot {
+        uint256 epochId;
+        uint256 assets;
+        uint256 shares;
+        bool finalized;
+    }
+
     MockUSDC public immutable usdc;
     CfdEngine public immutable engine;
     HousePool public immutable pool;
     TrancheVault public immutable seniorVault;
     TrancheVault public immutable juniorVault;
     address public immutable owner;
+    address public immutable feeRecipient;
+    uint256 public immutable initialFeeRecipientShares;
 
     address[4] internal actors;
     LastTransfer internal lastTransfer;
@@ -34,6 +65,28 @@ contract PerpHousePoolLifecycleHandler is Test {
     uint256 public ghostHeldSettlementUnexpectedSuccesses;
     uint256 public ghostHeldSettlementWrongReverts;
     uint256 public ghostHeldSettlementAccountingMutations;
+    uint256 public ghostHeldSettlementFeeMutations;
+    uint256 public ghostHeldFeeAccrualChecks;
+    uint256 public ghostHeldFeeAccrualIncreases;
+    uint256 public ghostHeldFeeAccrualRegressions;
+
+    uint256 public ghostFeeMaterializationAttempts;
+    uint256 public ghostFeeSettlementMaterializations;
+    uint256 public ghostFeeSharesMaterialized;
+    uint256 public ghostFeeRecipientMismatches;
+    uint256 public ghostFeeRawSupplyMismatches;
+    uint256 public ghostFeeEffectiveSupplyMismatches;
+    uint256 public ghostFeeIsolationAttempts;
+    uint256 public ghostFeeIsolationAccountingMutations;
+
+    uint256 public ghostJuniorRedemptionPricingChecks;
+    uint256 public ghostJuniorRedemptionPricingMismatches;
+    uint256 public ghostJuniorRedemptionEffectiveSupplyChecks;
+    uint256 public ghostJuniorRedemptionRawSupplyQuoteDivergences;
+    uint256 public ghostJuniorDepositPricingChecks;
+    uint256 public ghostJuniorDepositPricingMismatches;
+    uint256 public ghostJuniorDepositEffectiveSupplyChecks;
+    uint256 public ghostJuniorDepositRawSupplyQuoteDivergences;
 
     constructor(
         MockUSDC _usdc,
@@ -41,7 +94,8 @@ contract PerpHousePoolLifecycleHandler is Test {
         HousePool _pool,
         TrancheVault _seniorVault,
         TrancheVault _juniorVault,
-        address _owner
+        address _owner,
+        address _feeRecipient
     ) {
         usdc = _usdc;
         engine = _engine;
@@ -49,6 +103,8 @@ contract PerpHousePoolLifecycleHandler is Test {
         seniorVault = _seniorVault;
         juniorVault = _juniorVault;
         owner = _owner;
+        feeRecipient = _feeRecipient;
+        initialFeeRecipientShares = _juniorVault.balanceOf(_feeRecipient);
 
         actors[0] = address(0x9101);
         actors[1] = address(0x9102);
@@ -195,7 +251,17 @@ contract PerpHousePoolLifecycleHandler is Test {
         }
 
         _refreshMark();
-        pool.settleLpEpoch(0, 0);
+        JuniorFeeSnapshot memory feeBefore = _juniorFeeSnapshot();
+        JuniorSettlementPricingSnapshot memory pricingBefore = _juniorSettlementPricingSnapshot(feeBefore);
+        RedeemEpochPricingSnapshot[] memory redeemEpochsBefore = _maturedJuniorRedeemSnapshots(cutoffEpoch);
+        DepositEpochPricingSnapshot[] memory depositEpochsBefore = _maturedJuniorDepositSnapshots(cutoffEpoch);
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch(0, 0);
+        _recordJuniorSettlementPricing(pricingBefore, redeemEpochsBefore, depositEpochsBefore, result);
+        bool juniorSupplyMutated = result.juniorDepositShares != 0 || result.juniorFundedShares != 0;
+        _recordJuniorFeeMutation(feeBefore, result.juniorDepositShares, result.juniorFundedShares, juniorSupplyMutated);
+        if (juniorSupplyMutated && juniorVault.balanceOf(feeRecipient) > feeBefore.recipientShares) {
+            ghostFeeSettlementMaterializations++;
+        }
     }
 
     function attemptLpEpochSettlementWhileHeld() external {
@@ -204,6 +270,7 @@ contract PerpHousePoolLifecycleHandler is Test {
         }
 
         bytes32 accountingBefore = _epochAccountingDigest();
+        JuniorFeeSnapshot memory feeBefore = _juniorFeeSnapshot();
         (bool success, bytes memory revertData) = address(pool).call(abi.encodeCall(IHousePool.settleLpEpoch, (0, 0)));
 
         ghostHeldSettlementAttempts++;
@@ -214,6 +281,15 @@ contract PerpHousePoolLifecycleHandler is Test {
         }
         if (_epochAccountingDigest() != accountingBefore) {
             ghostHeldSettlementAccountingMutations++;
+        }
+        JuniorFeeSnapshot memory feeAfter = _juniorFeeSnapshot();
+        if (
+            feeAfter.rawSupply != feeBefore.rawSupply || feeAfter.effectiveSupply != feeBefore.effectiveSupply
+                || feeAfter.pendingShares != feeBefore.pendingShares
+                || feeAfter.recipientShares != feeBefore.recipientShares
+                || feeAfter.checkpointBoundary != feeBefore.checkpointBoundary
+        ) {
+            ghostHeldSettlementFeeMutations++;
         }
     }
 
@@ -240,8 +316,20 @@ contract PerpHousePoolLifecycleHandler is Test {
             return;
         }
 
+        JuniorFeeSnapshot memory feeBefore;
+        uint256 depositClaimEscrowBefore;
+        if (!isSenior) {
+            feeBefore = _juniorFeeSnapshot();
+            depositClaimEscrowBefore = vault.depositClaimEscrowShares();
+        }
         vm.prank(actor);
-        vault.claimDeposit(requestId, claimableAssets, actor, actor);
+        uint256 claimedShares = vault.claimDeposit(requestId, claimableAssets, actor, actor);
+        if (!isSenior) {
+            uint256 depositClaimEscrowAfter = vault.depositClaimEscrowShares();
+            uint256 escrowDecrease = depositClaimEscrowBefore - depositClaimEscrowAfter;
+            uint256 burnedShareDust = escrowDecrease - claimedShares;
+            _recordJuniorFeeMutation(feeBefore, 0, burnedShareDust, burnedShareDust != 0);
+        }
     }
 
     function claimRedeem(
@@ -312,7 +400,43 @@ contract PerpHousePoolLifecycleHandler is Test {
     function warpForward(
         uint256 secondsFuzz
     ) external {
+        bool checkHeldAccrual =
+            pool.lpEpochSettlementPaused() && juniorVault.maintenanceFeeAprBps() != 0 && juniorVault.totalSupply() != 0;
+        uint256 pendingBefore = checkHeldAccrual ? juniorVault.pendingMaintenanceFeeShares() : 0;
         vm.warp(block.timestamp + bound(secondsFuzz, 1, 3 days));
+        if (checkHeldAccrual) {
+            uint256 pendingAfter = juniorVault.pendingMaintenanceFeeShares();
+            ghostHeldFeeAccrualChecks++;
+            if (pendingAfter < pendingBefore) {
+                ghostHeldFeeAccrualRegressions++;
+            } else if (pendingAfter > pendingBefore) {
+                ghostHeldFeeAccrualIncreases++;
+            }
+        }
+    }
+
+    /// @notice Materializes accrued fees through the real timelocked configuration finalization path.
+    /// @dev Re-proposes the active configuration so the only lasting mutation is the old-rate fee checkpoint.
+    function materializeJuniorMaintenanceFee() external {
+        uint256 aprBps = juniorVault.maintenanceFeeAprBps();
+        if (aprBps == 0 || juniorVault.maintenanceFeeRecipient() != feeRecipient || juniorVault.totalSupply() == 0) {
+            return;
+        }
+
+        vm.prank(owner);
+        juniorVault.proposeMaintenanceFeeConfig(aprBps, feeRecipient);
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+
+        JuniorFeeSnapshot memory feeBefore = _juniorFeeSnapshot();
+        bytes32 accountingBefore = _feeIndependentAccountingDigest();
+        vm.prank(owner);
+        juniorVault.finalizeMaintenanceFeeConfig();
+
+        ghostFeeIsolationAttempts++;
+        _recordJuniorFeeMutation(feeBefore, 0, 0, true);
+        if (_feeIndependentAccountingDigest() != accountingBefore) {
+            ghostFeeIsolationAccountingMutations++;
+        }
     }
 
     function mintExcess(
@@ -346,6 +470,312 @@ contract PerpHousePoolLifecycleHandler is Test {
 
     function lastTransferSnapshot() external view returns (LastTransfer memory) {
         return lastTransfer;
+    }
+
+    function _recordJuniorFeeMutation(
+        JuniorFeeSnapshot memory feeBefore,
+        uint256 ordinaryMintedShares,
+        uint256 ordinaryBurnedShares,
+        bool shouldCheckpoint
+    ) internal {
+        JuniorFeeSnapshot memory feeAfter = _juniorFeeSnapshot();
+        if (feeBefore.effectiveSupply != feeBefore.rawSupply + feeBefore.pendingShares) {
+            ghostFeeEffectiveSupplyMismatches++;
+        }
+        if (feeAfter.effectiveSupply != feeAfter.rawSupply + feeAfter.pendingShares) {
+            ghostFeeEffectiveSupplyMismatches++;
+        }
+
+        if (feeAfter.recipientShares < feeBefore.recipientShares) {
+            ghostFeeRecipientMismatches++;
+            return;
+        }
+        uint256 recipientDelta = feeAfter.recipientShares - feeBefore.recipientShares;
+        uint256 expectedFeeShares = shouldCheckpoint ? feeBefore.pendingShares : 0;
+        if (recipientDelta != expectedFeeShares) {
+            ghostFeeRecipientMismatches++;
+        }
+        if (shouldCheckpoint && feeAfter.pendingShares != 0) {
+            ghostFeeEffectiveSupplyMismatches++;
+        }
+
+        uint256 grossExpectedSupply = feeBefore.rawSupply + recipientDelta + ordinaryMintedShares;
+        if (
+            ordinaryBurnedShares > grossExpectedSupply
+                || feeAfter.rawSupply != grossExpectedSupply - ordinaryBurnedShares
+        ) {
+            ghostFeeRawSupplyMismatches++;
+        }
+
+        if (recipientDelta != 0) {
+            ghostFeeMaterializationAttempts++;
+            ghostFeeSharesMaterialized += recipientDelta;
+        }
+    }
+
+    function _juniorFeeSnapshot() internal view returns (JuniorFeeSnapshot memory snapshot) {
+        snapshot.rawSupply = juniorVault.totalSupply();
+        snapshot.effectiveSupply = juniorVault.accruedTotalSupply();
+        snapshot.pendingShares = juniorVault.pendingMaintenanceFeeShares();
+        snapshot.recipientShares = juniorVault.balanceOf(feeRecipient);
+        snapshot.checkpointBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
+    }
+
+    function _juniorSettlementPricingSnapshot(
+        JuniorFeeSnapshot memory feeSnapshot
+    ) internal view returns (JuniorSettlementPricingSnapshot memory snapshot) {
+        (, snapshot.principal) = pool.getPendingDepositTrancheState();
+        snapshot.rawSupply = feeSnapshot.rawSupply;
+        snapshot.effectiveSupply = feeSnapshot.effectiveSupply;
+        snapshot.feeBps = pool.frozenLpFeeBps(false);
+    }
+
+    function _maturedJuniorRedeemSnapshots(
+        uint256 cutoffEpoch
+    ) internal view returns (RedeemEpochPricingSnapshot[] memory snapshots) {
+        snapshots = new RedeemEpochPricingSnapshot[](pool.MAX_LP_EPOCHS_PER_PHASE());
+        uint256 epochId = juniorVault.redeemQueueHead();
+        for (uint256 i = 0; i < snapshots.length && epochId != 0 && epochId <= cutoffEpoch; ++i) {
+            (uint256 fundedShares, uint256 fundedAssets) = _juniorRedeemFundingState(epochId);
+            snapshots[i] =
+                RedeemEpochPricingSnapshot({epochId: epochId, fundedShares: fundedShares, fundedAssets: fundedAssets});
+            epochId = _nextJuniorRedeemEpoch(epochId);
+        }
+    }
+
+    function _maturedJuniorDepositSnapshots(
+        uint256 cutoffEpoch
+    ) internal view returns (DepositEpochPricingSnapshot[] memory snapshots) {
+        snapshots = new DepositEpochPricingSnapshot[](pool.MAX_LP_EPOCHS_PER_PHASE());
+        uint256 epochId = juniorVault.depositQueueHead();
+        for (uint256 i = 0; i < snapshots.length && epochId != 0 && epochId <= cutoffEpoch; ++i) {
+            (uint256 assets, uint256 shares, bool finalized) = _juniorDepositEpochState(epochId);
+            snapshots[i] =
+                DepositEpochPricingSnapshot({epochId: epochId, assets: assets, shares: shares, finalized: finalized});
+            epochId = _nextJuniorDepositEpoch(epochId);
+        }
+    }
+
+    function _recordJuniorSettlementPricing(
+        JuniorSettlementPricingSnapshot memory pricingBefore,
+        RedeemEpochPricingSnapshot[] memory redeemEpochsBefore,
+        DepositEpochPricingSnapshot[] memory depositEpochsBefore,
+        IHousePool.LpEpochSettlementResult memory result
+    ) internal {
+        _recordJuniorRedemptionPricing(pricingBefore, redeemEpochsBefore, result);
+        _recordJuniorDepositPricing(pricingBefore, depositEpochsBefore, result);
+    }
+
+    function _recordJuniorRedemptionPricing(
+        JuniorSettlementPricingSnapshot memory pricingBefore,
+        RedeemEpochPricingSnapshot[] memory epochsBefore,
+        IHousePool.LpEpochSettlementResult memory result
+    ) internal {
+        uint256 observedFundedShares;
+        uint256 observedFundedAssets;
+        for (uint256 i = 0; i < epochsBefore.length; ++i) {
+            RedeemEpochPricingSnapshot memory epochBefore = epochsBefore[i];
+            if (epochBefore.epochId == 0) {
+                break;
+            }
+
+            (uint256 fundedSharesAfter, uint256 fundedAssetsAfter) = _juniorRedeemFundingState(epochBefore.epochId);
+            if (fundedSharesAfter < epochBefore.fundedShares || fundedAssetsAfter < epochBefore.fundedAssets) {
+                ghostJuniorRedemptionPricingMismatches++;
+                continue;
+            }
+
+            uint256 fundedShares = fundedSharesAfter - epochBefore.fundedShares;
+            uint256 fundedAssets = fundedAssetsAfter - epochBefore.fundedAssets;
+            if (fundedShares == 0 && fundedAssets == 0) {
+                continue;
+            }
+
+            ghostJuniorRedemptionPricingChecks++;
+            uint256 expectedAssets = _referenceJuniorRedeemAssets(
+                fundedShares, pricingBefore.principal, pricingBefore.effectiveSupply, pricingBefore.feeBps
+            );
+            if (pricingBefore.effectiveSupply > pricingBefore.rawSupply) {
+                ghostJuniorRedemptionEffectiveSupplyChecks++;
+                if (
+                    expectedAssets
+                        != _referenceJuniorRedeemAssets(
+                            fundedShares, pricingBefore.principal, pricingBefore.rawSupply, pricingBefore.feeBps
+                        )
+                ) {
+                    ghostJuniorRedemptionRawSupplyQuoteDivergences++;
+                }
+            }
+            observedFundedShares += fundedShares;
+            observedFundedAssets += fundedAssets;
+            if (fundedShares == 0 || fundedAssets != expectedAssets) {
+                ghostJuniorRedemptionPricingMismatches++;
+            }
+        }
+
+        if (observedFundedShares != result.juniorFundedShares || observedFundedAssets != result.juniorFundedAssets) {
+            ghostJuniorRedemptionPricingMismatches++;
+        }
+    }
+
+    function _recordJuniorDepositPricing(
+        JuniorSettlementPricingSnapshot memory pricingBefore,
+        DepositEpochPricingSnapshot[] memory epochsBefore,
+        IHousePool.LpEpochSettlementResult memory result
+    ) internal {
+        if (
+            result.juniorFundedShares > pricingBefore.effectiveSupply
+                || result.juniorFundedAssets > pricingBefore.principal
+        ) {
+            ghostJuniorDepositPricingMismatches++;
+            return;
+        }
+
+        uint256 postRedemptionSupply = pricingBefore.effectiveSupply - result.juniorFundedShares;
+        uint256 postRedemptionPrincipal = pricingBefore.principal - result.juniorFundedAssets;
+        uint256 observedDepositAssets;
+        uint256 observedDepositShares;
+        uint256 expectedCumulativeShares;
+        for (uint256 i = 0; i < epochsBefore.length; ++i) {
+            DepositEpochPricingSnapshot memory epochBefore = epochsBefore[i];
+            if (epochBefore.epochId == 0) {
+                break;
+            }
+
+            (uint256 assetsAfter, uint256 sharesAfter, bool finalizedAfter) =
+                _juniorDepositEpochState(epochBefore.epochId);
+            if (epochBefore.finalized || !finalizedAfter) {
+                continue;
+            }
+
+            ghostJuniorDepositPricingChecks++;
+            if (pricingBefore.effectiveSupply > pricingBefore.rawSupply) {
+                ghostJuniorDepositEffectiveSupplyChecks++;
+            }
+            observedDepositAssets += epochBefore.assets;
+            uint256 nextExpectedCumulativeShares =
+                _referenceJuniorDepositShares(observedDepositAssets, postRedemptionPrincipal, postRedemptionSupply);
+            uint256 expectedEpochShares = nextExpectedCumulativeShares - expectedCumulativeShares;
+            expectedCumulativeShares = nextExpectedCumulativeShares;
+            if (
+                pricingBefore.effectiveSupply > pricingBefore.rawSupply && result.juniorFundedShares == 0
+                    && nextExpectedCumulativeShares
+                        != _referenceJuniorDepositShares(
+                            observedDepositAssets, postRedemptionPrincipal, pricingBefore.rawSupply
+                        )
+            ) {
+                ghostJuniorDepositRawSupplyQuoteDivergences++;
+            }
+            observedDepositShares += sharesAfter;
+            if (
+                assetsAfter != epochBefore.assets || sharesAfter < epochBefore.shares
+                    || sharesAfter - epochBefore.shares != expectedEpochShares
+            ) {
+                ghostJuniorDepositPricingMismatches++;
+            }
+        }
+
+        if (observedDepositAssets != result.juniorDepositAssets || observedDepositShares != result.juniorDepositShares)
+        {
+            ghostJuniorDepositPricingMismatches++;
+        }
+    }
+
+    function _referenceJuniorRedeemAssets(
+        uint256 shares,
+        uint256 principal,
+        uint256 supply,
+        uint256 feeBps
+    ) internal pure returns (uint256) {
+        if (shares == 0 || feeBps >= 10_000) {
+            return 0;
+        }
+        uint256 grossAssets = Math.mulDiv(shares, principal + 1, supply + 1000, Math.Rounding.Floor);
+        return Math.mulDiv(grossAssets, 10_000 - feeBps, 10_000, Math.Rounding.Floor);
+    }
+
+    function _referenceJuniorDepositShares(
+        uint256 assets,
+        uint256 principal,
+        uint256 supply
+    ) internal pure returns (uint256) {
+        return Math.mulDiv(assets, supply + 1000, principal + 1, Math.Rounding.Floor);
+    }
+
+    function _juniorRedeemFundingState(
+        uint256 epochId
+    ) internal view returns (uint256 fundedShares, uint256 fundedAssets) {
+        (, fundedShares, fundedAssets,,,,,,,) = juniorVault.redeemEpochs(epochId);
+    }
+
+    function _juniorDepositEpochState(
+        uint256 epochId
+    ) internal view returns (uint256 assets, uint256 shares, bool finalized) {
+        (assets, shares,,, finalized) = juniorVault.depositEpochs(epochId);
+    }
+
+    function _nextJuniorRedeemEpoch(
+        uint256 epochId
+    ) internal view returns (uint256 nextEpoch) {
+        (, nextEpoch,,) = juniorVault.redeemEpochQueueState(epochId);
+    }
+
+    function _nextJuniorDepositEpoch(
+        uint256 epochId
+    ) internal view returns (uint256 nextEpoch) {
+        (, nextEpoch,,) = juniorVault.depositEpochQueueState(epochId);
+    }
+
+    function _feeIndependentAccountingDigest() internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                pool.lastReconcileTime(),
+                pool.lastSeniorCouponCheckpointTime(),
+                pool.seniorPrincipal(),
+                pool.juniorPrincipal(),
+                pool.seniorHighWaterMark(),
+                pool.accountedAssets(),
+                pool.unassignedAssets(),
+                pool.pendingRecapitalizationUsdc(),
+                pool.pendingTradingRevenueUsdc(),
+                pool.reservedSeniorDepositAssetsUsdc(),
+                pool.terminalDeficitUsdc(),
+                usdc.totalSupply(),
+                usdc.balanceOf(address(pool)),
+                _vaultFeeIndependentDigest(seniorVault),
+                _vaultFeeIndependentDigest(juniorVault),
+                _knownActorShareBalancesDigest(seniorVault),
+                _knownActorShareBalancesDigest(juniorVault)
+            )
+        );
+    }
+
+    function _vaultFeeIndependentDigest(
+        TrancheVault vault
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                vault.balanceOf(address(vault)),
+                usdc.balanceOf(address(vault)),
+                vault.pendingDepositEscrowAssets(),
+                vault.pendingRedeemEscrowShares(),
+                vault.depositClaimEscrowShares(),
+                vault.withdrawalEscrowAssets()
+            )
+        );
+    }
+
+    function _knownActorShareBalancesDigest(
+        TrancheVault vault
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                vault.balanceOf(actors[0]),
+                vault.balanceOf(actors[1]),
+                vault.balanceOf(actors[2]),
+                vault.balanceOf(actors[3])
+            )
+        );
     }
 
     function _warpToRequestWindowSide(
@@ -493,7 +923,8 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpHousePoolLifecycleHandler(usdc, engine, pool, seniorVault, juniorVault, address(this));
+        handler =
+            new PerpHousePoolLifecycleHandler(usdc, engine, pool, seniorVault, juniorVault, address(this), address(0));
 
         bytes4[] memory selectors = new bytes4[](16);
         selectors[0] = handler.initializeSeed.selector;
@@ -678,6 +1109,212 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
             uint256 floor = vault.seedShareFloor();
             unlockedShares = unlockedShares > floor ? unlockedShares - floor : 0;
         }
+    }
+
+}
+
+/// @notice Fee-enabled companion campaign that preserves the original lifecycle campaign's seed-order state space.
+contract PerpHousePoolMaintenanceFeeInvariantTest is BasePerpTest {
+
+    address internal constant FEE_RECIPIENT = address(0xFEE1);
+
+    PerpHousePoolLifecycleHandler internal handler;
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _initialSeniorSeedDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    function _autoActivateTrading() internal pure override returns (bool) {
+        return false;
+    }
+
+    function setUp() public override {
+        super.setUp();
+
+        handler = new PerpHousePoolLifecycleHandler(
+            usdc, engine, pool, seniorVault, juniorVault, address(this), FEE_RECIPIENT
+        );
+
+        // Give the fee real backing supply; the original companion contract retains the unconstrained seed ordering.
+        handler.initializeSeed(false, 1000e6);
+        juniorVault.proposeMaintenanceFeeConfig(1000, FEE_RECIPIENT);
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+
+        // Make fee minting and its isolation checks non-vacuously reachable in every campaign.
+        handler.materializeJuniorMaintenanceFee();
+
+        // Complete only this companion campaign's lifecycle so a real epoch settlement can crystallize the fee.
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(engine.orderRouter());
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+        handler.initializeSeed(true, 1000e6);
+        handler.activateTrading();
+
+        bytes4[] memory selectors = new bytes4[](17);
+        selectors[0] = handler.initializeSeed.selector;
+        selectors[1] = handler.activateTrading.selector;
+        selectors[2] = handler.pausePool.selector;
+        selectors[3] = handler.unpausePool.selector;
+        selectors[4] = handler.setLpEpochSettlementHold.selector;
+        selectors[5] = handler.attemptLpEpochSettlementWhileHeld.selector;
+        selectors[6] = handler.requestDeposit.selector;
+        selectors[7] = handler.requestRedeem.selector;
+        selectors[8] = handler.settleLpEpoch.selector;
+        selectors[9] = handler.claimDeposit.selector;
+        selectors[10] = handler.claimRedeem.selector;
+        selectors[11] = handler.transferShares.selector;
+        selectors[12] = handler.warpForward.selector;
+        selectors[13] = handler.mintExcess.selector;
+        selectors[14] = handler.accountExcess.selector;
+        selectors[15] = handler.sweepExcess.selector;
+        selectors[16] = handler.materializeJuniorMaintenanceFee.selector;
+
+        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
+        targetContract(address(handler));
+
+        // A held period accrues virtually, while a settlement attempt cannot crystallize or advance the fee.
+        handler.setLpEpochSettlementHold(true);
+        handler.warpForward(2 hours);
+        handler.attemptLpEpochSettlementWhileHeld();
+        handler.setLpEpochSettlementHold(false);
+
+        handler.requestDeposit(false, 1, 1000e6, false);
+        handler.warpForward(2 hours);
+        handler.settleLpEpoch();
+
+        // Exercise the other side of the same pricing snapshot with virtual fee dilution outstanding.
+        handler.claimDeposit(false, 1);
+        handler.warpForward(2 hours);
+        uint256 actorShares = juniorVault.balanceOf(handler.actorAt(1));
+        handler.requestRedeem(false, 1, actorShares, false);
+        handler.warpForward(2 hours);
+        handler.settleLpEpoch();
+    }
+
+    function invariant_EffectiveSupplySeparatesPendingFeeFromRawErc20Supply() public view {
+        uint256 rawJuniorSupply = juniorVault.totalSupply();
+        uint256 pendingFeeShares = juniorVault.pendingMaintenanceFeeShares();
+
+        assertEq(
+            juniorVault.accruedTotalSupply(),
+            rawJuniorSupply + pendingFeeShares,
+            "Junior effective supply must include unmaterialized dilution"
+        );
+        assertEq(
+            seniorVault.accruedTotalSupply(),
+            seniorVault.totalSupply(),
+            "Senior effective supply must remain raw supply"
+        );
+        assertEq(seniorVault.pendingMaintenanceFeeShares(), 0, "Senior must never accrue maintenance-fee shares");
+
+        uint256 completedBoundary = block.timestamp - (block.timestamp % 1 hours);
+        if (rawJuniorSupply != 0 && completedBoundary > juniorVault.maintenanceFeeCheckpointBoundary()) {
+            assertGt(pendingFeeShares, 0, "elapsed Junior fee hours must accrue independently of tranche NAV");
+        }
+    }
+
+    function invariant_MaterializedFeeSharesOnlyIncreaseRawSupplyAndRecipientBalance() public view {
+        assertGt(handler.ghostFeeMaterializationAttempts(), 0, "fee materialization must remain reachable");
+        assertGt(handler.ghostFeeSettlementMaterializations(), 0, "epoch settlement must materialize accrued fees");
+        assertGt(handler.ghostFeeSharesMaterialized(), 0, "fee campaign must mint nonzero fee shares");
+        assertEq(handler.ghostFeeRecipientMismatches(), 0, "fee shares must credit only the configured recipient");
+        assertEq(handler.ghostFeeRawSupplyMismatches(), 0, "raw Junior supply delta must isolate fee minting");
+        assertEq(
+            handler.ghostFeeEffectiveSupplyMismatches(),
+            0,
+            "effective and raw Junior supply must reconcile at checkpoints"
+        );
+        assertEq(
+            juniorVault.balanceOf(FEE_RECIPIENT),
+            handler.initialFeeRecipientShares() + handler.ghostFeeSharesMaterialized(),
+            "recipient balance must equal cumulatively observed fee mints"
+        );
+    }
+
+    function invariant_FeeCheckpointDoesNotMutatePoolEconomicsOrEscrows() public view {
+        assertGt(handler.ghostFeeIsolationAttempts(), 0, "isolated configuration checkpoint must remain reachable");
+        assertEq(
+            handler.ghostFeeIsolationAccountingMutations(),
+            0,
+            "fee-only checkpoint must not mutate principal, HWM, assets, USDC, or escrows"
+        );
+    }
+
+    function invariant_JuniorSettlementPricingUsesEffectiveSupplyAndRedemptionFirstOrdering() public view {
+        assertGt(handler.ghostJuniorDepositPricingChecks(), 0, "Junior deposit pricing must remain reachable");
+        assertGt(handler.ghostJuniorRedemptionPricingChecks(), 0, "Junior redemption pricing must remain reachable");
+        assertGt(
+            handler.ghostJuniorDepositEffectiveSupplyChecks(),
+            0,
+            "Junior deposit pricing must be checked while pending dilution exists"
+        );
+        assertGt(
+            handler.ghostJuniorRedemptionEffectiveSupplyChecks(),
+            0,
+            "Junior redemption pricing must be checked while pending dilution exists"
+        );
+        assertGt(
+            handler.ghostJuniorDepositRawSupplyQuoteDivergences(),
+            0,
+            "the exercised Junior deposit quote must distinguish effective from raw supply"
+        );
+        assertGt(
+            handler.ghostJuniorRedemptionRawSupplyQuoteDivergences(),
+            0,
+            "the exercised Junior redemption quote must distinguish effective from raw supply"
+        );
+        assertEq(
+            handler.ghostJuniorDepositPricingMismatches(),
+            0,
+            "accepted Junior deposits must use exact post-redemption effective-supply pricing"
+        );
+        assertEq(
+            handler.ghostJuniorRedemptionPricingMismatches(),
+            0,
+            "funded Junior redemptions must use pre-mutation effective-supply pricing"
+        );
+    }
+
+    function invariant_HeldSettlementAccruesButCannotMaterializeMaintenanceFee() public view {
+        assertGt(handler.ghostHeldFeeAccrualChecks(), 0, "held-period accrual check must remain reachable");
+        assertGt(handler.ghostHeldFeeAccrualIncreases(), 0, "maintenance fee must accrue during a settlement hold");
+        assertEq(handler.ghostHeldFeeAccrualRegressions(), 0, "held time must not reduce pending fee accrual");
+        assertGt(handler.ghostHeldSettlementAttempts(), 0, "held settlement attempt must remain reachable");
+        assertEq(handler.ghostHeldSettlementUnexpectedSuccesses(), 0, "held settlement must not succeed");
+        assertEq(handler.ghostHeldSettlementWrongReverts(), 0, "held settlement must use its dedicated error");
+        assertEq(handler.ghostHeldSettlementAccountingMutations(), 0, "held settlement must not mutate LP accounting");
+        assertEq(
+            handler.ghostHeldSettlementFeeMutations(),
+            0,
+            "held settlement must not mint fees or advance the fee checkpoint"
+        );
+    }
+
+    function invariant_RawShareSupplyIsConservedAcrossKnownHolders() public view {
+        uint256 seniorKnownShares = seniorVault.balanceOf(address(seniorVault));
+        uint256 juniorKnownShares = juniorVault.balanceOf(address(juniorVault)) + juniorVault.balanceOf(FEE_RECIPIENT);
+
+        for (uint256 i = 0; i < handler.actorCount(); ++i) {
+            address actor = handler.actorAt(i);
+            seniorKnownShares += seniorVault.balanceOf(actor);
+            juniorKnownShares += juniorVault.balanceOf(actor);
+        }
+
+        assertEq(seniorVault.totalSupply(), seniorKnownShares, "raw Senior supply must equal known holder balances");
+        assertEq(juniorVault.totalSupply(), juniorKnownShares, "raw Junior supply must equal known holder balances");
     }
 
 }

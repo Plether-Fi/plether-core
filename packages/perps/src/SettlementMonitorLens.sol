@@ -105,8 +105,8 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         bool positive;
     }
 
-    uint256 public constant CONFIG_SCHEMA_VERSION = 2;
-    bytes32 public constant OBSERVATION_DOMAIN = keccak256("PLETHER_SETTLEMENT_OBSERVATION_V2");
+    uint256 public constant CONFIG_SCHEMA_VERSION = 3;
+    bytes32 public constant OBSERVATION_DOMAIN = keccak256("PLETHER_SETTLEMENT_OBSERVATION_V3");
     uint256 internal constant STATIC_READ_GAS = 500_000;
     uint256 internal constant MAX_STATIC_WORDS = 16;
 

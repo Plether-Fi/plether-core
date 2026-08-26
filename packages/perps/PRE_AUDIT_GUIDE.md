@@ -66,6 +66,7 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when live positions exist; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback; every route reverts before mutation while the independent settlement hold is active |
 | `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold without blocking requests, reconciliation, trading, or funded claims |
 | `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
+| `TrancheVault.proposeMaintenanceFeeConfig` / `finalizeMaintenanceFeeConfig` / `cancelMaintenanceFeeConfigProposal` | current `HousePool.owner()` only, Junior vault only | 48-hour delayed configuration; finalization checkpoints the old rate/recipient before applying the new pair; no arbitrary mint or USDC-transfer authority |
 | `HousePoolRedemptionMathSidecar` pure functions | permissionless | stateless EIP-170 size split used by the HousePool immutable binding; fixed implementation id, no storage, authorization, setter, delegatecall, or upgrade path |
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
 | `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, the public `MONITOR()` binding remains readable while dependency bindings stay internal, and there are no setters or delegatecall paths |
@@ -167,6 +168,7 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 | Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
 | Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting | atomic Router epoch settlement, then controller/operator claim | no | no separate asset claim | no | yes, through outstanding share supply |
 | Pending LP redemption shares | Request controller; still exposed to tranche P&L | `TrancheVault` request/epoch queue; shares held by vault escrow and still in supply | request path plus pool-authorized settlement callback | no | no separate asset claim before funding | no | yes, through outstanding share supply |
+| Junior maintenance-fee shares | Configured fee recipient | Junior `TrancheVault`; pending dilution in `pendingMaintenanceFeeShares()`, issued ownership in ordinary ERC-20 balance | any nonzero Junior supply mutation (including terminal deposit-claim escrow-dust burn) and fee-config finalization | no | no separate asset claim | no | yes, through effective Junior supply |
 | Funded LP redemption assets | Request controller | USDC held in `TrancheVault` claim escrow and claimable epoch accounting | atomic Router epoch settlement, then controller/operator claim | no | no longer part of pool | no | no |
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
 
@@ -230,6 +232,22 @@ Reachability note:
 - Chosen rule: both use `physicalAssets - totalTraderClaims + terminalLpPriceDelta`, with the signed delta computed from whole lots, exact entry cost, and account-capped collectible loss.
 - Liquidity separation: a positive marked receivable affects share ownership but cannot fund redemption cash before collection; endpoint max liability remains the withdrawal/admission reserve.
 - Protecting invariant: a current terminal deficit blocks deposit activation, and every position/pledge/claim transition synchronizes the account curve atomically.
+
+### Junior maintenance-fee dilution
+
+- Ownership choice: the fee is paid only by diluting Junior supply; it does not move USDC or alter principal, HWM,
+  reserves, claimant buckets, or waterfall arithmetic.
+- Governance boundary: the current HousePool owner controls a 48-hour delayed configuration capped at `1,000 bps`
+  nominal APR. The fresh-deployment default is `0 bps` and `address(0)`.
+- Pricing invariant: every Junior conversion and epoch quote uses raw supply plus pending fee shares. Pending deposits
+  join the fee base on activation; pending redemptions stay in it until funding burns their shares.
+- Liveness choice: accrual continues during settlement holds, oracle freeze, and zero NAV. Held or reverted settlement
+  cannot materialize the fee, but elapsed completed hours remain pending; at zero NAV the recipient shares are
+  initially worthless and retain ordinary recovery rights.
+- Boundedness: accrual uses completed Unix hours, exponentiation by squaring, and at most `8,760` charged hours per
+  crystallization. Older elapsed hours are forgiven. There is no public fee checkpoint or per-account cost basis.
+- Monitoring boundary: schema/domain V3 commits the readable active APR and recipient into observable configuration;
+  an unreadable value invalidates the digest rather than being interpreted as a disabled fee.
 
 ### Clearinghouse liquidation-charge servicing
 

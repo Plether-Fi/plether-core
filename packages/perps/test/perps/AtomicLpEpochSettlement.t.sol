@@ -71,10 +71,18 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         uint256 poolUsdc;
         uint256 vaultUsdc;
         uint256 juniorSupply;
+        uint256 accruedJuniorSupply;
+        uint256 maintenanceFeeRecipientShares;
+        uint256 maintenanceFeeCheckpointBoundary;
+        uint256 pendingMaintenanceFeeShares;
         uint256 depositQueueHead;
         uint256 depositQueueTail;
         uint256 redeemQueueHead;
         uint256 redeemQueueTail;
+        uint256 pendingDepositEscrowAssets;
+        uint256 pendingRedeemEscrowShares;
+        uint256 depositClaimEscrowShares;
+        uint256 withdrawalEscrowAssets;
         uint256 pendingDepositAssets;
         uint256 claimableDepositAssets;
         uint256 pendingRedeemShares;
@@ -91,6 +99,9 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
     address internal constant CAROL = address(0xCA401);
     address internal constant DAVE = address(0xDA7E);
     address internal constant TRADER = address(0x7A0E2);
+    address internal constant MAINTENANCE_FEE_RECIPIENT = address(0xFEE60001);
+
+    uint256 internal constant MAINTENANCE_FEE_APR_BPS = 1000;
 
     uint256 internal constant FRIDAY_FAD_ONLY = 1_709_934_300;
     uint256 internal constant SATURDAY_FROZEN = 1_709_985_600;
@@ -735,11 +746,134 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
     }
 
+    function test_AtomicSettlement_MaintenanceFeeAccruesDuringHoldAndMaterializesOnceAfterRelease() public {
+        uint256 aliceShares = _seedJuniorLp(ALICE, 100_000e6);
+        _enableJuniorMaintenanceFee();
+        _openMarkSensitivePosition();
+
+        uint256 redeemShares = aliceShares / 5;
+        uint256 redeemId = _requestJuniorRedeem(ALICE, redeemShares);
+        uint256 depositAssets = 10_000e6;
+        uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
+        assertEq(depositId, redeemId, "entry and exit must share the held fee epoch");
+
+        pool.pauseLpEpochSettlement();
+        vm.warp(pool.lpEpochStart(depositId) + 6 hours);
+        _setBasket(100_000_000, 0, block.timestamp);
+        baseMockPyth.setFee(1 ether);
+        address caller = address(0xC011E3);
+        vm.deal(caller, 2 ether);
+
+        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
+        assertGt(feeShares, 0, "held time must remain chargeable");
+        uint256 rawSupplyBefore = juniorVault.totalSupply();
+        uint256 feeBoundaryBefore = juniorVault.maintenanceFeeCheckpointBoundary();
+        SettlementHoldRollbackSnapshot memory beforeState = _settlementHoldSnapshot(caller, depositId, redeemId);
+
+        vm.prank(caller);
+        vm.expectRevert(IHousePool.HousePool__LpEpochSettlementPaused.selector);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+
+        _assertSettlementHoldSnapshot(beforeState, caller, depositId, redeemId);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares, "held attempt must preserve accrued fee");
+
+        pool.unpauseLpEpochSettlement();
+        assertEq(juniorVault.totalSupply(), rawSupplyBefore, "release cannot mint fee shares");
+        assertEq(
+            juniorVault.maintenanceFeeCheckpointBoundary(), feeBoundaryBefore, "release cannot advance fee checkpoint"
+        );
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), 0, "release cannot credit the recipient");
+
+        vm.prank(caller);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "recovery must mint the accrued fee once");
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "successful settlement must consume accrued fee");
+        assertGt(
+            juniorVault.maintenanceFeeCheckpointBoundary(),
+            feeBoundaryBefore,
+            "successful settlement advances checkpoint"
+        );
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), redeemShares);
+        assertEq(juniorVault.pendingDepositRequest(depositId, BOB), 0);
+        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
+
+        uint256 checkpointAfterSettlement = juniorVault.maintenanceFeeCheckpointBoundary();
+        vm.prank(caller);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "fee must not mint twice");
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointAfterSettlement);
+    }
+
+    function test_AtomicSettlement_DownstreamFailureRollsBackMaterializedMaintenanceFee() public {
+        uint256 aliceShares = _seedJuniorLp(ALICE, 100_000e6);
+        _enableJuniorMaintenanceFee();
+        vm.warp(block.timestamp + 6 hours);
+        _openMarkSensitivePosition();
+
+        uint256 redeemShares = aliceShares / 5;
+        uint256 redeemId = _requestJuniorRedeem(ALICE, redeemShares);
+        uint256 depositAssets = 200_000e6;
+        uint256 depositId = _requestJuniorDeposit(BOB, depositAssets);
+        assertEq(depositId, redeemId, "entry and exit must share the failing fee epoch");
+        _warpToEpoch(depositId);
+        _setBasket(100_000_000, 0, block.timestamp);
+        baseMockPyth.setFee(1 ether);
+        address caller = address(0xC011E4);
+        vm.deal(caller, 2 ether);
+
+        uint256 feeShares = juniorVault.pendingMaintenanceFeeShares();
+        assertGt(feeShares, 0, "fixture must have a materializable fee");
+        uint256 expectedRedeemAssets = juniorVault.estimateRedeemAssets(redeemShares);
+        assertGt(expectedRedeemAssets, 0, "redemption must materialize the fee before the injected failure");
+        assertEq(usdc.balanceOf(address(juniorVault)), depositAssets, "fixture isolates deposit escrow cash");
+        bytes4 injectedFailure = bytes4(keccak256("InjectedDepositTransferFailure()"));
+        vm.mockCallRevert(
+            address(usdc),
+            abi.encodeWithSelector(bytes4(keccak256("transfer(address,uint256)")), address(pool), depositAssets),
+            abi.encodeWithSelector(injectedFailure)
+        );
+        SettlementHoldRollbackSnapshot memory beforeState = _settlementHoldSnapshot(caller, depositId, redeemId);
+
+        vm.prank(caller);
+        vm.expectRevert(injectedFailure);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+
+        _assertSettlementHoldSnapshot(beforeState, caller, depositId, redeemId);
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), feeShares, "failed settlement must preserve accrued fee");
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), 0, "transient fee mint must roll back completely");
+
+        vm.clearMockedCalls();
+        vm.prank(caller);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "recovered settlement must mint fee once");
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0);
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
+        assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), redeemShares);
+        assertEq(juniorVault.pendingDepositRequest(depositId, BOB), 0);
+        assertEq(juniorVault.claimableDepositRequest(depositId, BOB), depositAssets);
+
+        uint256 checkpointAfterSettlement = juniorVault.maintenanceFeeCheckpointBoundary();
+        vm.prank(caller);
+        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
+        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+        assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), feeShares, "fee must remain single-shot");
+        assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointAfterSettlement);
+    }
+
     function test_AtomicSettlement_NoProgressRollsBackOracleEngineCarryAndPoolState() public {
+        _seedJuniorLp(ALICE, 100_000e6);
+        _enableJuniorMaintenanceFee();
+        vm.warp(juniorVault.maintenanceFeeCheckpointBoundary() + 6 hours);
         _openMarkSensitivePosition();
         _warpToEpoch(pool.currentLpEpoch() + 1);
         _setBasket(100_000_000, 0, block.timestamp);
 
+        assertGt(juniorVault.pendingMaintenanceFeeShares(), 0, "fixture must have an outstanding maintenance fee");
+        bytes32 maintenanceFeeStateBefore = _maintenanceFeeStateDigest();
         uint256 updateCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
         PythStructs.Price memory pythBefore = baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_A);
         uint256 markPriceBefore = engine.lastMarkPrice();
@@ -768,6 +902,11 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(pool.seniorPrincipal(), seniorBefore);
         assertEq(pool.juniorPrincipal(), juniorBefore);
         assertEq(pool.accountedAssets(), accountedBefore);
+        assertEq(
+            _maintenanceFeeStateDigest(),
+            maintenanceFeeStateBefore,
+            "no-progress settlement cannot mint, credit, checkpoint, or forgive the outstanding fee"
+        );
     }
 
     function test_HousePoolAtomicCallback_RejectsWrongCallerAndMismatchedBinding() public {
@@ -909,6 +1048,25 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         _open(TRADER, CfdTypes.Side.LONG, 1000e18, 100e6, 100_000_000);
     }
 
+    function _enableJuniorMaintenanceFee() internal {
+        juniorVault.proposeMaintenanceFeeConfig(MAINTENANCE_FEE_APR_BPS, MAINTENANCE_FEE_RECIPIENT);
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+        assertEq(juniorVault.maintenanceFeeAprBps(), MAINTENANCE_FEE_APR_BPS);
+        assertEq(juniorVault.maintenanceFeeRecipient(), MAINTENANCE_FEE_RECIPIENT);
+    }
+
+    function _maintenanceFeeStateDigest() internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                juniorVault.totalSupply(),
+                juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT),
+                juniorVault.maintenanceFeeCheckpointBoundary(),
+                juniorVault.pendingMaintenanceFeeShares()
+            )
+        );
+    }
+
     function _seedJuniorLp(
         address owner,
         uint256 assets
@@ -1016,10 +1174,18 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         snapshot.poolUsdc = usdc.balanceOf(address(pool));
         snapshot.vaultUsdc = usdc.balanceOf(address(juniorVault));
         snapshot.juniorSupply = juniorVault.totalSupply();
+        snapshot.accruedJuniorSupply = juniorVault.accruedTotalSupply();
+        snapshot.maintenanceFeeRecipientShares = juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT);
+        snapshot.maintenanceFeeCheckpointBoundary = juniorVault.maintenanceFeeCheckpointBoundary();
+        snapshot.pendingMaintenanceFeeShares = juniorVault.pendingMaintenanceFeeShares();
         snapshot.depositQueueHead = juniorVault.depositQueueHead();
         snapshot.depositQueueTail = juniorVault.depositQueueTail();
         snapshot.redeemQueueHead = juniorVault.redeemQueueHead();
         snapshot.redeemQueueTail = juniorVault.redeemQueueTail();
+        snapshot.pendingDepositEscrowAssets = juniorVault.pendingDepositEscrowAssets();
+        snapshot.pendingRedeemEscrowShares = juniorVault.pendingRedeemEscrowShares();
+        snapshot.depositClaimEscrowShares = juniorVault.depositClaimEscrowShares();
+        snapshot.withdrawalEscrowAssets = juniorVault.withdrawalEscrowAssets();
         snapshot.pendingDepositAssets = juniorVault.pendingDepositRequest(depositId, BOB);
         snapshot.claimableDepositAssets = juniorVault.claimableDepositRequest(depositId, BOB);
         snapshot.pendingRedeemShares = juniorVault.pendingRedeemRequest(redeemId, ALICE);
@@ -1059,10 +1225,44 @@ contract AtomicLpEpochSettlementTest is BasePerpTest {
         assertEq(usdc.balanceOf(address(pool)), expected.poolUsdc, "pool USDC must roll back");
         assertEq(usdc.balanceOf(address(juniorVault)), expected.vaultUsdc, "vault USDC must roll back");
         assertEq(juniorVault.totalSupply(), expected.juniorSupply, "vault supply must roll back");
+        assertEq(juniorVault.accruedTotalSupply(), expected.accruedJuniorSupply, "accrued supply must roll back");
+        assertEq(
+            juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT),
+            expected.maintenanceFeeRecipientShares,
+            "fee-recipient shares must roll back"
+        );
+        assertEq(
+            juniorVault.maintenanceFeeCheckpointBoundary(),
+            expected.maintenanceFeeCheckpointBoundary,
+            "maintenance-fee checkpoint must roll back"
+        );
+        assertEq(
+            juniorVault.pendingMaintenanceFeeShares(),
+            expected.pendingMaintenanceFeeShares,
+            "pending maintenance fee must roll back"
+        );
         assertEq(juniorVault.depositQueueHead(), expected.depositQueueHead, "deposit head must roll back");
         assertEq(juniorVault.depositQueueTail(), expected.depositQueueTail, "deposit tail must roll back");
         assertEq(juniorVault.redeemQueueHead(), expected.redeemQueueHead, "redeem head must roll back");
         assertEq(juniorVault.redeemQueueTail(), expected.redeemQueueTail, "redeem tail must roll back");
+        assertEq(
+            juniorVault.pendingDepositEscrowAssets(),
+            expected.pendingDepositEscrowAssets,
+            "pending deposit escrow must roll back"
+        );
+        assertEq(
+            juniorVault.pendingRedeemEscrowShares(),
+            expected.pendingRedeemEscrowShares,
+            "pending redeem escrow must roll back"
+        );
+        assertEq(
+            juniorVault.depositClaimEscrowShares(),
+            expected.depositClaimEscrowShares,
+            "deposit claim escrow must roll back"
+        );
+        assertEq(
+            juniorVault.withdrawalEscrowAssets(), expected.withdrawalEscrowAssets, "withdrawal escrow must roll back"
+        );
         assertEq(
             juniorVault.pendingDepositRequest(depositId, BOB),
             expected.pendingDepositAssets,

@@ -485,6 +485,34 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertFalse(pool.lpEpochSettlementPaused(), "LP epoch settlement starts paused");
     }
 
+    function test_AsyncVaultReleaseDefaults_DisableJuniorMaintenanceFee() public {
+        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+
+        assertEq(juniorVault.maintenanceFeeAprBps(), 0, "Junior maintenance fee APR");
+        assertEq(juniorVault.maintenanceFeeRecipient(), address(0), "Junior maintenance fee recipient");
+        assertEq(juniorVault.pendingMaintenanceFeeShares(), 0, "Junior pending maintenance fee shares");
+        assertEq(juniorVault.accruedTotalSupply(), juniorVault.totalSupply(), "Junior effective supply");
+
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
+        bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+    }
+
+    function test_DeploymentRejectsActiveMaintenanceFeeWhileBootstrapRerunAcceptsIt() public {
+        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+        juniorVault.proposeMaintenanceFeeConfig(100, address(0xFEE));
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        vm.expectRevert(bytes("Junior maintenance fee must default to zero"));
+        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
+
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+    }
+
     function test_BootstrapRejectsMissingRedemptionMathSidecarOnRerun() public {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
 
