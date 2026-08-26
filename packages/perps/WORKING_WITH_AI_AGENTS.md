@@ -14,12 +14,41 @@ This document explains the core protocol surfaces available to agent developers.
 enforcement, execution, and verification. Wallet delegation, session keys, strategy design, model hosting, market-data
 selection, and user-facing approvals remain application-layer concerns.
 
+## The instrument: Plether dollar-index exposure
+
+Plether Perps provides one bounded, USDC-margined, oracle-settled perpetual market for USD direction against a
+six-currency basket. Its raw on-chain mark is a normalized linear combination of EUR, JPY, GBP, CAD, SEK, and CHF
+against USD. The reference weights are 57.6%, 13.6%, 11.9%, 9.1%, 4.2%, and 3.6%, respectively. They are
+DXY-oriented, but Plether's basket is not the ICE U.S. Dollar Index and must not be presented as a raw DXY quote.
+Exact feed IDs, weights, normalization bases, inversion flags, and the price cap are deployment-specific. The
+Router's verified current Oracle binding and execution configuration hash—not this reference list—are authoritative
+for an order.
+
+The raw basket mark rises when those foreign currencies strengthen against USD and falls when USD strengthens.
+Product-facing direction therefore maps to the current Solidity ABI as follows:
+
+| Product position | Economic exposure | Positive price PnL when the raw FX-basket mark | Solidity encoding |
+|------------------|-------------------|------------------------------------------------|-------------------|
+| **LONG dollar index** | USD strengthens against the basket | Falls | `CfdTypes.Side.BULL` (`0`) |
+| **SHORT dollar index** | USD weakens against the basket | Rises | `CfdTypes.Side.BEAR` (`1`) |
+
+Those enum labels are compatibility names in the current perps source, not the perps product terminology. Reserve
+**BULL** and **BEAR** as user-facing names for Plether's spot tokens. Perps agent policies, prompts, interfaces, and
+reports should use **LONG dollar index** and **SHORT dollar index**, translating only at the contract boundary. An
+integration must not infer economic direction from the English meaning of the enum label.
+
+Within a larger portfolio, this market can be used as a discrete dollar-factor overlay: an agent can express or
+partially hedge USD-against-basket direction without changing every asset-specific position or assembling six
+separate FX legs. That can help isolate a dollar exposure from the rest of a portfolio mandate. It is not a perfect
+hedge or an ICE USDX replica; agents must model basket basis, the price cap, leverage, carry, fees, oracle regimes,
+protocol and USDC risk, and the actual correlations of the portfolio they manage.
+
 ## Why the protocol is suitable for autonomous capital
 
 | Requirement | Protocol guarantee | Primary tool |
 |-------------|--------------------|--------------|
-| Authoritative state | Live state comes from the Router, Engine, Clearinghouse, HousePool, and Oracle; permanent order identity and outcomes come from a predeployed immutable lifecycle Book whose exact bindings the Router validates | `IOrderLifecycleBook`, `PerpsPublicLens`, Engine preview lenses |
-| Protocol meaning | Requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics are typed | `OrderV2Types`, `CfdOrderPolicyEvaluator` |
+| Authoritative state | Live state comes from the Router, Engine, Clearinghouse, HousePool, and Oracle; permanent order identity and outcomes come from a predeployed immutable lifecycle Book whose exact bindings the Router validates | `IOrderLifecycleBook`, `PerpsPublicLens`, `PletherOracle`, Engine preview lenses |
+| Protocol meaning | Dollar-index direction, requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics have an explicit machine mapping | `CfdTypes.Side`, `OrderV2Types`, `CfdOrderPolicyEvaluator` |
 | Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV2Types.ExecutionBounds`, `IPositionProtectionActions` |
 | Financial policy | The evaluator reconstructs authoritative Engine state and checks the registered intent's limits before the Engine applies the transition | `CfdOrderPolicyEvaluator`, configured Engine planner |
 | Composable execution | Bounded-order submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
@@ -119,6 +148,8 @@ The Book is the Router's eighth and final constructor dependency. The Router sep
 Use the smallest canonical surface that answers the decision:
 
 - `PerpsPublicLens` for compact account, position, tranche, and protocol status.
+- `OrderRouter.pletherOracle()` and the deployed `PletherOracle` configuration for the exact FX-basket market bound
+  to the Router.
 - `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for trade-ticket simulation.
 - `IOrderLifecycleBook` for order identity, pinned policy, lifecycle, and outcome.
 - `PerpsPublicLens.getActivePositionProtection(...)` and `getPositionProtection(...)`, or direct
@@ -177,7 +208,7 @@ that an agent integration can use or replace:
   account queries;
 - the [order and liquidation keeper](https://github.com/Plether-Fi/plether-app/blob/master/apps/backend/app/Keeper.hs)
   for permissionless execution;
-- the [Pyth basket cache worker](https://github.com/Plether-Fi/plether-app/blob/master/apps/backend/app/BasketWorker.hs)
+- the [Pyth FX-basket cache worker](https://github.com/Plether-Fi/plether-app/blob/master/apps/backend/app/BasketWorker.hs)
   for current and historical payload preparation;
 - the [perps event indexer](https://github.com/Plether-Fi/plether-app/blob/master/apps/backend/app/PerpsIndexer.hs) for
   searchable history.
@@ -187,23 +218,26 @@ payload acceptance, lifecycle state, and terminal evidence against the contracts
 
 ## The bounded-order envelope
 
-Every external `OrderRequest` contains an account-scoped `clientOrderId`, trade direction and size, margin delta,
+Every public `OrderRequest` contains an account-scoped `clientOrderId`, trade direction and size, margin delta,
 target price, open/close flag, and mandatory `ExecutionBounds`.
 
 Use protocol-native units: USDC amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals and must
 be divisible by `1e20` (the 100-token lot), timestamps are Unix seconds, and leverage values are basis points.
 
-`CfdTypes.Side.BULL` profits when the oracle basket price falls, while `BEAR` profits when it rises. The target is
-tested against the side-adverse execution price, not the neutral mark:
+All on-chain order prices are the raw 8-decimal FX-basket quote, not an inverted dollar-oriented display price.
+`targetPrice` is tested against the side-adverse execution price rather than the neutral mark. In product terms:
 
 `targetPrice` is a direction-aware inclusive execution boundary:
 
-| Action | Accepted execution price |
-|--------|--------------------------|
-| Open/increase BULL | `executionPrice >= targetPrice` |
-| Open/increase BEAR | `executionPrice <= targetPrice` |
-| Close/reduce BULL | `executionPrice <= targetPrice` |
-| Close/reduce BEAR | `executionPrice >= targetPrice` |
+| Product action | Accepted raw FX-basket execution price |
+|----------------|----------------------------------------|
+| Open/increase LONG dollar index | `executionPrice >= targetPrice` |
+| Open/increase SHORT dollar index | `executionPrice <= targetPrice` |
+| Close/reduce LONG dollar index | `executionPrice <= targetPrice` |
+| Close/reduce SHORT dollar index | `executionPrice >= targetPrice` |
+
+If an application derives an inverse, dollar-oriented display price, it must convert both the submitted value and
+the comparison direction. Never submit a display-price limit directly as a raw `targetPrice`.
 
 All ceilings and floors are inclusive. Zero means zero; it never means "unbounded." Use an integer type's maximum
 only when the account policy deliberately wants no practical ceiling. For fresh public commits, independently
@@ -240,10 +274,11 @@ and record the configuration actually observed at execution. They remain subject
 but they are not a caller-selected financial envelope. This exception is unavailable through public `commitOrder`:
 an agent-supplied fresh request with a zero configuration hash is rejected.
 
-For `commitOpenOrderWithProtection`, a caller target of zero is translated before registration to `1` for a BULL open
-or `CAP_PRICE` for a BEAR open. Trigger-generated market-style closes use the reverse nonbinding sentinels:
-`CAP_PRICE` for a BULL close and `1` for a BEAR close. `IntentRegistered` contains the translated nonzero target.
-Separately, zero in a TP/SL threshold disables that OCO leg; both threshold legs cannot be zero.
+For `commitOpenOrderWithProtection`, a caller target of zero is translated before registration to `1` for a LONG
+dollar-index open or `CAP_PRICE` for a SHORT dollar-index open. Trigger-generated market-style closes use the reverse
+nonbinding sentinels: `CAP_PRICE` for a LONG dollar-index close and `1` for a SHORT dollar-index close.
+`IntentRegistered` contains the translated nonzero target. Separately, zero in a TP/SL threshold disables that OCO
+leg; both threshold legs cannot be zero.
 
 The evaluator checks these constraints against an authoritative snapshot reconstructed from the Engine and
 Clearinghouse immediately before mutation. A caller cannot satisfy a bound by supplying its own accounting inputs.
@@ -303,15 +338,15 @@ requests use the zero marker, skip equality, and record `observedConfigHash` in 
 ## Price selection is protocol-defined
 
 A keeper supplies Pyth update payloads, not an arbitrary execution price. In Live and FAD execution, the Router parses
-the unique historical basket tick in
+the unique historical FX-basket tick in
 `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`. The tick immediately preceding that range
 must have a publish time no later than `commitTime`, preventing a keeper from skipping an earlier eligible tick in
 favor of a later one.
 
-The Oracle derives the side-adverse execution price from the validated basket and confidence interval. It caps that
+The Oracle derives the side-adverse execution price from the validated FX basket and confidence interval. It caps that
 price before applying the request's directional target boundary. Frozen execution follows the separate validated
-stored-basket policy and fixed frozen-close spread rules. This makes price selection part of protocol meaning rather
-than keeper discretion.
+stored FX-basket policy and fixed frozen-close spread rules. This makes price selection part of protocol meaning
+rather than keeper discretion.
 
 ## Machine-readable execution semantics
 
@@ -421,6 +456,9 @@ the observed post-liquidation state.
 ### 2. Read and model
 
 - Read compact market/account state from `PerpsPublicLens`.
+- Verify the deployed FX-basket feed IDs, weights, normalization bases, inversion flags, and price cap against the
+  intended market manifest; do not assume they match ICE USDX or another deployment.
+- Translate the strategy's LONG/SHORT dollar-index decision to the ABI side and raw FX-basket price domain.
 - Use Engine previews for the intended trade.
 - Read `currentExecutionConfigHash()` from the Book.
 - Choose a nonzero target, finite deadline, allowed regimes, and bounds derived from the user's risk mandate.
@@ -463,6 +501,13 @@ regardless of who executes, with the documented self-execution versus external-k
 - Persist block number and block hash so reorg handling can invalidate off-chain observations cleanly.
 
 ## Position-protection workflow
+
+TP/SL thresholds are also raw 8-decimal FX-basket prices. Their product-facing direction is:
+
+| Product position | Take-profit condition | Stop-loss condition |
+|------------------|-----------------------|---------------------|
+| LONG dollar index | raw mark at or below TP | raw mark at or above SL |
+| SHORT dollar index | raw mark at or above TP | raw mark at or below SL |
 
 1. Discover the protection Book from the verified Router and read the account's active protection plus current
    position, pending orders, cached mark, feature flag, and configured bounties at one block.
@@ -514,6 +559,8 @@ protocol-synthesized execution envelope.
   configuration instead.
 - **Dynamic state:** the configuration hash is not a price, liquidity, pause, or oracle-regime snapshot. Use bounds
   and fresh reads as well.
+- **Index basis:** the Plether dollar index is a capped normalized linear FX basket, not ICE USDX. A portfolio hedge
+  can retain basket, cap, and correlation basis risk even when its directional mapping is correct.
 - **Oracle dependency:** live execution requires valid Pyth data and ETH for its fee. A data API is not authoritative;
   the contracts validate payloads and publish-time policy.
 - **Event finality:** wait for the confirmation depth appropriate to the chain and handle reorgs before treating an
@@ -532,6 +579,9 @@ protocol-synthesized execution envelope.
 
 - [ ] Use the canonical deployment and verify immutable bindings.
 - [ ] Put agent authority behind a revocable smart account or session policy.
+- [ ] Use LONG/SHORT dollar-index terminology in policies and reports; apply the product/ABI mapping above only at the
+      contract boundary.
+- [ ] Verify the deployed FX-basket configuration and model basis against the portfolio exposure being managed.
 - [ ] For bounded orders, read the Book's current execution configuration hash.
 - [ ] For bounded orders, use a permanent account-scoped client id and resolve it before submission.
 - [ ] For bounded orders, set every financial bound explicitly; never treat zero as unbounded.
@@ -546,6 +596,9 @@ protocol-synthesized execution envelope.
 
 ## Reference map
 
+- [`CfdTypes.sol`](src/CfdTypes.sol): current perps ABI side encoding and core position types; apply the product-facing
+  direction mapping defined above.
+- [`PletherOracle.sol`](src/PletherOracle.sol): deployment-bound FX-basket construction, confidence, and timing policy.
 - [`OrderV2Types.sol`](src/OrderV2Types.sol): request, bounds, lifecycle, failure, economics, and result types.
 - [`IOrderLifecycleBook.sol`](src/interfaces/IOrderLifecycleBook.sol): authoritative identity, policy, outcome, and
   configuration reads.
