@@ -164,7 +164,8 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   a predicted Router, and that Router validates the Book's Router, Engine, Clearinghouse, and HousePool bindings in
   its constructor.
 - `PositionProtectionBook` is created by and immutable-bound to the Router and Engine. It owns retained protection
-  state, direct actions/views, and Router-only lifecycle hooks; it does not carry keeper or liquidation orchestration.
+  state, direct actions/views, retry-bounty attribution, and Router-only lifecycle hooks; it does not carry keeper or
+  liquidation orchestration.
 - `OrderRouterV2ExecutionSidecar` is a fixed, stateless Router delegate dependency. It orchestrates Oracle, evaluator,
   Engine, Clearinghouse, and lifecycle Book calls under the Router's address, but it cannot be called directly to
   obtain Router authority. Its self-call item boundary and ABI forwarding are security-critical.
@@ -412,13 +413,27 @@ configuration finalization. The Router retains admin authentication and applies 
 before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
 storage slots by assumed layout.
 
-The attached parent open and triggered linked close are the only requests allowed to carry
+The attached parent open and every triggered or retried close attempt are the only requests allowed to carry
 `expectedConfigHash == bytes32(0)`. Zero is an internal unpinned marker, not a public wildcard: the parent path requires
 the immutable position-protection Book as the Router caller, and the trigger path runs through the exactly
 Router-bound keeper sidecar plus Router-only Book activation/registration hooks. Fresh external V2 commits reject a
 zero hash and remain bound to the exact digest they supplied. Internal protected orders skip only config-digest
 equality; their typed execution modes, deadlines, financial policy, lifecycle evidence, and observed receipt digest
 remain enforced.
+
+Triggering is irreversible. `Triggered` means the Book has exactly one current live child; `Latched` means the trigger
+evidence and account trade lock remain but no child is live. A non-liquidation terminal child failure relatches only
+when the protected position still has the exact recorded account, side, and size; otherwise the protection fails and
+releases the active lock. Retry is permissionless and validates the latest child/reverse mapping so an old or spoofed
+callback cannot replace the current attempt. It does not re-evaluate the threshold, and a recovered price cannot cancel
+the close mandate.
+
+The Router registers every generated close as a protection attempt in `OrderLifecycleBook`. Only that authenticated
+marker permits a failed receipt to use `RetainedForProtectionRetry`: the recipient must be zero, the marker is consumed
+at finalization, and an ordinary order cannot select this disposition. A relatching cleanup pays no caller and moves
+the same reservation from Router attribution back to the Book; mismatch cleanup remains ordinarily paid. Retry
+requires the exact protected position and no pending account order, then transfers the retained value to the new child
+without another trader debit. This prevents permissionless retry from becoming a repeated bounty-drain primitive.
 
 When existing-position protection locks its trigger and linked-close bounties, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
@@ -492,6 +507,9 @@ Terminal classification is deliberately allow-listed:
   terminally and record selector/category/code/constraint evidence,
 - ordinary terminal failure cleanup pays the executor from the exact clearinghouse-reserved bounty; the reason does
   not change that routing,
+- registered protection-attempt failure is the narrow exception: when the exact protected position remains, cleanup
+  records `RetainedForProtectionRetry`, pays no executor, moves `Triggered -> Latched`, and preserves the original
+  execution bounty for the next attempt,
 - terminal-invalid closes pay the keeper from the already locked action reserve rather than refunding it to the trader wallet,
 - open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
@@ -510,7 +528,9 @@ Terminal classification is deliberately allow-listed:
 for completed calls. Each batch item uses an external Router self-call and a delegatecall back to the fixed sidecar,
 so a prepared-item failure can stop the batch without rolling back already finalized predecessors. Oracle/Pyth
 preparation is deliberately outside that item frame and is batch-atomic: if it reverts, the complete call reverts.
-There is no separate requeue operation: retry means calling execution again against the same pending FIFO head.
+For an ordinary pending order there is no separate requeue operation: retry means calling execution again against the
+same FIFO head. A terminal protection attempt is different: it has been permanently removed and receipted, so a
+separate permissionless Book retry appends a new order id at the current FIFO tail.
 
 ### Pinned financial policy and configuration
 
@@ -519,7 +539,7 @@ action charge, explicit fees, and post-position size, plus inclusive minima for 
 post-position equity and an inclusive maximum post-leverage. Zero is an actual zero allowance, not an unbounded sentinel. A field
 that is separately required nonzero cannot use zero; integrations use the field type's maximum to express no
 practical ceiling. In particular, a fresh external request must supply the current nonzero execution-config hash.
-Only the Router-authenticated TP/SL parent/trigger paths use zero as the internal unpinned marker. A terminal full
+Only the Router-authenticated TP/SL parent/attempt paths use zero as the internal unpinned marker. A terminal full
 close skips only the post-position equity and leverage checks because no position survives. Gross account debit
 includes settlement value lost or charged, consumed trader-claim value, and the
 reserved execution bounty; post-settlement balance means total internal settlement custody, including locked value.
@@ -533,6 +553,11 @@ that module affects only LP redemption budgeting, not order execution. This divi
 finalized policy drift produces terminal `ConfigMismatch` for config-pinned external orders, while execution mode and
 economics must fit the separately pinned request bounds. The internal TP/SL marker skips the hash-equality check but
 still records the observed digest in its terminal receipt.
+
+The request ABI and permanent intent-hash domain remain V2. The receipt type and execution-config schema are V3 in
+the latched-retry stack because authenticated protection-attempt registration and
+`RetainedForProtectionRetry` change terminal receipt meaning. Cross-version digest or receipt-hash equality must never
+be used as a compatibility signal.
 
 Deadline equality passes. Expiry begins only when `block.timestamp > validUntil`. A fresh commit must nevertheless
 choose a future deadline no farther away than the currently active `maxOrderAge`.
@@ -974,6 +999,9 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 - account-scoped client ids are permanent; a terminal or config-invalidated id cannot be reused for a replacement
   request, so clients must generate and persist unique ids,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
+- failed protection-attempt cleanup is deliberately unpaid so the single user-funded bounty can survive retries;
+  liveness therefore depends on keepers processing the terminal attempt and separately appending a retry, and operators
+  must alert on prolonged `Latched` state without a live child,
 - per-account pending-order caps bound griefing and liquidation cleanup now stays on bounded account-local order traversal,
 - the Router, its independently predeployed lifecycle Book, constructor-created protection Book, and fixed sidecars
   form one non-upgradeable reviewed stack. Externalizing the lifecycle Book plus keeper and execution paths saves
@@ -981,13 +1009,19 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
   change to either Book or any delegated path requires rechecking direct-call rejection, external-getter assumptions,
   Router caller/event context, and every affected EIP-170 size. Only protection-Book creation code remains embedded in
   Router initcode; lifecycle-Book and sidecar creation inputs must be gated independently under EIP-3860,
-- known typed planner/policy failures, slippage, expiry, and config mismatch are terminal and have no retry lane,
+- known typed planner/policy failures, slippage, expiry, and config mismatch are terminal for the affected order. A
+  current registered protection attempt may relatch for a fresh child when the exact protected position remains; other
+  orders have no terminal retry lane,
   while uncertain dependency failures deliberately retain the FIFO head and can block later orders until a successful
   retry or a different terminal rule such as expiry/risk-off/liquidation applies,
 - complete terminal economics are event-backed; on-chain storage retains only the compact outcome and receipt hash,
   so historical consumers require reliable log indexing,
-- the V2 lifecycle Book has no migration or repair authority. A binding/invariant fault requires containment and a
+- the lifecycle Book has no migration or repair authority. A binding/invariant fault requires containment and a
   fresh compatible stack.
+
+The latched-retry release therefore cannot be installed into an existing Router-created protection Book. Rollout must
+contain and reconcile the old stack, deploy and verify a complete new immutable stack, and move clients, keepers, and
+indexers to the new manifest; old protection and attempt state is not migrated.
 
 ### LP accounting limitations
 

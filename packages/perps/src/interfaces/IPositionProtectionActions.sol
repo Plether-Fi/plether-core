@@ -44,6 +44,16 @@ interface IPositionProtectionActions {
         bytes[] calldata pythUpdateData
     ) external payable returns (uint64 linkedOrderId);
 
+    /// @notice Permissionlessly queues a fresh full-position close for an already-latched protection.
+    /// @dev The original trigger is not re-evaluated. Exactly one retained execution bounty moves to the fresh child,
+    ///      which receives a new order id, commit clock, expiry, and oracle settlement window at the FIFO tail.
+    ///      This safety action remains available while new protection commits are paused or disabled.
+    /// @param protectionId Latched protection whose latest close attempt is already terminal.
+    /// @return linkedOrderId Newly committed ordinary close-attempt identifier.
+    function retryPositionProtectionClose(
+        uint64 protectionId
+    ) external returns (uint64 linkedOrderId);
+
     /// @notice Commits an opening order and stages TP/SL protection in the same transaction.
     /// @dev The protection becomes `Armed` atomically if the parent open executes. Parent failure terminally fails the
     ///      protection and releases its protection bounties. A fill that has crossed a staged threshold still arms the

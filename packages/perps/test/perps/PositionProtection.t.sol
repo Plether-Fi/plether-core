@@ -420,6 +420,413 @@ contract PositionProtectionTest is BasePerpTest {
         assertTrue(engine.degradedMode(), "a safety close must not silently clear the risk-off latch");
     }
 
+    function test_ExpiredProtectionAttempt_RelatchesRetainsBountyAndPaysNoCleaner() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
+        uint256 cleanerBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+
+        OrderV2Types.ExecutionResult memory result = _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "expiry lifecycle status");
+        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.Expired), "expiry reason");
+        assertEq(
+            clearinghouse.balanceUsdc(EXECUTION_KEEPER),
+            cleanerBalanceBefore,
+            "failed protection-attempt cleaner must not consume the reusable bounty"
+        );
+
+        PositionProtectionTypes.PositionProtectionView memory latched =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(latched.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+            "expired close attempt should relatch"
+        );
+        assertEq(latched.linkedOrderId, linkedOrderId, "latched protection retains latest attempt history");
+        assertEq(latched.executionBountyUsdc, executionBountyUsdc, "Book should recover the original close bounty");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "latch keeps the trade lock active");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "expired attempt should leave no live account order");
+        assertEq(router.pendingCloseSize(ALICE), 0, "expired attempt should clear pending close size");
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            executionBountyUsdc,
+            "reservation view should include the Book-held bounty"
+        );
+        assertEq(
+            clearinghouse.actionReserveUsdc(ALICE),
+            actionReserveBefore,
+            "expiry should not change the underlying action reserve"
+        );
+
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(linkedOrderId);
+        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired), "receipt expiry reason");
+        assertEq(
+            uint8(outcome.bountyDisposition),
+            uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
+            "receipt should authenticate retained retry funding"
+        );
+        assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt should preserve the bounty amount");
+        assertEq(outcome.bountyRecipient, address(0), "retained bounty has no recipient");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(linkedOrderId), "terminal receipt should clear marker");
+    }
+
+    function test_RetryPositionProtectionClose_IsPermissionlessFreshAndAppendsFifoTail() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        CfdTypes.Order memory firstOrder = _orderRecord(firstOrderId).core;
+        uint64 firstValidUntil = router.lifecycleBook().pendingPolicy(firstOrderId).validUntil;
+        PositionProtectionTypes.PositionProtectionView memory triggered =
+            protectionViews.getPositionProtection(protectionId);
+
+        _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
+
+        vm.prank(BOB);
+        uint64 foreignOrderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        assertEq(router.nextExecuteId(), foreignOrderId, "foreign order should become the FIFO head");
+
+        vm.deal(CAROL, 1);
+        vm.prank(CAROL);
+        (bool payableRetrySucceeded,) = address(protectionActions).call{value: 1}(
+            abi.encodeCall(IPositionProtectionActions.retryPositionProtectionClose, (protectionId))
+        );
+        assertFalse(payableRetrySucceeded, "retry must remain nonpayable");
+        assertEq(address(protectionBook).balance, 0, "rejected ETH must never enter the Book");
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+
+        assertGt(retryOrderId, firstOrderId, "retry should receive a fresh order id");
+        assertEq(router.nextExecuteId(), foreignOrderId, "retry must not jump the existing FIFO head");
+        assertEq(router.globalTailOrderId(), retryOrderId, "retry should append at the global tail");
+        assertEq(_orderRecord(foreignOrderId).nextGlobalOrderId, retryOrderId, "foreign head should point to retry");
+        assertEq(_orderRecord(retryOrderId).prevGlobalOrderId, foreignOrderId, "retry should point to prior tail");
+
+        CfdTypes.Order memory retryOrder = _orderRecord(retryOrderId).core;
+        OrderV2Types.ExecutionBounds memory retryBounds = router.lifecycleBook().pendingPolicy(retryOrderId);
+        assertGt(retryOrder.commitTime, firstOrder.commitTime, "retry should use a fresh commit clock");
+        assertEq(retryOrder.commitTime, block.timestamp, "retry commit time");
+        assertEq(retryOrder.commitBlock, block.number, "retry commit block");
+        assertGt(retryBounds.validUntil, firstValidUntil, "retry should receive a fresh validity window");
+        assertEq(
+            retryBounds.validUntil,
+            retryOrder.commitTime + uint64(router.maxOrderAge()),
+            "retry deadline should derive from its own commit time"
+        );
+        assertTrue(
+            router.lifecycleBook().isProtectionAttempt(retryOrderId), "retry should carry protected-attempt marker"
+        );
+
+        PositionProtectionTypes.PositionProtectionView memory retried =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(retried.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "retry should install one live child"
+        );
+        assertEq(retried.linkedOrderId, retryOrderId, "retry should become the latest linked order");
+        assertEq(retried.executionBountyUsdc, 0, "Book should transfer bounty attribution to retry child");
+        assertEq(
+            _orderRecord(retryOrderId).executionBountyUsdc,
+            router.closeOrderExecutionBountyUsdc(),
+            "retry should reuse the original bounty"
+        );
+        assertEq(uint8(retried.triggeredLeg), uint8(triggered.triggeredLeg), "retry must preserve trigger leg");
+        assertEq(retried.triggerMarkPrice, triggered.triggerMarkPrice, "retry must preserve trigger mark");
+        assertEq(retried.triggerPublishTime, triggered.triggerPublishTime, "retry must preserve trigger publish time");
+
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotLatched.selector);
+        protectionActions.retryPositionProtectionClose(protectionId);
+        assertEq(router.pendingOrderCounts(ALICE), 1, "double retry must not create another child");
+    }
+
+    function test_RetryPositionProtectionClose_PriceRecoveryDoesNotCancelLatchedIntent() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
+
+        _refreshMark(MARK_PRICE);
+        assertGt(MARK_PRICE, LONG_TAKE_PROFIT, "fixture should move back across the original TP threshold");
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        assertEq(
+            protectionViews.getPositionProtection(protectionId).triggerMarkPrice,
+            LONG_TAKE_PROFIT,
+            "price recovery must not rewrite the latched trigger"
+        );
+
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        uint256 executorBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        bytes[] memory executionData = _mockPythUpdateData(MARK_PRICE);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(retryOrderId, executionData);
+
+        PositionProtectionTypes.PositionProtectionView memory executed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(executed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed),
+            "fresh attempt should eventually execute despite price recovery"
+        );
+        assertEq(executed.triggerMarkPrice, LONG_TAKE_PROFIT, "terminal protection keeps original trigger evidence");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "successful retry should release trade lock");
+        assertEq(
+            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executorBalanceBefore,
+            executionBountyUsdc,
+            "successful retry should pay the original bounty exactly once"
+        );
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "success should clear bounty reserve");
+        assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "success should consume the action reserve");
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(retryOrderId);
+        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Executed), "successful retry receipt");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "paid disposition");
+        assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "receipt bounty recipient");
+        assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt bounty amount");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "success should clear attempt marker");
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "successful retry should fully close the position");
+    }
+
+    function test_FailedProtectionAttempt_PositionMismatchFailsAndPaysCleanerExactlyOnce() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+
+        CfdTypes.Order memory outOfBandPartialClose = CfdTypes.Order({
+            account: ALICE,
+            sizeDelta: 100e18,
+            marginDelta: 0,
+            targetPrice: engine.CAP_PRICE(),
+            commitTime: uint64(block.timestamp - 1),
+            commitBlock: uint64(block.number - 1),
+            orderId: type(uint64).max,
+            side: CfdTypes.Side.LONG,
+            isClose: true
+        });
+        uint256 poolDepthUsdc = pool.totalAssets();
+        vm.prank(address(router));
+        engine.processOrderTyped(outOfBandPartialClose, MARK_PRICE, poolDepthUsdc, uint64(block.timestamp));
+        (uint256 mismatchedSize,,,,,,) = engine.positions(ALICE);
+        assertEq(mismatchedSize, POSITION_SIZE - 100e18, "fixture should change the protected position size");
+
+        uint256 cleanerBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
+
+        PositionProtectionTypes.PositionProtectionView memory failed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(failed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
+            "mismatched position should terminally fail protection"
+        );
+        assertEq(failed.executionBountyUsdc, 0, "failed protection must not retain the child bounty");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "terminal mismatch should clear active id");
+        assertEq(
+            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - cleanerBalanceBefore,
+            executionBountyUsdc,
+            "mismatch cleaner should receive the child bounty exactly once"
+        );
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "mismatch should clear reserve view");
+        assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "mismatch payout should consume the action reserve");
+
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(linkedOrderId);
+        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired), "mismatch receipt reason");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "paid receipt");
+        assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "cleaner receipt recipient");
+        assertEq(outcome.bountyUsdc, executionBountyUsdc, "cleaner receipt bounty");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(linkedOrderId), "mismatch should clear attempt marker");
+    }
+
+    function test_RetryPositionProtectionClose_ReusesSnapshotAfterBountyConfigChangeWithoutFreshFunds() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        _withdrawAllFreeSettlement(ALICE);
+        uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint256 originalBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
+
+        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
+        assertEq(actionReserveBefore, originalBountyUsdc, "fixture should retain only the original bounty");
+        assertEq(_freeSettlementUsdc(ALICE), 0, "fixture should leave no fresh retry funding");
+
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.closeOrderExecutionBountyUsdc = originalBountyUsdc + 100_000;
+        _setRouterConfig(config);
+        assertNotEq(router.closeOrderExecutionBountyUsdc(), originalBountyUsdc, "fixture should change live config");
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+
+        assertEq(
+            _orderRecord(retryOrderId).executionBountyUsdc,
+            originalBountyUsdc,
+            "retry child should reuse the immutable protection snapshot"
+        );
+        assertEq(
+            router.lifecycleBook().pendingIntent(retryOrderId).executionBountyUsdc,
+            originalBountyUsdc,
+            "lifecycle intent should authenticate the original snapshot"
+        );
+        assertEq(
+            router.getAccountReservations(ALICE).executionBountyUsdc,
+            originalBountyUsdc,
+            "config change must not create a second reserve"
+        );
+        assertEq(clearinghouse.actionReserveUsdc(ALICE), actionReserveBefore, "retry should not alter reserve amount");
+        assertEq(_freeSettlementUsdc(ALICE), 0, "retry should not debit unavailable free settlement");
+    }
+
+    function test_Batch_ExpiredProtectionHeadRelatchesAndLaterOrderExecutes() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint64 linkedValidUntil = router.lifecycleBook().pendingPolicy(linkedOrderId).validUntil;
+
+        vm.warp(block.timestamp + 30);
+        vm.prank(BOB);
+        uint64 bobOrderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        CfdTypes.Order memory bobOrder = _orderRecord(bobOrderId).core;
+        assertEq(router.nextExecuteId(), linkedOrderId, "protection attempt should be the global head");
+
+        vm.warp(uint256(linkedValidUntil) + 1);
+        vm.roll(block.number + 1);
+        uint256 bobPublishTime = uint256(bobOrder.commitTime) + 1;
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(uint64(MARK_PRICE)), 0, int32(-8), bobPublishTime, bobPublishTime - 1
+        );
+        bytes[] memory executionData = new bytes[](1);
+        executionData[0] = abi.encode(MARK_PRICE);
+
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrderBatch(bobOrderId, executionData);
+
+        PositionProtectionTypes.PositionProtectionView memory latched =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(latched.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+            "batch cleanup should relatch expired protection head"
+        );
+        assertEq(
+            latched.executionBountyUsdc,
+            router.closeOrderExecutionBountyUsdc(),
+            "batch cleanup should retain protection bounty"
+        );
+        OrderV2Types.CompactOutcome memory protectionOutcome = router.lifecycleBook().outcome(linkedOrderId);
+        assertEq(
+            uint8(protectionOutcome.bountyDisposition),
+            uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
+            "batch head receipt should retain bounty"
+        );
+        assertEq(
+            uint8(router.lifecycleBook().outcome(bobOrderId).status),
+            uint8(OrderV2Types.LifecycleStatus.Executed),
+            "later target should execute in the same batch"
+        );
+        assertEq(router.nextExecuteId(), 0, "batch should advance beyond both orders");
+        (uint256 bobSize,,,,,,) = engine.positions(BOB);
+        assertEq(bobSize, POSITION_SIZE, "later account order should reach the Engine");
+    }
+
+    function test_RepeatedProtectionAttemptExpiryRetry_ConservesSingleBounty() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 attemptOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
+
+        for (uint256 i; i < 2; ++i) {
+            uint256 cleanerBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+            _expireProtectionAttempt(attemptOrderId, EXECUTION_KEEPER);
+
+            PositionProtectionTypes.PositionProtectionView memory latched =
+                protectionViews.getPositionProtection(protectionId);
+            assertEq(
+                uint8(latched.status),
+                uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+                "each expiry should return to the durable latch"
+            );
+            assertEq(latched.executionBountyUsdc, executionBountyUsdc, "each expiry returns the same bounty to Book");
+            assertEq(
+                clearinghouse.balanceUsdc(EXECUTION_KEEPER),
+                cleanerBalanceBefore,
+                "expiry cleaner should remain unpaid on every cycle"
+            );
+            assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "cycles must not change free settlement");
+            assertEq(
+                clearinghouse.actionReserveUsdc(ALICE),
+                actionReserveBefore,
+                "cycles must not duplicate or consume reserved settlement"
+            );
+            assertEq(
+                router.getAccountReservations(ALICE).executionBountyUsdc,
+                executionBountyUsdc,
+                "exactly one execution bounty should remain reserved"
+            );
+
+            uint64 previousOrderId = attemptOrderId;
+            vm.prank(CAROL);
+            attemptOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+            assertGt(attemptOrderId, previousOrderId, "each attempt should receive a new id");
+            assertEq(
+                _orderRecord(attemptOrderId).executionBountyUsdc,
+                executionBountyUsdc,
+                "new child should own the same single bounty"
+            );
+            assertEq(
+                protectionViews.getPositionProtection(protectionId).executionBountyUsdc,
+                0,
+                "Book and live child must not both own the bounty"
+            );
+        }
+    }
+
+    function test_RetryPositionProtectionClose_RemainsAvailableAcrossSafetyModes() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
+
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.positionProtectionCommitsEnabled = false;
+        _setRouterConfig(config);
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        routerAdmin.pause();
+        vm.warp(FRIDAY_FAD_START + 3 hours);
+
+        assertFalse(router.positionProtectionCommitsEnabled(), "fixture should disable new protections");
+        assertTrue(routerAdmin.paused(), "fixture should pause new risk");
+        assertTrue(engine.degradedMode(), "fixture should enable degraded mode");
+        assertTrue(engine.isOracleFrozen(), "fixture should enter frozen-oracle policy");
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        assertEq(router.accountHeadOrderId(ALICE), retryOrderId, "safety modes must not suppress durable retry");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "retry should restore one live close attempt"
+        );
+
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        uint256 executorBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(MARK_PRICE)), 0, int32(-8), uint64(block.timestamp));
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(retryOrderId, _priceData(MARK_PRICE));
+
+        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(retryOrderId);
+        assertEq(uint8(outcome.executionMode), uint8(OrderV2Types.ExecutionMode.Frozen), "frozen execution mode");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "frozen payout");
+        assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "frozen executor should receive bounty");
+        assertEq(
+            clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executorBalanceBefore,
+            executionBountyUsdc,
+            "frozen retry should pay exactly once"
+        );
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "frozen success clears reserve");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "frozen success clears marker");
+    }
+
     function test_CancelPositionProtection_RefundsExactReserveAndClearsTradeLock() public {
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
@@ -744,6 +1151,8 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ProtectionBook_LifecycleHooksRejectNonRouterCallers() public {
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         protectionBook.activate(1, MARK_PRICE, uint64(block.timestamp), 1);
 
@@ -751,10 +1160,16 @@ contract PositionProtectionTest is BasePerpTest {
         protectionBook.afterOrderTerminal(1, ALICE, IOrderRouterAccounting.OrderStatus.Failed);
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionBook.handleFailedProtectionAttempt(1, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         protectionBook.failPendingOpenForRiskOff(1, ALICE);
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         protectionBook.forfeitOnLiquidation(ALICE);
+
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        router.commitProtectionCloseAttempt(1, ALICE, CfdTypes.Side.LONG, POSITION_SIZE, executionBountyUsdc);
     }
 
     function test_Router_RejectsUntrustedProtectionHostMetadata() public {
@@ -887,6 +1302,113 @@ contract PositionProtectionTest is BasePerpTest {
         );
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
         assertEq(remainingSize, 0, "liquidation should remove the protected position");
+    }
+
+    function test_Liquidation_LatchedProtectionForfeitsRetainedBountyExactlyOnce() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
+        _withdrawAllFreeSettlement(ALICE);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
+        _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
+
+        PositionProtectionTypes.PositionProtectionView memory latched =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(latched.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+            "fixture should hold a durable latched protection"
+        );
+        assertEq(
+            latched.executionBountyUsdc,
+            router.closeOrderExecutionBountyUsdc(),
+            "latched Book should hold exactly one close bounty"
+        );
+        assertEq(router.pendingOrderCounts(ALICE), 0, "latched protection should have no live child");
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        vm.prank(EXECUTION_KEEPER);
+        router.executeLiquidation(ALICE, _mockPythUpdateData(150_000_000));
+
+        PositionProtectionTypes.PositionProtectionView memory liquidated =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(liquidated.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Liquidated),
+            "liquidation should terminalize the latch"
+        );
+        assertEq(liquidated.executionBountyUsdc, 0, "liquidation should consume the Book-held bounty");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "liquidation should clear the trade lock");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "no bounty reserve should remain");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            router.closeOrderExecutionBountyUsdc(),
+            "retained bounty should be forfeited exactly once"
+        );
+        OrderV2Types.CompactOutcome memory expiredOutcome = router.lifecycleBook().outcome(linkedOrderId);
+        assertEq(
+            uint8(expiredOutcome.bountyDisposition),
+            uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
+            "liquidation must not rewrite the prior attempt receipt"
+        );
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "liquidation should remove the protected position");
+    }
+
+    function test_Liquidation_LiveRetriedChildCleansLatestLinkageAndBountyExactlyOnce() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
+        _withdrawAllFreeSettlement(ALICE);
+        uint64 firstOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
+        _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        assertEq(
+            protectionViews.getPositionProtection(protectionId).linkedOrderId,
+            retryOrderId,
+            "retry should be the latest live linkage"
+        );
+        assertEq(
+            _orderRecord(retryOrderId).executionBountyUsdc,
+            router.closeOrderExecutionBountyUsdc(),
+            "retry child should own the single retained bounty"
+        );
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        vm.prank(EXECUTION_KEEPER);
+        router.executeLiquidation(ALICE, _mockPythUpdateData(150_000_000));
+
+        PositionProtectionTypes.PositionProtectionView memory liquidated =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(liquidated.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Liquidated),
+            "liquidation should terminalize retried protection"
+        );
+        assertEq(liquidated.linkedOrderId, retryOrderId, "terminal history should retain the latest retry id");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "liquidation should clear active linkage");
+        assertEq(uint8(_orderRecord(retryOrderId).status), uint8(IOrderRouterAccounting.OrderStatus.Failed));
+        assertEq(_orderRecord(retryOrderId).executionBountyUsdc, 0, "latest child bounty should be consumed");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "latest child should be removed from account queue");
+        assertEq(router.pendingCloseSize(ALICE), 0, "latest child should be removed from close aggregate");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "all bounty reserve should clear");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            router.closeOrderExecutionBountyUsdc(),
+            "live retry bounty should be forfeited exactly once"
+        );
+
+        OrderV2Types.CompactOutcome memory retryOutcome = router.lifecycleBook().outcome(retryOrderId);
+        assertEq(
+            uint8(retryOutcome.reason),
+            uint8(OrderV2Types.TerminalReason.AccountLiquidated),
+            "latest child should receive liquidation terminal evidence"
+        );
+        assertEq(
+            uint8(retryOutcome.bountyDisposition),
+            uint8(OrderV2Types.BountyDisposition.Forfeited),
+            "latest child receipt should authenticate forfeiture"
+        );
+        assertEq(retryOutcome.bountyRecipient, engine.protocolTreasury(), "forfeiture recipient");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "liquidation should clear attempt marker");
     }
 
     function test_AttachedOpen_InheritsSettlementBufferAdmissionAtCommit() public {
@@ -1467,6 +1989,17 @@ contract PositionProtectionTest is BasePerpTest {
         bytes[] memory updateData = _mockPythUpdateData(price);
         vm.prank(TRIGGER_KEEPER);
         linkedOrderId = protectionActions.triggerPositionProtection(protectionId, updateData);
+    }
+
+    function _expireProtectionAttempt(
+        uint64 orderId,
+        address cleaner
+    ) internal returns (OrderV2Types.ExecutionResult memory result) {
+        uint64 validUntil = router.lifecycleBook().pendingPolicy(orderId).validUntil;
+        assertGt(validUntil, block.timestamp, "fixture requires a live attempt before expiry");
+        vm.warp(uint256(validUntil) + 1);
+        vm.prank(cleaner);
+        result = router.executeOrder(orderId, new bytes[](0));
     }
 
     function _expectTriggerNotMet(

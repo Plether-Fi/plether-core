@@ -26,6 +26,9 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Protection management: replace a `PendingOpen` or `Armed` record with
   `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`, or detach/cancel a
   `PendingOpen`/`Armed` record with `PositionProtectionBook.cancelPositionProtection(uint64)`
+- Once a trigger is recorded, neither the owner nor a keeper may replace or cancel it. `Triggered` means one live close
+  attempt; `Latched` means the irreversible trigger remains active with no live attempt and may be retried
+  permissionlessly.
 - Only Router-authenticated TP/SL-generated orders use `expectedConfigHash == bytes32(0)`: the protected parent-open
   host and protection-trigger path treat it as an internal unpinned marker. It is not a public wildcard and cannot be
   selected through `OrderRouter.commitOrder(...)`.
@@ -105,6 +108,9 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 - Batch execution: `OrderRouter.executeOrderBatch(uint64,bytes[])`
 - Neutral mark refresh: `OrderRouter.updateMarkPrice(bytes[])`
 - Position-protection activation: `PositionProtectionBook.triggerPositionProtection(uint64,bytes[])`
+- Latched close retry: `PositionProtectionBook.retryPositionProtectionClose(uint64)`; permissionless, nonpayable, and
+  valid only when the protection has no live attempt. It creates a fresh FIFO-tail attempt without re-evaluating the
+  original trigger or charging another execution bounty.
 - Liquidation: `OrderRouter.executeLiquidation(address,bytes[])`
 - Batch liquidation: `OrderRouter.executeLiquidationBatch(address[],bytes[])`
 - Risk-off queue cleanup: `OrderRouter.clearRiskOffOrder(uint64)`; permissionless, oracle-free, and unpaid. The caller
@@ -121,11 +127,16 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 
 The protocol-operated incident keeper should clear risk-off orders after containment. A risk-off open is already
 logically unexecutable before physical cleanup, and cleanup authority does not grant its caller the trader's bounty.
+Protection-attempt failure cleanup is unpaid when its exact protected position remains: its one reserved execution
+bounty is retained for the next attempt. Keeper infrastructure should therefore process the terminal attempt, observe
+`Latched`, confirm the exact position and zero pending-order retry preconditions, and submit the separate retry
+transaction; it must not assume that relatching cleanup itself earns the eventual execution bounty. A position
+mismatch follows ordinary paid cleanup and terminally fails the protection.
 
 Use this interface:
 
 - `IPerpsKeeper`
-- `IPositionProtectionActions` for the permissionless trigger entrypoint
+- `IPositionProtectionActions` for the permissionless trigger and retry entrypoints
 
 Mark refresh, single and batch liquidation, and atomic-refresh LP-epoch settlement remain Router entrypoints.
 Integrations must not call matching selectors on `OrderRouterLiquidationBatchSidecar`: the Router invokes that
@@ -137,14 +148,17 @@ by the Book's trailing payload.
 ## Protocol / Status Readers
 
 - Compact protocol status and LP/trader views: `PerpsPublicLens`
-- Retained protection status and linkage: `IPositionProtectionViews` on the Book returned by
-  `OrderRouter.positionProtectionBook()`
+- Retained protection status and latest-attempt linkage: `IPositionProtectionViews` on the Book returned by
+  `OrderRouter.positionProtectionBook()`. `linkedOrderId` is the most recent attempt, not complete history; reconstruct
+  the one-to-many attempt set from protection events and permanent lifecycle-Book outcomes.
 - Authoritative order identity and outcome reads: the independently predeployed, exactly Router-bound
   `OrderLifecycleBook` exposed by `OrderRouter.lifecycleBook()` via `IOrderLifecycleBook`. Use
   `currentExecutionConfigHash()` before constructing a request, `clientIntent(account,
   clientOrderId)` to resolve permanent idempotency, `lifecycleStatus(orderId)` / `pendingPolicy(orderId)` while live,
-  and `outcome(orderId)` for the compact authenticated terminal result. Full terminal receipts are emitted by
-  `OrderFinalized`; their hash is retained in the compact outcome.
+  `isProtectionAttempt(orderId)` for the transient Router-authenticated child marker, and `outcome(orderId)` for the
+  compact authenticated terminal result. `ProtectionAttemptRegistered` is permanent event evidence after finalization
+  removes the marker. Full terminal receipts are emitted by `OrderFinalized`; their hash is retained in the compact
+  outcome.
 - Settlement operations and security monitoring: `SettlementMonitorLens`. Its route, oracle, queue, and invariant
   observations are advisory and fail-soft; they do not authorize settlement or replace an `eth_call` of
   the exact route-specific settlement transaction.
@@ -233,5 +247,8 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
   It emits all protection lifecycle events and calls narrow Router host operations for mark refresh and FIFO mutation; it
   holds no token custody and does not mutate the queue directly. It is stateful and distinct from the stateless keeper
   sidecar returned by `OrderRouter.liquidationBatchSidecar()`.
-- A `PendingOpen` or `Armed` protection is a retained off-queue OCO record, not an ordinary pending order. Once triggered,
-  its linked full-position close is an ordinary binding FIFO order and is read through the normal order surfaces.
+- A `PendingOpen`, `Armed`, or `Latched` protection is a retained off-queue record, not an ordinary pending order.
+  `Triggered` identifies exactly one live full-position close attempt. Every attempt is an ordinary binding FIFO order
+  read through the normal order surfaces; a non-liquidation failure returns the protection to `Latched` and retains its
+  execution bounty only when the exact protected side and size remain. A position mismatch resolves the protection as
+  `Failed` under ordinary paid cleanup. Neither path erases the failed order's permanent receipt.

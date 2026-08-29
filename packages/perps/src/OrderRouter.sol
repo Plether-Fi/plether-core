@@ -97,6 +97,25 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return uint64(_delegateToKeeperSidecar());
     }
 
+    /// @notice Queues a fresh close attempt for an already-latched position protection.
+    /// @dev Only the immutable protection Book may call this entrypoint. The Book owns the durable trigger and its
+    ///      already-reserved execution bounty; delegated logic creates fresh lifecycle evidence and appends an ordinary
+    ///      short-lived close without reserving the bounty a second time.
+    function commitProtectionCloseAttempt(
+        uint64 protectionId,
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 executionBountyUsdc
+    ) external nonReentrant returns (uint64 orderId) {
+        protectionId;
+        account;
+        side;
+        size;
+        executionBountyUsdc;
+        return uint64(_delegateToKeeperSidecar());
+    }
+
     /// @notice Returns the immutable engine lens to delegated commit validation without exposing storage layout.
     function engineLensForCommit() external view returns (address) {
         return address(engineLens);
@@ -220,24 +239,38 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return abi.decode(_delegateExecutionSidecar(), (OrderV2Types.ExecutionResult));
     }
 
-    /// @notice Releases order margin, settles its bounty, and deletes its ephemeral Router record.
+    /// @notice Releases order margin, settles or retains its bounty, and deletes its ephemeral Router record.
     /// @dev The recipient is explicit because the item rollback boundary changes `msg.sender` to the Router. When the
     ///      source account executes its own order, only the bounty classification is released and no Engine carry
-    ///      checkpoint occurs; all other recipients use the canonical Engine bounty-credit path.
+    ///      checkpoint occurs; all other recipients use the canonical Engine bounty-credit path. A failed protection
+    ///      attempt may instead return the bounty to the durable protection Book without changing clearinghouse
+    ///      classification, allowing a later attempt to reuse the same reserve.
     function settleV2OrderFromSidecar(
         uint64 orderId,
         bool success,
+        OrderV2Types.TerminalReason reason,
         address bountyRecipient,
         uint256 executionPrice,
         uint256 accountingPrice,
         uint64 accountingPublishTime
-    ) external returns (uint256 bountyUsdc) {
+    ) external returns (IOrderRouterV2ExecutionHost.BountySettlement memory settlement) {
         _onlySelfCall();
         (OrderRecord storage record, CfdTypes.Order memory order) = _pendingOrder(orderId);
         clearinghouse.releaseOrderReservationForTerminalCleanup(orderId);
-        bountyUsdc = record.executionBountyUsdc;
+        uint256 bountyUsdc = record.executionBountyUsdc;
         record.executionBountyUsdc = 0;
-        if (bountyUsdc != 0) {
+
+        bool retained;
+        if (!success && lifecycleBook.isProtectionAttempt(orderId)) {
+            retained = positionProtectionBook.handleFailedProtectionAttempt(orderId, order.account, reason, bountyUsdc);
+        }
+
+        settlement.bountyUsdc = bountyUsdc;
+        if (retained) {
+            settlement.bountyDisposition = OrderV2Types.BountyDisposition.RetainedForProtectionRetry;
+        } else if (bountyUsdc != 0) {
+            settlement.bountyRecipient = bountyRecipient;
+            settlement.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
             if (bountyRecipient == order.account) {
                 clearinghouse.releaseReservedExecutionBountyToSource(order.account, bountyUsdc);
             } else {
@@ -341,8 +374,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Records the already-validated close order produced by a delegated protection trigger.
     /// @dev Callable only through an external self-call from the exactly bound keeper sidecar. The sidecar performs
-    ///      Book activation and bounty crediting; this callback alone mutates Router queue storage and revalidates the
-    ///      next id across the intervening external Book call.
+    ///      Book activation or retry validation and lifecycle registration; this callback alone mutates Router queue
+    ///      storage and revalidates the next id across the intervening external calls.
     function executePositionProtectionTriggerItem() external {
         if (msg.sender != address(this)) {
             revert OrderRouter__Unauthorized();

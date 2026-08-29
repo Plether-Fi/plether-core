@@ -688,7 +688,7 @@ Component authority is deliberately split:
 - `PositionProtectionBook`, discovered through `OrderRouter.positionProtectionBook()`, owns retained protection state,
   canonical protection actions/views, bounty attribution before trigger, and all protection lifecycle events,
 - `OrderRouter` owns the timelocked protection feature/bounty configuration, the ordinary global FIFO, and the narrow
-  host operations used by the Book to commit the parent open, refresh a trigger mark, and append the linked close,
+  host operations used by the Book to commit the parent open, refresh a trigger mark, and append each close attempt,
 - `MarginClearinghouse` remains the custody and reserved-settlement source of truth. The Book holds no tokens, and it
   cannot mutate the Router queue directly.
 
@@ -712,13 +712,19 @@ Component authority is deliberately split:
   ordinary terminal-order policy,
 - cancelling `PendingOpen` or `Armed` protection releases both unpaid amounts exactly once; cancelling `PendingOpen`
   detaches protection but does not cancel the binding parent open,
-- triggering credits the trigger bounty and reattributes the remaining execution bounty to exactly one generated FIFO
-  close without a second clearinghouse reservation,
-- linked-close execution or terminal failure consumes the remaining bounty under ordinary order policy,
-- liquidation forfeits unpaid protection value to treasury. `Triggered` protection does not add the linked order's
-  bounty a second time,
-- a terminal protection has no reserved value, and Book-attributed dormant-protection reserve plus Router-attributed
-  ordinary-order reserve must equal the clearinghouse's reserved settlement source of truth.
+- triggering credits the trigger bounty once and reattributes the remaining execution bounty to the first generated
+  FIFO close attempt without a second clearinghouse reservation,
+- successful attempt execution consumes and pays the remaining bounty once,
+- a non-liquidation attempt failure is terminal for that order. If the account still has the exact protected side and
+  size, the receipt records `RetainedForProtectionRetry` with no recipient, failure cleanup is unpaid, and the same
+  reserved value returns from Router attribution to the `Latched` protection. A missing or mismatched position instead
+  terminally fails the protection, clears its active lock, and pays the attempt bounty under ordinary cleanup policy,
+- permissionless retry transfers that retained amount into one fresh FIFO attempt without a new clearinghouse lock or
+  trader debit. At most one attempt owns it at a time, but one protection may produce many sequential attempt orders,
+- liquidation forfeits unpaid protection value to treasury. `Triggered` attributes the bounty to its one live attempt;
+  `Latched` attributes it to the Book; neither adds the same amount twice,
+- a terminal protection has no reserved value, and Book-attributed dormant/recycled protection reserve plus
+  Router-attributed live-attempt reserve must equal the clearinghouse's reserved settlement source of truth.
 
 ### Open-order failure policy
 
@@ -949,27 +955,36 @@ Required transition rules:
 - user cancellation is disallowed once pending; the only binding-order exception is a protocol risk-off cutoff that
   terminally invalidates pre-cutoff opens and refunds their remaining committed margin, execution bounty, and any
   attached `PendingOpen` protection bounties to the trader's free internal settlement,
-- expiry resolves through the configured bounty and reservation policy,
+- expiry resolves through the configured bounty and reservation policy. A registered protection attempt whose exact
+  protected position remains is the exception to ordinary paid cleanup: its bounty is retained for retry and the
+  protection becomes `Latched`; position mismatch instead terminally fails the protection under ordinary paid cleanup,
 - risk-off invalidation precedes expiry, requires no oracle and performs no Engine mutation, carry checkpoint, or
   Terminal NAV synchronization, pays no cleanup bounty, and remains effective after governance unpauses,
 - stale or missing oracle data does not destroy a valid pending order,
 - slippage-invalid orders fail terminally and must not pin the FIFO head,
 - live-market execution requires `order.commitTime < oraclePublishTime <= block.timestamp`; only genuine frozen-oracle close-only windows may relax commit-time ordering.
 
-Position-protection storage persists `None`, `PendingOpen`, `Armed`, `Triggered`, `Executed`, `Failed`, `Cancelled`, and
-`Liquidated`.
+Position-protection storage persists `None`, `PendingOpen`, `Armed`, `Triggered`, `Executed`, `Failed`, `Cancelled`,
+`Liquidated`, and appended `Latched`.
 
 - The state machine and its canonical reads live in `PositionProtectionBook`; protection lifecycle events originate
-  there. The linked close is an ordinary Router order and its order events originate from the Router.
+  there. Each linked close attempt is an ordinary Router order and its order events originate from the Router.
 - `PendingOpen` is attached to one binding open but remains unable to trigger.
 - Successful parent execution transitions to `Armed` atomically and snapshots the actual resulting position.
 - Trader creation, replacement, and attached-open calls are nonpayable and use the engine's cached fresh neutral mark.
 - Triggering is permissionless and payable for current Pyth data. It requires a later block and a publish time strictly
   after arming, and is unavailable during `oracleFrozen`.
-- `Armed` is off queue. `Triggered` links one full-size `targetPrice = 0` close appended at the global FIFO tail.
-- The linked close follows ordinary historical settlement, expiry, and terminal failure. Failure does not re-arm.
-- An already-triggered linked close may use ordinary frozen-close execution policy even though a new trigger may not be
-  evaluated while frozen.
+- A valid trigger is irreversible: its leg, mark, and publish time are not changed by later price recovery or retries.
+- `Armed` and `Latched` are off queue. `Triggered` links exactly one live full-size market-style close attempt, using
+  the side-dependent nonbinding target sentinel and appended at the global FIFO tail; `linkedOrderId` names the latest
+  attempt rather than complete history.
+- A non-liquidation attempt failure removes that order and, only when the exact protected side and size remain, retains
+  its bounty and moves `Triggered -> Latched`. Otherwise it resolves the protection as `Failed`. Retry is permissionless,
+  nonpayable, and separate from cleanup; `Latched -> Triggered` appends a new attempt at the current tail with a fresh
+  id, commit time, deadline, and live/FAD historical settlement window. Retry also requires that the account has no
+  other pending Router order.
+- Trigger evaluation is unavailable during `oracleFrozen`, but an already latched protection may be retried and its
+  live attempt may execute under the ordinary frozen-close policy.
 
 ![Order state machine](../../assets/diagrams/perps-order-lifecycle.svg)
 
@@ -1006,10 +1021,12 @@ The accounting system should preserve the following:
 22. LP request ids are monotonically nondecreasing with `block.timestamp` and follow the shared five-minute formula
     for both tranches and both request directions
 23. no request included at or after `b - 300` can increase the locked `e + 1` epoch
-24. each account has at most one active (`PendingOpen`, `Armed`, or `Triggered`) protection
-25. an armed protection is never linked into FIFO, and a triggered protection links exactly one full reduce-only order
+24. each account has at most one active (`PendingOpen`, `Armed`, `Latched`, or `Triggered`) protection
+25. armed and latched protection is off queue; triggered protection links exactly one live full reduce-only attempt,
+    while terminal lifecycle receipts retain the complete one-to-many attempt history
 26. the take-profit and stop-loss legs collectively trigger at most once
-27. every protection bounty unit is exactly reserved, paid, refunded, or forfeited once
+27. every protection bounty unit is exactly reserved, attributed to either Book or Router but not both, and ultimately
+    paid, refunded, or forfeited once; retry never creates a new reservation
 28. terminal protection owns zero reserve, and liquidation leaves no protection or linked-order residue
 29. existing-position protection cannot arm after its reserve lock unless canonical exact-basis price equity, using
     only PnL pledge plus same-account claim, remains strictly above the stricter initial/active requirement

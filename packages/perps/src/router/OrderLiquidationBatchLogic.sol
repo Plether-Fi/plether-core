@@ -150,6 +150,34 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         return _commitOrder(host, account, request, true, true);
     }
 
+    /// @notice Queues a fresh short-lived close attempt for an already-latched protection.
+    /// @dev The protection Book authenticates and validates durable state before calling this host. The retry receives
+    ///      fresh timing and lifecycle identity, but reuses the Book-held bounty without creating another reserve.
+    function commitProtectionCloseAttempt(
+        uint64 protectionId,
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 executionBountyUsdc
+    ) external returns (uint64 orderId) {
+        _requireDelegateCall();
+        IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0) {
+            revert OrderRouter__Unauthorized();
+        }
+
+        orderId = host.nextCommitId();
+        OrderV2Types.OrderRequest memory request =
+            _protectionRetryRequest(host, protectionId, orderId, account, side, size);
+        (uint64 registeredOrderId,, bool replayed) =
+            host.lifecycleBook().registerPending(account, orderId, request, executionBountyUsdc);
+        if (replayed || registeredOrderId != orderId) {
+            revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(orderId);
+        }
+        host.lifecycleBook().registerProtectionAttempt(orderId);
+        _queueProtectionAttempt(host, orderId, account, side, size, executionBountyUsdc);
+    }
+
     /// @dev Permanent identity is resolved before current-state validation so an exact replay remains unconditional.
     function _commitOrder(
         IOrderLiquidationBatchHost host,
@@ -487,20 +515,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             IPositionProtectionBook.TriggerPlan memory plan =
                 protectionBook.activate(protectionId, snapshot.markPrice, snapshot.publishTime, linkedOrderId);
             _registerProtectionTrigger(host, protectionId, linkedOrderId, plan);
-            bytes memory triggerItemCall = abi.encodeWithSelector(
-                IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector,
-                linkedOrderId,
-                plan.account,
-                plan.side,
-                plan.size,
-                plan.executionBountyUsdc
-            );
-            (bool triggerRecorded, bytes memory triggerRevertData) = address(host).call(triggerItemCall);
-            if (!triggerRecorded) {
-                assembly ("memory-safe") {
-                    revert(add(triggerRevertData, 0x20), mload(triggerRevertData))
-                }
-            }
+            _queueProtectionAttempt(host, linkedOrderId, plan.account, plan.side, plan.size, plan.executionBountyUsdc);
             engine.creditBounty(
                 plan.account, refundRecipient, plan.triggerBountyUsdc, snapshot.markPrice, snapshot.publishTime
             );
@@ -551,6 +566,69 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             host.lifecycleBook().registerPending(plan.account, linkedOrderId, request, plan.executionBountyUsdc);
         if (replayed || resolvedOrderId != linkedOrderId) {
             revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(linkedOrderId);
+        }
+        host.lifecycleBook().registerProtectionAttempt(linkedOrderId);
+    }
+
+    /// @dev Builds the protocol-native intent for a later attempt without re-evaluating the original trigger.
+    function _protectionRetryRequest(
+        IOrderLiquidationBatchHost host,
+        uint64 protectionId,
+        uint64 linkedOrderId,
+        address account,
+        CfdTypes.Side side,
+        uint256 size
+    ) private view returns (OrderV2Types.OrderRequest memory request) {
+        request.clientOrderId = OrderV2Types.protocolClientOrderId(
+            keccak256(
+                abi.encode(
+                    "PLETHER_POSITION_PROTECTION_RETRY_V2",
+                    block.chainid,
+                    address(this),
+                    account,
+                    protectionId,
+                    linkedOrderId
+                )
+            )
+        );
+        request.side = side;
+        request.sizeDelta = size;
+        request.targetPrice = side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
+        request.isClose = true;
+        request.bounds.validUntil = uint64(block.timestamp + host.maxOrderAge());
+        request.bounds.allowedExecutionModes = ALL_V2_EXECUTION_MODES;
+        request.bounds.expectedConfigHash = bytes32(0);
+        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
+        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
+        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
+        request.bounds.maxActionChargeUsdc = type(uint256).max;
+        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
+        request.bounds.maxPostPositionSize = type(uint256).max;
+        request.bounds.maxPostLeverageBps = type(uint32).max;
+    }
+
+    /// @dev Appends an already-registered protection attempt through the Router's isolated storage frame.
+    function _queueProtectionAttempt(
+        IOrderLiquidationBatchHost host,
+        uint64 linkedOrderId,
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 executionBountyUsdc
+    ) private {
+        bytes memory itemCall = abi.encodeWithSelector(
+            IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector,
+            linkedOrderId,
+            account,
+            side,
+            size,
+            executionBountyUsdc
+        );
+        (bool recorded, bytes memory revertData) = address(host).call(itemCall);
+        if (!recorded) {
+            assembly ("memory-safe") {
+                revert(add(revertData, 0x20), mload(revertData))
+            }
         }
     }
 

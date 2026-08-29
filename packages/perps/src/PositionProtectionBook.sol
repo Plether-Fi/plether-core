@@ -105,6 +105,20 @@ interface IPositionProtectionOrderCommitHost {
 
 }
 
+/// @notice Book-only host surface for transferring one retained protection bounty into a fresh close attempt.
+/// @dev The Router authenticates this explicit-account call by requiring its immutable Book as caller.
+interface IPositionProtectionCloseAttemptHost {
+
+    function commitProtectionCloseAttempt(
+        uint64 protectionId,
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 executionBountyUsdc
+    ) external returns (uint64 orderId);
+
+}
+
 /// @notice Narrow emergency-pause view exposed by the router's dedicated admin.
 interface IPositionProtectionAdmin {
 
@@ -116,8 +130,8 @@ interface IPositionProtectionAdmin {
 /// @notice Custody-free direct action and lifecycle store for one full-position OCO protection per account.
 /// @dev Trigger calls receive ETH only transiently and forward the full call value to the router's ordinary mark-refresh
 ///      entrypoint. This contract never intentionally custodies tokens or mutates an order queue directly. The immutable
-///      router remains responsible for queue mutation and keeper credits. All bounty fields are current unpaid amounts
-///      and are zeroed exactly when transferred back into router-owned accounting.
+///      router remains responsible for queue mutation and keeper credits. Public bounty fields are current unpaid
+///      amounts and are zeroed exactly while their value is attributed to router-owned order accounting.
 contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, ReentrancyGuardTransient {
 
     bytes4 private constant UPDATE_MARK_PRICE_SELECTOR = bytes4(keccak256("updateMarkPrice(bytes[])"));
@@ -131,9 +145,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     uint64 public nextPositionProtectionId = 1;
 
     mapping(uint64 protectionId => PositionProtectionTypes.PositionProtectionView protection) private _protections;
+    /// @dev Immutable per-record execution-bounty amount used to authenticate every retained retry transfer.
+    mapping(uint64 protectionId => uint256 executionBountyUsdc) private _executionBountySnapshots;
     mapping(address account => uint64 protectionId) private _activeProtectionIds;
     mapping(uint64 parentOrderId => uint64 protectionId) private _parentProtectionIds;
-    mapping(uint64 linkedOrderId => uint64 protectionId) private _triggeredProtectionIds;
+    mapping(uint64 linkedOrderId => uint64 protectionId) private _attemptProtectionIds;
 
     /// @notice Deployment requires a nonzero router and engine.
     error PositionProtectionBook__ZeroAddress();
@@ -143,6 +159,8 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     error PositionProtectionBook__InvalidLinkedOrder();
     /// @notice A reused router entrypoint returned data despite its canonical no-return ABI.
     error PositionProtectionBook__InvalidHostResponse();
+    /// @notice The Router supplied a reason that cannot represent a failed retryable close attempt.
+    error PositionProtectionBook__InvalidTerminalReason();
 
     modifier onlyRouter() {
         _requireRouter();
@@ -207,6 +225,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
         protection.triggerBountyUsdc = triggerBountyUsdc;
         protection.executionBountyUsdc = executionBountyUsdc;
+        _executionBountySnapshots[protectionId] = executionBountyUsdc;
         _arm(protection);
         _activeProtectionIds[account] = protectionId;
 
@@ -300,6 +319,39 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         _callRouterNoReturn(callData, msg.value);
     }
 
+    /// @inheritdoc IPositionProtectionActions
+    function retryPositionProtectionClose(
+        uint64 protectionId
+    ) external nonReentrant returns (uint64 linkedOrderId) {
+        PositionProtectionTypes.PositionProtectionView storage protection = _activeProtection(protectionId);
+        if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Latched) {
+            revert OrderRouter__ProtectionNotLatched();
+        }
+        _requireMatchingPosition(protection);
+
+        IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
+        if (router.pendingOrderCounts(protection.account) != 0) {
+            revert OrderRouter__PendingOrdersExist();
+        }
+
+        uint256 executionBountyUsdc = _executionBountySnapshots[protectionId];
+        if (executionBountyUsdc == 0 || protection.executionBountyUsdc != executionBountyUsdc) {
+            revert PositionProtectionBook__BountyMismatch();
+        }
+        if (protection.linkedOrderId == 0 || _attemptProtectionIds[protection.linkedOrderId] != 0) {
+            revert PositionProtectionBook__InvalidLinkedOrder();
+        }
+        uint64 expectedOrderId = router.nextCommitId();
+        linkedOrderId = IPositionProtectionCloseAttemptHost(ROUTER)
+            .commitProtectionCloseAttempt(
+                protectionId, protection.account, protection.side, protection.size, executionBountyUsdc
+            );
+        if (linkedOrderId != expectedOrderId) {
+            revert PositionProtectionBook__InvalidHostResponse();
+        }
+        _recordCloseAttempt(protection, linkedOrderId);
+    }
+
     function _cancel(
         address account,
         uint64 protectionId
@@ -374,6 +426,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
         protection.triggerBountyUsdc = triggerBountyUsdc;
         protection.executionBountyUsdc = executionBountyUsdc;
+        _executionBountySnapshots[protectionId] = executionBountyUsdc;
         protection.status = PositionProtectionTypes.PositionProtectionStatus.PendingOpen;
         _activeProtectionIds[account] = protectionId;
         _parentProtectionIds[parentOrderId] = protectionId;
@@ -413,6 +466,9 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Armed) {
             revert OrderRouter__ProtectionNotArmed();
         }
+        if (_activeProtectionIds[protection.account] != protectionId) {
+            revert OrderRouter__ProtectionNotFound();
+        }
         if (_activeOracle().isOracleFrozen()) {
             revert OrderRouter__ConditionalTriggerFrozen();
         }
@@ -434,6 +490,9 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         plan.size = protection.size;
         plan.triggerBountyUsdc = protection.triggerBountyUsdc;
         plan.executionBountyUsdc = protection.executionBountyUsdc;
+        if (plan.executionBountyUsdc == 0 || plan.executionBountyUsdc != _executionBountySnapshots[protectionId]) {
+            revert PositionProtectionBook__BountyMismatch();
+        }
     }
 
     function _recordActivation(
@@ -443,20 +502,30 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint64 linkedOrderId,
         PositionProtectionTypes.PositionProtectionTriggerLeg leg
     ) private {
-        if (linkedOrderId == 0 || _triggeredProtectionIds[linkedOrderId] != 0) {
-            revert PositionProtectionBook__InvalidLinkedOrder();
-        }
         PositionProtectionTypes.PositionProtectionView storage protection = _protections[protectionId];
         protection.triggerBountyUsdc = 0;
-        protection.executionBountyUsdc = 0;
-        protection.linkedOrderId = linkedOrderId;
         protection.triggerMarkPrice = markPrice;
         protection.triggerPublishTime = publishTime;
         protection.triggeredLeg = leg;
-        protection.status = PositionProtectionTypes.PositionProtectionStatus.Triggered;
-        _triggeredProtectionIds[linkedOrderId] = protectionId;
-
         emit PositionProtectionTriggered(protectionId, protection.account, linkedOrderId, leg, markPrice, publishTime);
+        _recordCloseAttempt(protection, linkedOrderId);
+    }
+
+    function _recordCloseAttempt(
+        PositionProtectionTypes.PositionProtectionView storage protection,
+        uint64 linkedOrderId
+    ) private {
+        if (linkedOrderId == 0 || _attemptProtectionIds[linkedOrderId] != 0) {
+            revert PositionProtectionBook__InvalidLinkedOrder();
+        }
+        uint64 previousLinkedOrderId = protection.linkedOrderId;
+        protection.executionBountyUsdc = 0;
+        protection.linkedOrderId = linkedOrderId;
+        protection.status = PositionProtectionTypes.PositionProtectionStatus.Triggered;
+        _attemptProtectionIds[linkedOrderId] = protection.protectionId;
+        emit PositionProtectionCloseAttemptQueued(
+            protection.protectionId, protection.account, linkedOrderId, previousLinkedOrderId
+        );
     }
 
     /// @inheritdoc IPositionProtectionBook
@@ -494,18 +563,23 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             return;
         }
 
-        protectionId = _triggeredProtectionIds[orderId];
+        protectionId = _attemptProtectionIds[orderId];
         if (protectionId == 0) {
             return;
         }
-        delete _triggeredProtectionIds[orderId];
         PositionProtectionTypes.PositionProtectionView storage triggeredProtection = _protections[protectionId];
-        if (triggeredProtection.status != PositionProtectionTypes.PositionProtectionStatus.Triggered) {
+        if (
+            triggeredProtection.status != PositionProtectionTypes.PositionProtectionStatus.Triggered
+                || triggeredProtection.linkedOrderId != orderId
+                || _activeProtectionIds[triggeredProtection.account] != protectionId
+        ) {
+            delete _attemptProtectionIds[orderId];
             return;
         }
         if (triggeredProtection.account != account) {
             revert OrderRouter__PositionChanged();
         }
+        delete _attemptProtectionIds[orderId];
         PositionProtectionTypes.PositionProtectionStatus protectionStatus = terminalStatus
             == IOrderRouterAccounting.OrderStatus.Executed
             ? PositionProtectionTypes.PositionProtectionStatus.Executed
@@ -513,6 +587,55 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         triggeredProtection.status = protectionStatus;
         delete _activeProtectionIds[account];
         emit PositionProtectionTerminal(protectionId, account, orderId, protectionStatus);
+    }
+
+    /// @inheritdoc IPositionProtectionBook
+    function handleFailedProtectionAttempt(
+        uint64 orderId,
+        address account,
+        OrderV2Types.TerminalReason reason,
+        uint256 executionBountyUsdc
+    ) external onlyRouter returns (bool retained) {
+        uint64 protectionId = _attemptProtectionIds[orderId];
+        if (protectionId == 0) {
+            return false;
+        }
+
+        PositionProtectionTypes.PositionProtectionView storage protection = _protections[protectionId];
+        if (protection.account != account) {
+            revert OrderRouter__PositionChanged();
+        }
+        if (
+            protection.status != PositionProtectionTypes.PositionProtectionStatus.Triggered
+                || protection.linkedOrderId != orderId || _activeProtectionIds[account] != protectionId
+        ) {
+            delete _attemptProtectionIds[orderId];
+            return false;
+        }
+        if (!_isFailedProtectionAttemptReason(reason)) {
+            revert PositionProtectionBook__InvalidTerminalReason();
+        }
+
+        uint256 bountySnapshotUsdc = _executionBountySnapshots[protectionId];
+        if (bountySnapshotUsdc == 0 || executionBountyUsdc != bountySnapshotUsdc || protection.executionBountyUsdc != 0)
+        {
+            revert PositionProtectionBook__BountyMismatch();
+        }
+
+        delete _attemptProtectionIds[orderId];
+        retained = _positionMatches(protection);
+        emit PositionProtectionCloseAttemptFailed(protectionId, account, orderId, reason, retained);
+        if (retained) {
+            protection.executionBountyUsdc = executionBountyUsdc;
+            protection.status = PositionProtectionTypes.PositionProtectionStatus.Latched;
+            return true;
+        }
+
+        protection.status = PositionProtectionTypes.PositionProtectionStatus.Failed;
+        delete _activeProtectionIds[account];
+        emit PositionProtectionTerminal(
+            protectionId, account, orderId, PositionProtectionTypes.PositionProtectionStatus.Failed
+        );
     }
 
     /// @inheritdoc IPositionProtectionBook
@@ -557,7 +680,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             delete _parentProtectionIds[protection.parentOrderId];
         }
         if (protection.linkedOrderId != 0) {
-            delete _triggeredProtectionIds[protection.linkedOrderId];
+            delete _attemptProtectionIds[protection.linkedOrderId];
         }
         delete _activeProtectionIds[account];
         protection.status = PositionProtectionTypes.PositionProtectionStatus.Liquidated;
@@ -795,22 +918,41 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint64 protectionId,
         address account
     ) private view returns (PositionProtectionTypes.PositionProtectionView storage protection) {
-        protection = _protections[protectionId];
-        if (protection.account == address(0) || _activeProtectionIds[account] != protectionId) {
-            revert OrderRouter__ProtectionNotFound();
-        }
+        protection = _activeProtection(protectionId);
         if (protection.account != account) {
             revert OrderRouter__Unauthorized();
+        }
+    }
+
+    function _activeProtection(
+        uint64 protectionId
+    ) private view returns (PositionProtectionTypes.PositionProtectionView storage protection) {
+        protection = _protections[protectionId];
+        if (protection.account == address(0) || _activeProtectionIds[protection.account] != protectionId) {
+            revert OrderRouter__ProtectionNotFound();
         }
     }
 
     function _requireMatchingPosition(
         PositionProtectionTypes.PositionProtectionView storage protection
     ) private view {
-        (uint256 size,,,, CfdTypes.Side side,,) = ENGINE.positions(protection.account);
-        if (size == 0 || size != protection.size || side != protection.side) {
+        if (!_positionMatches(protection)) {
             revert OrderRouter__PositionChanged();
         }
+    }
+
+    function _positionMatches(
+        PositionProtectionTypes.PositionProtectionView storage protection
+    ) private view returns (bool matches) {
+        (uint256 size,,,, CfdTypes.Side side,,) = ENGINE.positions(protection.account);
+        return size != 0 && size == protection.size && side == protection.side;
+    }
+
+    function _isFailedProtectionAttemptReason(
+        OrderV2Types.TerminalReason reason
+    ) private pure returns (bool) {
+        return reason != OrderV2Types.TerminalReason.None && reason != OrderV2Types.TerminalReason.Executed
+            && reason != OrderV2Types.TerminalReason.RiskOff && reason != OrderV2Types.TerminalReason.AccountLiquidated;
     }
 
     function _triggeredLeg(

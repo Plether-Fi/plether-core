@@ -61,6 +61,14 @@ interface IOrderRouterV2ExecutionHost {
         OrderV2Types.FailureDetails failure;
     }
 
+    /// @notice Canonical execution-bounty outcome returned by Router accounting.
+    /// @dev Protection attempts may retain their bounty in the protection Book instead of paying the terminal caller.
+    struct BountySettlement {
+        uint256 bountyUsdc;
+        address bountyRecipient;
+        OrderV2Types.BountyDisposition bountyDisposition;
+    }
+
     function engine() external view returns (address);
 
     function policyEvaluator() external view returns (address);
@@ -91,16 +99,18 @@ interface IOrderRouterV2ExecutionHost {
         ItemRequest calldata request
     ) external returns (OrderV2Types.ExecutionResult memory result);
 
-    /// @notice Releases remaining order margin, settles its bounty, and unlinks its Router record.
-    /// @dev `bountyRecipient` is explicit because a Router self-call changes `msg.sender`.
+    /// @notice Releases remaining order margin, settles or retains its bounty, and unlinks its Router record.
+    /// @dev `bountyRecipient` is explicit because a Router self-call changes `msg.sender`. Failed protection attempts
+    ///      return a retained disposition with a zero recipient so their one reserved bounty can fund a fresh retry.
     function settleV2OrderFromSidecar(
         uint64 orderId,
         bool success,
+        OrderV2Types.TerminalReason reason,
         address bountyRecipient,
         uint256 executionPrice,
         uint256 accountingPrice,
         uint64 accountingPublishTime
-    ) external returns (uint256 bountyUsdc);
+    ) external returns (BountySettlement memory settlement);
 
     /// @notice Refunds a cutoff-invalid open, including its bounty, and unlinks its Router record.
     function refundRiskOffOrderFromSidecar(

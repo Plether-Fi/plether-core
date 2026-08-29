@@ -489,15 +489,16 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             revert OrderRouterV2ExecutionSidecar__MalformedSuccess(address(engine_), engineData.length);
         }
 
-        uint256 bountyUsdc = host.settleV2OrderFromSidecar(
+        IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement = host.settleV2OrderFromSidecar(
             order.orderId,
             true,
+            OrderV2Types.TerminalReason.Executed,
             request.executor,
             request.executionPrice,
             request.bountyAccountingPrice,
             request.bountyAccountingPublishTime
         );
-        _requireBounty(pending.executionBountyUsdc, bountyUsdc);
+        _requireBounty(pending.executionBountyUsdc, bountySettlement.bountyUsdc);
 
         AccountState memory postState = _accountState(engine_, order.account);
         _assertAssessmentState(assessment, request.executionMode, preState, postState);
@@ -516,7 +517,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             true
         );
         receipt.status = OrderV2Types.LifecycleStatus.Executed;
-        _setPaidBounty(receipt, bountyUsdc, request.executor);
+        _setBountySettlement(receipt, bountySettlement);
         receipt.economics = _assessmentEconomics(assessment, preState, postState);
         return _finalizeReceipt(book, receipt);
     }
@@ -532,15 +533,16 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         TerminalClassification memory classification,
         bool priceReachedEngine
     ) private returns (OrderV2Types.ExecutionResult memory result) {
-        uint256 bountyUsdc = host.settleV2OrderFromSidecar(
+        IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement = host.settleV2OrderFromSidecar(
             order.orderId,
             false,
+            classification.reason,
             request.executor,
             request.executionPrice,
             request.bountyAccountingPrice,
             request.bountyAccountingPublishTime
         );
-        _requireBounty(pending.executionBountyUsdc, bountyUsdc);
+        _requireBounty(pending.executionBountyUsdc, bountySettlement.bountyUsdc);
         AccountState memory postState = _accountState(ICfdEngineCore(host.engine()), order.account);
         OrderV2Types.OrderReceipt memory receipt = _baseReceipt(
             order.orderId,
@@ -556,7 +558,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             request.oraclePublishTime,
             priceReachedEngine
         );
-        _setPaidBounty(receipt, bountyUsdc, request.executor);
+        _setBountySettlement(receipt, bountySettlement);
         receipt.failure = classification.failure;
         receipt.economics = _stateOnlyEconomics(preState, postState);
         return _finalizeReceipt(book, receipt);
@@ -573,16 +575,16 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
     ) private returns (OrderV2Types.ExecutionResult memory result) {
         ICfdEngineCore engine_ = ICfdEngineCore(host.engine());
         AccountState memory preState = _accountState(engine_, order.account);
-        IMarginClearinghouse(engine_.clearinghouse()).releaseOrderReservationForTerminalCleanup(order.orderId);
-        uint256 bountyUsdc = host.settleV2OrderFromSidecar(
+        IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement = host.settleV2OrderFromSidecar(
             order.orderId,
             false,
+            reason,
             request.executor,
             request.executionPrice,
             request.bountyAccountingPrice,
             request.bountyAccountingPublishTime
         );
-        _requireBounty(pending.executionBountyUsdc, bountyUsdc);
+        _requireBounty(pending.executionBountyUsdc, bountySettlement.bountyUsdc);
         AccountState memory postState = _accountState(engine_, order.account);
 
         OrderV2Types.OrderReceipt memory receipt = _baseReceipt(
@@ -599,7 +601,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             request.oraclePublishTime,
             false
         );
-        _setPaidBounty(receipt, bountyUsdc, request.executor);
+        _setBountySettlement(receipt, bountySettlement);
         receipt.failure = failure;
         receipt.economics = _stateOnlyEconomics(preState, postState);
         return _finalizeReceipt(book, receipt);
@@ -1198,16 +1200,13 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         }
     }
 
-    function _setPaidBounty(
+    function _setBountySettlement(
         OrderV2Types.OrderReceipt memory receipt,
-        uint256 bountyUsdc,
-        address recipient
+        IOrderRouterV2ExecutionHost.BountySettlement memory settlement
     ) private pure {
-        receipt.bountyUsdc = bountyUsdc;
-        if (bountyUsdc != 0) {
-            receipt.bountyRecipient = recipient;
-            receipt.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
-        }
+        receipt.bountyUsdc = settlement.bountyUsdc;
+        receipt.bountyRecipient = settlement.bountyRecipient;
+        receipt.bountyDisposition = settlement.bountyDisposition;
     }
 
     function _revertRetryable(

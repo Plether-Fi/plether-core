@@ -48,7 +48,9 @@ library OrderV2Types {
         None,
         Paid,
         Forfeited,
-        RefundedToAccount
+        RefundedToAccount,
+        /// @notice The bounty remains reserved for a fresh attempt of the same latched position protection.
+        RetainedForProtectionRetry
     }
 
     /// @notice Canonical reason for a terminal order transition.
