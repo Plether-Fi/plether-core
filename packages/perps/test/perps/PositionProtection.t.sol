@@ -1172,6 +1172,48 @@ contract PositionProtectionTest is BasePerpTest {
         router.commitProtectionCloseAttempt(1, ALICE, CfdTypes.Side.LONG, POSITION_SIZE, executionBountyUsdc);
     }
 
+    function test_ProtectionBook_FailedAttemptHookValidatesAttemptAccountReasonAndBounty() public {
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+
+        vm.prank(address(router));
+        assertFalse(
+            protectionBook.handleFailedProtectionAttempt(
+                404, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc
+            ),
+            "unknown attempts should be ignored"
+        );
+
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+
+        vm.prank(address(router));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__PositionChanged.selector);
+        protectionBook.handleFailedProtectionAttempt(
+            linkedOrderId, BOB, OrderV2Types.TerminalReason.Expired, executionBountyUsdc
+        );
+
+        vm.prank(address(router));
+        vm.expectRevert(PositionProtectionBook.PositionProtectionBook__InvalidTerminalReason.selector);
+        protectionBook.handleFailedProtectionAttempt(
+            linkedOrderId, ALICE, OrderV2Types.TerminalReason.Executed, executionBountyUsdc
+        );
+
+        vm.prank(address(router));
+        vm.expectRevert(PositionProtectionBook.PositionProtectionBook__BountyMismatch.selector);
+        protectionBook.handleFailedProtectionAttempt(
+            linkedOrderId, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc + 1
+        );
+
+        assertTrue(
+            router.lifecycleBook().isProtectionAttempt(linkedOrderId), "rejected callbacks keep live attempt state"
+        );
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "rejected callbacks must not alter the durable protection"
+        );
+    }
+
     function test_Router_RejectsUntrustedProtectionHostMetadata() public {
         OrderV2Types.OrderRequest memory protectedOpenRequest;
         vm.prank(BOB);
