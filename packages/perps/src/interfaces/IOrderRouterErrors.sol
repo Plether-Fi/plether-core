@@ -226,10 +226,7 @@ interface IOrderRouterErrors {
 
     /// @notice Emitted whenever the initial or a retried protection close joins the ordinary FIFO queue.
     event PositionProtectionCloseAttemptQueued(
-        uint64 indexed protectionId,
-        address indexed account,
-        uint64 indexed linkedOrderId,
-        uint64 previousLinkedOrderId
+        uint64 indexed protectionId, address indexed account, uint64 indexed linkedOrderId, uint64 previousLinkedOrderId
     );
 
     /// @notice Emitted when a linked close fails and the protection either relatches or resolves as failed.

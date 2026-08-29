@@ -100,19 +100,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @notice Queues a fresh close attempt for an already-latched position protection.
     /// @dev Only the immutable protection Book may call this entrypoint. The Book owns the durable trigger and its
     ///      already-reserved execution bounty; delegated logic creates fresh lifecycle evidence and appends an ordinary
-    ///      short-lived close without reserving the bounty a second time.
+    ///      short-lived close without reserving the bounty a second time. Parameters are intentionally unnamed because
+    ///      the delegated implementation consumes the Router's unchanged original calldata.
     function commitProtectionCloseAttempt(
-        uint64 protectionId,
-        address account,
-        CfdTypes.Side side,
-        uint256 size,
-        uint256 executionBountyUsdc
+        uint64,
+        address,
+        CfdTypes.Side,
+        uint256,
+        uint256
     ) external nonReentrant returns (uint64 orderId) {
-        protectionId;
-        account;
-        side;
-        size;
-        executionBountyUsdc;
         return uint64(_delegateToKeeperSidecar());
     }
 
@@ -260,10 +256,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 bountyUsdc = record.executionBountyUsdc;
         record.executionBountyUsdc = 0;
 
-        bool retained;
-        if (!success && lifecycleBook.isProtectionAttempt(orderId)) {
-            retained = positionProtectionBook.handleFailedProtectionAttempt(orderId, order.account, reason, bountyUsdc);
-        }
+        bool retained = !success && lifecycleBook.isProtectionAttempt(orderId)
+            && positionProtectionBook.handleFailedProtectionAttempt(orderId, order.account, reason, bountyUsdc);
 
         settlement.bountyUsdc = bountyUsdc;
         if (retained) {
