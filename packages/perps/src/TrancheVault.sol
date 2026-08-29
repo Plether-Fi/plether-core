@@ -24,6 +24,8 @@ interface IHousePoolMaintenanceFeeAdminView {
 /// @title TrancheVault
 /// @notice Fully asynchronous ERC-7540-style entry point for one HousePool tranche.
 /// @dev The vault escrows request tokens and claim tokens. HousePool alone moves epochs into claimable state.
+// Legacy integration interfaces are implemented structurally; the pool settlement fragment is intentionally local to HousePool.
+// slither-disable-next-line missing-inheritance
 contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     using SafeERC20 for IERC20;

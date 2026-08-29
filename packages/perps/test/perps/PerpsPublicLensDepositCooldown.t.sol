@@ -2,11 +2,57 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
+
+contract ZeroVaultHousePoolStub {
+
+    function seniorVault() external pure returns (address) {
+        return address(0);
+    }
+
+    function juniorVault() external pure returns (address) {
+        return address(0);
+    }
+
+}
 
 contract PerpsPublicLensDepositCooldownTest is BasePerpTest {
 
     address internal constant DEPOSITOR = address(0xC001D0);
+
+    function test_GetLpDepositCooldownState_ReturnsMetadataWhenHousePoolIsZero() public {
+        PerpsPublicLens lens = new PerpsPublicLens(address(0), address(0), address(0), address(0));
+        uint256 requestId = 17;
+
+        PerpsViewTypes.LpDepositCooldownStateView memory viewData =
+            lens.getLpDepositCooldownState(false, requestId, DEPOSITOR);
+
+        assertEq(viewData.vault, address(0));
+        assertEq(viewData.requestId, requestId);
+        assertEq(viewData.controller, DEPOSITOR);
+        assertEq(viewData.activationTime, 0);
+        assertEq(viewData.cooldownEnd, 0);
+        assertEq(viewData.remainingClaimableShares, 0);
+        assertEq(viewData.directRedeemableShares, 0);
+    }
+
+    function test_GetLpDepositCooldownState_ReturnsMetadataWhenSelectedVaultIsZero() public {
+        ZeroVaultHousePoolStub housePool = new ZeroVaultHousePoolStub();
+        PerpsPublicLens lens = new PerpsPublicLens(address(0), address(0), address(0), address(housePool));
+        uint256 requestId = 23;
+
+        PerpsViewTypes.LpDepositCooldownStateView memory viewData =
+            lens.getLpDepositCooldownState(true, requestId, DEPOSITOR);
+
+        assertEq(viewData.vault, address(0));
+        assertEq(viewData.requestId, requestId);
+        assertEq(viewData.controller, DEPOSITOR);
+        assertEq(viewData.activationTime, 0);
+        assertEq(viewData.cooldownEnd, 0);
+        assertEq(viewData.remainingClaimableShares, 0);
+        assertEq(viewData.directRedeemableShares, 0);
+    }
 
     function test_GetLpDepositCooldownState_TracksActivationAndEligibility() public {
         uint256 assets = 25_000e6;

@@ -112,6 +112,50 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
         assertEq(juniorVault.pendingRedeemRequest(redeemRequestId, ALICE), shares);
     }
 
+    function test_DirectRouteRejectsZeroController() public {
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.requestRedeemFromClaimableDeposit(1, 1, address(0));
+    }
+
+    function test_DirectRouteRejectsZeroShares() public {
+        vm.expectRevert(TrancheVault.TrancheVault__WithdrawalTooSmall.selector);
+        vm.prank(ALICE);
+        juniorVault.requestRedeemFromClaimableDeposit(1, 0, ALICE);
+    }
+
+    function test_DirectRouteRejectsUnfinalizedDepositSource() public {
+        uint256 assets = 10_000e6;
+        uint256 requestId = _requestDeposit(ALICE, assets);
+        assertEq(juniorVault.depositEpochActivationTime(requestId), 0);
+
+        vm.expectRevert(TrancheVault.TrancheVault__DepositEpochNotFinalized.selector);
+        vm.prank(ALICE);
+        juniorVault.requestRedeemFromClaimableDeposit(requestId, 1, ALICE);
+
+        assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.depositClaimEscrowShares(), 0);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
+    }
+
+    function test_DirectRouteRejectsSharesAboveMaximumClaimable() public {
+        uint256 assets = 10_000e6;
+        uint256 shares = 10_000e9;
+        uint256 requestId = _requestDeposit(ALICE, assets);
+        uint256 activationTime = pool.lpEpochStart(requestId);
+        _finalizeDepositAt(requestId, shares, activationTime);
+        vm.warp(activationTime + juniorVault.DEPOSIT_COOLDOWN());
+
+        uint256 maxShares = juniorVault.maxRequestRedeemFromClaimableDeposit(requestId, ALICE);
+        assertEq(maxShares, shares);
+        vm.expectPartialRevert(TrancheVault.TrancheVault__ExceededMaxRequestRedeem.selector);
+        vm.prank(ALICE);
+        juniorVault.requestRedeemFromClaimableDeposit(requestId, maxShares + 1, ALICE);
+
+        assertEq(juniorVault.claimableDepositShares(requestId, ALICE), maxShares);
+        assertEq(juniorVault.depositClaimEscrowShares(), maxShares);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
+    }
+
     function test_DirectRouteRequiresControllerOrApprovedOperator() public {
         uint256 assets = 15_000e6;
         uint256 shares = 15_000e9;
