@@ -7,6 +7,7 @@ import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.so
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
+import {IAsyncTrancheVaultClaimableRedeem} from "@plether/perps/interfaces/IAsyncTrancheVaultClaimableRedeem.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {JuniorMaintenanceFeeMathLib} from "@plether/perps/libraries/JuniorMaintenanceFeeMathLib.sol";
 
@@ -23,7 +24,7 @@ interface IHousePoolMaintenanceFeeAdminView {
 /// @title TrancheVault
 /// @notice Fully asynchronous ERC-7540-style entry point for one HousePool tranche.
 /// @dev The vault escrows request tokens and claim tokens. HousePool alone moves epochs into claimable state.
-contract TrancheVault is ERC4626 {
+contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     using SafeERC20 for IERC20;
 
@@ -111,6 +112,7 @@ contract TrancheVault is ERC4626 {
     mapping(address => uint256) public lastDepositTime;
     mapping(address controller => mapping(address operator => bool approved)) public isOperator;
     mapping(uint256 => DepositEpoch) public depositEpochs;
+    mapping(uint256 => uint256) public override depositEpochActivationTime;
     mapping(uint256 => EpochQueueState) public depositEpochQueueState;
     mapping(uint256 => RedeemEpoch) public redeemEpochs;
     mapping(uint256 => EpochQueueState) public redeemEpochQueueState;
@@ -297,7 +299,8 @@ contract TrancheVault is ERC4626 {
         return interfaceId == INTERFACE_ID_ERC165 || interfaceId == INTERFACE_ID_ERC7575
             || interfaceId == INTERFACE_ID_ERC7575_SHARE || interfaceId == INTERFACE_ID_ERC7540_OPERATOR
             || interfaceId == INTERFACE_ID_ERC7540_DEPOSIT || interfaceId == INTERFACE_ID_ERC7540_REDEEM
-            || interfaceId == type(IAsyncTrancheVault).interfaceId;
+            || interfaceId == type(IAsyncTrancheVault).interfaceId
+            || interfaceId == type(IAsyncTrancheVaultClaimableRedeem).interfaceId;
     }
 
     function setOperator(
@@ -619,14 +622,71 @@ contract TrancheVault is ERC4626 {
         if (shares > maxShares) {
             revert TrancheVault__ExceededMaxRequestRedeem(owner, shares, maxShares);
         }
-        if (estimateRedeemAssets(shares) < POOL.minTrancheDepositUsdc() && shares < maxShares) {
-            revert TrancheVault__WithdrawalTooSmall();
-        }
+        _requireMinimumRedeemSize(shares, maxShares);
         if (msg.sender != owner && !isOperator[owner][msg.sender]) {
             _spendAllowance(owner, msg.sender, shares);
         }
         _transfer(owner, address(this), shares);
 
+        requestId = _enqueueRedeemRequest(shares, controller);
+        emit RedeemRequest(controller, owner, requestId, msg.sender, shares);
+    }
+
+    function maxRequestRedeemFromClaimableDeposit(
+        uint256 depositRequestId,
+        address controller
+    ) external view override returns (uint256 maxShares) {
+        uint256 activationTime = depositEpochActivationTime[depositRequestId];
+        unchecked {
+            if (block.timestamp < activationTime + DEPOSIT_COOLDOWN) {
+                return 0;
+            }
+        }
+        return claimableDepositShares(depositRequestId, controller);
+    }
+
+    function requestRedeemFromClaimableDeposit(
+        uint256 depositRequestId,
+        uint256 shares,
+        address controller
+    ) external override returns (uint256 redeemRequestId) {
+        if (controller == address(0)) {
+            revert TrancheVault__ZeroAddress();
+        }
+        _requireControllerAuth(controller);
+        if (shares == 0) {
+            revert TrancheVault__WithdrawalTooSmall();
+        }
+
+        uint256 activationTime = depositEpochActivationTime[depositRequestId];
+        if (activationTime == 0) {
+            revert TrancheVault__DepositEpochNotFinalized();
+        }
+        unchecked {
+            if (block.timestamp < activationTime + DEPOSIT_COOLDOWN) {
+                revert TrancheVault__DepositCooldown();
+            }
+        }
+
+        DepositEpoch storage depositEpoch = depositEpochs[depositRequestId];
+        uint256 maxShares = claimableDepositShares(depositRequestId, controller);
+        if (shares > maxShares) {
+            revert TrancheVault__ExceededMaxRequestRedeem(controller, shares, maxShares);
+        }
+        _requireMinimumRedeemSize(shares, maxShares);
+
+        DepositPosition storage depositPosition = depositRequests[controller][depositRequestId];
+        uint256 assets = _depositAssetsForShares(depositEpoch, depositPosition, shares, maxShares, controller);
+        _consumeDepositEntitlement(depositRequestId, assets, shares, controller);
+        redeemRequestId = _enqueueRedeemRequest(shares, controller);
+
+        emit ClaimableDepositRedeemRequest(controller, depositRequestId, redeemRequestId, msg.sender, assets, shares);
+    }
+
+    function _enqueueRedeemRequest(
+        uint256 shares,
+        address controller
+    ) internal returns (uint256 requestId) {
         (requestId,) = _requestEpochWindow();
         RedeemEpoch storage epoch = redeemEpochs[requestId];
         if (!redeemEpochQueueState[requestId].queued) {
@@ -639,7 +699,6 @@ contract TrancheVault is ERC4626 {
         epoch.shares += shares;
         position.shares += shares;
         pendingRedeemEscrowShares += shares;
-        emit RedeemRequest(controller, owner, requestId, msg.sender, shares);
     }
 
     function pendingDepositRequest(
@@ -1004,23 +1063,29 @@ contract TrancheVault is ERC4626 {
         }
         DepositPosition storage position = depositRequests[controller][requestId];
         uint256 remainingShares = claimableDepositShares(requestId, controller);
-        uint256 remainingAssets = position.assets - position.claimedAssets;
         if (shares == 0 || shares > remainingShares) {
             revert ERC4626ExceededMaxMint(controller, shares, remainingShares);
         }
-        if (shares == remainingShares) {
-            assets = remainingAssets;
-        } else {
-            assets = Math.mulDiv(shares, epoch.assets, epoch.shares, Math.Rounding.Ceil);
-            if (assets >= remainingAssets) {
-                revert ERC4626ExceededMaxMint(controller, shares, remainingShares);
-            }
-        }
-        if (assets > remainingAssets) {
-            revert ERC4626ExceededMaxMint(controller, shares, remainingShares);
-        }
+        assets = _depositAssetsForShares(epoch, position, shares, remainingShares, controller);
         _requireShareReceiver(controller, receiver);
         _consumeDepositClaim(requestId, assets, shares, receiver, controller);
+    }
+
+    function _depositAssetsForShares(
+        DepositEpoch storage epoch,
+        DepositPosition storage position,
+        uint256 shares,
+        uint256 remainingShares,
+        address controller
+    ) internal view returns (uint256 assets) {
+        uint256 remainingAssets = position.assets - position.claimedAssets;
+        if (shares == remainingShares) {
+            return remainingAssets;
+        }
+        assets = Math.mulDiv(shares, epoch.assets, epoch.shares, Math.Rounding.Ceil);
+        if (assets >= remainingAssets) {
+            revert ERC4626ExceededMaxMint(controller, shares, remainingShares);
+        }
     }
 
     function _consumeDepositClaim(
@@ -1028,6 +1093,26 @@ contract TrancheVault is ERC4626 {
         uint256 assets,
         uint256 shares,
         address receiver,
+        address controller
+    ) internal {
+        _consumeDepositEntitlement(requestId, assets, shares, controller);
+        if (shares != 0) {
+            uint256 activationTime = depositEpochActivationTime[requestId];
+            if (lastDepositTime[receiver] < activationTime) {
+                lastDepositTime[receiver] = activationTime;
+            }
+            _transfer(address(this), receiver, shares);
+        }
+        // ERC-7540 reinterprets the first ERC-4626 Deposit field as the request controller, including operator claims.
+        emit Deposit(controller, receiver, assets, shares);
+        emit DepositSharesClaimed(controller, requestId, assets, shares);
+        emit AsyncDepositSharesClaimed(controller, receiver, requestId, assets, shares);
+    }
+
+    function _consumeDepositEntitlement(
+        uint256 requestId,
+        uint256 assets,
+        uint256 shares,
         address controller
     ) internal {
         DepositEpoch storage epoch = depositEpochs[requestId];
@@ -1050,14 +1135,6 @@ contract TrancheVault is ERC4626 {
                 _burn(address(this), shareDust);
             }
         }
-        if (shares != 0) {
-            lastDepositTime[receiver] = block.timestamp;
-            _transfer(address(this), receiver, shares);
-        }
-        // ERC-7540 reinterprets the first ERC-4626 Deposit field as the request controller, including operator claims.
-        emit Deposit(controller, receiver, assets, shares);
-        emit DepositSharesClaimed(controller, requestId, assets, shares);
-        emit AsyncDepositSharesClaimed(controller, receiver, requestId, assets, shares);
     }
 
     function _claimRedeem(
@@ -1375,6 +1452,7 @@ contract TrancheVault is ERC4626 {
 
         epoch.finalized = true;
         epoch.shares = shares;
+        depositEpochActivationTime[epochId] = block.timestamp;
         pendingDepositEscrowAssets -= assets;
         depositClaimEscrowShares += shares;
         IERC20(asset()).safeTransfer(address(POOL), assets);
@@ -1512,6 +1590,15 @@ contract TrancheVault is ERC4626 {
     ) internal view {
         if (msg.sender != controller && !isOperator[controller][msg.sender]) {
             revert TrancheVault__NotControllerOrOperator();
+        }
+    }
+
+    function _requireMinimumRedeemSize(
+        uint256 shares,
+        uint256 maxShares
+    ) internal view {
+        if (estimateRedeemAssets(shares) < POOL.minTrancheDepositUsdc() && shares < maxShares) {
+            revert TrancheVault__WithdrawalTooSmall();
         }
     }
 
@@ -2005,4 +2092,4 @@ contract TrancheVault is ERC4626 {
         return xLow < yLow ? int256(-1) : int256(1);
     }
 
-}
+    }

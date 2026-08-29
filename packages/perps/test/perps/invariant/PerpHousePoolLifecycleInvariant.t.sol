@@ -234,6 +234,47 @@ contract PerpHousePoolLifecycleHandler is Test {
         assertEq(requestId, expectedRequestId, "redeem request must use the advertised LP epoch");
     }
 
+    function requestRedeemFromClaimableDeposit(
+        bool isSenior,
+        uint256 actorIndex
+    ) external {
+        TrancheVault vault = isSenior ? seniorVault : juniorVault;
+        address actor = actors[actorIndex % actors.length];
+        uint256 depositRequestId = vault.controllerDepositHead(actor);
+        if (depositRequestId == 0) {
+            return;
+        }
+
+        uint256 shares = vault.maxRequestRedeemFromClaimableDeposit(depositRequestId, actor);
+        if (shares == 0) {
+            return;
+        }
+
+        (uint256 expectedRequestId,) = vault.getRequestEpochWindow();
+        uint256 depositClaimEscrowBefore = vault.depositClaimEscrowShares();
+        uint256 pendingRedeemEscrowBefore = vault.pendingRedeemEscrowShares();
+        JuniorFeeSnapshot memory feeBefore;
+        if (!isSenior) {
+            feeBefore = _juniorFeeSnapshot();
+        }
+
+        vm.prank(actor);
+        uint256 redeemRequestId = vault.requestRedeemFromClaimableDeposit(depositRequestId, shares, actor);
+
+        assertEq(redeemRequestId, expectedRequestId, "direct redeem must use the advertised LP epoch");
+        assertEq(
+            vault.pendingRedeemEscrowShares(),
+            pendingRedeemEscrowBefore + shares,
+            "direct redeem must reclassify routed shares into redemption escrow"
+        );
+        uint256 depositClaimEscrowDecrease = depositClaimEscrowBefore - vault.depositClaimEscrowShares();
+        assertGe(depositClaimEscrowDecrease, shares, "direct redeem must consume its source shares");
+        uint256 burnedShareDust = depositClaimEscrowDecrease - shares;
+        if (!isSenior) {
+            _recordJuniorFeeMutation(feeBefore, 0, burnedShareDust, burnedShareDust != 0);
+        }
+    }
+
     function settleLpEpoch() external {
         if (pool.lpEpochSettlementPaused()) {
             return;
@@ -926,7 +967,7 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
         handler =
             new PerpHousePoolLifecycleHandler(usdc, engine, pool, seniorVault, juniorVault, address(this), address(0));
 
-        bytes4[] memory selectors = new bytes4[](16);
+        bytes4[] memory selectors = new bytes4[](17);
         selectors[0] = handler.initializeSeed.selector;
         selectors[1] = handler.activateTrading.selector;
         selectors[2] = handler.pausePool.selector;
@@ -943,6 +984,7 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
         selectors[13] = handler.mintExcess.selector;
         selectors[14] = handler.accountExcess.selector;
         selectors[15] = handler.sweepExcess.selector;
+        selectors[16] = handler.requestRedeemFromClaimableDeposit.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
@@ -1163,7 +1205,7 @@ contract PerpHousePoolMaintenanceFeeInvariantTest is BasePerpTest {
         handler.initializeSeed(true, 1000e6);
         handler.activateTrading();
 
-        bytes4[] memory selectors = new bytes4[](17);
+        bytes4[] memory selectors = new bytes4[](18);
         selectors[0] = handler.initializeSeed.selector;
         selectors[1] = handler.activateTrading.selector;
         selectors[2] = handler.pausePool.selector;
@@ -1181,6 +1223,7 @@ contract PerpHousePoolMaintenanceFeeInvariantTest is BasePerpTest {
         selectors[14] = handler.accountExcess.selector;
         selectors[15] = handler.sweepExcess.selector;
         selectors[16] = handler.materializeJuniorMaintenanceFee.selector;
+        selectors[17] = handler.requestRedeemFromClaimableDeposit.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));

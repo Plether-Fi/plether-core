@@ -49,4 +49,17 @@ interface IPerpsLPViews {
         address controller
     ) external view returns (PerpsViewTypes.LpRequestStateView memory viewData);
 
+    /// @notice Returns activation-aged cooldown state for one controller's finalized deposit request.
+    /// @dev Pending, deferred, and rejected requests report zero activation and cooldown timestamps. Direct redeem
+    ///      capacity becomes nonzero only after the request-specific cooldown has elapsed.
+    /// @param isSenior True for the Senior tranche and false for the Junior tranche.
+    /// @param requestId Deposit request epoch whose activation-aged entitlement is queried.
+    /// @param controller Account that controls the deposit request.
+    /// @return viewData Activation timing, remaining claimable shares, and current direct-redemption capacity.
+    function getLpDepositCooldownState(
+        bool isSenior,
+        uint256 requestId,
+        address controller
+    ) external view returns (PerpsViewTypes.LpDepositCooldownStateView memory viewData);
+
 }
