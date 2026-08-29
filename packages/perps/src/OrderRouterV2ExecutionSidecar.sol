@@ -77,25 +77,49 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         bool closeOnly;
     }
 
+    struct BatchExecutionState {
+        address executor;
+        uint64 riskOffCutoff;
+        uint256 riskOffRefunds;
+        uint256 terminalPrunes;
+        uint256 pythFeeTotal;
+        IPletherOracle.BatchOrderPriceCache oracleCache;
+    }
+
+    struct PreparedExecutionContext {
+        IOrderRouterV2ExecutionHost host;
+        IOrderLifecycleBook book;
+        CfdTypes.Order order;
+        OrderV2Types.PendingIntent pending;
+        bytes32 observedConfigHash;
+        uint256 minimumEngineGas;
+    }
+
     constructor() {
         SELF = address(this);
     }
 
     modifier onlyDelegateCall() {
-        if (address(this) == SELF) {
-            revert OrderRouterV2ExecutionSidecar__OnlyDelegateCall();
-        }
+        _requireDelegateCall();
         _;
     }
 
     modifier onlyRouterSelf() {
+        _requireRouterSelf();
+        _;
+    }
+
+    function _requireDelegateCall() private view {
         if (address(this) == SELF) {
             revert OrderRouterV2ExecutionSidecar__OnlyDelegateCall();
         }
+    }
+
+    function _requireRouterSelf() private view {
+        _requireDelegateCall();
         if (msg.sender != address(this)) {
             revert OrderRouterV2ExecutionSidecar__OnlyRouterSelf();
         }
-        _;
     }
 
     /// @notice Executes one queue target after bounded oracle-independent head cleanup.
@@ -207,12 +231,9 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         IOrderRouterV2ExecutionHost host = IOrderRouterV2ExecutionHost(address(this));
         _validateBatchBounds(host, maxOrderId);
 
-        address executor = msg.sender;
-        uint64 riskOffCutoff = _riskOffCutoff(host);
-        uint256 riskOffRefunds = 0;
-        uint256 terminalPrunes = 0;
-        uint256 pythFeeTotal = 0;
-        IPletherOracle.BatchOrderPriceCache memory oracleCache;
+        BatchExecutionState memory state;
+        state.executor = msg.sender;
+        state.riskOffCutoff = _riskOffCutoff(host);
 
         while (host.nextExecuteId() != 0 && host.nextExecuteId() <= maxOrderId) {
             uint64 orderId = host.nextExecuteId();
@@ -220,23 +241,28 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             _requireOrderView(orderId, orderView);
 
             (IOrderRouterV2ExecutionHost.ItemAction action, bool terminalBeforeOracle) =
-                _preOracleAction(host, orderView.order, orderId, riskOffCutoff);
+                _preOracleAction(host, orderView.order, orderId, state.riskOffCutoff);
             if (terminalBeforeOracle) {
                 if (action == IOrderRouterV2ExecutionHost.ItemAction.RiskOff) {
-                    if (riskOffRefunds == MAX_RISK_OFF_REFUNDS_PER_CALL) {
+                    if (state.riskOffRefunds == MAX_RISK_OFF_REFUNDS_PER_CALL) {
                         batchResult.stopReason = OrderV2Types.PendingReason.CleanupLimit;
                         break;
                     }
-                    ++riskOffRefunds;
+                    unchecked {
+                        ++state.riskOffRefunds;
+                    }
                 } else {
-                    if (terminalPrunes == host.maxPruneOrdersPerCall()) {
+                    if (state.terminalPrunes == host.maxPruneOrdersPerCall()) {
                         batchResult.stopReason = OrderV2Types.PendingReason.CleanupLimit;
                         break;
                     }
-                    ++terminalPrunes;
+                    unchecked {
+                        ++state.terminalPrunes;
+                    }
                 }
 
-                IOrderRouterV2ExecutionHost.ItemRequest memory cleanup = _preOracleItem(host, orderId, action, executor);
+                IOrderRouterV2ExecutionHost.ItemRequest memory cleanup =
+                    _preOracleItem(host, orderId, action, state.executor);
                 uint256 cleanupGas = _itemCallGas();
                 if (cleanupGas == 0) {
                     batchResult.stopReason = OrderV2Types.PendingReason.InsufficientGas;
@@ -259,16 +285,16 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
                 bool oracleResolved,
                 OracleResult memory oracleResult,
                 IPletherOracle.BatchOrderPriceCache memory nextCache
-            ) = _prepareBatchOracle(host, orderView.order, executor, pythUpdateData, pythFeeTotal, oracleCache);
-            oracleCache = nextCache;
-            pythFeeTotal += oracleResult.fee;
+            ) = _prepareBatchOracle(host, orderView.order, pythUpdateData, state);
+            state.oracleCache = nextCache;
+            state.pythFeeTotal += oracleResult.fee;
             if (!oracleResolved) {
                 batchResult.stopReason = OrderV2Types.PendingReason.HistoricalPriceUnavailable;
                 break;
             }
 
             IOrderRouterV2ExecutionHost.ItemRequest memory executionRequest =
-                _executionItem(host, orderView.order, oracleResult, executor);
+                _executionItem(host, orderView.order, oracleResult, state.executor);
             uint256 executionGas = _itemCallGas();
             if (executionGas == 0) {
                 batchResult.stopReason = OrderV2Types.PendingReason.InsufficientGas;
@@ -289,7 +315,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         }
 
         batchResult.nextOrderId = host.nextExecuteId();
-        _refundEth(host, executor, msg.value - pythFeeTotal);
+        _refundEth(host, state.executor, msg.value - state.pythFeeTotal);
     }
 
     /// @notice Executes or terminally settles one order inside a Router self-call rollback frame.
@@ -369,20 +395,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         _validateSettledTerminalInput(host, pending, input);
 
         AccountState memory state = _accountState(ICfdEngineCore(host.engine()), pending.account);
-        OrderV2Types.OrderReceipt memory receipt = _baseReceipt(
-            input.orderId,
-            pending,
-            input.executor,
-            input.observedConfigHash,
-            input.reason,
-            input.executionMode,
-            input.priceSource,
-            input.executionPrice,
-            input.neutralMarkPrice,
-            input.poolDepthUsdc,
-            input.oraclePublishTime,
-            input.priceReachedEngine
-        );
+        OrderV2Types.OrderReceipt memory receipt = _settledTerminalBaseReceipt(pending, input);
         receipt.bountyUsdc = input.bountyUsdc;
         receipt.bountyRecipient = input.bountyRecipient;
         receipt.bountyDisposition = input.bountyDisposition;
@@ -426,40 +439,109 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             return _pendingResult(order.orderId, OrderV2Types.PendingReason.InsufficientGas);
         }
 
-        ICfdEngineCore engine_ = ICfdEngineCore(host.engine());
-        IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine_.clearinghouse());
-        AccountState memory preState = _accountState(engine_, order.account);
+        PreparedExecutionContext memory context;
+        context.host = host;
+        context.book = book;
+        context.order = order;
+        context.pending = pending;
+        context.observedConfigHash = observedConfigHash;
+        context.minimumEngineGas = minimumEngineGas;
+        return _executeAssessed(context, request);
+    }
+
+    function _executeAssessed(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request
+    ) private returns (OrderV2Types.ExecutionResult memory result) {
+        ICfdEngineCore engine_ = ICfdEngineCore(context.host.engine());
+        AccountState memory preState = _accountState(engine_, context.order.account);
 
         // Classification-only release is inside this independently revertible item frame. Unknown failures below
         // therefore restore the reservation, while successful assessment sees the same free-settlement state as Engine.
-        clearinghouse.releaseOrderReservationForTerminalCleanup(order.orderId);
+        IMarginClearinghouse(engine_.clearinghouse()).releaseOrderReservationForTerminalCleanup(context.order.orderId);
 
-        address evaluator = host.policyEvaluator();
-        uint256 evaluatorGas = _evaluatorCallGas(address(engine_), minimumEngineGas);
-        (bool assessed, bytes memory assessmentData) = evaluator.staticcall{gas: evaluatorGas}(
-            abi.encodeCall(
-                ICfdOrderPolicyEvaluator.assessOrder,
-                (
-                    address(engine_),
-                    order,
-                    request.executor,
-                    request.executionPrice,
-                    request.poolDepthUsdc,
-                    request.oraclePublishTime,
-                    pending.bounds,
-                    pending.executionBountyUsdc
-                )
-            )
-        );
+        (address evaluator, bool assessed, bytes memory assessmentData) =
+            _callPolicyEvaluator(context, request, address(engine_));
         if (!assessed) {
-            TerminalClassification memory classification = _classifyTypedFailure(assessmentData);
-            if (!classification.terminal || !_plannerFailureMatches(classification, order.isClose)) {
-                _revertRetryable(evaluator, assessmentData);
-            }
-            return _settleTypedFailure(
-                host, book, order, pending, request, observedConfigHash, preState, classification, false
-            );
+            return _settleAssessmentFailure(context, request, preState, evaluator, assessmentData);
         }
+        OrderV2Types.ExecutionAssessment memory assessment = _decodeAssessment(evaluator, assessmentData);
+
+        (bool engineSucceeded, bytes memory engineData) = _callEngine(context, request, address(engine_));
+        if (!engineSucceeded) {
+            return _settleEngineFailure(context, request, preState, address(engine_), engineData);
+        }
+        if (engineData.length != 0) {
+            revert OrderRouterV2ExecutionSidecar__MalformedSuccess(address(engine_), engineData.length);
+        }
+
+        uint256 bountyUsdc = _settleExecutedOrder(context, request);
+        return _finalizeExecutedOrder(context, request, assessment, preState, bountyUsdc);
+    }
+
+    function _finalizeExecutedOrder(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
+        OrderV2Types.ExecutionAssessment memory assessment,
+        AccountState memory preState,
+        uint256 bountyUsdc
+    ) private returns (OrderV2Types.ExecutionResult memory result) {
+        AccountState memory postState = _accountState(ICfdEngineCore(context.host.engine()), context.order.account);
+        _assertAssessmentState(assessment, request.executionMode, preState, postState);
+        OrderV2Types.OrderReceipt memory receipt =
+            _preparedBaseReceipt(context, request, OrderV2Types.TerminalReason.Executed, assessment.mode, true);
+        receipt.status = OrderV2Types.LifecycleStatus.Executed;
+        _setPaidBounty(receipt, bountyUsdc, request.executor);
+        receipt.economics = _assessmentEconomics(assessment, preState, postState);
+        return _finalizeReceipt(context.book, receipt);
+    }
+
+    function _settleExecutedOrder(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request
+    ) private returns (uint256 bountyUsdc) {
+        bountyUsdc = context.host
+            .settleV2OrderFromSidecar(
+                context.order.orderId,
+                true,
+                request.executor,
+                request.executionPrice,
+                request.bountyAccountingPrice,
+                request.bountyAccountingPublishTime
+            );
+        _requireBounty(context.pending.executionBountyUsdc, bountyUsdc);
+    }
+
+    function _callPolicyEvaluator(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
+        address engineAddress
+    ) private view returns (address evaluator, bool assessed, bytes memory assessmentData) {
+        evaluator = context.host.policyEvaluator();
+        uint256 evaluatorGas = _evaluatorCallGas(engineAddress, context.minimumEngineGas);
+        (assessed, assessmentData) = evaluator.staticcall{gas: evaluatorGas}(
+            _assessmentCallData(engineAddress, context.order, request, context.pending)
+        );
+    }
+
+    function _settleAssessmentFailure(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
+        AccountState memory preState,
+        address evaluator,
+        bytes memory assessmentData
+    ) private returns (OrderV2Types.ExecutionResult memory result) {
+        TerminalClassification memory classification = _classifyTypedFailure(assessmentData);
+        if (!classification.terminal || !_plannerFailureMatches(classification, context.order.isClose)) {
+            _revertRetryable(evaluator, assessmentData);
+        }
+        return _settleTypedFailure(context, request, preState, classification, false);
+    }
+
+    function _decodeAssessment(
+        address evaluator,
+        bytes memory assessmentData
+    ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
         uint256 assessedMode = assessmentData.length >= 32 ? _word(assessmentData, 0) : 0;
         if (
             assessmentData.length != EXECUTION_ASSESSMENT_ABI_LENGTH || assessedMode == 0
@@ -467,99 +549,81 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         ) {
             revert OrderRouterV2ExecutionSidecar__MalformedSuccess(evaluator, assessmentData.length);
         }
-        OrderV2Types.ExecutionAssessment memory assessment =
-            abi.decode(assessmentData, (OrderV2Types.ExecutionAssessment));
+        return abi.decode(assessmentData, (OrderV2Types.ExecutionAssessment));
+    }
 
+    function _callEngine(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
+        address engineAddress
+    ) private returns (bool engineSucceeded, bytes memory engineData) {
         bytes memory engineCall = abi.encodeCall(
             ICfdEngineCore.processOrderTyped,
-            (order, request.executionPrice, request.poolDepthUsdc, request.oraclePublishTime)
+            (context.order, request.executionPrice, request.poolDepthUsdc, request.oraclePublishTime)
         );
-        uint256 callGas = _engineCallGas(address(engine_), minimumEngineGas);
-        (bool engineSucceeded, bytes memory engineData) = address(engine_).call{gas: callGas}(engineCall);
-        if (!engineSucceeded) {
-            TerminalClassification memory classification = _classifyTypedFailure(engineData);
-            if (!classification.terminal || !_plannerFailureMatches(classification, order.isClose)) {
-                _revertRetryable(address(engine_), engineData);
-            }
-            return _settleTypedFailure(
-                host, book, order, pending, request, observedConfigHash, preState, classification, true
-            );
-        }
-        if (engineData.length != 0) {
-            revert OrderRouterV2ExecutionSidecar__MalformedSuccess(address(engine_), engineData.length);
-        }
+        uint256 callGas = _engineCallGas(engineAddress, context.minimumEngineGas);
+        return engineAddress.call{gas: callGas}(engineCall);
+    }
 
-        uint256 bountyUsdc = host.settleV2OrderFromSidecar(
-            order.orderId,
-            true,
-            request.executor,
-            request.executionPrice,
-            request.bountyAccountingPrice,
-            request.bountyAccountingPublishTime
-        );
-        _requireBounty(pending.executionBountyUsdc, bountyUsdc);
+    function _settleEngineFailure(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
+        AccountState memory preState,
+        address engineAddress,
+        bytes memory engineData
+    ) private returns (OrderV2Types.ExecutionResult memory result) {
+        TerminalClassification memory classification = _classifyTypedFailure(engineData);
+        if (!classification.terminal || !_plannerFailureMatches(classification, context.order.isClose)) {
+            _revertRetryable(engineAddress, engineData);
+        }
+        return _settleTypedFailure(context, request, preState, classification, true);
+    }
 
-        AccountState memory postState = _accountState(engine_, order.account);
-        _assertAssessmentState(assessment, request.executionMode, preState, postState);
-        OrderV2Types.OrderReceipt memory receipt = _baseReceipt(
-            order.orderId,
-            pending,
-            request.executor,
-            observedConfigHash,
-            OrderV2Types.TerminalReason.Executed,
-            assessment.mode,
-            request.priceSource,
-            request.executionPrice,
-            request.neutralMarkPrice,
-            request.poolDepthUsdc,
-            request.oraclePublishTime,
-            true
+    function _assessmentCallData(
+        address engineAddress,
+        CfdTypes.Order memory order,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
+        OrderV2Types.PendingIntent memory pending
+    ) private pure returns (bytes memory) {
+        return abi.encodeCall(
+            ICfdOrderPolicyEvaluator.assessOrder,
+            (
+                engineAddress,
+                order,
+                request.executor,
+                request.executionPrice,
+                request.poolDepthUsdc,
+                request.oraclePublishTime,
+                pending.bounds,
+                pending.executionBountyUsdc
+            )
         );
-        receipt.status = OrderV2Types.LifecycleStatus.Executed;
-        _setPaidBounty(receipt, bountyUsdc, request.executor);
-        receipt.economics = _assessmentEconomics(assessment, preState, postState);
-        return _finalizeReceipt(book, receipt);
     }
 
     function _settleTypedFailure(
-        IOrderRouterV2ExecutionHost host,
-        IOrderLifecycleBook book,
-        CfdTypes.Order memory order,
-        OrderV2Types.PendingIntent memory pending,
+        PreparedExecutionContext memory context,
         IOrderRouterV2ExecutionHost.ItemRequest calldata request,
-        bytes32 observedConfigHash,
         AccountState memory preState,
         TerminalClassification memory classification,
         bool priceReachedEngine
     ) private returns (OrderV2Types.ExecutionResult memory result) {
-        uint256 bountyUsdc = host.settleV2OrderFromSidecar(
-            order.orderId,
-            false,
-            request.executor,
-            request.executionPrice,
-            request.bountyAccountingPrice,
-            request.bountyAccountingPublishTime
-        );
-        _requireBounty(pending.executionBountyUsdc, bountyUsdc);
-        AccountState memory postState = _accountState(ICfdEngineCore(host.engine()), order.account);
-        OrderV2Types.OrderReceipt memory receipt = _baseReceipt(
-            order.orderId,
-            pending,
-            request.executor,
-            observedConfigHash,
-            classification.reason,
-            request.executionMode,
-            request.priceSource,
-            request.executionPrice,
-            request.neutralMarkPrice,
-            request.poolDepthUsdc,
-            request.oraclePublishTime,
-            priceReachedEngine
-        );
+        uint256 bountyUsdc = context.host
+            .settleV2OrderFromSidecar(
+                context.order.orderId,
+                false,
+                request.executor,
+                request.executionPrice,
+                request.bountyAccountingPrice,
+                request.bountyAccountingPublishTime
+            );
+        _requireBounty(context.pending.executionBountyUsdc, bountyUsdc);
+        AccountState memory postState = _accountState(ICfdEngineCore(context.host.engine()), context.order.account);
+        OrderV2Types.OrderReceipt memory receipt =
+            _preparedBaseReceipt(context, request, classification.reason, request.executionMode, priceReachedEngine);
         _setPaidBounty(receipt, bountyUsdc, request.executor);
         receipt.failure = classification.failure;
         receipt.economics = _stateOnlyEconomics(preState, postState);
-        return _finalizeReceipt(book, receipt);
+        return _finalizeReceipt(context.book, receipt);
     }
 
     function _settleNonEngine(
@@ -585,20 +649,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         _requireBounty(pending.executionBountyUsdc, bountyUsdc);
         AccountState memory postState = _accountState(engine_, order.account);
 
-        OrderV2Types.OrderReceipt memory receipt = _baseReceipt(
-            order.orderId,
-            pending,
-            request.executor,
-            request.observedConfigHash,
-            reason,
-            request.executionMode,
-            request.priceSource,
-            request.executionPrice,
-            request.neutralMarkPrice,
-            request.poolDepthUsdc,
-            request.oraclePublishTime,
-            false
-        );
+        OrderV2Types.OrderReceipt memory receipt = _memoryRequestBaseReceipt(order.orderId, pending, request, reason);
         _setPaidBounty(receipt, bountyUsdc, request.executor);
         receipt.failure = failure;
         receipt.economics = _stateOnlyEconomics(preState, postState);
@@ -673,6 +724,71 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         receipt.poolDepthUsdc = poolDepthUsdc;
         receipt.oraclePublishTime = oraclePublishTime;
         receipt.priceReachedEngine = priceReachedEngine;
+    }
+
+    function _settledTerminalBaseReceipt(
+        OrderV2Types.PendingIntent memory pending,
+        IOrderRouterV2ExecutionHost.SettledTerminalInput calldata input
+    ) private pure returns (OrderV2Types.OrderReceipt memory receipt) {
+        return _baseReceipt(
+            input.orderId,
+            pending,
+            input.executor,
+            input.observedConfigHash,
+            input.reason,
+            input.executionMode,
+            input.priceSource,
+            input.executionPrice,
+            input.neutralMarkPrice,
+            input.poolDepthUsdc,
+            input.oraclePublishTime,
+            input.priceReachedEngine
+        );
+    }
+
+    function _memoryRequestBaseReceipt(
+        uint64 orderId,
+        OrderV2Types.PendingIntent memory pending,
+        IOrderRouterV2ExecutionHost.ItemRequest memory request,
+        OrderV2Types.TerminalReason reason
+    ) private pure returns (OrderV2Types.OrderReceipt memory receipt) {
+        return _baseReceipt(
+            orderId,
+            pending,
+            request.executor,
+            request.observedConfigHash,
+            reason,
+            request.executionMode,
+            request.priceSource,
+            request.executionPrice,
+            request.neutralMarkPrice,
+            request.poolDepthUsdc,
+            request.oraclePublishTime,
+            false
+        );
+    }
+
+    function _preparedBaseReceipt(
+        PreparedExecutionContext memory context,
+        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
+        OrderV2Types.TerminalReason reason,
+        OrderV2Types.ExecutionMode executionMode,
+        bool priceReachedEngine
+    ) private pure returns (OrderV2Types.OrderReceipt memory receipt) {
+        return _baseReceipt(
+            context.order.orderId,
+            context.pending,
+            request.executor,
+            context.observedConfigHash,
+            reason,
+            executionMode,
+            request.priceSource,
+            request.executionPrice,
+            request.neutralMarkPrice,
+            request.poolDepthUsdc,
+            request.oraclePublishTime,
+            priceReachedEngine
+        );
     }
 
     function _finalizeReceipt(
@@ -888,25 +1004,24 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
     function _prepareBatchOracle(
         IOrderRouterV2ExecutionHost host,
         CfdTypes.Order memory order,
-        address executor,
         bytes[] calldata pythUpdateData,
-        uint256 pythFeeAlreadySpent,
-        IPletherOracle.BatchOrderPriceCache memory cache
+        BatchExecutionState memory state
     ) private returns (bool ok, OracleResult memory result, IPletherOracle.BatchOrderPriceCache memory nextCache) {
         IPletherOracle oracle = IPletherOracle(host.pletherOracle());
         uint256 fee = 0;
-        if (!_canReuseHistoricalBatchBasket(oracle, order, cache)) {
+        if (!_canReuseHistoricalBatchBasket(oracle, order, state.oracleCache)) {
             fee = oracle.getUpdateFee(pythUpdateData);
             // The outer FIFO loop passes a monotonic spent total; this guard prevents aggregate Pyth overspending.
             // slither-disable-next-line msg-value-loop
             uint256 suppliedValue = msg.value;
-            if (suppliedValue < pythFeeAlreadySpent + fee) {
-                revert IPletherOracle.PletherOracle__InsufficientFee(suppliedValue, pythFeeAlreadySpent + fee);
+            if (suppliedValue < state.pythFeeTotal + fee) {
+                revert IPletherOracle.PletherOracle__InsufficientFee(suppliedValue, state.pythFeeTotal + fee);
             }
         }
         IPletherOracle.PriceSnapshot memory snapshot;
+        IPletherOracle.OrderExecutionRequest memory oracleRequest = _oracleRequest(order, false);
         (ok, snapshot, nextCache) = oracle.updateBatchOrderExecutionPrice{value: fee}(
-            executor, pythUpdateData, _oracleRequest(order, false), cache
+            state.executor, pythUpdateData, oracleRequest, state.oracleCache
         );
         result.fee = snapshot.updateFee;
         if (!ok) {

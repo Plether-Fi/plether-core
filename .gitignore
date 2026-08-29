@@ -3,6 +3,8 @@ cache/
 out/
 packages/*/cache/
 packages/*/out/
+packages/*/cache-ci-fast/
+packages/*/out-ci-fast/
 .coverage-perps.*
 
 # Ignores development broadcast logs

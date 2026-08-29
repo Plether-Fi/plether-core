@@ -316,14 +316,14 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_MarkRefreshStateMatchesLastSuccessfulOracleUpdate() public view {
+    function _assertInvariant_MarkRefreshStateMatchesLastSuccessfulOracleUpdate() internal view {
         assertEq(
             engine.lastMarkPrice(), handler.ghostExpectedMarkPrice(), "engine mark price drifted from last success"
         );
         assertEq(engine.lastMarkTime(), handler.ghostExpectedMarkTime(), "engine mark time drifted from last success");
     }
 
-    function invariant_OracleTracksOnlyClaimableFailedRefundEth() public view {
+    function _assertInvariant_OracleTracksOnlyClaimableFailedRefundEth() internal view {
         assertEq(
             router.pletherOracle().claimableEth(address(handler)),
             handler.ghostPendingRefundEth(),
@@ -332,7 +332,7 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         assertEq(address(routerAdmin).balance, 0, "router admin must not custody oracle refunds");
     }
 
-    function invariant_OracleStalenessLimitsRemainPositive() public view {
+    function _assertInvariant_OracleStalenessLimitsRemainPositive() internal view {
         assertGt(
             router.pletherOracle().orderExecutionStalenessLimit(),
             0,
@@ -341,6 +341,20 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         assertGt(
             router.pletherOracle().liquidationStalenessLimit(), 0, "liquidation staleness limit must stay positive"
         );
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_MarkRefreshStateMatchesLastSuccessfulOracleUpdate();
+        _assertInvariant_OracleTracksOnlyClaimableFailedRefundEth();
+        _assertInvariant_OracleStalenessLimitsRemainPositive();
     }
 
 }

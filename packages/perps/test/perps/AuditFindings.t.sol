@@ -334,7 +334,7 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
         _warpForward(50);
 
         // H-01 FIX: engine.updateMarkPrice now uses publishTime, not block.timestamp
-        uint64 vaaTime = uint64(block.timestamp) - 30;
+        uint64 vaaTime = engine.lastMarkTime() - 1;
         vm.prank(address(router));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
         engine.updateMarkPrice(0.8e8, vaaTime);

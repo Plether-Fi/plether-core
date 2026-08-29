@@ -1,0 +1,94 @@
+name: Perps Deep Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+    types: [labeled, synchronize, reopened]
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perps-deep-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+env:
+  FOUNDRY_PROFILE: ci
+  FOUNDRY_INVARIANT_RUNS: 16
+  FOUNDRY_INVARIANT_DEPTH: 500
+
+jobs:
+  package-test-perps-shard:
+    name: Perps deep shard ${{ matrix.shard_number }}/4
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:deep-perps') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_index: 0
+            shard_number: 1
+          - shard_index: 1
+            shard_number: 2
+          - shard_index: 2
+            shard_number: 3
+          - shard_index: 3
+            shard_number: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+
+      - name: Select fuzz seed
+        id: fuzz-seed
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = schedule ]; then
+            seed="$(printf '0x%064x' "${GITHUB_RUN_ID}")"
+          else
+            seed="0xdeadbeef"
+          fi
+          echo "Using fuzz seed ${seed}"
+          echo "value=${seed}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build production package
+        run: bash scripts/run-with-heartbeat.sh forge build --sizes --skip test --skip script --root packages/perps
+
+      - name: Run package test shard
+        env:
+          FOUNDRY_FUZZ_SEED: ${{ steps.fuzz-seed.outputs.value }}
+        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-package-tests.sh "${{ matrix.shard_index }}" 4
+
+      - name: Upload perps failure corpus
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: perps-deep-failures-${{ matrix.shard_number }}-${{ github.run_id }}
+          path: |
+            packages/perps/cache*/fuzz
+            packages/perps/cache*/invariant
+          if-no-files-found: ignore
+          retention-days: 7
+
+  package-test-perps:
+    name: Perps deep (all shards)
+    if: ${{ always() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:deep-perps')) }}
+    needs: package-test-perps-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every perps package shard
+        env:
+          SHARD_RESULT: ${{ needs.package-test-perps-shard.result }}
+        run: test "${SHARD_RESULT}" = success

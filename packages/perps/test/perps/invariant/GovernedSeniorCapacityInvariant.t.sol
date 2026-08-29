@@ -627,7 +627,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_SuccessfulSeniorAdmissionsPreserveCapacityLimits() public view {
+    function _assertInvariant_SuccessfulSeniorAdmissionsPreserveCapacityLimits() internal view {
         assertGt(handler.successfulSeniorAdmissions(), 0, "campaign must exercise a successful senior admission");
         assertFalse(
             handler.seniorAdmissionViolation(),
@@ -635,7 +635,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_SuccessfulJuniorWithdrawalsPreserveActiveSeniorRatio() public view {
+    function _assertInvariant_SuccessfulJuniorWithdrawalsPreserveActiveSeniorRatio() internal view {
         assertGt(handler.successfulJuniorWithdrawals(), 0, "campaign must exercise a successful junior withdrawal");
         assertFalse(
             handler.juniorWithdrawalViolation(),
@@ -643,7 +643,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_RequestGenerationExercisesBothCutoffSides() public view {
+    function _assertInvariant_RequestGenerationExercisesBothCutoffSides() internal view {
         assertGt(
             handler.successfulPreCutoffDepositRequests(),
             0,
@@ -656,7 +656,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_ReservationCounterMatchesReservedSeniorEpochAssets() public view {
+    function _assertInvariant_ReservationCounterMatchesReservedSeniorEpochAssets() internal view {
         assertEq(
             pool.reservedSeniorDepositAssetsUsdc(),
             handler.reservedSeniorEpochAssets(),
@@ -664,12 +664,12 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_VaultCustodyMatchesAsyncEscrowLedgers() public view {
+    function _assertInvariant_VaultCustodyMatchesAsyncEscrowLedgers() internal view {
         _assertVaultCustody(seniorVault);
         _assertVaultCustody(juniorVault);
     }
 
-    function invariant_DepositEpochsMatchControllerAccounting() public view {
+    function _assertInvariant_DepositEpochsMatchControllerAccounting() internal view {
         _assertDepositEpochAccounting(seniorVault);
         _assertDepositEpochAccounting(juniorVault);
     }
@@ -711,6 +711,23 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
             uint256 expectedAssets = finalized ? epochAssets - claimedAssets : epochAssets;
             assertEq(controllerAssets, expectedAssets, "epoch assets must equal tracked controller accounting");
         }
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_SuccessfulSeniorAdmissionsPreserveCapacityLimits();
+        _assertInvariant_SuccessfulJuniorWithdrawalsPreserveActiveSeniorRatio();
+        _assertInvariant_RequestGenerationExercisesBothCutoffSides();
+        _assertInvariant_ReservationCounterMatchesReservedSeniorEpochAssets();
+        _assertInvariant_VaultCustodyMatchesAsyncEscrowLedgers();
+        _assertInvariant_DepositEpochsMatchControllerAccounting();
     }
 
 }

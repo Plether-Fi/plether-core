@@ -304,7 +304,7 @@ contract PerpInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_GlobalSolvency() public view {
+    function _assertInvariant_GlobalSolvency() internal view {
         uint256 effectiveAssets = pool.totalAssets();
 
         int256 cappedLegacySpread = int256(0);
@@ -320,7 +320,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_TranchePriority() public {
+    function _assertInvariant_TranchePriority() internal {
         vm.prank(address(juniorVault));
         pool.reconcile();
         uint256 currentSenior = pool.seniorPrincipal();
@@ -332,7 +332,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_SeniorHighWaterMarkBlocksJuniorExtractionWhileImpaired() public {
+    function _assertInvariant_SeniorHighWaterMarkBlocksJuniorExtractionWhileImpaired() internal {
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -344,13 +344,13 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_NoLegacySideIndexState() public view {
+    function _assertInvariant_NoLegacySideIndexState() internal view {
         int256 longIdx = _legacySideIndexZero(CfdTypes.Side.LONG);
         int256 shortIdx = _legacySideIndexZero(CfdTypes.Side.SHORT);
         assertEq(longIdx + shortIdx, 0, "Legacy side indices must stay zeroed");
     }
 
-    function invariant_NoNegativePrincipal() public {
+    function _assertInvariant_NoNegativePrincipal() internal {
         vm.prank(address(juniorVault));
         pool.reconcile();
         if (pool.lastReconcileTime() != block.timestamp) {
@@ -370,7 +370,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(claimed, terminalEquity, "Freshly reconciled principal cannot exceed exact terminal LP equity");
     }
 
-    function invariant_FeesWithinClearinghouseTreasury() public view {
+    function _assertInvariant_FeesWithinClearinghouseTreasury() internal view {
         uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
@@ -380,7 +380,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(fees, usdc.balanceOf(address(clearinghouse)), "Treasury fees must be clearinghouse-custodied");
     }
 
-    function invariant_WithdrawalAccountingMatchesEngineReserve() public view {
+    function _assertInvariant_WithdrawalAccountingMatchesEngineReserve() internal view {
         uint256 poolAssets = pool.totalAssets();
         uint256 reserved = _withdrawalReservedUsdc();
         uint256 expectedFree = poolAssets > reserved ? poolAssets - reserved : 0;
@@ -389,7 +389,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(pool.getFreeUSDC(), poolAssets, "Free USDC cannot exceed physical assets");
     }
 
-    function invariant_HousePoolPendingStateMatchesReconcileFirstState() public {
+    function _assertInvariant_HousePoolPendingStateMatchesReconcileFirstState() internal {
         (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingMaxSenior, uint256 pendingMaxJunior) =
             pool.getPendingTrancheState();
 
@@ -410,13 +410,13 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_LiveLiabilityFlagMatchesDirectionalExposure() public view {
+    function _assertInvariant_LiveLiabilityFlagMatchesDirectionalExposure() internal view {
         bool hasLiveLiability = (_maxLiability() > 0);
         bool hasDirectionalLiability = _maxLiability() > 0;
         assertEq(hasLiveLiability, hasDirectionalLiability, "Live-liability flag must match nonzero bounded liability");
     }
 
-    function invariant_PendingKeeperReservesBackedByClearinghouseReservations() public view {
+    function _assertInvariant_PendingKeeperReservesBackedByClearinghouseReservations() internal view {
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody queued keeper reserves");
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
@@ -430,7 +430,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_ClearinghouseBalanceMatchesTrackedAccounts() public view {
+    function _assertInvariant_ClearinghouseBalanceMatchesTrackedAccounts() internal view {
         uint256 trackedBalances =
             clearinghouse.balanceUsdc(address(handler)) + clearinghouse.balanceUsdc(engine.protocolTreasury());
         for (uint256 i = 0; i < 3; i++) {
@@ -445,7 +445,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_KnownActorUsdcConservation() public view {
+    function _assertInvariant_KnownActorUsdcConservation() internal view {
         uint256 actorBalances =
             usdc.balanceOf(address(handler)) + usdc.balanceOf(handler.lp()) + usdc.balanceOf(address(this));
         for (uint256 i = 0; i < 3; i++) {
@@ -464,7 +464,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AggregateOIMatchesPositions() public view {
+    function _assertInvariant_AggregateOIMatchesPositions() internal view {
         uint256 sumLongSize;
         uint256 sumShortSize;
 
@@ -485,7 +485,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(_sideOpenInterest(CfdTypes.Side.SHORT), sumShortSize, "Short OI must match sum of short positions");
     }
 
-    function invariant_LivePositionsRemainSingleDirectionAndBounded() public view {
+    function _assertInvariant_LivePositionsRemainSingleDirectionAndBounded() internal view {
         uint256 capPrice = engine.CAP_PRICE();
 
         for (uint256 i = 0; i < 3; i++) {
@@ -523,7 +523,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_EntryNotionalsMatchPositions() public view {
+    function _assertInvariant_EntryNotionalsMatchPositions() internal view {
         uint256 sumLongNotional;
         uint256 sumShortNotional;
 
@@ -545,7 +545,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(_sideEntryNotional(CfdTypes.Side.SHORT), sumShortNotional, "Short entry notional must match positions");
     }
 
-    function invariant_PositionMarginsBackedByClearinghouse() public view {
+    function _assertInvariant_PositionMarginsBackedByClearinghouse() internal view {
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
             address account = trader;
@@ -565,7 +565,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_GlobalSideMarginsMatchPositions() public view {
+    function _assertInvariant_GlobalSideMarginsMatchPositions() internal view {
         uint256 sumLongMargin;
         uint256 sumShortMargin;
 
@@ -594,7 +594,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_LivePositionsRetainMinimumLiquidationReserve() public view {
+    function _assertInvariant_LivePositionsRetainMinimumLiquidationReserve() internal view {
         (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
@@ -610,7 +610,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_ClearinghouseBucketsConserveTrackedState() public view {
+    function _assertInvariant_ClearinghouseBucketsConserveTrackedState() internal view {
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
@@ -633,7 +633,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_TraderOwnedCollateralRemainsTerminallyReachable() public view {
+    function _assertInvariant_TraderOwnedCollateralRemainsTerminallyReachable() internal view {
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
@@ -646,7 +646,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_CommittedMarginOwnershipAccountingConservesQueuedExposure() public view {
+    function _assertInvariant_CommittedMarginOwnershipAccountingConservesQueuedExposure() internal view {
         uint64 nextCommitId = router.nextCommitId();
 
         for (uint256 i = 0; i < 3; i++) {
@@ -670,7 +670,7 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_ProtocolAccountingViewMatchesAccessors() public view {
+    function _assertInvariant_ProtocolAccountingViewMatchesAccessors() internal view {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
@@ -693,7 +693,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_WithdrawalReserveIncludesTraderClaimLiabilities() public view {
+    function _assertInvariant_WithdrawalReserveIncludesTraderClaimLiabilities() internal view {
         uint256 maxLiability = _maxLiability();
         uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceUsdc()
             + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
@@ -705,7 +705,7 @@ contract PerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_PoolLiquidityViewMatchesProtocolAccounting() public view {
+    function _assertInvariant_PoolLiquidityViewMatchesProtocolAccounting() internal view {
         IHousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
@@ -719,7 +719,7 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(poolView.freeUsdc, protocolView.freeUsdc, "Pool free USDC must match engine accounting view");
     }
 
-    function invariant_LiquidationPreviewMatchesPositionView() public view {
+    function _assertInvariant_LiquidationPreviewMatchesPositionView() internal view {
         uint256 oraclePrice = engine.lastMarkPrice();
         if (oraclePrice == 0) {
             return;
@@ -753,6 +753,42 @@ contract PerpInvariantTest is BasePerpTest {
                 pendingExecutionBountyUsdc += record.executionBountyUsdc;
             }
         }
+    }
+
+    function invariant_job1() public {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal {
+        _assertInvariant_GlobalSolvency();
+        _assertInvariant_TranchePriority();
+        _assertInvariant_SeniorHighWaterMarkBlocksJuniorExtractionWhileImpaired();
+        _assertInvariant_NoLegacySideIndexState();
+        _assertInvariant_NoNegativePrincipal();
+        _assertInvariant_FeesWithinClearinghouseTreasury();
+        _assertInvariant_WithdrawalAccountingMatchesEngineReserve();
+        _assertInvariant_HousePoolPendingStateMatchesReconcileFirstState();
+        _assertInvariant_LiveLiabilityFlagMatchesDirectionalExposure();
+        _assertInvariant_PendingKeeperReservesBackedByClearinghouseReservations();
+        _assertInvariant_ClearinghouseBalanceMatchesTrackedAccounts();
+        _assertInvariant_KnownActorUsdcConservation();
+        _assertInvariant_AggregateOIMatchesPositions();
+        _assertInvariant_LivePositionsRemainSingleDirectionAndBounded();
+        _assertInvariant_EntryNotionalsMatchPositions();
+        _assertInvariant_PositionMarginsBackedByClearinghouse();
+        _assertInvariant_GlobalSideMarginsMatchPositions();
+        _assertInvariant_LivePositionsRetainMinimumLiquidationReserve();
+        _assertInvariant_ClearinghouseBucketsConserveTrackedState();
+        _assertInvariant_TraderOwnedCollateralRemainsTerminallyReachable();
+        _assertInvariant_CommittedMarginOwnershipAccountingConservesQueuedExposure();
+        _assertInvariant_ProtocolAccountingViewMatchesAccessors();
+        _assertInvariant_WithdrawalReserveIncludesTraderClaimLiabilities();
+        _assertInvariant_PoolLiquidityViewMatchesProtocolAccounting();
+        _assertInvariant_LiquidationPreviewMatchesPositionView();
     }
 
 }
@@ -1188,11 +1224,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function invariant_AdversarialReservationStaysBacked() public view {
+    function _assertInvariant_AdversarialReservationStaysBacked() internal view {
         _assertActionReserveBacking();
     }
 
-    function invariant_AdversarialBatchProcessingRemainsLive() public view {
+    function _assertInvariant_AdversarialBatchProcessingRemainsLive() internal view {
         uint64 nextExecuteId = router.nextExecuteId();
         uint64 nextCommitId = router.nextCommitId();
         assertLe(nextExecuteId, nextCommitId, "Queue pointers must remain ordered");
@@ -1202,7 +1238,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
     }
 
-    function invariant_AdversarialViewsStayConsistent() public view {
+    function _assertInvariant_AdversarialViewsStayConsistent() internal view {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
         IHousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
@@ -1216,7 +1252,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_AdversarialSlippageFailureClearsHeadAndReserve() public view {
+    function _assertInvariant_AdversarialSlippageFailureClearsHeadAndReserve() internal view {
         if (handler.ghost_lastRetryableSlippageBatch() == 0) {
             return;
         }
@@ -1238,7 +1274,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         );
     }
 
-    function invariant_GlobalQueueLinksRemainConsistent() public view {
+    function _assertInvariant_GlobalQueueLinksRemainConsistent() internal view {
         uint64 nextCommitId = router.nextCommitId();
         uint64 headOrderId = router.nextExecuteId();
         uint64 traversed;
@@ -1275,11 +1311,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         assertEq(traversed, pendingCount, "Global queue traversal must cover every pending order exactly once");
     }
 
-    function invariant_AdversarialClearinghouseReservesOnlyPendingKeeperReserves() public view {
+    function _assertInvariant_AdversarialClearinghouseReservesOnlyPendingKeeperReserves() internal view {
         _assertActionReserveBacking();
     }
 
-    function invariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() public view {
+    function _assertInvariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() internal view {
         for (uint256 i = 0; i < 4; i++) {
             address account = handler.actors(i);
             IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
@@ -1314,6 +1350,24 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
                 pendingExecutionBountyUsdc += record.executionBountyUsdc;
             }
         }
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_AdversarialReservationStaysBacked();
+        _assertInvariant_AdversarialBatchProcessingRemainsLive();
+        _assertInvariant_AdversarialViewsStayConsistent();
+        _assertInvariant_AdversarialSlippageFailureClearsHeadAndReserve();
+        _assertInvariant_GlobalQueueLinksRemainConsistent();
+        _assertInvariant_AdversarialClearinghouseReservesOnlyPendingKeeperReserves();
+        _assertInvariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral();
     }
 
 }

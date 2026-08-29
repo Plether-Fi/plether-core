@@ -25,7 +25,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_FeeModelTracksTreasuryBalanceAndWithdrawals() public view {
+    function _assertInvariant_FeeModelTracksTreasuryBalanceAndWithdrawals() internal view {
         assertEq(
             handler.ghostTrackedFeesUsdc(),
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
@@ -38,7 +38,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_ProtocolAccountingSnapshotIncludesTreasuryBalance() public view {
+    function _assertInvariant_ProtocolAccountingSnapshotIncludesTreasuryBalance() internal view {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot =
             engineProtocolLens.getProtocolAccountingSnapshot();
         assertEq(
@@ -53,7 +53,7 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_FeeBalanceRemainsClearinghouseCustodied() public view {
+    function _assertInvariant_FeeBalanceRemainsClearinghouseCustodied() internal view {
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
@@ -64,6 +64,20 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
             usdc.balanceOf(address(clearinghouse)),
             "Treasury balance must remain backed by clearinghouse USDC"
         );
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_FeeModelTracksTreasuryBalanceAndWithdrawals();
+        _assertInvariant_ProtocolAccountingSnapshotIncludesTreasuryBalance();
+        _assertInvariant_FeeBalanceRemainsClearinghouseCustodied();
     }
 
 }

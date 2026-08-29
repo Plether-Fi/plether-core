@@ -117,7 +117,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         assertGt(size, 0, "handler must execute the open into a live position");
     }
 
-    function invariant_ValidPartialCloseNeverLeavesDustPosition() public view {
+    function _assertInvariant_ValidPartialCloseNeverLeavesDustPosition() internal view {
         uint256 oraclePrice = _previewOraclePrice();
         (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
@@ -158,7 +158,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() public view {
+    function _assertInvariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth() internal view {
         uint256 oraclePrice = _previewOraclePrice();
         uint256 canonicalDepth = housePool.totalAssets();
         (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
@@ -193,7 +193,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_ValidPartialCloseWithCarryAccrualImpliesHousePoolCanPay() public view {
+    function _assertInvariant_ValidPartialCloseWithCarryAccrualImpliesHousePoolCanPay() internal view {
         uint256 oraclePrice = _previewOraclePrice();
         (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
@@ -214,7 +214,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_PartialCloseInvalidOnlyForNewCodes() public view {
+    function _assertInvariant_PartialCloseInvalidOnlyForNewCodes() internal view {
         uint256 oraclePrice = _previewOraclePrice();
         (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
@@ -251,7 +251,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
         }
     }
 
-    function invariant_ImmediateOrTraderClaimSplitMatchesFreshPayout() public view {
+    function _assertInvariant_ImmediateOrTraderClaimSplitMatchesFreshPayout() internal view {
         uint256 oraclePrice = _previewOraclePrice();
         (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
 
@@ -400,6 +400,22 @@ contract PerpClosePreviewParityInvariantTest is Test {
         address actor
     ) internal pure returns (address) {
         return actor;
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_ValidPartialCloseNeverLeavesDustPosition();
+        _assertInvariant_PreviewClose_EqualsSimulateCloseAtCanonicalDepth();
+        _assertInvariant_ValidPartialCloseWithCarryAccrualImpliesHousePoolCanPay();
+        _assertInvariant_PartialCloseInvalidOnlyForNewCodes();
+        _assertInvariant_ImmediateOrTraderClaimSplitMatchesFreshPayout();
     }
 
 }
