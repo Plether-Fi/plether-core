@@ -51,7 +51,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_ClearinghouseReservationsMatchLiveExecutionBounties() public view {
+    function _assertInvariant_ClearinghouseReservationsMatchLiveExecutionBounties() internal view {
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody execution bounty reserves");
         assertEq(
             _sumReservedSettlementBuckets(),
@@ -60,7 +60,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_TerminalNavBookMatchesCanonicalEngineState() public view {
+    function _assertInvariant_TerminalNavBookMatchesCanonicalEngineState() internal view {
         ITerminalNavBookV2 book = engine.terminalNavBook();
         uint256 activeCurveCount;
         uint256 totalLots;
@@ -86,6 +86,11 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 continue;
             }
 
+            assertEq(
+                curveHash,
+                _terminalCurveHash(book, account, curve),
+                "Curve hash must commit to the canonical account record"
+            );
             assertEq(size % CfdTypes.SIZE_QUANTUM, 0, "Live Engine position must contain exact terminal lots");
             uint256 expectedLots = size / CfdTypes.SIZE_QUANTUM;
             uint256 expectedEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
@@ -110,11 +115,6 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 "Curve cap must match clipped claim-plus-pledge collateral"
             );
             assertEq(uint256(curve.side), uint256(side), "Curve side must match canonical Engine side");
-            assertEq(
-                curveHash,
-                _terminalCurveHash(book, account, curve),
-                "Curve hash must commit to the canonical account record"
-            );
 
             activeCurveCount++;
             totalLots += curve.lots;
@@ -136,7 +136,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_LiquidatedActorsHaveNoPendingOrders() public view {
+    function _assertInvariant_LiquidatedActorsHaveNoPendingOrders() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
@@ -148,7 +148,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidatedActorsHaveNoLiveReserves() public view {
+    function _assertInvariant_LiquidatedActorsHaveNoLiveReserves() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
@@ -165,7 +165,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidatedActorsCannotRecoverWalletUsdc() public view {
+    function _assertInvariant_LiquidatedActorsCannotRecoverWalletUsdc() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address actor = handler.actorAt(i);
             address account = _account(actor);
@@ -178,7 +178,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() public view {
+    function _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
@@ -199,7 +199,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_GhostCommittedMarginMatchesAccountReservation() public view {
+    function _assertInvariant_GhostCommittedMarginMatchesAccountReservation() internal view {
         uint256 ghostTotalCommittedMargin;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
@@ -223,7 +223,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_OrderReservationModuleSummariesMatchAccountReservation() public view {
+    function _assertInvariant_OrderReservationModuleSummariesMatchAccountReservation() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
@@ -257,7 +257,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_GhostOrderCommittedMarginStateMachineMatchesRouter() public view {
+    function _assertInvariant_GhostOrderCommittedMarginStateMachineMatchesRouter() internal view {
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
             uint8 ghostState = handler.ghostOrderLifecycleState(orderId);
@@ -284,7 +284,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_ReservationConservationHoldsPerOrder() public view {
+    function _assertInvariant_ReservationConservationHoldsPerOrder() internal view {
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
             uint256 original = handler.reservationOriginalAmount(orderId);
@@ -301,7 +301,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_AggregateReservationParityMatchesClearinghouseTotals() public view {
+    function _assertInvariant_AggregateReservationParityMatchesClearinghouseTotals() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             assertEq(
@@ -317,7 +317,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_ExplicitFifoReservationConsumptionUsesSuppliedIdsInOrder() public view {
+    function _assertInvariant_ExplicitFifoReservationConsumptionUsesSuppliedIdsInOrder() internal view {
         (
             address account,
             uint256 count,
@@ -350,7 +350,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_QueueReservationAgreementIsBidirectional() public view {
+    function _assertInvariant_QueueReservationAgreementIsBidirectional() internal view {
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
             uint8 status = handler.reservationStatus(orderId);
@@ -367,7 +367,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_NoDoubleFinalizationAfterReservationTerminalState() public view {
+    function _assertInvariant_NoDoubleFinalizationAfterReservationTerminalState() internal view {
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
             uint8 status = handler.reservationStatus(orderId);
@@ -389,7 +389,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_TerminalPathExactnessOnlyTouchesExplicitReservationSet() public view {
+    function _assertInvariant_TerminalPathExactnessOnlyTouchesExplicitReservationSet() internal view {
         (address account, uint256 count,, uint64[5] memory ids,) = handler.lastTerminalReservationInfo();
         if (account == address(0)) {
             return;
@@ -415,7 +415,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_CrossViewParityMatchesReservationSummaryAndTypedBuckets() public view {
+    function _assertInvariant_CrossViewParityMatchesReservationSummaryAndTypedBuckets() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
@@ -437,11 +437,11 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_FifoPointersStayWithinCommittedRange() public view {
+    function _assertInvariant_FifoPointersStayWithinCommittedRange() internal view {
         assertLe(router.nextExecuteId(), router.nextCommitId(), "nextExecuteId must not exceed nextCommitId");
     }
 
-    function invariant_OrderExecutionPathRemainsReachable() public view {
+    function _assertInvariant_OrderExecutionPathRemainsReachable() internal view {
         uint256 attempts = handler.ghostOrderExecutionAttemptCount();
         uint256 executedOrders = handler.ghostExecutedOrderCount();
         if (attempts < ORDER_EXECUTION_REACHABILITY_ATTEMPT_THRESHOLD) {
@@ -451,7 +451,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertGt(executedOrders, 0, "Order execution must become reachable after repeated valid attempts");
     }
 
-    function invariant_PendingQueueCountsStayConsistent() public view {
+    function _assertInvariant_PendingQueueCountsStayConsistent() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             uint256 expectedCount = router.pendingOrderCounts(account);
@@ -473,7 +473,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function invariant_MarginQueueLinksAndMembershipStayConsistent() public view {
+    function _assertInvariant_MarginQueueLinksAndMembershipStayConsistent() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             uint64 head = router.marginHeadOrderId(account);
@@ -564,6 +564,37 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         address actor
     ) internal pure returns (address) {
         return actor;
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_ClearinghouseReservationsMatchLiveExecutionBounties();
+        _assertInvariant_TerminalNavBookMatchesCanonicalEngineState();
+        _assertInvariant_LiquidatedActorsHaveNoPendingOrders();
+        _assertInvariant_LiquidatedActorsHaveNoLiveReserves();
+        _assertInvariant_LiquidatedActorsCannotRecoverWalletUsdc();
+        _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion();
+        _assertInvariant_GhostCommittedMarginMatchesAccountReservation();
+        _assertInvariant_OrderReservationModuleSummariesMatchAccountReservation();
+        _assertInvariant_GhostOrderCommittedMarginStateMachineMatchesRouter();
+        _assertInvariant_ReservationConservationHoldsPerOrder();
+        _assertInvariant_AggregateReservationParityMatchesClearinghouseTotals();
+        _assertInvariant_ExplicitFifoReservationConsumptionUsesSuppliedIdsInOrder();
+        _assertInvariant_QueueReservationAgreementIsBidirectional();
+        _assertInvariant_NoDoubleFinalizationAfterReservationTerminalState();
+        _assertInvariant_TerminalPathExactnessOnlyTouchesExplicitReservationSet();
+        _assertInvariant_CrossViewParityMatchesReservationSummaryAndTypedBuckets();
+        _assertInvariant_FifoPointersStayWithinCommittedRange();
+        _assertInvariant_OrderExecutionPathRemainsReachable();
+        _assertInvariant_PendingQueueCountsStayConsistent();
+        _assertInvariant_MarginQueueLinksAndMembershipStayConsistent();
     }
 
 }

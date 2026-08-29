@@ -76,10 +76,10 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         handler.liquidate(2, 1.8e8);
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Liquidation regression position must be removed");
-        invariant_TerminalNavBookMatchesIndependentCanonicalEnumeration();
+        _assertInvariant_TerminalNavBookMatchesIndependentCanonicalEnumeration();
     }
 
-    function invariant_TerminalNavBookMatchesIndependentCanonicalEnumeration() public view {
+    function _assertInvariant_TerminalNavBookMatchesIndependentCanonicalEnumeration() internal view {
         address[] memory accounts = _trackedAccounts();
         (
             TerminalNavBruteForceModel.AccountState[] memory accountStates,
@@ -252,6 +252,18 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
             "Partial-close seed must leave a same-account claim on a live position"
         );
         assertFalse(engine.degradedMode(), "Campaign recovery must clear degraded mode after claim seeding");
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_TerminalNavBookMatchesIndependentCanonicalEnumeration();
     }
 
 }

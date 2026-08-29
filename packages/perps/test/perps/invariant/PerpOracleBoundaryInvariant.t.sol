@@ -30,7 +30,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function invariant_OracleFrozenMatchesBoundaryFormula() public view {
+    function _assertInvariant_OracleFrozenMatchesBoundaryFormula() internal view {
         assertEq(
             engine.isOracleFrozen(),
             _expectedOracleFrozen(block.timestamp),
@@ -38,7 +38,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_FadWindowMatchesBoundaryFormula() public view {
+    function _assertInvariant_FadWindowMatchesBoundaryFormula() internal view {
         assertEq(
             engine.isFadWindow(),
             _expectedFadWindow(block.timestamp),
@@ -46,7 +46,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_MaintenanceMarginMatchesFadWindow() public view {
+    function _assertInvariant_MaintenanceMarginMatchesFadWindow() internal view {
         uint256 price = 1e8;
         uint256 size = 10_000e18;
         uint256 maint = _maintenanceMarginUsdc(size, price);
@@ -55,7 +55,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         assertEq(maint, (notionalUsdc * expectedBps) / 10_000, "Maintenance margin must switch with FAD mode");
     }
 
-    function invariant_HousePoolSnapshotUsesCorrectFreshnessLimit() public view {
+    function _assertInvariant_HousePoolSnapshotUsesCorrectFreshnessLimit() internal view {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(300);
         if (!snapshot.markFreshnessRequired) {
@@ -72,7 +72,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function invariant_PositionViewsRespectCurrentFadMode() public view {
+    function _assertInvariant_PositionViewsRespectCurrentFadMode() internal view {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = handler.actorAt(i);
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
@@ -174,6 +174,22 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         uint256 monthPrime = (5 * dayOfYear + 2) / 153;
         dayOfMonth = dayOfYear - (153 * monthPrime + 2) / 5 + 1;
         month = monthPrime < 10 ? monthPrime + 3 : monthPrime - 9;
+    }
+
+    function invariant_job1() public view {
+        _assertAllInvariants();
+    }
+
+    function invariant_job2() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_OracleFrozenMatchesBoundaryFormula();
+        _assertInvariant_FadWindowMatchesBoundaryFormula();
+        _assertInvariant_MaintenanceMarginMatchesFadWindow();
+        _assertInvariant_HousePoolSnapshotUsesCorrectFreshnessLimit();
+        _assertInvariant_PositionViewsRespectCurrentFadMode();
     }
 
 }
