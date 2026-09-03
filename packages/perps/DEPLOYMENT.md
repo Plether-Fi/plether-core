@@ -542,11 +542,16 @@ payable `triggerPositionProtection(...)` keeper call. The Router does not forwar
 trigger call ingests payable Pyth update data. This keeps the trader flow compatible with zero-native-value sponsored
 accounts while retaining an independently verified trigger observation.
 
-The protected parent open and triggered linked close are internal typed V2 requests. Only these Router-authenticated
-paths set `expectedConfigHash == bytes32(0)`, which is an unpinned internal marker rather than a public wildcard.
-Fresh external `OrderRouter.commitOrder(...)` calls reject zero and must pin the active lifecycle-Book digest. Deploy,
-bootstrap, and integration tests must verify both sides of that boundary: direct external zero-hash commits fail,
-while valid Book-authenticated parent/trigger creation succeeds and terminal receipts retain the observed config hash.
+The protected parent open is a caller-authored bounded V2 request and must pin the active lifecycle-Book digest. Only
+the Router-authenticated triggered linked close sets `expectedConfigHash == bytes32(0)`, which is an unpinned internal
+marker rather than a public wildcard. Deploy, bootstrap, and integration tests must verify both sides of that boundary:
+external zero-hash commits, including Book-forwarded parents, fail; valid bounded parents and authenticated trigger
+creation succeed; and terminal receipts retain the expected and observed config hashes.
+
+The bounded protected-open selector replaces the former scalar selector without a compatibility overload. Ship it
+only as part of a fresh complete perps-stack deployment, regenerate consumer ABIs from the new
+`IPositionProtectionActions` interface, and update integrations to the newly discovered Book address. Live-state
+migration and mixed old/new Router-Book stacks are unsupported.
 
 Before enabling the feature, verify the existing-position post-reservation gate against boundary tests. The Book locks
 both bounties first, then calls the Engine-configured planner's canonical V2 exact-price predicate with exact entry cost

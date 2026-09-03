@@ -354,7 +354,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
 
         bytes32 observedConfigHash = book.currentExecutionConfigHash();
         bytes32 expectedConfigHash = pending.bounds.expectedConfigHash;
-        // Zero is reserved for Router-created protected orders whose child intent is deliberately unpinned.
+        // Zero is reserved for Router-created trigger closes whose intent is deliberately unpinned.
         if (expectedConfigHash != bytes32(0) && observedConfigHash != expectedConfigHash) {
             IOrderRouterV2ExecutionHost.ItemRequest memory configRequest = request;
             configRequest.observedConfigHash = observedConfigHash;
@@ -934,7 +934,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             return (IOrderRouterV2ExecutionHost.ItemAction.Expire, true);
         }
         bytes32 expectedConfigHash = pending.bounds.expectedConfigHash;
-        // External V2 commits reject zero; internal protected children use it to inherit execution-time configuration.
+        // External V2 commits reject zero; internal trigger closes use it to inherit execution-time configuration.
         if (expectedConfigHash != bytes32(0) && book.currentExecutionConfigHash() != expectedConfigHash) {
             return (IOrderRouterV2ExecutionHost.ItemAction.ConfigMismatch, true);
         }

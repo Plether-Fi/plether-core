@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 /// @notice Trader and keeper actions implemented by the router-discoverable position-protection book.
@@ -48,18 +48,13 @@ interface IPositionProtectionActions {
     /// @dev The protection becomes `Armed` atomically if the parent open executes. Parent failure terminally fails the
     ///      protection and releases its protection bounties. A fill that has crossed a staged threshold still arms the
     ///      protection; only a valid later-block publication may trigger it. This is for a flat account with no orders.
-    /// @param side Position direction to open.
-    /// @param sizeDelta Nonzero position size in synthetic-token units (18 decimals).
-    /// @param marginDelta Margin committed to the opening order in 6-decimal USDC.
-    /// @param targetPrice Direction-aware opening execution limit (8 decimals), or zero for no slippage limit.
+    ///      The parent is a fresh public V2 intent and must satisfy the same bounded-request policy as `commitOrder`.
+    /// @param request Complete caller-authored opening intent and execution bounds.
     /// @param params Take-profit and stop-loss trigger prices staged for the resulting position.
     /// @return parentOrderId Newly committed opening-order identifier.
     /// @return protectionId Newly staged protection identifier.
     function commitOpenOrderWithProtection(
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 targetPrice,
+        OrderV2Types.OrderRequest calldata request,
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external returns (uint64 parentOrderId, uint64 protectionId);
 
