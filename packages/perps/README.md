@@ -103,14 +103,18 @@ In practice, the compact public API is:
     `AtomicOracleRefresh`
 - LPs:
   - the configured Senior or Junior `TrancheVault`: asynchronous `requestDeposit` / `requestRedeem`, request
-    cancellation and status views, and funded-request claims through `deposit` / `mint` or `withdraw` / `redeem`
+    cancellation and status views, funded-request claims through `deposit` / `mint` or `withdraw` / `redeem`, and
+    direct routing of an activated deposit entitlement into redemption through
+    `requestRedeemFromClaimableDeposit(...)`
   - permissionless synchronized clearing through the Lens-selected direct-Pool or Router route; on
     `AtomicOracleRefresh`, the Router validates one Pyth mark under the reported minimum-publish-time policy and settles
     the bounded batch atomically
 - Readers:
   - `PerpsPublicLens`, including `getTrancheQueues(bool)` for synchronized heads/backlog and
-    `getLpRequestState(bool,uint256,address)` for controller request balances. LP, queue, and protocol status expose
-    `lpEpochSettlementPaused`; request admission may remain enabled while settlement/withdrawal funding is not live.
+    `getLpRequestState(bool,uint256,address)` for controller request balances, plus
+    `getLpDepositCooldownState(bool,uint256,address)` for source-lot activation and direct-redemption capacity. LP,
+    queue, and protocol status expose `lpEpochSettlementPaused`; request admission may remain enabled while
+    settlement/withdrawal funding is not live.
   - `PositionProtectionBook.activePositionProtectionId(address)` /
     `PositionProtectionBook.getPositionProtection(uint64)` for canonical retained protection state. `linkedOrderId`
     is the latest attempt; combine attempt events with lifecycle outcomes for complete history.
@@ -137,8 +141,10 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 - `IPerpsTraderViews.sol`
 - `ICfdEngineLens.sol` for `previewOpen(...)` / `previewClose(...)` trade-ticket previews
 - `IPerpsLPActions.sol` for configured-vault-to-pool integration hooks, not direct LP calls
-- `IPerpsLPViews.sol`
-- `IAsyncTrancheVault.sol` for the complete asynchronous LP request, cancellation, estimate, and claim surface
+- `IPerpsLPViews.sol`, including the additive deposit-activation cooldown view
+- `IAsyncTrancheVault.sol` for the base asynchronous LP request, cancellation, estimate, and claim surface
+- `IAsyncTrancheVaultClaimableRedeem.sol` for the additive activated-deposit escrow-to-redemption route; vaults
+  advertise its ERC-165 id separately so the existing `IAsyncTrancheVault` id remains stable
 - `IERC7540.sol` and `IERC7575.sol` for the standard operator/request/claim and vault-entry fragments
 - `IPerpsKeeper.sol`
 - `IOrderLifecycleBook.sol` and `OrderV2Types.sol` for V2 intent policy, lifecycle state, receipts, and
@@ -485,6 +491,13 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
 - Junior absorbs first loss and receives residual upside.
 - LP redemption requests escrow shares after the holder cooldown and size checks. Pending shares remain outstanding and
   exposed to tranche profit and loss until an epoch settlement funds and burns them.
+- A deposit lot's one-hour anti-flash cooldown starts when synchronized settlement successfully activates that lot and
+  mints its shares, not when the controller later claims them. Claiming is an administrative delivery step and carries
+  the historical activation timestamp into the receiver's wallet without shortening any newer wallet cooldown.
+- Once that source lot's activation-aged cooldown has elapsed, its controller or approved operator may route claimable
+  shares directly from deposit-claim escrow into the current redemption request. No intermediate wallet transfer or
+  allowance is needed, and the resulting redemption request remains controlled by the source controller. Completing
+  an epoch's final entitlement still performs the existing allocation-dust burn and any associated fee checkpoint.
 - Ordinary tranche deposits and partial redemption requests must be at least `1 USDC` at the current estimate,
   preventing dust flows from forcing checkpoint churn while still allowing a complete dust exit.
 - During `oracleFrozen`, matured redemption funding uses the stale-window policy with a fixed tranche-local
@@ -525,6 +538,19 @@ id. Existing authorization, cooldown, pause, lifecycle, size, balance, and capac
 that target changes. `PerpsPublicLens.getTrancheQueues(bool)` relays the same pair as `nextRequestEpoch` and
 `nextRequestCutoffTime`; both tranches report identical values at the same block. For every successful request, the
 target epoch start is more than 300 and at most 3,900 seconds after inclusion.
+
+`PerpsPublicLens.getLpDepositCooldownState(...)` reports a finalized deposit lot's activation time, cooldown end,
+remaining claimable shares, and the amount currently eligible for direct redemption. A zero activation time means the
+epoch has not successfully activated; request maturity alone does not start the cooldown.
+
+Direct routing consumes deposit contribution basis with the same exact-share rounding and terminal dust sweep as a
+wallet claim. Partial routes must satisfy the ordinary minimum redemption estimate, while consuming the source lot's
+complete remaining entitlement remains available as a dust exit. Each successful route decreases
+`depositClaimEscrowShares` and increases `pendingRedeemEscrowShares` by exactly the routed amount, preserving
+the routed shares' custody and supply. If the route terminally consumes the deposit epoch, shared cleanup may also burn
+aggregate deposit-claim share dust; on Junior, that burn may first checkpoint and mint accrued maintenance-fee shares.
+After cleanup, `balanceOf(vault) == depositClaimEscrowShares + pendingRedeemEscrowShares` still holds. Multiple routes
+in the same request window aggregate into the controller's current redemption position.
 
 LP share pricing uses one exact signed terminal-NAV snapshot for both deposits and redemptions. Each position stores
 whole 100-token lots and exact entry cost. `TerminalNavBookV2` evaluates its marked LP-side price PnL and caps a
@@ -571,9 +597,10 @@ this order:
 3. matured Junior deposits,
 4. matured Senior deposits.
 
-Deposits activated in that transaction do not fund withdrawals in the same transaction. User claims remain separate
-controller/operator pull actions and stay available while new deposit requests or entry activation are paused;
-redemption requests remain available so exit demand can queue during a pause.
+Deposits activated in that transaction do not fund withdrawals in the same transaction. Deposit claims and eligible
+claimable-deposit-to-redeem routes remain separate controller/operator pull actions and stay available while new
+deposit requests or entry activation are paused; redemption requests remain available so exit demand can queue during
+a pause.
 `HousePool.lpEpochSettlementPaused()` is an independent no-expiry hold. While active, both direct cached/no-position
 and Router atomic-refresh settlement revert, so no pending deposit activates and no new redemption is funded. New
 deposit and redemption requests, Senior reservations, existing cancellation paths, trading, reconciliation, and
@@ -731,15 +758,24 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
   `previewDeposit()` / `previewMint()` revert for the asynchronous flow. A share-delivering claim, redemption
   cancellation, or redemption refund may target another account only if that account has no existing vault shares;
   this prevents unsolicited dust from resetting the account's whole-balance cooldown. Self-receipt is always allowed.
+  A deposit claim sets the receiver's cooldown timestamp to the later of its current timestamp and the source epoch's
+  successful activation time, so delayed claims do not restart an already elapsed cooldown and older lots cannot
+  weaken a newer wallet cooldown.
 - `TrancheVault.requestDeposit()` funds LP entry through pending deposit epochs; requests are funded
   up front and reserve senior capacity when applicable. A complete pending deposit is cancellable before its request
   epoch matures. At or after maturity, cancellation remains available only under the existing epoch rejection,
   projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions.
-- `TrancheVault.requestRedeem()` enforces cooldown, allowance, seed-floor, and minimum-request rules. ERC-4626
+- `TrancheVault.requestRedeem()` enforces wallet cooldown, allowance, seed-floor, and minimum-request rules. The
+  additive `IAsyncTrancheVaultClaimableRedeem` route instead authorizes against one controller-owned finalized deposit
+  lot and enforces that lot's activation-aged cooldown. `maxRequestRedeemFromClaimableDeposit(...)` returns the shares
+  currently eligible from that source; `requestRedeemFromClaimableDeposit(...)` consumes only that entitlement and
+  keeps the same controller on the destination request. It emits `ClaimableDepositRedeemRequest`, not the canonical
+  `RedeemRequest`, because no wallet owner supplies shares through the standard request path. ERC-4626
   `maxWithdraw()` / `maxRedeem()` report only already-funded claim capacity; `previewWithdraw()` / `previewRedeem()`
   revert for the asynchronous redemption flow. Use the vault's explicit estimate views for pending requests. A
   complete redemption request is cancellable only while it is unmatured, wholly unfunded, and outside refund state;
-  returned shares restart the receiver's existing cooldown.
+  shares returned to a wallet by cancellation or terminal refund restart that receiver's cooldown at the return time,
+  including when the request was originally sourced directly from deposit-claim escrow.
 
 ### Reconcile / freshness nuance
 
@@ -843,8 +879,10 @@ The Engine exports one signed terminal price-PnL adjustment for both LP entry an
 This removes the deposit/withdrawal pricing asymmetry: a new depositor neither inherits old marked liabilities without
 discount nor receives credit for uncollectible trader debt.
 Ordinary LP entry always moves through pending deposit epochs: the user funds the request up front and later claims
-the batch-priced shares after synchronized pool settlement. A request included one second before the cutoff waits five
-minutes and one second for its target epoch to mature; a request included at the cutoff rolls to the following epoch.
+the batch-priced shares after synchronized pool settlement, or routes those claimable shares directly into redemption
+after the activation-aged cooldown. The claim transaction only delivers already-owned shares; successful activation
+starts the cooldown. A request included one second before the cutoff waits five minutes and one second for its target
+epoch to mature; a request included at the cutoff rolls to the following epoch.
 A complete pending deposit is cancellable before its request epoch matures. At or after maturity, cancellation remains
 available only under the existing epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation
 escape conditions. This keeps request submission separate from the fresh symmetric NAV fixed at activation.
@@ -1260,7 +1298,7 @@ pending order; then deploy and verify the complete new graph and start its index
 | `maxSeniorExposureUsdc` | Timelocked, finite | Absolute counted-admission limit (`E +` pending senior reservations) |
 | `maxSeniorShareBps` | Timelocked, <10,000 | Maximum counted senior admission share; active `E` also governs Junior redemption funding |
 | `LP_REQUEST_CUTOFF_DURATION` | 5 minutes | Shared deposit/redemption roll-forward cutoff before each round-hour boundary |
-| `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown |
+| `DEPOSIT_COOLDOWN` | 1 hour | LP anti-flash cooldown measured from successful deposit activation |
 
 The two senior-capacity rows describe the required post-timelock operating configuration. Fresh deployments initially
 use the neutral constructor sentinels `type(uint256).max` and `10,000` bps, which cannot pass trading activation.

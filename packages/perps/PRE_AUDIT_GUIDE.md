@@ -66,6 +66,7 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when live positions exist; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback; every route reverts before mutation while the independent settlement hold is active |
 | `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold without blocking requests, reconciliation, trading, or funded claims |
 | `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
+| `TrancheVault.requestRedeemFromClaimableDeposit` | source controller or its approved operator | consumes one finalized source lot only after its activation-aged cooldown and preserves the controller on the destination redemption request; no token allowance or wallet custody is involved |
 | `TrancheVault.proposeMaintenanceFeeConfig` / `finalizeMaintenanceFeeConfig` / `cancelMaintenanceFeeConfigProposal` | current `HousePool.owner()` only, Junior vault only | 48-hour delayed configuration; finalization checkpoints the old rate/recipient before applying the new pair; no arbitrary mint or USDC-transfer authority |
 | `HousePoolRedemptionMathSidecar` pure functions | permissionless | stateless EIP-170 size split used by the HousePool immutable binding; fixed implementation id, no storage, authorization, setter, delegatecall, or upgrade path |
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
@@ -167,8 +168,8 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
 | Settlement-liability buffer `B` | No separate owner; protected cash headroom | Derived as `ceil(maxLiability * settlementBufferBps / 10_000)` from canonical Engine state | Liability changes and timelocked `EngineRiskConfig` updates change the target; no custody movement | no | no; excluded from raw `E < L` degraded test | yes, as an engine-supplied supplemental reserve | cash-funding constraint only; excluded from terminal NAV and yield |
 | Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
-| Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting | atomic Router epoch settlement, then controller/operator claim | no | no separate asset claim | no | yes, through outstanding share supply |
-| Pending LP redemption shares | Request controller; still exposed to tranche P&L | `TrancheVault` request/epoch queue; shares held by vault escrow and still in supply | request path plus pool-authorized settlement callback | no | no separate asset claim before funding | no | yes, through outstanding share supply |
+| Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting and activation timestamp | atomic Router epoch settlement, then controller/operator wallet claim or direct source-lot routing into redemption | no | no separate asset claim | no | yes, through outstanding share supply |
+| Pending LP redemption shares | Request controller; still exposed to tranche P&L | `TrancheVault` request/epoch queue; shares held by vault escrow and still in supply | wallet request or authorized reclassification from deposit-claim escrow, plus pool-authorized settlement callback | no | no separate asset claim before funding | no | yes, through outstanding share supply |
 | Junior maintenance-fee shares | Configured fee recipient | Junior `TrancheVault`; pending dilution in `pendingMaintenanceFeeShares()`, issued ownership in ordinary ERC-20 balance | any nonzero Junior supply mutation (including terminal deposit-claim escrow-dust burn) and fee-config finalization | no | no separate asset claim | no | yes, through effective Junior supply |
 | Funded LP redemption assets | Request controller | USDC held in `TrancheVault` claim escrow and claimable epoch accounting | atomic Router epoch settlement, then controller/operator claim | no | no longer part of pool | no | no |
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
@@ -242,6 +243,19 @@ Reachability note:
   No request included at or after `b - 300` may increase the locked `e + 1` epoch, but cancellation may shrink it and
   removing its final request must preserve the ordered, acyclic queue links. After `b`, new requests may legitimately
   join numeric epoch `e + 2`, now the imminent epoch, until its own cutoff.
+- Cooldown ownership rule: successful deposit activation records the lot timestamp that begins the one-hour anti-flash
+  delay. A later share claim is administrative and applies `max(receiver cooldown, source activation)` rather than the
+  claim time. Pending, deferred, and rejected deposit epochs have no activation timestamp and cannot age into
+  eligibility merely because their request id matured.
+- Direct-route authority: `requestRedeemFromClaimableDeposit(...)` may consume only the named controller's entitlement
+  from one finalized source lot, and only the controller or its approved operator may call it. The redemption position
+  keeps that controller. `maxRequestRedeemFromClaimableDeposit(...)` is zero before the source-lot cooldown expires.
+- Escrow invariant: direct routing advances the same deposit entitlement counters as a wallet claim, decreases
+  `depositClaimEscrowShares`, and increases `pendingRedeemEscrowShares` by the identical routed amount without a token
+  transfer. Completing the epoch's final entitlement may additionally burn allocation dust and checkpoint Junior fee
+  shares under the existing terminal-sweep rules; final vault custody must still equal the sum of both share escrows.
+  Audit `ClaimableDepositRedeemRequest` separately from the canonical wallet-funded `RedeemRequest`; cancellation or
+  terminal refund that returns routed shares to a wallet restarts the receiver's cooldown at return time.
 
 ### Exact symmetric Terminal NAV
 
@@ -448,6 +462,12 @@ Reachability note:
     dependency is required for a complete composite even if its feed policy is not required by the selected route,
     cutoff totals are maximum membership because cancellations may shrink them, and bounded aggregate checks do not
     prove per-account curve or radix-node parity.
+12. Deposit cooldown provenance: successful activation, not claim, starts each deposit lot's cooldown; claiming cannot
+    shorten the receiver's newer cooldown.
+13. Claimable-deposit routing conservation: one authorized source entitlement becomes one same-controller pending
+    redemption amount and the routed shares move by equal and opposite escrow-counter amounts without a token
+    transfer. A terminal route may separately burn aggregate claim-share dust and checkpoint/mint Junior fee shares;
+    exact vault-custody-to-share-escrow equality must still hold afterward.
 
 ## Test Map
 
@@ -472,7 +492,7 @@ Use the suites below as the highest-signal audit companions.
 | LP reserve / withdrawals | `packages/perps/test/perps/MarginClearinghouse.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
 | HousePool snapshot parity | `packages/perps/test/perps/HousePoolSnapshotParity.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
 | Exact terminal NAV / close conservation | `packages/perps/test/perps/TerminalNavBookV2.t.sol`, `packages/perps/test/perps/TerminalNavCloseConservation.t.sol`, `packages/perps/test/perps/TerminalNavIntegrationSecurity.t.sol` |
-| HousePool lifecycle / cooldown | `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
+| HousePool lifecycle / activation-aged cooldown / direct claim-escrow redemption | `packages/perps/test/perps/ClaimableDepositRedeem.t.sol`, `packages/perps/test/perps/PerpsPublicLensDepositCooldown.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
 | Governed senior capacity / delayed reservations | `packages/perps/test/perps/SeniorCapacity.t.sol`, `packages/perps/test/perps/FrozenLpFeePolicy.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
 | Router policy matrix | `packages/perps/test/perps/OrderRouterPolicyMatrix.t.sol` |
 | Stale-mark / reconcile behavior | `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |

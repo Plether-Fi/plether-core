@@ -277,6 +277,9 @@ These are the highest-value properties an auditor should expect to hold.
 | Shared cutoff routing | Both tranches and both request directions use the same five-minute cutoff; exact equality rolls to the later epoch without a cutoff-specific revert |
 | Locked-epoch additions | For boundary `b`, no request at or after `b - 300` may increase locked epoch `e + 1`, including after it matures; cancellation may still shrink it, while requests after `b` may join the new imminent numeric epoch `e + 2` until its own cutoff |
 | Shared accounting inputs | Reconcile, synchronized redemption funding, deposit finalization, and LP status views consume the same canonical engine snapshot |
+| Activation-aged cooldown | A deposit lot's cooldown begins only on successful activation; a later wallet claim preserves that timestamp and cannot shorten a newer receiver cooldown |
+| Claim-escrow routing isolation | Direct redemption consumes one authorized controller's finalized deposit entitlement, preserves that controller on the destination request, and cannot capture another controller's lot |
+| Share-escrow conservation | The routed amount decreases `depositClaimEscrowShares` and increases `pendingRedeemEscrowShares` equally without a token transfer; terminal cleanup may separately burn aggregate claim-share dust and checkpoint/mint Junior fee shares, after which vault share custody still equals the sum of both escrow counters |
 
 ### Coverage map
 
@@ -302,6 +305,7 @@ The tables above describe the intended safety properties. The suites below are t
 | Delegated mark refresh, single/batch liquidation, and LP-epoch isolation | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol` |
 | Canonical asset boundary / symmetric terminal NAV / high-water-mark protection | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol`, `packages/perps/test/perps/TerminalNavBookV2.t.sol` |
 | Shared request cutoff / locked-epoch additions | `packages/perps/test/perps/LpRequestCutoff.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
+| Activation-aged cooldown / direct deposit-escrow redemption | `packages/perps/test/perps/ClaimableDepositRedeem.t.sol`, `packages/perps/test/perps/PerpsPublicLensDepositCooldown.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
 | Oracle freshness / FAD boundaries / ETH refund custody | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
 | Fee custody / protocol accounting snapshots | `packages/perps/test/perps/invariant/PerpFeeFlowInvariant.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
 
@@ -654,8 +658,26 @@ Ordinary LP entry remains asynchronous: assets are funded into request escrow, a
 cancellable before maturity, and post-maturity cancellation remains available only under the documented
 epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions. Shares are
 minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
-already activated shares. During a frozen entry state the request remains deferred; redemptions can still use the
-separate conservative cash-reserve path.
+already activated shares. The one-hour cooldown is timestamped at that successful activation, not at claim. A claim is
+therefore an administrative transfer that propagates the source activation timestamp with
+`max(receiverTimestamp, activationTimestamp)`; it neither restarts an elapsed cooldown nor weakens a newer receiver
+cooldown. During a frozen entry state the request remains deferred, its activation timestamp remains zero, and
+redemptions can still use the separate conservative cash-reserve path.
+
+The additive `IAsyncTrancheVaultClaimableRedeem` surface permits the controller or an approved operator to consume
+shares from one finalized deposit lot directly into a redemption request after that lot's activation-aged cooldown.
+The destination controller cannot be changed. This path advances the same per-position claimed/consumed entitlement
+accounting as an ordinary share claim, but moves no ERC-20 shares: it atomically reclassifies the amount from
+`depositClaimEscrowShares` to `pendingRedeemEscrowShares`. The routed-share reclassification itself changes neither
+custody nor supply; consuming the epoch's final entitlement may also burn allocation dust and materialize accrued
+Junior fee shares under the existing terminal-claim rules. The final state still satisfies
+`balanceOf(vault) == depositClaimEscrowShares + pendingRedeemEscrowShares`.
+Partial routes remain subject to the ordinary minimum redemption estimate; the source lot's complete remaining
+entitlement may exit below that threshold so terminal dust cannot be stranded.
+It emits the dedicated `ClaimableDepositRedeemRequest` event rather than the canonical `RedeemRequest`, so indexers can
+distinguish escrow-sourced requests from wallet-sourced requests. If the resulting request is later cancelled or its
+terminal remainder is refunded, any shares delivered back to a wallet restart that receiver's cooldown at the return
+time.
 
 Atomic Engine-to-book synchronization is a critical trust boundary. Any path that changes position lots, exact entry
 cost, side, PnL pledge, or same-account claim must finish by installing the matching curve or removing it. The
@@ -668,11 +690,13 @@ each settlement that advances real epoch work, so sub-micro-USDC rounding remain
 hourly aggregation of requests bounds that residual rather than making coupon accrual mathematically remainder-exact.
 
 Async allocation uses per-controller floor rounding against immutable epoch totals. Splitting a request among more
-controllers cannot increase aggregate entitlement. Once all controllers reach terminal state, deposit-share dust is
-burned; funded-redemption share dust is booked in the epoch's claimed-share counter; funded asset dust returns raw to
-`HousePool` without restoring `accountedAssets` and therefore becomes excess; and refundable-share dust moves to the
-permanent seed account without resetting its cooldown. These terminal sweeps prevent stranded escrow without allowing
-the final caller to capture another controller's rounding remainder.
+controllers cannot increase aggregate entitlement. Ordinary deposit claims and direct deposit-to-redeem routing share
+the same exact-share consumption and terminal-dust accounting, so neither path can reuse an entitlement consumed by
+the other. Once all controllers reach terminal state, deposit-share dust is burned; funded-redemption share dust is
+booked in the epoch's claimed-share counter; funded asset dust returns raw to `HousePool` without restoring
+`accountedAssets` and therefore becomes excess; and refundable-share dust moves to the permanent seed account without
+resetting its cooldown. These terminal sweeps prevent stranded escrow without allowing the final caller to capture
+another controller's rounding remainder.
 
 This is an explicit design choice, not an accounting accident.
 
@@ -1039,7 +1063,10 @@ indexers to the new manifest; old protection and attempt state is not migrated.
   reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,
 - pending senior reservations are not grandfathered against later cap or accounting changes, but become refundable if
   they no longer fit at finalization,
-- deposit cooldown can be griefed only by economically irrational donation-style top-ups.
+- wallet shares remain governed by the latest applicable activation timestamp, so voluntarily combining a newer lot
+  with an older wallet balance preserves the newer lot's remaining cooldown. Administrative claims do not manufacture
+  a claim-time delay, and the direct route can consume an independently aged source lot without mixing it into the
+  wallet. Redemption cancellation or terminal refund still begins a new cooldown when shares return to a wallet.
 
 ### VPI limitations
 
@@ -1178,7 +1205,8 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `OrderLifecycleBook`, `CfdOrderPolicyEvaluator`, and `OrderRouterV2ExecutionSidecar` | V2 execution-authority additions; formal audit pending |
 | `MarginClearinghouse` | Pre-audit reviewed before V2 no-carry reservation-release additions; formal audit pending |
 | `HousePool` and stateless redemption-math sidecar | Settlement-hold and size-split changes require formal review |
-| `TrancheVault` | Pre-audit reviewed; formal audit pending |
+| `TrancheVault` | Pre-audit reviewed before the activation-aged cooldown and direct claim-escrow redemption extension; those changes require formal review |
+| `PerpsPublicLens` deposit-cooldown view | Additive read surface for the new lifecycle; formal audit pending |
 | `SettlementMonitorLens` and monitor-bound sidecar | Read-only monitoring addition; formal audit pending |
 | `EmergencyPauseCoordinator` and persistent Router risk-off refund path | Three-action emergency containment addition; formal audit pending |
 
