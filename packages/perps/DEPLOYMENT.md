@@ -16,6 +16,8 @@ The current target network is Arbitrum Sepolia with:
 - Preflight and no-broadcast dry run: `scripts/prepare-perps-arbitrum-sepolia-release.sh`
 - Environment template: `.env.arbitrum-sepolia-perps.example`
 - Manifest template: `deployments/arbitrum-sepolia-perps.template.json`
+- Current preparation record: `deployments/releases/2026-09-04-perps-arbitrum-sepolia/README.md`
+- Consumer ABI and build-evidence exporter: `scripts/export-perps-release.py`
 
 The deploy script handles contract creation and one-time wiring.
 
@@ -801,6 +803,8 @@ Cross-check `PerpsPublicLens` queue state immediately before broadcasting, but u
 evidence and selected execution route for keeper preflight. Each bounded `AtomicOracleRefresh` backlog pass requires a
 new validated Pyth update; a `CachedMark` pass requires neither a Hermes payload nor ETH.
 
-Create a new dated release note after deployment. Do not edit historical release notes. The new note must identify the
-old stack as lacking position protection and state clearly that a trigger queues a close; it does not guarantee
-execution time, execution price, or execution before liquidation.
+Create a new dated release note after deployment. Do not edit historical release notes. Identify the previous source
+commit and inspect its protection support and live feature flag instead of assuming the old stack lacks protection.
+State clearly that a trigger queues a close; it does not guarantee execution time, execution price, or execution before
+liquidation. Keep prepared candidate manifests separate from the active deployment record until deployment and all
+phase verifiers have succeeded.
