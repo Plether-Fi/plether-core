@@ -475,8 +475,8 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
             revert OrderRouterV2ExecutionSidecar__MalformedSuccess(address(engine_), engineData.length);
         }
 
-        uint256 bountyUsdc = _settleExecutedOrder(context, request);
-        return _finalizeExecutedOrder(context, request, assessment, preState, bountyUsdc);
+        IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement = _settleExecutedOrder(context, request);
+        return _finalizeExecutedOrder(context, request, assessment, preState, bountySettlement);
     }
 
     function _finalizeExecutedOrder(
@@ -484,14 +484,14 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         IOrderRouterV2ExecutionHost.ItemRequest calldata request,
         OrderV2Types.ExecutionAssessment memory assessment,
         AccountState memory preState,
-        uint256 bountyUsdc
+        IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement
     ) private returns (OrderV2Types.ExecutionResult memory result) {
         AccountState memory postState = _accountState(ICfdEngineCore(context.host.engine()), context.order.account);
         _assertAssessmentState(assessment, request.executionMode, preState, postState);
         OrderV2Types.OrderReceipt memory receipt =
             _preparedBaseReceipt(context, request, OrderV2Types.TerminalReason.Executed, assessment.mode, true);
         receipt.status = OrderV2Types.LifecycleStatus.Executed;
-        _setPaidBounty(receipt, bountyUsdc, request.executor);
+        _setBountySettlement(receipt, bountySettlement);
         receipt.economics = _assessmentEconomics(assessment, preState, postState);
         return _finalizeReceipt(context.book, receipt);
     }
@@ -499,17 +499,18 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
     function _settleExecutedOrder(
         PreparedExecutionContext memory context,
         IOrderRouterV2ExecutionHost.ItemRequest calldata request
-    ) private returns (uint256 bountyUsdc) {
-        bountyUsdc = context.host
+    ) private returns (IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement) {
+        bountySettlement = context.host
             .settleV2OrderFromSidecar(
                 context.order.orderId,
                 true,
+                OrderV2Types.TerminalReason.Executed,
                 request.executor,
                 request.executionPrice,
                 request.bountyAccountingPrice,
                 request.bountyAccountingPublishTime
             );
-        _requireBounty(context.pending.executionBountyUsdc, bountyUsdc);
+        _requireBounty(context.pending.executionBountyUsdc, bountySettlement.bountyUsdc);
     }
 
     function _callPolicyEvaluator(
@@ -607,20 +608,21 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         TerminalClassification memory classification,
         bool priceReachedEngine
     ) private returns (OrderV2Types.ExecutionResult memory result) {
-        uint256 bountyUsdc = context.host
+        IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement = context.host
             .settleV2OrderFromSidecar(
                 context.order.orderId,
                 false,
+                classification.reason,
                 request.executor,
                 request.executionPrice,
                 request.bountyAccountingPrice,
                 request.bountyAccountingPublishTime
             );
-        _requireBounty(context.pending.executionBountyUsdc, bountyUsdc);
+        _requireBounty(context.pending.executionBountyUsdc, bountySettlement.bountyUsdc);
         AccountState memory postState = _accountState(ICfdEngineCore(context.host.engine()), context.order.account);
         OrderV2Types.OrderReceipt memory receipt =
             _preparedBaseReceipt(context, request, classification.reason, request.executionMode, priceReachedEngine);
-        _setPaidBounty(receipt, bountyUsdc, request.executor);
+        _setBountySettlement(receipt, bountySettlement);
         receipt.failure = classification.failure;
         receipt.economics = _stateOnlyEconomics(preState, postState);
         return _finalizeReceipt(context.book, receipt);
@@ -637,20 +639,20 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
     ) private returns (OrderV2Types.ExecutionResult memory result) {
         ICfdEngineCore engine_ = ICfdEngineCore(host.engine());
         AccountState memory preState = _accountState(engine_, order.account);
-        IMarginClearinghouse(engine_.clearinghouse()).releaseOrderReservationForTerminalCleanup(order.orderId);
-        uint256 bountyUsdc = host.settleV2OrderFromSidecar(
+        IOrderRouterV2ExecutionHost.BountySettlement memory bountySettlement = host.settleV2OrderFromSidecar(
             order.orderId,
             false,
+            reason,
             request.executor,
             request.executionPrice,
             request.bountyAccountingPrice,
             request.bountyAccountingPublishTime
         );
-        _requireBounty(pending.executionBountyUsdc, bountyUsdc);
+        _requireBounty(pending.executionBountyUsdc, bountySettlement.bountyUsdc);
         AccountState memory postState = _accountState(engine_, order.account);
 
         OrderV2Types.OrderReceipt memory receipt = _memoryRequestBaseReceipt(order.orderId, pending, request, reason);
-        _setPaidBounty(receipt, bountyUsdc, request.executor);
+        _setBountySettlement(receipt, bountySettlement);
         receipt.failure = failure;
         receipt.economics = _stateOnlyEconomics(preState, postState);
         return _finalizeReceipt(book, receipt);
@@ -1313,16 +1315,13 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         }
     }
 
-    function _setPaidBounty(
+    function _setBountySettlement(
         OrderV2Types.OrderReceipt memory receipt,
-        uint256 bountyUsdc,
-        address recipient
+        IOrderRouterV2ExecutionHost.BountySettlement memory settlement
     ) private pure {
-        receipt.bountyUsdc = bountyUsdc;
-        if (bountyUsdc != 0) {
-            receipt.bountyRecipient = recipient;
-            receipt.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
-        }
+        receipt.bountyUsdc = settlement.bountyUsdc;
+        receipt.bountyRecipient = settlement.bountyRecipient;
+        receipt.bountyDisposition = settlement.bountyDisposition;
     }
 
     function _revertRetryable(

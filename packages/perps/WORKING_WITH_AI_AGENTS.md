@@ -95,11 +95,13 @@ mandatory, and the resulting FIFO order cannot be cancelled, so agents should us
 
 Position protection is a separate canonical surface. Discover the stateful Book through
 `OrderRouter.positionProtectionBook()` and use `IPositionProtectionActions` to create, replace, cancel, trigger, or
-atomically attach protection to an opening order. `commitOpenOrderWithProtection(OrderRequest,PositionProtectionParams)`
+retry protection, or atomically attach protection to an opening order.
+`commitOpenOrderWithProtection(OrderRequest,PositionProtectionParams)`
 requires the same complete caller-authored bounded request as `commitOrder`, including a nonzero target and current
 nonzero configuration hash. It accepts only a fresh parent; exact replay is not a retry mechanism for the composite
 action. Cancelling a `PendingOpen` protection detaches and refunds the protection but does not cancel its
-already-committed parent order; an already `Triggered` linked close is binding.
+already-committed parent order. An already `Triggered` close attempt is binding; `Latched` means the trigger remains
+binding but no attempt is live.
 
 ### Authoritative order reads
 
@@ -112,6 +114,8 @@ durable order state:
 - `clientIntent(account, clientOrderId)` permanently resolves a client id to its order id and intent hash.
 - `pendingIntent(orderId)` returns pending identity, the actually reserved bounty, and all bounds.
 - `pendingPolicy(orderId)` returns the bounds while the order is pending.
+- `isProtectionAttempt(orderId)` identifies the Router-registered close-attempt marker while that order is pending;
+  `ProtectionAttemptRegistered` is the permanent event evidence after finalization removes the transient marker.
 - `lifecycleStatus(orderId)` returns `None`, `Pending`, `Executed`, or `Failed`.
 - `outcome(orderId)` returns the permanent compact terminal outcome and receipt hash.
 
@@ -164,13 +168,19 @@ Use `IPerpsKeeper` for execution:
 - `IPositionProtectionActions.triggerPositionProtection(protectionId, pythUpdateData)` is the payable permissionless
   protection-trigger surface. Call it directly on the Router-discovered protection Book; the Router does not forward
   public protection selectors.
+- `IPositionProtectionActions.retryPositionProtectionClose(protectionId)` is the nonpayable permissionless retry
+  surface for a `Latched` protection. It creates a fresh FIFO-tail attempt and does not ingest Pyth data or re-evaluate
+  the original trigger.
 
 The submitting agent does not have to be the executor. Any keeper may execute an order. For a freshly submitted
 bounded-order request, execution remains inside the limits pinned by the account. Protection parent and linked-close
 orders instead use the documented protocol-synthesized envelope and remain subject to ordinary Router, evaluator,
 Engine, and protection-state checks. Bounty economics differ: self-execution credits the stored order bounty to the
 account while an external keeper receives it. Receipts encode self-execution as `Paid` to `executor == account`;
-`RefundedToAccount` is reserved for risk-off cleanup.
+`RefundedToAccount` is reserved for risk-off cleanup. A failed registered protection attempt records
+`RetainedForProtectionRetry`, pays no cleaner, and rolls the same reserved amount back to the latched protection only
+while the exact protected position still matches. A missing or mismatched position instead uses `Paid` cleanup and
+terminally resolves the protection as `Failed`.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
@@ -251,7 +261,7 @@ protocol-generated position-protection orders.
 A terminal full close still enforces every non-position bound. It skips post-position equity and leverage checks only
 because no position survives.
 
-Router-authenticated trigger-generated protection closes are the only zero-config exception. Those internal requests
+Router-authenticated triggered and retried protection closes are the only zero-config exception. Those internal requests
 use `expectedConfigHash == bytes32(0)` as an unpinned marker, enable every execution mode, use
 `validUntil = block.timestamp + maxOrderAge`, set upper bounds to their integer maxima and minimum bounds to zero,
 and record the configuration actually observed at execution. They remain subject to ordinary protocol safety policy,
@@ -292,8 +302,8 @@ identifier, account, and action sequence—not from data that changes between re
 The parent request passed to `commitOpenOrderWithProtection` includes a caller-supplied client id, but the composite
 Book action is intentionally fresh-only: an exact parent replay returns an old order id and the Book reverts before
 staging another protection. Before retrying any uncertain create, replace, cancel, attached-open, or trigger
-transaction, reconcile the retained protection record, its events, and the account's pending-order state. Blind
-application-level retries do not receive a composite-action exact-replay guarantee.
+or latched-retry transaction, reconcile the retained protection record, its events, and the account's pending-order
+state. Blind application-level retries do not receive a composite-action exact-replay guarantee.
 
 If governance configuration changes or the strategy wants different bounds, create a new client id. The old id still
 describes the old authorization and must remain immutable.
@@ -314,6 +324,11 @@ verify those through Router getters, immutable bindings, and the deployment mani
 HousePool redemption-math sidecar because that module affects LP redemption budgeting, not order execution. Admin
 domains contribute their finalized active configuration versions; pending timelock proposals are not active execution
 policy and therefore are not committed.
+
+The bounded request ABI and intent-hash domain remain V2. The latched-retry release uses the V3 execution-config and
+receipt domains because a Router-authenticated protection-attempt marker and the retained-for-retry bounty disposition
+change authenticated terminal semantics. Never compare a V2 deployment's digest or receipt hash with V3 as if the
+domain were unchanged.
 
 For a nonzero externally pinned expectation, a later mismatch terminalizes as `ConfigMismatch` unless risk-off,
 expiry, account liquidation, or another terminal cleanup path finalizes the order first. Authenticated protection
@@ -411,12 +426,15 @@ to every receipt.
 
 For TP/SL, also reconcile the retained protection record and `PositionProtectionCreated`,
 `PositionProtectionReplaced`, `PositionProtectionArmed`, `PositionProtectionCancelled`,
-`PositionProtectionTriggered`, and `PositionProtectionTerminal` events from the protection Book. They prove the
+`PositionProtectionTriggered`, `PositionProtectionCloseAttemptQueued`,
+`PositionProtectionCloseAttemptFailed`, and `PositionProtectionTerminal` events from the protection Book. They prove the
 thresholds, protection status, triggered leg, trigger mark and publish time, and
-`parentOrderId`/`linkedOrderId` association that an order receipt does not contain. The receipt bounty covers only the
-queued order's stored execution bounty. Protection trigger bounties and protection reserves that are separately
-refunded or forfeited require the protection and Clearinghouse/Engine evidence; once a linked-close bounty transfers
-into ordinary order accounting, its close receipt covers that stored bounty.
+`parentOrderId`/latest-`linkedOrderId` association that an order receipt does not contain. Retry events and lifecycle
+receipts form the complete one-to-many attempt history; never treat the mutable latest id as the whole history. The
+receipt bounty covers only that attempt's stored execution bounty. Protection trigger bounties and protection reserves
+that are separately retained, refunded, or forfeited require the protection and Clearinghouse/Engine evidence. A
+failed attempt with `RetainedForProtectionRetry` has a zero recipient because the value moves from Router attribution
+back to Book attribution rather than being paid.
 
 The Router deletes terminal live-order records. This is intentional: use the Book's permanent compact outcome and
 receipt hash for durable state, and the canonical event for the full receipt.
@@ -503,10 +521,17 @@ TP/SL thresholds are also raw 8-decimal FX-basket prices. Their product-facing d
    the parent order's lifecycle state. The parent client id prevents duplicate orders, but it does not replay the
    composite protection action.
 5. To trigger, submit `triggerPositionProtection` directly to the Book with Pyth data and the quoted fee. Then monitor
-   the retained `linkedOrderId` and execute that ordinary FIFO close through the Router keeper interface.
-6. Reconcile both evidence domains: protection state/events for OCO intent and trigger facts, and lifecycle Book
-   state/receipts for the caller-authored parent and synthesized linked-close orders. Account separately for trigger
-   and order bounties.
+   the latest `linkedOrderId` and execute that ordinary FIFO attempt through the Router keeper interface.
+6. If the attempt fails without liquidation and the Book confirms the account still has the exact protected side and
+   size, reconcile its terminal receipt, `PositionProtectionCloseAttemptFailed(...,relatched=true)`, and the
+   protection's `Latched` state; then call `retryPositionProtectionClose` without Pyth data. A retry uses a new order
+   id, commit time, deadline, and live/FAD historical-oracle window; it requires the exact protected side and size and
+   zero pending Router orders for the account. Price recovery does not undo or re-test the original trigger. Competing
+   retries are expected, so reconcile again before replacing a reverted or uncertain submission. A missing or
+   mismatched position produces `relatched=false` and terminal `Failed`, not another attempt.
+7. Reconcile both evidence domains: protection state/events for OCO intent and immutable trigger facts, and lifecycle
+   Book state/receipts for the caller-authored parent plus every synthesized close attempt. Track the trigger bounty separately from
+   the single execution bounty recycled across attempts.
 
 ## Smart-account and session-key policy
 
@@ -514,7 +539,7 @@ The core protocol does not issue agent permissions. A production account layer s
 
 - allowed chain and target contract addresses;
 - callable selectors, especially separating trading from withdrawals and arbitrary transfers;
-- the Router-discovered protection Book as a separate target, with only the create/replace/cancel/attach/trigger
+- the Router-discovered protection Book as a separate target, with only the create/replace/cancel/attach/trigger/retry
   selectors that the user actually authorized;
 - token approvals and maximum value sent with payable keeper calls;
 - per-order and rolling exposure limits;
@@ -531,16 +556,17 @@ protocol-synthesized execution envelope.
 
 ## Operational cautions
 
-- **FIFO cancellation:** ordinary FIFO orders—including protected parent opens and triggered linked closes—cannot be
+- **FIFO cancellation:** ordinary FIFO orders—including protected parent opens and triggered close attempts—cannot be
   cancelled. Use deliberate deadlines and do not submit speculative placeholders. Expiry does not automatically
   delete an order; a permissionless execution/cleanup call must reach it and record the terminal outcome. A
   `PendingOpen` or `Armed` protection record can be replaced or cancelled, but cancelling `PendingOpen` does not
-  cancel its parent order.
+  cancel its parent order. A failed protection attempt returns the protection to `Latched`, but cleanup does not append
+  the replacement or pay its caller; a separate permissionless retry appends the next attempt at the current FIFO tail.
 - **FIFO:** a retryable head can delay later orders. Monitor `PendingReason` and use bounded cleanup/execution calls.
 - **Governance changes:** for an externally submitted bounded-order intent, a pinned configuration change terminally
   fails the old intent unless risk-off, expiry, liquidation, or another terminal cleanup path finalizes it first; it
-  does not authorize a new one. Internal protection orders are deliberately unpinned and record the observed
-  configuration instead.
+  does not authorize a new one. Internal protection close attempts are deliberately unpinned and record the observed
+  configuration instead; protected parent opens remain pinned external requests.
 - **Dynamic state:** the configuration hash is not a price, liquidity, pause, or oracle-regime snapshot. Use bounds
   and fresh reads as well.
 - **Index basis:** a dollar-index sleeve is not a perfect portfolio hedge; model basket, cap, and correlation basis.
@@ -586,8 +612,8 @@ protocol-synthesized execution envelope.
   configuration reads.
 - [`IPerpsTraderActions.sol`](src/interfaces/IPerpsTraderActions.sol): canonical order submission ABI.
 - [`IPerpsKeeper.sol`](src/interfaces/IPerpsKeeper.sol): canonical order, liquidation, and LP settlement execution ABI.
-- [`IPositionProtectionActions.sol`](src/interfaces/IPositionProtectionActions.sol): direct trader and trigger-keeper
-  protection actions.
+- [`IPositionProtectionActions.sol`](src/interfaces/IPositionProtectionActions.sol): direct trader and
+  trigger/retry-keeper protection actions.
 - [`IPositionProtectionViews.sol`](src/interfaces/IPositionProtectionViews.sol): active and retained protection reads.
 - [`PositionProtectionTypes.sol`](src/interfaces/PositionProtectionTypes.sol): OCO parameters, status, trigger leg, and
   retained evidence types.

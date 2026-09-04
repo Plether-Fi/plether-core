@@ -422,7 +422,7 @@ including at least:
 - `SettlementMonitorLens` and its internally deployed `SettlementMonitorLensSidecar`
 - `EmergencyPauseCoordinator`
 
-Also record the active V2 execution-config hash, source commit, deployment block, transaction hashes, and
+Also record the active V3 execution-config hash, source commit, deployment block, transaction hashes, and
 verified-bytecode status. `MockUSDC`,
 `HousePool`, `HousePoolRedemptionMathSidecar`, `OrderRouter`, and `EmergencyPauseCoordinator` are consumed directly by
 the bootstrap script. Bootstrap derives the RouterAdmin, policy evaluator, V2 execution sidecar, lifecycle Book,
@@ -530,23 +530,39 @@ can verify ordinary trading without exposing an unprepared conditional-order sur
 
 ## Position Protection Activation
 
-Position protection has a two-stage keeper model:
+Position protection has a trigger/attempt/retry keeper model:
 
 1. A permissionless trigger worker evaluates an armed TP/SL condition with a current Pyth update and, when a condition
-   is met, appends a full-position market-style close to the ordinary global FIFO tail.
-2. The ordinary order keeper executes that linked close using the normal post-commit historical Pyth rule.
+   is met, irreversibly latches the trigger and appends the first full-position market-style close attempt to the
+   ordinary global FIFO tail.
+2. The ordinary order keeper executes the live attempt using its own post-commit historical Pyth rule.
+3. A non-liquidation failure relatches the protection when the exact protected position remains, retains the one close
+   bounty, and pays no cleanup keeper. A permissionless retry worker then submits
+   `retryPositionProtectionClose(...)` without Pyth data; the fresh attempt receives a new id, commit clock, deadline,
+   and live/FAD oracle window at the current FIFO tail. Retry requires that exact side/size and zero pending Router
+   orders for the account. This loop continues until execution, liquidation, or terminal position mismatch.
+
+The protocol-operated worker automatically retries only an `Expired` latest attempt. It must first prune an expired
+sole FIFO head in a separate transaction, funded from the operator gas budget, then re-check the Book and receipt. It
+queues a retry only when live Pyth data (or frozen-close execution) is available and projected head-arrival is no more
+than `maxOrderAge - 15 seconds` (45 seconds with the default TTL). `PlannerRejected`, `ConstraintViolation`, and other
+non-expiry terminal reasons remain latched and page operators with the reason and failure fingerprint; the official
+worker does not hot-loop them before remediation. Permissionless third parties remain free to retry.
 
 Trader calls that create, replace, or attach protection are nonpayable and validate against the engine's cached fresh
 mark. They target the `PositionProtectionBook` discovered through `OrderRouter.positionProtectionBook()`, as does the
 payable `triggerPositionProtection(...)` keeper call. The Router does not forward these public selectors. Only the
 trigger call ingests payable Pyth update data. This keeps the trader flow compatible with zero-native-value sponsored
-accounts while retaining an independently verified trigger observation.
+accounts while retaining an independently verified trigger observation. The nonpayable retry selector remains live
+while new protection commits are paused or disabled and while the Engine is degraded or the oracle is frozen.
 
 The protected parent open is a caller-authored bounded V2 request and must pin the active lifecycle-Book digest. Only
-the Router-authenticated triggered linked close sets `expectedConfigHash == bytes32(0)`, which is an unpinned internal
-marker rather than a public wildcard. Deploy, bootstrap, and integration tests must verify both sides of that boundary:
-external zero-hash commits, including Book-forwarded parents, fail; valid bounded parents and authenticated trigger
-creation succeed; and terminal receipts retain the expected and observed config hashes.
+Router-authenticated triggered or retried close attempts set `expectedConfigHash == bytes32(0)`, which is an unpinned
+internal marker rather than a public wildcard. Deploy, bootstrap, and integration tests must verify both sides of that
+boundary: external zero-hash commits, including Book-forwarded parents, fail; valid bounded parents and authenticated
+attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request ABI and
+intent hash remain V2, but this release uses the V3 receipt and execution-config domains because registered protection
+attempts may authenticate `RetainedForProtectionRetry` with a zero bounty recipient.
 
 The bounded protected-open selector replaces the former scalar selector without a compatibility overload. Ship it
 only as part of a fresh complete perps-stack deployment, regenerate consumer ABIs from the new
@@ -562,8 +578,19 @@ protection value before the ordinary open planner evaluates the parent. Reusing 
 single source of risk semantics and an initcode constraint: do not re-embed a local copy of the exact-price kernel in
 the internally deployed position-protection Book.
 
-Protection lifecycle events originate from the Book. Indexers and trigger workers must subscribe at the Book address;
-the generated close's ordinary `OrderCommitted` and terminal-order events originate from the Router.
+Protection lifecycle events originate from the Book. Indexers and trigger/retry workers must subscribe at the Book
+address, including `PositionProtectionCloseAttemptQueued` and `PositionProtectionCloseAttemptFailed`; every generated
+attempt's ordinary `OrderCommitted` and terminal-order events originate from the Router. `linkedOrderId` is only the
+latest attempt, while each queued event names the previous attempt id (`0` initially), so durable integrations must
+retain the one-to-many attempt history. They must also index the lifecycle Book's
+`ProtectionAttemptRegistered` event because `isProtectionAttempt(orderId)` becomes false when finalization consumes the
+pending marker.
+
+Regenerate frontend, keeper, governance, and indexer bindings from this release. The ABI adds the permissionless retry
+action, lifecycle-Book registration/view surface, and close-attempt events. `PositionProtectionStatus.Latched` and
+`BountyDisposition.RetainedForProtectionRetry` are appended, preserving prior numeric ordinals, but old enum decoders
+will not know the new values. The receipt and execution-config hash domains are V3 even though the request/intent ABI
+remains V2; do not compare their hashes with an earlier stack.
 
 The feature flag and trigger bounty are members of the 48-hour timelocked `OrderRouterAdmin.RouterConfig`. Enabling the
 feature must use the normal proposal/finalization path:
@@ -578,7 +605,7 @@ feature must use the normal proposal/finalization path:
 Do not reconstruct unrelated fields from old release notes or hardcoded defaults: finalizing `RouterConfig` replaces the
 complete router configuration. Disabling new protection commits follows the same timelocked path. Disabling or pausing
 must not strand existing records: cancellation, valid triggering, linked FIFO execution, terminal cleanup, and
-liquidation remain live.
+latched retry, and liquidation remain live.
 
 ## Operational Notes
 
@@ -587,6 +614,10 @@ liquidation remain live.
 - This Terminal NAV V2 rollout is testnet-only and deliberately has no compatibility or migration path. Deploy a fresh
   complete stack and leave the old instance untouched; importing old positions, shares, pending requests, or claim
   escrow is out of scope.
+- The latched-retry protection lifecycle is also not an in-place Book update. Before cutover, stop new admission on the
+  old stack and resolve or explicitly inventory every active old protection and pending order. Deploy the Router,
+  lifecycle Book, constructor-created protection Book, and sidecars as one fresh compatible graph; then switch frontend,
+  keeper, indexer, and monitoring manifests together. Old attempt history and bounty attribution are not imported.
 - Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
   terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, coordinator, and lenses as a single
   versioned unit.
@@ -635,7 +666,7 @@ liquidation remain live.
    configure the guardian and seed Junior then Senior without an initial governance wait.
 6. Run the seeded verifier, set `ACTIVATE_TRADING=true`, rerun bootstrap, and run the active verifier.
 7. Fund test wallets with Arbitrum Sepolia ETH as needed.
-8. Point the frontend, public lens consumers, indexer, ordinary order keeper, LP epoch keeper, trigger worker, and
+8. Point the frontend, public lens consumers, indexer, ordinary order keeper, LP epoch keeper, trigger/retry workers, and
    monitoring at the new release. Configure the guardian monitor and protocol-funded incident keeper. Protection
    clients and event subscriptions use the Book; ordinary FIFO and LP epoch services use their canonical endpoints,
    with the LP keeper following the Lens-selected direct-Pool or Router route; operator and security monitoring use the
@@ -647,16 +678,18 @@ liquidation remain live.
     cutoff for risk-off actions, settlement rollback, and deliberately live closes, protection lifecycle paths, and
     funded claims; clear invalidated opens with the protocol incident keeper, then have governance perform independent
     recovery of every active restriction.
-11. Exercise trigger-worker discovery and dry-run/simulation paths while protection creation remains disabled.
+11. Exercise trigger- and retry-worker discovery and dry-run/simulation paths while protection creation remains disabled.
 12. Propose, wait 48 hours, verify, and finalize the complete router configuration that enables protection commits.
 13. Test attached-open activation, existing-position protection, both trigger directions, cancellation/replacement,
-    linked-order execution and expiry, frozen-oracle behavior, emergency-pause cancellation/trigger liveness, and
-    liquidation end to end.
-14. Run a limited-TVL soak for at least seven days before broader use. Monitor armed and triggered counts,
-    trigger-to-FIFO and FIFO-to-terminal latency, linked-close failure/expiry, keeper profitability, liquidation before
-    fill, exact reservation reconciliation, LP queue backlog, epoch-settlement progress, monitor dependency/critical
-    masks, observation completeness, cached-mark versus atomic-refresh routing, LP settlement-hold state, guardian
-    availability, and risk-off cleanup backlog.
+    first-attempt execution, failure-to-latch, repeated retry with fresh oracle windows, frozen-oracle retry/execution,
+    emergency-pause cancellation/trigger/retry liveness, exact bounty recycling, and liquidation from both `Latched`
+    and `Triggered` end to end.
+14. Run a limited-TVL soak for at least seven days before broader use. Monitor armed, latched, and triggered counts;
+    time latched without a live attempt; retry count; trigger-to-first-attempt and per-attempt FIFO-to-terminal latency;
+    unpaid failed-attempt cleanup; keeper profitability; liquidation before fill; exact Book-versus-Router reservation
+    reconciliation; LP queue backlog; epoch-settlement progress; monitor dependency/critical masks; observation
+    completeness; cached-mark versus atomic-refresh routing; LP settlement-hold state; guardian availability; and
+    risk-off cleanup backlog.
 
 ## Emergency Containment Runbook
 
@@ -674,7 +707,7 @@ pause trader closes/reductions or already-funded claims and does not create a gl
    the advisory Lens and no Lens condition trips it permissionlessly.
 3. Confirm `EmergencyContainmentTriggered`, its action and previous/new masks, and every targeted state. When risk-off
    is included, confirm the inclusive cutoff; covered opens remain invalid forever, including after recovery.
-4. Keep closes, liquidations, protection cancellation and valid trigger/linked-close processing, LP redemption
+4. Keep closes, liquidations, protection cancellation and valid trigger/retry/linked-attempt processing, LP redemption
    requests, existing cancellation paths, recapitalization/reconciliation, and funded claims operating. Risk-off's
    HousePool pause blocks new deposit requests and activation. Under settlement-only, new deposits and Senior
    reservations remain accepted but cannot activate; assets can accumulate under unchanged cancellation rules. A

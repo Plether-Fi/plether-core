@@ -36,7 +36,7 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 |-------|----------------|---------------------|
 | `MarginClearinghouse` | Custody trader settlement USDC, lock/release reserved buckets, settle or seize balances under trusted engine/router calls | Reprice the HousePool, classify LP ownership, or pay arbitrary third parties |
 | `OrderRouter` | Convert trader balance into queued committed margin and clearinghouse execution-bounty reservations; advance or unwind order lifecycle | Mutate `HousePool` accounting directly or invent trader/pool economics outside engine-validated outcomes |
-| `PositionProtectionBook` | Own retained protection state and direct protection actions/views; expose Router-only activation and terminal lifecycle hooks | Custody tokens, directly mutate FIFO, execute keeper/liquidation orchestration, or accept a trigger activation from any caller other than its immutable Router |
+| `PositionProtectionBook` | Own retained protection state, direct protection actions/views, latest-attempt linkage, and recycled retry-bounty attribution; expose Router-only activation and terminal lifecycle hooks | Custody tokens, directly mutate FIFO, execute keeper/liquidation orchestration, accept a trigger activation from any caller other than its immutable Router, or allow more than one live attempt per protection |
 | `CfdEngine` | Own core state, planner orchestration, carry realization, and narrow settlement host hooks | Hold funds directly or bypass clearinghouse / `HousePool` custody boundaries |
 | `TerminalNavBookV2` | Aggregate account curves derived from canonical Engine and clearinghouse state for exact signed LP NAV at a mark | Accept mutations other than the bound Engine's state-derived `syncFromEngine(...)`, accept caller-supplied curve economics, infer cash availability, or act as the endpoint risk-admission reserve |
 | `CfdEngineSettlementSidecar` | Execute externalized close/liquidation settlement orchestration through engine-owned host hooks | Own storage or bypass engine authorization boundaries |
@@ -110,6 +110,8 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 | Commit open order | Free settlement -> committed margin + reserved bounty bucket | `OrderRouter` via clearinghouse | Moves trader cash into pending-order reservations; no pool effect |
 | Commit close order | Eligible free settlement -> reserved bounty bucket | `OrderRouter` via clearinghouse | Funds queue execution without reclassifying PnL pledge or changing the terminal collectible cap |
 | Create existing-position protection | Free settlement -> reserved trigger + linked-close bounty | `PositionProtectionBook` via clearinghouse | Locks action value first, then requires exact-basis PnL-pledge-plus-claim price equity strictly above the stricter initial/active threshold; free/action reserves do not back that test, and uncovered carry or underfunded negative VPI fails closed |
+| Failed protection close attempt | Router-attributed reserved close bounty -> Book-attributed recycled bounty, or keeper on position mismatch | `OrderRouter` + `PositionProtectionBook` | Exact matching position relatches through unpaid `RetainedForProtectionRetry`; mismatch terminally fails protection under ordinary paid cleanup |
+| Retry latched protection | Book-attributed recycled bounty -> fresh FIFO close attempt | `PositionProtectionBook` via Router | Permissionless and nonpayable; creates a new id, commit clock, deadline, and oracle window without another trader debit or trigger evaluation |
 | Execute open | Committed margin -> live position margin; protocol fee -> treasury clearinghouse account; adverse trading cash -> `HousePool` accounted inflow when realized | `CfdEngine` | Converts pending reservations into live exposure; fee value becomes treasury margin while non-fee trading inflows become canonical pool cash |
 | Profitable close | Position margin + free settlement + pool cash -> trader settlement or trader claim balance | `CfdEngine` / `CfdEngineSettlementSidecar` | Realizes trader profit; may create a senior trader claim instead of reverting |
 | Losing close / liquidation price settlement | Same-account claim is netted; PnL pledge -> `HousePool`; excess -> `PriceLossWrittenOff` | `CfdEngine` / `CfdEngineSettlementSidecar` | Collects exactly the value precommitted in terminal NAV; excess creates no asset, claim, deficit, or protocol debt; action charges remain separate |
@@ -128,8 +130,9 @@ For normative semantics, use [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md). For sys
 
 - `MarginClearinghouse` owns trader custody.
 - `OrderRouter` owns queued-intent bookkeeping.
-- `PositionProtectionBook` owns retained OCO state and direct protection actions/views. The Router creates and
-  immutable-binds it during construction; it does not carry keeper or liquidation orchestration bytecode.
+- `PositionProtectionBook` owns retained OCO state, direct protection actions/views, latest-attempt linkage, and the
+  single close bounty while a triggered protection is latched between attempts. The Router creates and immutable-binds
+  it during construction; it does not carry keeper or liquidation orchestration bytecode.
 - `OrderRouterLiquidationBatchSidecar` is the stateless code carrier for Router mark refresh/protection trigger,
   single/batch liquidation, and LP-epoch settlement. The Router remains every path's canonical public surface.
 - `CfdEngine` owns state transitions and liability classification.

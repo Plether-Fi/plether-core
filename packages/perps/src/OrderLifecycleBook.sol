@@ -66,12 +66,12 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
 
     /// @inheritdoc IOrderLifecycleBook
     bytes32 public constant override RECEIPT_TYPEHASH = keccak256(
-        "PletherOrderReceiptV2(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,"
+        "PletherOrderReceiptV3(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,"
         "OrderReceipt receipt)"
     );
 
     /// @inheritdoc IOrderLifecycleBook
-    bytes32 public constant override CONFIG_SCHEMA_HASH = keccak256("PletherExecutionConfigV2");
+    bytes32 public constant override CONFIG_SCHEMA_HASH = keccak256("PletherExecutionConfigV3");
 
     /// @inheritdoc IOrderLifecycleBook
     address public immutable override ROUTER;
@@ -91,6 +91,9 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
 
     /// @notice Ephemeral policy and identity required to authenticate terminal settlement.
     mapping(uint64 orderId => OrderV2Types.PendingIntent intent) private _pendingIntents;
+
+    /// @notice Ephemeral Router-authenticated marker for retryable position-protection child orders.
+    mapping(uint64 orderId => bool registered) private _protectionAttempts;
 
     /// @notice Permanent compact terminal outcomes.
     mapping(uint64 orderId => OrderV2Types.CompactOutcome terminalOutcome) private _outcomes;
@@ -248,6 +251,28 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     /// @inheritdoc IOrderLifecycleBook
+    function registerProtectionAttempt(
+        uint64 orderId
+    ) external override onlyRouter {
+        OrderV2Types.PendingIntent storage pending = _pendingIntents[orderId];
+        if (pending.account == address(0) || pending.bounds.expectedConfigHash != bytes32(0)) {
+            revert OrderLifecycleBook__InvalidProtectionAttempt(orderId);
+        }
+        if (_protectionAttempts[orderId]) {
+            revert OrderLifecycleBook__ProtectionAttemptAlreadyRegistered(orderId);
+        }
+        _protectionAttempts[orderId] = true;
+        emit ProtectionAttemptRegistered(orderId);
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function isProtectionAttempt(
+        uint64 orderId
+    ) external view override returns (bool registered) {
+        return _protectionAttempts[orderId];
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
     function finalize(
         OrderV2Types.OrderReceipt calldata receipt
     ) external override onlyRouter returns (bytes32 receiptHash) {
@@ -301,6 +326,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             receiptHash: receiptHash
         });
         delete _pendingIntents[receipt.orderId];
+        delete _protectionAttempts[receipt.orderId];
 
         emit OrderFinalized(
             receipt.orderId, receipt.account, receipt.clientOrderId, receiptHash, terminalBlock, terminalTime, receipt
@@ -462,6 +488,17 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         if (receipt.bountyUsdc == 0) {
             if (
                 receipt.bountyDisposition != OrderV2Types.BountyDisposition.None
+                    || receipt.bountyRecipient != address(0)
+            ) {
+                revert OrderLifecycleBook__InvalidTerminalOutcome();
+            }
+            return;
+        }
+        if (receipt.bountyDisposition == OrderV2Types.BountyDisposition.RetainedForProtectionRetry) {
+            if (
+                !_protectionAttempts[receipt.orderId] || receipt.status != OrderV2Types.LifecycleStatus.Failed
+                    || receipt.reason == OrderV2Types.TerminalReason.RiskOff
+                    || receipt.reason == OrderV2Types.TerminalReason.AccountLiquidated
                     || receipt.bountyRecipient != address(0)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();

@@ -6,7 +6,7 @@ import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtect
 /// @notice Read surface implemented by the router-discoverable position-protection book.
 interface IPositionProtectionViews {
 
-    /// @notice Returns the account's pending-open, armed, or triggered protection id.
+    /// @notice Returns the account's pending-open, armed, triggered, or latched protection id.
     /// @param account Account to inspect.
     /// @return protectionId Active protection id, or zero when none exists.
     function activePositionProtectionId(

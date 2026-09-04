@@ -147,6 +147,40 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         return _commitOrder(host, account, request, true);
     }
 
+    /// @notice Queues a fresh short-lived close attempt for an already-latched protection.
+    /// @dev The protection Book authenticates and validates durable state before calling this host. The retry receives
+    ///      fresh timing and lifecycle identity, but reuses the Book-held bounty without creating another reserve.
+    function commitProtectionCloseAttempt(
+        uint64 protectionId,
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 executionBountyUsdc
+    ) external returns (uint64 orderId) {
+        _requireDelegateCall();
+        IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0) {
+            revert OrderRouter__Unauthorized();
+        }
+
+        orderId = host.nextCommitId();
+        OrderV2Types.OrderRequest memory request = _protectionCloseRequest(host, side, size);
+        request.clientOrderId = OrderV2Types.protocolClientOrderId(
+            keccak256(
+                abi.encode(
+                    "PLETHER_POSITION_PROTECTION_RETRY_V2", block.chainid, address(this), account, protectionId, orderId
+                )
+            )
+        );
+        (uint64 registeredOrderId,, bool replayed) =
+            host.lifecycleBook().registerPending(account, orderId, request, executionBountyUsdc);
+        if (replayed || registeredOrderId != orderId) {
+            revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(orderId);
+        }
+        host.lifecycleBook().registerProtectionAttempt(orderId);
+        _queueProtectionAttempt(host, orderId, account, side, size, executionBountyUsdc);
+    }
+
     /// @dev Permanent identity is resolved before current-state validation so an exact replay remains unconditional.
     function _commitOrder(
         IOrderLiquidationBatchHost host,
@@ -479,20 +513,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             IPositionProtectionBook.TriggerPlan memory plan =
                 protectionBook.activate(protectionId, snapshot.markPrice, snapshot.publishTime, linkedOrderId);
             _registerProtectionTrigger(host, protectionId, linkedOrderId, plan);
-            bytes memory triggerItemCall = abi.encodeWithSelector(
-                IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector,
-                linkedOrderId,
-                plan.account,
-                plan.side,
-                plan.size,
-                plan.executionBountyUsdc
-            );
-            (bool triggerRecorded, bytes memory triggerRevertData) = address(host).call(triggerItemCall);
-            if (!triggerRecorded) {
-                assembly ("memory-safe") {
-                    revert(add(triggerRevertData, 0x20), mload(triggerRevertData))
-                }
-            }
+            _queueProtectionAttempt(host, linkedOrderId, plan.account, plan.side, plan.size, plan.executionBountyUsdc);
             engine.creditBounty(
                 plan.account, refundRecipient, plan.triggerBountyUsdc, snapshot.markPrice, snapshot.publishTime
             );
@@ -509,9 +530,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint64 linkedOrderId,
         IPositionProtectionBook.TriggerPlan memory plan
     ) private {
-        // Solidity zero-initializes margin and minimum-bound fields omitted from this synthetic close request.
-        // slither-disable-next-line uninitialized-local
-        OrderV2Types.OrderRequest memory request;
+        OrderV2Types.OrderRequest memory request = _protectionCloseRequest(host, plan.side, plan.size);
         request.clientOrderId = OrderV2Types.protocolClientOrderId(
             keccak256(
                 abi.encode(
@@ -524,12 +543,27 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                 )
             )
         );
-        request.side = plan.side;
-        request.sizeDelta = plan.size;
-        request.targetPrice = plan.side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
+        (uint64 resolvedOrderId,, bool replayed) =
+            host.lifecycleBook().registerPending(plan.account, linkedOrderId, request, plan.executionBountyUsdc);
+        if (replayed || resolvedOrderId != linkedOrderId) {
+            revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(linkedOrderId);
+        }
+        host.lifecycleBook().registerProtectionAttempt(linkedOrderId);
+    }
+
+    /// @dev Shares the execution envelope across initial and retried closes; callers supply their distinct client ids.
+    ///      Omitted margin and minimum-bound fields remain zero-initialized.
+    function _protectionCloseRequest(
+        IOrderLiquidationBatchHost host,
+        CfdTypes.Side side,
+        uint256 size
+    ) private view returns (OrderV2Types.OrderRequest memory request) {
+        request.side = side;
+        request.sizeDelta = size;
+        request.targetPrice = side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
         request.isClose = true;
         request.bounds.validUntil = uint64(block.timestamp + host.maxOrderAge());
-        request.bounds.allowedExecutionModes = 1 | 2 | 4;
+        request.bounds.allowedExecutionModes = ALL_V2_EXECUTION_MODES;
         request.bounds.expectedConfigHash = bytes32(0);
         request.bounds.maxExecutionBountyUsdc = type(uint256).max;
         request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
@@ -538,11 +572,30 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         request.bounds.maxExplicitFeesUsdc = type(uint256).max;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
+    }
 
-        (uint64 resolvedOrderId,, bool replayed) =
-            host.lifecycleBook().registerPending(plan.account, linkedOrderId, request, plan.executionBountyUsdc);
-        if (replayed || resolvedOrderId != linkedOrderId) {
-            revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(linkedOrderId);
+    /// @dev Appends an already-registered protection attempt through the Router's isolated storage frame.
+    function _queueProtectionAttempt(
+        IOrderLiquidationBatchHost host,
+        uint64 linkedOrderId,
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 executionBountyUsdc
+    ) private {
+        bytes memory itemCall = abi.encodeWithSelector(
+            IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector,
+            linkedOrderId,
+            account,
+            side,
+            size,
+            executionBountyUsdc
+        );
+        (bool recorded, bytes memory revertData) = address(host).call(itemCall);
+        if (!recorded) {
+            assembly ("memory-safe") {
+                revert(add(revertData, 0x20), mload(revertData))
+            }
         }
     }
 

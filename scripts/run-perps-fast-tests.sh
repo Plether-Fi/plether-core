@@ -3,11 +3,12 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_root="${repo_root}/packages/perps"
-production_test_regex='testProduction|RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|GasBudget|test_Runtime_|test_Gas_'
+deployment_size_regex='RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|test_Runtime_'
+production_test_regex='GasBudget|test_Gas_'
 fuzz_invariant_regex='testFuzz_|invariant_'
-regular_exclusion_regex="${production_test_regex}|${fuzz_invariant_regex}"
+regular_exclusion_regex="${deployment_size_regex}|${production_test_regex}|${fuzz_invariant_regex}"
 
-echo "Running production-codegen release gates with via-IR"
+echo "Running production-codegen gas and runtime gates with via-IR"
 FOUNDRY_PROFILE=ci \
     forge test --offline -vvv --root "${package_root}" --match-test "${production_test_regex}"
 
@@ -29,4 +30,4 @@ FOUNDRY_PROFILE=ci \
     FOUNDRY_INVARIANT_DEPTH=128 \
     forge test --offline -vvv --root "${package_root}" \
         --match-test "${fuzz_invariant_regex}" \
-        --no-match-test "${production_test_regex}"
+        --no-match-test "${deployment_size_regex}|${production_test_regex}"

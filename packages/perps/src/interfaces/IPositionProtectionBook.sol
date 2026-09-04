@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
@@ -33,6 +34,18 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
         address account,
         IOrderRouterAccounting.OrderStatus terminalStatus
     ) external;
+
+    /// @notice Relatches the current failed close attempt when its protected position still matches exactly.
+    /// @dev Router-only. The Router calls this before finalizing a non-liquidation failed child receipt. Returning
+    ///      `true` transfers accounting attribution for the unchanged reserved bounty from the child back to this
+    ///      Book; returning `false` permits ordinary bounty settlement after a missing or mismatched position resolves
+    ///      the protection as `Failed`. Unknown and stale order ids are harmless no-ops that return `false`.
+    function handleFailedProtectionAttempt(
+        uint64 orderId,
+        address account,
+        OrderV2Types.TerminalReason reason,
+        uint256 executionBountyUsdc
+    ) external returns (bool retained);
 
     /// @notice Fails protection attached to a risk-off-invalidated parent without unlocking its reserve directly.
     /// @dev Router-only. The returned bounty is folded into the Router's no-checkpoint clearinghouse refund.

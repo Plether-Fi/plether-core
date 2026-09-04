@@ -24,6 +24,33 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
         return 0;
     }
 
+    function _assertClaimableDepositRedeemRequest(
+        Vm.Log memory log,
+        uint256 requestId,
+        uint256 redeemRequestId,
+        uint256 assets,
+        uint256 shares
+    ) internal pure {
+        assertEq(log.topics[1], bytes32(uint256(uint160(ALICE))));
+        assertEq(log.topics[2], bytes32(requestId));
+        assertEq(log.topics[3], bytes32(redeemRequestId));
+        (address sender, uint256 eventAssets, uint256 eventShares) = abi.decode(log.data, (address, uint256, uint256));
+        assertEq(sender, ALICE);
+        assertEq(eventAssets, assets);
+        assertEq(eventShares, shares);
+    }
+
+    function _assertDepositEpochFullyClaimed(
+        uint256 requestId,
+        uint256 expectedShares
+    ) internal view {
+        (uint256 epochAssets,, uint256 claimedAssets, uint256 claimedShares, bool finalized) =
+            juniorVault.depositEpochs(requestId);
+        assertTrue(finalized);
+        assertEq(claimedAssets, epochAssets, "full routing must consume all remaining contribution basis");
+        assertEq(claimedShares, expectedShares);
+    }
+
     function test_ActivationUsesActualFinalizationTimeAndClaimInheritsIt() public {
         uint256 assets = 20_000e6;
         uint256 shares = 20_000e9;
@@ -206,14 +233,7 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
                 foundCanonical = true;
             } else if (logs[i].topics[0] == dedicatedTopic) {
                 foundDedicated = true;
-                assertEq(logs[i].topics[1], bytes32(uint256(uint160(ALICE))));
-                assertEq(logs[i].topics[2], bytes32(requestId));
-                assertEq(logs[i].topics[3], bytes32(redeemRequestId));
-                (address sender, uint256 eventAssets, uint256 eventShares) =
-                    abi.decode(logs[i].data, (address, uint256, uint256));
-                assertEq(sender, ALICE);
-                assertEq(eventAssets, assets);
-                assertEq(eventShares, shares);
+                _assertClaimableDepositRedeemRequest(logs[i], requestId, redeemRequestId, assets, shares);
             }
         }
 
@@ -283,11 +303,7 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
         assertEq(juniorVault.balanceOf(address(juniorVault)), vaultBalanceBefore);
         assertEq(juniorVault.totalSupply(), supplyBefore);
 
-        (uint256 epochAssets,, uint256 epochClaimedAssets, uint256 epochClaimedShares, bool finalized) =
-            juniorVault.depositEpochs(requestId);
-        assertTrue(finalized);
-        assertEq(epochClaimedAssets, epochAssets, "full routing must consume all remaining contribution basis");
-        assertEq(epochClaimedShares, epochShares);
+        _assertDepositEpochFullyClaimed(requestId, epochShares);
     }
 
     function test_DirectRouteCanBeFundedAndClaimedWithoutWalletShareCustody() public {

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 /// @notice Canonical custom errors and commit event shared by the delayed-order router stack.
@@ -132,6 +133,8 @@ interface IOrderRouterErrors {
     error OrderRouter__ProtectionNotFound();
     /// @notice The requested lifecycle transition requires an armed protection.
     error OrderRouter__ProtectionNotArmed();
+    /// @notice The requested retry requires a latched protection with no live close attempt.
+    error OrderRouter__ProtectionNotLatched();
     /// @notice An ordinary discretionary order was attempted while account protection is active.
     error OrderRouter__ProtectionActive();
     /// @notice Trigger prices are both disabled, out of bounds, or inconsistent with the protected direction.
@@ -219,6 +222,20 @@ interface IOrderRouterErrors {
         PositionProtectionTypes.PositionProtectionTriggerLeg leg,
         uint256 triggerMarkPrice,
         uint64 triggerPublishTime
+    );
+
+    /// @notice Emitted whenever the initial or a retried protection close joins the ordinary FIFO queue.
+    event PositionProtectionCloseAttemptQueued(
+        uint64 indexed protectionId, address indexed account, uint64 indexed linkedOrderId, uint64 previousLinkedOrderId
+    );
+
+    /// @notice Emitted when a linked close fails and the protection either relatches or resolves as failed.
+    event PositionProtectionCloseAttemptFailed(
+        uint64 indexed protectionId,
+        address indexed account,
+        uint64 indexed linkedOrderId,
+        OrderV2Types.TerminalReason reason,
+        bool relatched
     );
 
     /// @notice Emitted when a protection reaches an executed, failed, or liquidated terminal state.

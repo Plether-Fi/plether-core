@@ -83,6 +83,11 @@ jobs:
       - name: Build package
         run: bash scripts/run-with-heartbeat.sh forge build --sizes --skip test --skip script --root packages/perps
 
+      - name: Enforce production deployment-size limits
+        run: >-
+          bash scripts/run-with-heartbeat.sh forge test --offline -vvv --root packages/perps
+          --match-test "RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|test_Runtime_"
+
       - name: Run fast package tests
         run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-fast-tests.sh
 

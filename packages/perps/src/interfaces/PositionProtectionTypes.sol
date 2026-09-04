@@ -20,12 +20,15 @@ library PositionProtectionTypes {
         Triggered,
         /// @notice The linked close executed successfully.
         Executed,
-        /// @notice The parent open or linked close reached a terminal failure.
+        /// @notice The parent open failed, or a failed close attempt found the protected position missing or changed.
         Failed,
         /// @notice The owner cancelled the protection before it triggered.
         Cancelled,
         /// @notice Liquidation terminally removed the protection and any linked close.
-        Liquidated
+        Liquidated,
+        /// @notice The trigger is permanently latched but no close attempt is currently live.
+        /// @dev A permissionless retry may transfer the retained execution bounty to one fresh FIFO close attempt.
+        Latched
     }
 
     /// @notice The OCO leg that activated a protection.
@@ -51,15 +54,16 @@ library PositionProtectionTypes {
     /// @dev Prices use 8 decimals, `size` uses 18 decimals, and bounty fields use 6-decimal USDC.
     /// @param protectionId Monotonically increasing protection identifier.
     /// @param parentOrderId Opening order that must execute before protection arms, or zero for an existing position.
-    /// @param linkedOrderId Full-position FIFO close created by the trigger, or zero before triggering.
+    /// @param linkedOrderId Most recent full-position FIFO close attempt, or zero before triggering. `Triggered`
+    ///        means this order is live; `Latched` means it is retained terminal history and no attempt is live.
     /// @param account Trader account that owns and funds the protection.
     /// @param side Protected position direction snapshotted when protection arms.
     /// @param size Protected full position size snapshotted when protection arms.
     /// @param takeProfitTriggerPrice Direction-aware take-profit trigger, or zero when disabled.
     /// @param stopLossTriggerPrice Direction-aware stop-loss trigger, or zero when disabled.
     /// @param triggerBountyUsdc Current unpaid trigger bounty; zero after trigger, cancellation, or terminal cleanup.
-    /// @param executionBountyUsdc Current unpaid linked-close bounty; zero once transferred to ordinary order accounting
-    ///        or released during cancellation or terminal cleanup.
+    /// @param executionBountyUsdc Current unpaid close bounty; nonzero before trigger and while `Latched`, zero while
+    ///        attributed to a live `Triggered` attempt or after cancellation or terminal cleanup.
     /// @param armedAt Timestamp at which the protection most recently became armed.
     /// @param armedBlock Block number at which the protection most recently became armed.
     /// @param triggerMarkPrice Neutral oracle mark that activated the protection, or zero before triggering.

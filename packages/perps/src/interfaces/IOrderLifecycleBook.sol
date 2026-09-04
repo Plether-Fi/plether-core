@@ -29,6 +29,10 @@ interface IOrderLifecycleBook {
     error OrderLifecycleBook__ExecutionBountyAboveBound(uint256 actualBountyUsdc, uint256 maximumBountyUsdc);
     /// @notice A finalization referenced an order that is not pending.
     error OrderLifecycleBook__OrderNotPending(uint64 orderId);
+    /// @notice A protection-attempt marker referenced a missing or externally pinned pending intent.
+    error OrderLifecycleBook__InvalidProtectionAttempt(uint64 orderId);
+    /// @notice A pending order was already registered as a position-protection execution attempt.
+    error OrderLifecycleBook__ProtectionAttemptAlreadyRegistered(uint64 orderId);
     /// @notice Receipt identity or its pinned configuration differs from the pending intent.
     error OrderLifecycleBook__ReceiptIdentityMismatch(uint64 orderId);
     /// @notice A receipt supplied an impossible terminal status/reason combination.
@@ -45,6 +49,9 @@ interface IOrderLifecycleBook {
         uint256 executionBountyUsdc,
         OrderV2Types.OrderRequest request
     );
+
+    /// @notice Emitted after the Router authenticates a pending internal intent as a position-protection attempt.
+    event ProtectionAttemptRegistered(uint64 indexed orderId);
 
     /// @notice Canonical fixed-shape evidence for one terminal order.
     /// @dev The receipt hash commits to the complete receipt, terminal clock, chain, Book, and Router.
@@ -96,6 +103,18 @@ interface IOrderLifecycleBook {
         OrderV2Types.OrderRequest calldata request,
         uint256 executionBountyUsdc
     ) external returns (uint64 resolvedOrderId, bytes32 intentHash, bool replayed);
+
+    /// @notice Marks a pending internal intent as a position-protection execution attempt.
+    /// @dev Router-only. The intent must already be pending, use the internal unpinned configuration domain, and not
+    ///      already carry the marker. Finalization deletes the marker regardless of terminal outcome.
+    function registerProtectionAttempt(
+        uint64 orderId
+    ) external;
+
+    /// @notice Returns whether a pending order is registered as a position-protection execution attempt.
+    function isProtectionAttempt(
+        uint64 orderId
+    ) external view returns (bool registered);
 
     /// @notice Atomically deletes pending policy, stores a compact outcome, and emits the full receipt.
     function finalize(
