@@ -86,8 +86,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     }
 
     /// @notice Typed compatibility host used only by the immutable position-protection Book for an attached open.
-    /// @dev The Book constructs the synthetic identity and permissive zero-config policy outside Router runtime. This
-    ///      host authenticates the Book and explicit account, then uses the canonical V2 registration and commit path.
+    /// @dev The Book forwards the caller-authored bounded request outside Router runtime. This host authenticates the
+    ///      Book and explicit account, then uses the canonical public V2 registration and commit policy.
     function commitProtectedOpen(
         address account,
         OrderV2Types.OrderRequest calldata request

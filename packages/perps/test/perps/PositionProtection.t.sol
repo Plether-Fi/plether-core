@@ -9,6 +9,7 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -1167,11 +1168,11 @@ contract PositionProtectionTest is BasePerpTest {
         vm.expectRevert(Pausable.EnforcedPause.selector);
         protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
 
+        OrderV2Types.OrderRequest memory pausedRequest =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(CAROL);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
-        );
+        protectionActions.commitOpenOrderWithProtection(pausedRequest, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         vm.prank(ALICE);
         protectionActions.cancelPositionProtection(cancelledProtectionId);
@@ -1201,11 +1202,11 @@ contract PositionProtectionTest is BasePerpTest {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
         protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
 
+        OrderV2Types.OrderRequest memory disabledRequest =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(CAROL);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
-        protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
-        );
+        protectionActions.commitOpenOrderWithProtection(disabledRequest, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         vm.prank(ALICE);
         protectionActions.cancelPositionProtection(cancelledProtectionId);
@@ -1249,14 +1250,13 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_ProtectionBook_NonTriggerActionsRejectEthAndNeverCustodyIt() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         bytes[] memory calls = new bytes[](4);
         calls[0] = abi.encodeCall(IPositionProtectionActions.createPositionProtection, (params));
         calls[1] = abi.encodeCall(IPositionProtectionActions.replacePositionProtection, (uint64(1), params));
         calls[2] = abi.encodeCall(IPositionProtectionActions.cancelPositionProtection, (uint64(1)));
-        calls[3] = abi.encodeCall(
-            IPositionProtectionActions.commitOpenOrderWithProtection,
-            (CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params)
-        );
+        calls[3] = abi.encodeCall(IPositionProtectionActions.commitOpenOrderWithProtection, (request, params));
 
         vm.deal(ALICE, calls.length);
         for (uint256 i; i < calls.length; ++i) {
@@ -1395,11 +1395,11 @@ contract PositionProtectionTest is BasePerpTest {
     function test_ActiveProtection_BlocksAttachedOpenWithCanonicalSelector() public {
         _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
-        protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
-        );
+        protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
     }
 
     function test_Liquidation_ArmedProtectionForfeitsBothBountiesAndTerminalizes() public {
@@ -1597,6 +1597,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
 
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        OrderV2Types.OrderRequest memory request = _boundedOpenRequest(CfdTypes.Side.LONG, size, marginUsdc, 0);
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1604,9 +1605,7 @@ contract PositionProtectionTest is BasePerpTest {
                 uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED)
             )
         );
-        protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, size, marginUsdc, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
-        );
+        protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         assertEq(_freeSettlementUsdc(ALICE), freeBefore, "commit rejection must roll back every tentative lock");
         assertEq(
@@ -1625,10 +1624,11 @@ contract PositionProtectionTest is BasePerpTest {
         _open(BOB, CfdTypes.Side.SHORT, size, marginUsdc, MARK_PRICE);
 
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
-        vm.prank(ALICE);
+        vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, size, marginUsdc, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
+            _boundedOpenRequest(CfdTypes.Side.LONG, size, marginUsdc, 0), _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
+        vm.stopPrank();
         uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
 
         uint256 maxLiabilityUsdc = _maxLiability();
@@ -1693,10 +1693,11 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_SuccessArmsProtectionAtomically() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
-        vm.prank(ALICE);
+        vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
         );
+        vm.stopPrank();
 
         PositionProtectionTypes.PositionProtectionView memory staged =
             protectionViews.getPositionProtection(protectionId);
@@ -1752,41 +1753,250 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(liveSize, POSITION_SIZE, "parent should open the position");
     }
 
-    function test_AttachedOpen_PublicRawIdPreclaimCannotPoisonProtocolParent() public {
-        uint64 poisonOrderId = router.nextCommitId();
-        uint64 predictedParentOrderId = poisonOrderId + 1;
-        bytes32 rawParentDigest = keccak256(
-            abi.encode(
-                "PLETHER_POSITION_PROTECTION_PARENT_V2", block.chainid, address(router), ALICE, predictedParentOrderId
-            )
-        );
-        bytes32 protocolClientOrderId = OrderV2Types.protocolClientOrderId(rawParentDigest);
-
-        OrderV2Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawParentDigest, false);
-        poisonRequest.bounds.validUntil = uint64(block.timestamp + 1);
-        vm.prank(ALICE);
-        assertEq(router.commitOrder(poisonRequest), poisonOrderId, "public preclaim order id");
-
-        vm.warp(uint256(poisonRequest.bounds.validUntil) + 1);
-        vm.prank(EXECUTION_KEEPER);
-        OrderV2Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
-        assertEq(uint8(poisonResult.terminalReason), uint8(OrderV2Types.TerminalReason.Expired));
-        _refreshMark(MARK_PRICE);
+    function test_AttachedOpen_RetainsCallerBoundedRequestAndPublicIdentity() public {
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request.clientOrderId = keccak256("bounded-protected-parent");
+        request.bounds.validUntil = uint64(block.timestamp + 1);
+        request.bounds.allowedExecutionModes = 1;
 
         vm.prank(ALICE);
-        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
-        );
+        (uint64 parentOrderId, uint64 protectionId) =
+            protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
-        assertEq(parentOrderId, predictedParentOrderId, "fixture must target the formerly colliding parent");
-        assertTrue(OrderV2Types.isProtocolClientOrderId(protocolClientOrderId));
-        assertEq(router.lifecycleBook().clientIntent(ALICE, rawParentDigest).orderId, poisonOrderId);
-        assertEq(router.lifecycleBook().clientIntent(ALICE, protocolClientOrderId).orderId, parentOrderId);
+        OrderV2Types.ClientIntent memory intent = router.lifecycleBook().clientIntent(ALICE, request.clientOrderId);
+        OrderV2Types.PendingIntent memory pending = router.lifecycleBook().pendingIntent(parentOrderId);
+        (IOrderRouterAccounting.PendingOrderView memory parent,) = router.getPendingOrderView(parentOrderId);
+        assertFalse(OrderV2Types.isProtocolClientOrderId(request.clientOrderId), "parent must use public id namespace");
+        assertEq(intent.orderId, parentOrderId, "client id must resolve to parent");
+        assertEq(intent.intentHash, router.lifecycleBook().hashOrderRequest(ALICE, request), "caller request hash");
+        assertEq(pending.account, ALICE, "pending account");
+        assertEq(pending.clientOrderId, request.clientOrderId, "pending client id");
+        assertEq(pending.intentHash, intent.intentHash, "pending intent hash");
+        assertEq(keccak256(abi.encode(pending.bounds)), keccak256(abi.encode(request.bounds)), "exact bounds");
+        assertEq(uint8(parent.side), uint8(request.side), "parent side");
+        assertEq(parent.sizeDelta, request.sizeDelta, "parent size");
+        assertEq(parent.marginDelta, request.marginDelta, "parent margin");
+        assertEq(parent.targetPrice, request.targetPrice, "parent target");
         assertEq(
             uint8(protectionViews.getPositionProtection(protectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen),
-            "raw public preclaim must not block the protected parent"
+            "bounded parent must stage protection"
         );
+    }
+
+    function test_AttachedOpen_RejectsMalformedOrUnboundedParentAndRollsBack() public {
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        bytes32 currentConfigHash = request.bounds.expectedConfigHash;
+
+        request.bounds.expectedConfigHash = bytes32(0);
+        _expectAttachedOpenCommitRevert(
+            request,
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__ExecutionConfigMismatch.selector, bytes32(0), currentConfigHash
+            )
+        );
+
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request.targetPrice = 0;
+        _expectAttachedOpenCommitRevert(
+            request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ZeroTargetPrice.selector)
+        );
+
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request.isClose = true;
+        _expectAttachedOpenCommitRevert(
+            request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__Unauthorized.selector)
+        );
+
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request.clientOrderId = OrderV2Types.protocolClientOrderId(keccak256("protected-parent"));
+        _expectAttachedOpenCommitRevert(
+            request,
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, request.clientOrderId, false
+            )
+        );
+
+        request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        uint256 executionBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(POSITION_SIZE);
+        request.bounds.maxExecutionBountyUsdc = executionBountyUsdc - 1;
+        _expectAttachedOpenCommitRevert(
+            request,
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound.selector,
+                executionBountyUsdc,
+                executionBountyUsdc - 1
+            )
+        );
+    }
+
+    function test_AttachedOpen_RejectsStaleConfigAtCommitAndRollsBack() public {
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        bytes32 staleConfigHash = request.bounds.expectedConfigHash;
+        _setRouterConfig(_routerConfig());
+        _refreshMark(MARK_PRICE);
+        request.bounds.validUntil = uint64(block.timestamp + router.maxOrderAge());
+        bytes32 currentConfigHash = router.lifecycleBook().currentExecutionConfigHash();
+        assertTrue(staleConfigHash != currentConfigHash, "finalized config must change the digest");
+
+        _expectAttachedOpenCommitRevert(
+            request,
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__ExecutionConfigMismatch.selector, staleConfigHash, currentConfigHash
+            )
+        );
+    }
+
+    function test_AttachedOpen_ConfigDriftTerminallyFailsParentAndProtection() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        routerAdmin.proposeRouterConfig(config);
+        uint256 activationTime = routerAdmin.routerConfigActivationTime();
+        vm.warp(activationTime - 1);
+        _refreshMark(MARK_PRICE);
+
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) =
+            protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+
+        vm.warp(activationTime);
+        routerAdmin.finalizeRouterConfig();
+        assertTrue(
+            request.bounds.expectedConfigHash != router.lifecycleBook().currentExecutionConfigHash(),
+            "finalized config must invalidate the parent"
+        );
+
+        vm.prank(EXECUTION_KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(parentOrderId, new bytes[](0));
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "parent lifecycle");
+        assertEq(
+            uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.ConfigMismatch), "parent failure reason"
+        );
+        _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
+    }
+
+    function test_AttachedOpen_DisallowedExecutionModeFailsParentAndProtection() public {
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        request.bounds.allowedExecutionModes = 2;
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) =
+            protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        assertFalse(engine.isFadWindow(), "execution must occur in live mode");
+        vm.prank(EXECUTION_KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(parentOrderId, _mockPythUpdateData(MARK_PRICE));
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "parent lifecycle");
+        assertEq(
+            uint8(result.terminalReason),
+            uint8(OrderV2Types.TerminalReason.ExecutionModeDisallowed),
+            "parent failure reason"
+        );
+        _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
+    }
+
+    function test_AttachedOpen_FinancialBoundFailureFailsParentAndProtection() public {
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        uint256 executionNotionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
+        request.bounds.maxExecutionNotionalUsdc = executionNotionalUsdc - 1;
+
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) =
+            protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+
+        vm.prank(EXECUTION_KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(parentOrderId, _mockPythUpdateData(MARK_PRICE));
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "parent lifecycle");
+        assertEq(
+            uint8(result.terminalReason),
+            uint8(OrderV2Types.TerminalReason.ConstraintViolation),
+            "parent failure reason"
+        );
+        assertEq(
+            uint8(router.lifecycleBook().outcome(parentOrderId).failedConstraint),
+            uint8(OrderV2Types.ConstraintKind.ExecutionNotional),
+            "failed bound"
+        );
+        _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
+    }
+
+    function test_AttachedOpen_ExactReplayAndClientIdConflictAreRejectedWithoutMutation() public {
+        OrderV2Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(request, params);
+
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint64 nextParentBefore = router.nextCommitId();
+        uint64 nextProtectionBefore = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
+        bytes32 protectionHash = keccak256(abi.encode(protectionViews.getPositionProtection(protectionId)));
+
+        vm.expectRevert(PositionProtectionBook.PositionProtectionBook__InvalidHostResponse.selector);
+        vm.prank(ALICE);
+        protectionActions.commitOpenOrderWithProtection(request, params);
+
+        OrderV2Types.OrderRequest memory conflict =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        conflict.clientOrderId = request.clientOrderId;
+        conflict.bounds.maxExplicitFeesUsdc -= 1;
+        bytes32 existingIntentHash = router.lifecycleBook().hashOrderRequest(ALICE, request);
+        bytes32 suppliedIntentHash = router.lifecycleBook().hashOrderRequest(ALICE, conflict);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__ClientIdConflict.selector,
+                ALICE,
+                request.clientOrderId,
+                existingIntentHash,
+                suppliedIntentHash
+            )
+        );
+        vm.prank(ALICE);
+        protectionActions.commitOpenOrderWithProtection(conflict, params);
+
+        assertEq(router.nextCommitId(), nextParentBefore, "retry must not allocate parent");
+        assertEq(
+            PositionProtectionBook(address(protectionBook)).nextPositionProtectionId(),
+            nextProtectionBefore,
+            "retry must not allocate protection"
+        );
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "retry must roll back tentative bounty locks");
+        assertEq(
+            keccak256(abi.encode(protectionViews.getPositionProtection(protectionId))),
+            protectionHash,
+            "retry must not mutate protection"
+        );
+        assertEq(router.lifecycleBook().clientIntent(ALICE, request.clientOrderId).orderId, parentOrderId);
+    }
+
+    function test_AttachedOpen_LegacyScalarSelectorIsUnavailable() public {
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
+        bytes4 legacySelector =
+            bytes4(keccak256("commitOpenOrderWithProtection(uint8,uint256,uint256,uint256,(uint256,uint256))"));
+        assertTrue(legacySelector != IPositionProtectionActions.commitOpenOrderWithProtection.selector);
+
+        vm.prank(ALICE);
+        (bool success,) = address(protectionBook)
+            .call(
+                abi.encodeWithSelector(
+                    legacySelector, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, uint256(0), params
+                )
+            );
+
+        assertFalse(success, "legacy scalar selector must be unavailable");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "legacy call must not commit an order");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "legacy call must not create protection");
     }
 
     function test_Trigger_PublicRawIdPreclaimCannotPoisonProtocolClose() public {
@@ -1841,10 +2051,11 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_ThresholdCrossedBeforeFillArmsThenTriggersOnLaterTick() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
 
-        vm.prank(ALICE);
+        vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
         );
+        vm.stopPrank();
 
         uint256 crossedTakeProfit = LONG_TAKE_PROFIT - 2;
         bytes[] memory executionData = _mockPythUpdateData(crossedTakeProfit);
@@ -1873,10 +2084,11 @@ contract PositionProtectionTest is BasePerpTest {
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
-        vm.prank(ALICE);
+        vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_STOP_LOSS, params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_STOP_LOSS), params
         );
+        vm.stopPrank();
         uint256 parentBountyUsdc = _executionBountyReserve(parentOrderId);
 
         bytes[] memory executionData = _mockPythUpdateData(MARK_PRICE);
@@ -1910,10 +2122,12 @@ contract PositionProtectionTest is BasePerpTest {
         fixture.settlementBefore = _settlementBalance(ALICE);
         fixture.cleanerSettlementBefore = _settlementBalance(CAROL);
 
-        vm.prank(ALICE);
+        vm.startPrank(ALICE);
         (fixture.parentOrderId, fixture.protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS)
         );
+        vm.stopPrank();
 
         fixture.parentMarginUsdc = _remainingCommittedMargin(fixture.parentOrderId);
         fixture.parentBountyUsdc = _executionBountyReserve(fixture.parentOrderId);
@@ -2045,10 +2259,11 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_RiskOffClearinghouseFailureRollsBackProtectionAndRouter() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
-        vm.prank(ALICE);
+        vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
         );
+        vm.stopPrank();
         routerAdmin.pause();
 
         bytes32 orderHashBefore = keccak256(abi.encode(_orderRecord(parentOrderId)));
@@ -2101,14 +2316,16 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_ParentExpiryBatchFailsProtectionsAndRefundsTheirBounties() public {
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
-        vm.prank(ALICE);
+        vm.startPrank(ALICE);
         (uint64 aliceParentId, uint64 aliceProtectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
         );
-        vm.prank(BOB);
+        vm.stopPrank();
+        vm.startPrank(BOB);
         (uint64 bobParentId, uint64 bobProtectionId) = protectionActions.commitOpenOrderWithProtection(
-            CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0, params
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0), params
         );
+        vm.stopPrank();
         assertEq(aliceParentId, 1, "Alice parent queue id");
         assertEq(bobParentId, 2, "Bob parent queue id");
 
@@ -2249,6 +2466,66 @@ contract PositionProtectionTest is BasePerpTest {
             minPostPositionEquityUsdc: 0,
             maxPostLeverageBps: type(uint32).max
         });
+    }
+
+    function _boundedOpenRequest(
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 targetPrice
+    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+        request = _publicBoundedRequest(bytes32(uint256(router.nextCommitId())), false);
+        request.side = side;
+        request.sizeDelta = sizeDelta;
+        request.marginDelta = marginDelta;
+        request.targetPrice = targetPrice == 0 ? (side == CfdTypes.Side.LONG ? 1 : engine.CAP_PRICE()) : targetPrice;
+    }
+
+    function _expectAttachedOpenCommitRevert(
+        OrderV2Types.OrderRequest memory request,
+        bytes memory revertData
+    ) internal {
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint64 nextParentBefore = router.nextCommitId();
+        uint64 nextProtectionBefore = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
+
+        vm.expectRevert(revertData);
+        vm.prank(ALICE);
+        protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+
+        assertEq(router.nextCommitId(), nextParentBefore, "rejection must not allocate parent");
+        assertEq(
+            PositionProtectionBook(address(protectionBook)).nextPositionProtectionId(),
+            nextProtectionBefore,
+            "rejection must not allocate protection"
+        );
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "rejection must roll back protection bounty locks");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "rejection must not queue parent");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "rejection must not stage protection");
+    }
+
+    function _assertAttachedOpenTerminalFailure(
+        uint64 parentOrderId,
+        uint64 protectionId
+    ) internal view {
+        PositionProtectionTypes.PositionProtectionView memory failed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(_orderRecord(parentOrderId).status),
+            uint8(IOrderRouterAccounting.OrderStatus.Failed),
+            "parent must fail"
+        );
+        assertEq(
+            uint8(failed.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed),
+            "protection must fail with parent"
+        );
+        assertEq(failed.triggerBountyUsdc, 0, "trigger bounty must clear");
+        assertEq(failed.executionBountyUsdc, 0, "close bounty must clear");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "trade lock must clear");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "parent must leave queue");
+        (uint256 liveSize,,,,,,) = engine.positions(ALICE);
+        assertEq(liveSize, 0, "failed parent must not create position");
     }
 
     function _totalProtectionBountyUsdc() internal view returns (uint256) {

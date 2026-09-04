@@ -76,8 +76,6 @@ interface IPositionProtectionRouterHost {
 
     function closeOrderExecutionBountyUsdc() external view returns (uint256);
 
-    function maxOrderAge() external view returns (uint256);
-
     function nextCommitId() external view returns (uint64);
 
     function pendingOrderCounts(
@@ -378,17 +376,15 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     /// @inheritdoc IPositionProtectionActions
     function commitOpenOrderWithProtection(
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 targetPrice,
+        OrderV2Types.OrderRequest calldata request,
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external nonReentrant returns (uint64 parentOrderId, uint64 protectionId) {
         (uint256 triggerBountyUsdc, uint256 executionBountyUsdc) = _configuredBounties();
         _clearinghouse().lockReservedSettlement(msg.sender, triggerBountyUsdc + executionBountyUsdc);
-        parentOrderId = _commitOpen(msg.sender, side, sizeDelta, marginDelta, targetPrice);
-        protectionId =
-            _stageAttached(msg.sender, parentOrderId, side, sizeDelta, params, triggerBountyUsdc, executionBountyUsdc);
+        parentOrderId = _commitOpen(msg.sender, request);
+        protectionId = _stageAttached(
+            msg.sender, parentOrderId, request.side, request.sizeDelta, params, triggerBountyUsdc, executionBountyUsdc
+        );
     }
 
     function _stageAttached(
@@ -722,37 +718,10 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     function _commitOpen(
         address account,
-        CfdTypes.Side side,
-        uint256 sizeDelta,
-        uint256 marginDelta,
-        uint256 targetPrice
+        OrderV2Types.OrderRequest calldata request
     ) private returns (uint64 parentOrderId) {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
         parentOrderId = router.nextCommitId();
-
-        // Solidity zero-initializes the fields intentionally omitted from this synthetic permissive request.
-        // slither-disable-next-line uninitialized-local
-        OrderV2Types.OrderRequest memory request;
-        request.clientOrderId = OrderV2Types.protocolClientOrderId(
-            keccak256(
-                abi.encode("PLETHER_POSITION_PROTECTION_PARENT_V2", block.chainid, ROUTER, account, parentOrderId)
-            )
-        );
-        request.side = side;
-        request.sizeDelta = sizeDelta;
-        request.marginDelta = marginDelta;
-        request.targetPrice = targetPrice == 0 ? (side == CfdTypes.Side.LONG ? 1 : ENGINE.CAP_PRICE()) : targetPrice;
-        request.bounds.validUntil = uint64(block.timestamp + router.maxOrderAge());
-        request.bounds.allowedExecutionModes = 1 | 2 | 4;
-        // Zero is a Router-authenticated internal wildcard. Public V2 commits reject it.
-        request.bounds.expectedConfigHash = bytes32(0);
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
-        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
-        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
-        request.bounds.maxPostPositionSize = type(uint256).max;
-        request.bounds.maxPostLeverageBps = type(uint32).max;
 
         uint64 committedOrderId = IPositionProtectionOrderCommitHost(ROUTER).commitProtectedOpen(account, request);
         if (committedOrderId != parentOrderId) {

@@ -417,13 +417,13 @@ configuration finalization. The Router retains admin authentication and applies 
 before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
 storage slots by assumed layout.
 
-The attached parent open and every triggered or retried close attempt are the only requests allowed to carry
-`expectedConfigHash == bytes32(0)`. Zero is an internal unpinned marker, not a public wildcard: the parent path requires
-the immutable position-protection Book as the Router caller, and the trigger path runs through the exactly
-Router-bound keeper sidecar plus Router-only Book activation/registration hooks. Fresh external V2 commits reject a
-zero hash and remain bound to the exact digest they supplied. Internal protected orders skip only config-digest
-equality; their typed execution modes, deadlines, financial policy, lifecycle evidence, and observed receipt digest
-remain enforced.
+The attached parent open is a caller-authored public V2 intent and must carry the same nonzero configuration hash and
+financial bounds as an ordinary open. Only Router-authenticated triggered or retried close attempts may carry
+`expectedConfigHash == bytes32(0)`. Zero is an internal unpinned marker, not a public wildcard: attempt creation runs
+through the exactly Router-bound keeper sidecar or Router-only Book retry hooks plus Router-only registration hooks.
+Fresh external V2 commits reject a zero hash and remain bound to the exact digest they supplied. Internal protection
+close attempts skip only config-digest equality; their typed execution modes, deadlines, financial policy, lifecycle
+evidence, and observed receipt digest remain enforced.
 
 Triggering is irreversible. `Triggered` means the Book has exactly one current live child; `Latched` means the trigger
 evidence and account trade lock remain but no child is live. A non-liquidation terminal child failure relatches only
@@ -542,9 +542,10 @@ The external V2 request sets inclusive maxima for execution bounty, execution no
 action charge, explicit fees, and post-position size, plus inclusive minima for post-settlement balance and
 post-position equity and an inclusive maximum post-leverage. Zero is an actual zero allowance, not an unbounded sentinel. A field
 that is separately required nonzero cannot use zero; integrations use the field type's maximum to express no
-practical ceiling. In particular, a fresh external request must supply the current nonzero execution-config hash.
-Only the Router-authenticated TP/SL parent/attempt paths use zero as the internal unpinned marker. A terminal full
-close skips only the post-position equity and leverage checks because no position survives. Gross account debit
+practical ceiling. In particular, a fresh external request, including an attached protection parent, must supply the
+current nonzero execution-config hash. Only Router-authenticated TP/SL triggered or retried close attempts use zero as
+the internal unpinned marker. A terminal full close skips only the post-position equity and leverage checks because no
+position survives. Gross account debit
 includes settlement value lost or charged, consumed trader-claim value, and the
 reserved execution bounty; post-settlement balance means total internal settlement custody, including locked value.
 
@@ -555,8 +556,8 @@ market/runtime values such as price, depth, position skew, FAD/frozen mode, Rout
 settlement hold, and the risk-off cutoff. It also excludes the immutable HousePool redemption-math sidecar because
 that module affects only LP redemption budgeting, not order execution. This division is intentional: identity and
 finalized policy drift produces terminal `ConfigMismatch` for config-pinned external orders, while execution mode and
-economics must fit the separately pinned request bounds. The internal TP/SL marker skips the hash-equality check but
-still records the observed digest in its terminal receipt.
+economics must fit the separately pinned request bounds. The internal TP/SL close-attempt marker skips the
+hash-equality check but still records the observed digest in its terminal receipt.
 
 The request ABI and permanent intent-hash domain remain V2. The receipt type and execution-config schema are V3 in
 the latched-retry stack because authenticated protection-attempt registration and

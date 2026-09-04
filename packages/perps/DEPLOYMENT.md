@@ -556,13 +556,18 @@ trigger call ingests payable Pyth update data. This keeps the trader flow compat
 accounts while retaining an independently verified trigger observation. The nonpayable retry selector remains live
 while new protection commits are paused or disabled and while the Engine is degraded or the oracle is frozen.
 
-The protected parent open and every triggered or retried close attempt are internal typed V2 requests. Only these Router-authenticated
-paths set `expectedConfigHash == bytes32(0)`, which is an unpinned internal marker rather than a public wildcard.
-Fresh external `OrderRouter.commitOrder(...)` calls reject zero and must pin the active lifecycle-Book digest. Deploy,
-bootstrap, and integration tests must verify both sides of that boundary: direct external zero-hash commits fail,
-while valid Book-authenticated parent/attempt creation succeeds and terminal receipts retain the observed config hash.
-The request ABI and intent hash remain V2, but this release uses the V3 receipt and execution-config domains because
-registered protection attempts may authenticate `RetainedForProtectionRetry` with a zero bounty recipient.
+The protected parent open is a caller-authored bounded V2 request and must pin the active lifecycle-Book digest. Only
+Router-authenticated triggered or retried close attempts set `expectedConfigHash == bytes32(0)`, which is an unpinned
+internal marker rather than a public wildcard. Deploy, bootstrap, and integration tests must verify both sides of that
+boundary: external zero-hash commits, including Book-forwarded parents, fail; valid bounded parents and authenticated
+attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request ABI and
+intent hash remain V2, but this release uses the V3 receipt and execution-config domains because registered protection
+attempts may authenticate `RetainedForProtectionRetry` with a zero bounty recipient.
+
+The bounded protected-open selector replaces the former scalar selector without a compatibility overload. Ship it
+only as part of a fresh complete perps-stack deployment, regenerate consumer ABIs from the new
+`IPositionProtectionActions` interface, and update integrations to the newly discovered Book address. Live-state
+migration and mixed old/new Router-Book stacks are unsupported.
 
 Before enabling the feature, verify the existing-position post-reservation gate against boundary tests. The Book locks
 both bounties first, then calls the Engine-configured planner's canonical V2 exact-price predicate with exact entry cost
