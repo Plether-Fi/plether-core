@@ -95,10 +95,11 @@ mandatory, and the resulting FIFO order cannot be cancelled, so agents should us
 
 Position protection is a separate canonical surface. Discover the stateful Book through
 `OrderRouter.positionProtectionBook()` and use `IPositionProtectionActions` to create, replace, cancel, trigger, or
-atomically attach protection to an opening order. `commitOpenOrderWithProtection` accepts a caller target of zero for
-no practical slippage limit and translates it to a nonzero bounded-order sentinel before registration. Cancelling a
-`PendingOpen` protection detaches and refunds the protection but does not cancel its already-committed parent order;
-an already `Triggered` linked close is binding.
+atomically attach protection to an opening order. `commitOpenOrderWithProtection(OrderRequest,PositionProtectionParams)`
+requires the same complete caller-authored bounded request as `commitOrder`, including a nonzero target and current
+nonzero configuration hash. It accepts only a fresh parent; exact replay is not a retry mechanism for the composite
+action. Cancelling a `PendingOpen` protection detaches and refunds the protection but does not cancel its
+already-committed parent order; an already `Triggered` linked close is binding.
 
 ### Authoritative order reads
 
@@ -250,18 +251,17 @@ protocol-generated position-protection orders.
 A terminal full close still enforces every non-position bound. It skips post-position equity and leverage checks only
 because no position survives.
 
-Router-authenticated position-protection parent and trigger orders are the only zero-config exception. Those internal
-requests use `expectedConfigHash == bytes32(0)` as an unpinned marker, enable every execution mode, use
+Router-authenticated trigger-generated protection closes are the only zero-config exception. Those internal requests
+use `expectedConfigHash == bytes32(0)` as an unpinned marker, enable every execution mode, use
 `validUntil = block.timestamp + maxOrderAge`, set upper bounds to their integer maxima and minimum bounds to zero,
 and record the configuration actually observed at execution. They remain subject to ordinary protocol safety policy,
 but they are not a caller-selected financial envelope. This exception is unavailable through public `commitOrder`:
 an agent-supplied fresh request with a zero configuration hash is rejected.
 
-For `commitOpenOrderWithProtection`, a caller target of zero is translated before registration to `1` for a LONG
-dollar-index open or `CAP_PRICE` for a SHORT dollar-index open. Trigger-generated market-style closes use the reverse
-nonbinding sentinels: `CAP_PRICE` for a LONG dollar-index close and `1` for a SHORT dollar-index close.
-`IntentRegistered` contains the translated nonzero target. Separately, zero in a TP/SL threshold disables that OCO
-leg; both threshold legs cannot be zero.
+For `commitOpenOrderWithProtection`, the caller supplies the same nonzero direction-aware target required by an
+ordinary public order. Trigger-generated market-style closes use the internal nonbinding sentinels: `CAP_PRICE` for a
+LONG dollar-index close and `1` for a SHORT dollar-index close. Separately, zero in a TP/SL threshold disables that
+OCO leg; both threshold legs cannot be zero.
 
 The evaluator checks these constraints against an authoritative snapshot reconstructed from the Engine and
 Clearinghouse immediately before mutation. A caller cannot satisfy a bound by supplying its own accounting inputs.
@@ -289,10 +289,11 @@ This allows an agent to retry after an RPC timeout, relayer failure, restart, or
 without risking a duplicate position. A useful client-id policy is to derive the id from a stable strategy decision
 identifier, account, and action sequence—not from data that changes between retries.
 
-Protection actions do not accept a caller-supplied client id. Before retrying an uncertain
-`commitOpenOrderWithProtection`, create, replace, cancel, or trigger transaction, reconcile the retained protection
-record, its events, and the account's pending-order state. Blind application-level retries do not receive the public
-bounded-order exact-replay guarantee.
+The parent request passed to `commitOpenOrderWithProtection` includes a caller-supplied client id, but the composite
+Book action is intentionally fresh-only: an exact parent replay returns an old order id and the Book reverts before
+staging another protection. Before retrying any uncertain create, replace, cancel, attached-open, or trigger
+transaction, reconcile the retained protection record, its events, and the account's pending-order state. Blind
+application-level retries do not receive a composite-action exact-replay guarantee.
 
 If governance configuration changes or the strategy wants different bounds, create a new client id. The old id still
 describes the old authorization and must remain immutable.
@@ -386,9 +387,9 @@ For an externally submitted bounded order, use both on-chain state and the canon
    policy requires deeper accounting assurance.
 
 `IntentRegistered` emits the complete registered `OrderRequest`, its canonical intent hash, and the order bounty
-actually reserved. For a public bounded-order commit, this is the account's original request. For a protection parent
-or linked close, it is the protocol-generated request and does not by itself prove the original scalar protection
-action.
+actually reserved. For a public bounded-order commit, including a protection parent, this is the account's original
+request. For a trigger-generated linked close, it is the protocol-generated request and does not by itself prove the
+original protection action.
 
 `OrderFinalized` emits the complete fixed-shape receipt, including:
 
@@ -496,15 +497,16 @@ TP/SL thresholds are also raw 8-decimal FX-basket prices. Their product-facing d
 2. Authorize explicit OCO thresholds and action selectors. Zero disables one threshold leg, but both legs cannot be
    zero. A trigger threshold authorizes queuing a delayed full-position market-style close; it does not guarantee a
    fill at the threshold.
-3. Simulate the exact direct Book call. An attached-open caller target may be zero and will be translated into the
-   documented nonbinding bounded-order sentinel.
+3. Simulate the exact direct Book call. An attached-open request must provide the same nonzero direction-aware target
+   and complete execution envelope as an ordinary bounded open.
 4. After submission—or before any retry after uncertain inclusion—reconcile the protection record and events plus
-   the parent order's lifecycle state. Protection calls do not have caller-controlled client-id replay protection.
+   the parent order's lifecycle state. The parent client id prevents duplicate orders, but it does not replay the
+   composite protection action.
 5. To trigger, submit `triggerPositionProtection` directly to the Book with Pyth data and the quoted fee. Then monitor
    the retained `linkedOrderId` and execute that ordinary FIFO close through the Router keeper interface.
 6. Reconcile both evidence domains: protection state/events for OCO intent and trigger facts, and lifecycle Book
-   state/receipts for the synthesized parent and linked-close orders. Account separately for trigger and order
-   bounties.
+   state/receipts for the caller-authored parent and synthesized linked-close orders. Account separately for trigger
+   and order bounties.
 
 ## Smart-account and session-key policy
 

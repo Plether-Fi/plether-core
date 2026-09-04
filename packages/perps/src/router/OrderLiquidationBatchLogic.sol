@@ -131,23 +131,20 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         OrderV2Types.OrderRequest calldata request
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
-        return _commitOrder(IOrderLiquidationBatchHost(address(this)), msg.sender, request, true, false);
+        return _commitOrder(IOrderLiquidationBatchHost(address(this)), msg.sender, request, true);
     }
 
-    /// @notice Resolves or submits an attached open constructed by the Router's immutable protection Book.
+    /// @notice Resolves or submits a caller-authored bounded open through the Router's immutable protection Book.
     function commitProtectedOpen(
         address account,
         OrderV2Types.OrderRequest calldata request
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        if (
-            msg.sender != address(host.positionProtectionBook()) || account == address(0) || request.isClose
-                || request.bounds.expectedConfigHash != bytes32(0)
-        ) {
+        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || request.isClose) {
             revert OrderRouter__Unauthorized();
         }
-        return _commitOrder(host, account, request, true, true);
+        return _commitOrder(host, account, request, true);
     }
 
     /// @dev Permanent identity is resolved before current-state validation so an exact replay remains unconditional.
@@ -155,8 +152,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IOrderLiquidationBatchHost host,
         address account,
         OrderV2Types.OrderRequest calldata request,
-        bool enforceProtectionLock,
-        bool allowInternalConfigWildcard
+        bool enforceProtectionLock
     ) private returns (uint64 orderId) {
         IOrderLifecycleBook book = host.lifecycleBook();
         (OrderV2Types.ClientIntentResolution resolution, uint64 resolvedOrderId, bytes32 suppliedIntentHash) =
@@ -171,7 +167,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             );
         }
 
-        _validateFreshRequest(host, account, request, enforceProtectionLock, allowInternalConfigWildcard);
+        _validateFreshRequest(host, account, request, enforceProtectionLock);
         uint256 executionBountyUsdc = request.isClose
             ? _validatedCloseBounty(host, account, request.side, request.sizeDelta)
             : _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
@@ -199,8 +195,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IOrderLiquidationBatchHost host,
         address account,
         OrderV2Types.OrderRequest calldata request,
-        bool enforceProtectionLock,
-        bool allowInternalConfigWildcard
+        bool enforceProtectionLock
     ) private view {
         if (request.clientOrderId == bytes32(0)) {
             revert OrderRouter__ZeroClientOrderId();
@@ -221,10 +216,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__InvalidExecutionModeMask();
         }
         bytes32 currentConfigHash = host.lifecycleBook().currentExecutionConfigHash();
-        if (
-            (!allowInternalConfigWildcard && bounds.expectedConfigHash == bytes32(0))
-                || (bounds.expectedConfigHash != bytes32(0) && bounds.expectedConfigHash != currentConfigHash)
-        ) {
+        if (bounds.expectedConfigHash == bytes32(0) || bounds.expectedConfigHash != currentConfigHash) {
             revert OrderRouter__ExecutionConfigMismatch(bounds.expectedConfigHash, currentConfigHash);
         }
         if (bounds.maxPostLeverageBps == 0) {

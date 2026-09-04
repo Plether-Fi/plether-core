@@ -46,10 +46,10 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 ### Core product rules
 
 - Delayed orders only. There is no same-tx trader market-order path.
-- Every externally committed ordinary order is a caller-bounded V2 request. It pins an exact target, deadline,
-  allowed execution regimes, execution configuration, and financial limits before capital is reserved. The only
-  configuration-unpinned requests are internally constructed TP/SL parent and trigger orders authenticated by the
-  Router's immutable position-protection path.
+- Every externally committed ordinary order and attached protection parent is a caller-bounded V2 request. It pins an
+  exact target, deadline, allowed execution regimes, execution configuration, and financial limits before capital is
+  reserved. The only configuration-unpinned requests are internally constructed TP/SL trigger closes authenticated by
+  the Router's immutable position-protection path.
 - `clientOrderId` values are permanent inside each account namespace. Exact request replay returns the original
   order id without side effects; reusing the id for a different request reverts.
 - One live position per account address at a time. Side flips must pass through a close.
@@ -85,7 +85,7 @@ In practice, the compact public API is:
 - Ordinary trade actions:
   - `OrderRouter.commitOrder(OrderV2Types.OrderRequest)`
 - Protection actions, called directly on the immutable Book returned by `OrderRouter.positionProtectionBook()`:
-  - `PositionProtectionBook.commitOpenOrderWithProtection(...,PositionProtectionParams)`
+  - `PositionProtectionBook.commitOpenOrderWithProtection(OrderV2Types.OrderRequest,PositionProtectionParams)`
   - `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
   - `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`
   - `PositionProtectionBook.cancelPositionProtection(uint64)`
@@ -353,6 +353,8 @@ commit open with protection
   parent opening execution bounty retains the ordinary terminal-order policy.
 - Cancelling `PendingOpen` protection detaches it but does not cancel the binding parent open. That open may later
   execute without protection.
+- `commitOpenOrderWithProtection(...)` accepts only a fresh parent intent. Replaying the same `clientOrderId` does not
+  replay the composite action and reverts without changing the existing parent or protection.
 - `createPositionProtection(...)`, `replacePositionProtection(...)`, and
   `commitOpenOrderWithProtection(...)` are nonpayable trader calls. They validate trigger geometry against the engine's
   cached fresh neutral mark and do not ingest Pyth data.
@@ -363,17 +365,17 @@ commit open with protection
   price collateral. Any uncovered carry or underfunded `max(-vpiAccrued, 0)` reserve fails closed, and exact-price equity
   must be strictly above the stricter of initial margin and the active normal/FAD maintenance requirement. An attached
   open locks protection value first, so the ordinary open planner sees the remaining balances when it admits and later
-  executes the parent.
+  executes the parent. Those protection bounty reservations are outside the parent request's
+  `maxGrossAccountDebitUsdc`; the request's nonzero configuration hash pins their finalized Router configuration.
 - `triggerPositionProtection(...)` is a permissionless payable keeper call. It ingests current Pyth data, requires a
   later block and publish time after arming, and cannot trigger while `oracleFrozen`.
 - A valid trigger pays the trigger keeper and appends one full-size market-style close to the ordinary global FIFO
   tail using the internal side-dependent nonbinding target sentinel (`CAP_PRICE` for a LONG close and `1` for a SHORT
   close). The linked close is binding and inherits ordinary
   post-commit oracle timing, adverse execution pricing, expiry, terminal failure, and liquidation behavior.
-- Both the attached parent open and triggered linked close are typed V2 requests constructed inside the authenticated
-  protection path. Only those requests use `expectedConfigHash == bytes32(0)` as an internal unpinned marker. Fresh
-  external `OrderRouter.commitOrder(...)` calls reject zero, and no external caller can opt an ordinary order out of
-  configuration pinning.
+- The attached parent is a caller-authored public V2 request with the same nonzero configuration pin and financial
+  bounds as `OrderRouter.commitOrder(...)`. Only the trigger-generated linked close uses
+  `expectedConfigHash == bytes32(0)` as an authenticated internal unpinned marker.
 - A failed or expired linked close does not re-arm automatically. The position remains exposed until another valid
   close or liquidation.
 - While protection is `PendingOpen`, `Armed`, or `Triggered`, conflicting discretionary trade commitments are blocked;
@@ -395,13 +397,13 @@ the 8-decimal raw basket triggers.
 is a real zero allowance, not an unbounded sentinel; use the relevant integer type's maximum when an application
 intends no practical ceiling. Fields that are independently required nonzero on fresh external requests, including
 `validUntil`, `expectedConfigHash`, `allowedExecutionModes`, and `maxPostLeverageBps`, cannot use zero. The sole
-`expectedConfigHash` exception is the Router-authenticated TP/SL marker described above.
+`expectedConfigHash` exception is a Router-authenticated trigger-generated TP/SL close.
 
 | Field | Meaning |
 |-------|---------|
 | `validUntil` | Absolute execution deadline; fresh commits require it after the current time and no later than the Router's current `maxOrderAge` |
 | `allowedExecutionModes` | Bitmask authorizing `Live`, `Fad`, and/or `Frozen` execution |
-| `expectedConfigHash` | Exact execution-critical configuration digest that must still be active for an external request; zero is reserved for authenticated internal TP/SL parent/trigger orders |
+| `expectedConfigHash` | Exact execution-critical configuration digest that must still be active for an external request; zero is reserved for authenticated trigger-generated TP/SL closes |
 | `maxExecutionBountyUsdc` | Maximum quoted keeper bounty reserved at commit |
 | `maxExecutionNotionalUsdc` | Maximum execution notional assessed by the canonical planner |
 | `maxGrossAccountDebitUsdc` | Maximum evaluator-reported gross account debit, including settlement debit, consumed trader claims, and the reserved execution bounty |
@@ -879,10 +881,11 @@ These domains answer different questions. They should not silently share assumpt
 
 ### Commit rules
 
-- The only production commit ABI is `commitOrder(OrderV2Types.OrderRequest)`.
+- The only production Router order-commit ABI is `commitOrder(OrderV2Types.OrderRequest)`; attached opens use the
+  bounded Book entrypoint documented above.
 - `clientOrderId`, `targetPrice`, `validUntil`, `allowedExecutionModes`, a nonzero `expectedConfigHash`, and a nonzero
-  `maxPostLeverageBps` are mandatory for fresh external commits. The authenticated TP/SL parent/trigger paths alone
-  construct the internal zero-config marker.
+  `maxPostLeverageBps` are mandatory for fresh external commits, including attached parent opens. Only the
+  authenticated TP/SL trigger path constructs the internal zero-config marker.
 - An exact account-scoped replay is returned before any current-state validation. Conflicting reuse of a client id
   reverts, and the binding is never cleared.
 - Fresh external commits must pin `OrderLifecycleBook.currentExecutionConfigHash()` and choose a deadline inside the
@@ -911,8 +914,8 @@ excludes the immutable HousePool redemption-math sidecar because that module aff
 than order execution. The request separately authorizes execution modes and financial outcomes. For a config-pinned
 external request, a different digest at execution is a terminal `ConfigMismatch`; an application that accepts new
 governance policy must submit a new client id because the original id remains permanently bound. The internal TP/SL
-zero marker deliberately skips only this digest-equality gate; its execution modes and financial/order policy remain
-protocol-authored and enforced, and its receipt still records the observed digest.
+trigger-close zero marker deliberately skips only this digest-equality gate; its execution modes and financial/order
+policy remain protocol-authored and enforced, and its receipt still records the observed digest.
 
 This execution-authority digest is distinct from `SettlementMonitorLens.observableConfigDigest()`. The former is
 enforced by commit and execution; the latter is an advisory monitoring fingerprint with different coverage and never

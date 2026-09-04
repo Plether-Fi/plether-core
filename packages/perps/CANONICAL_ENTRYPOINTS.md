@@ -17,7 +17,7 @@ For autonomous trading-account and AI-agent integration, including bounded autho
   open is instead terminally invalidated by protocol policy and its remaining reservations are refunded to the
   trader's internal clearinghouse balance.
 - Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
-- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(CfdTypes.Side,uint256,uint256,uint256,PositionProtectionParams)`
+- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV2Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
 - Existing-position protection creation locks both bounties first, then applies the canonical V2 exact-price safety
   gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
@@ -26,9 +26,9 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Protection management: replace a `PendingOpen` or `Armed` record with
   `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`, or detach/cancel a
   `PendingOpen`/`Armed` record with `PositionProtectionBook.cancelPositionProtection(uint64)`
-- Only Router-authenticated TP/SL-generated orders use `expectedConfigHash == bytes32(0)`: the protected parent-open
-  host and protection-trigger path treat it as an internal unpinned marker. It is not a public wildcard and cannot be
-  selected through `OrderRouter.commitOrder(...)`.
+- Only Router-authenticated TP/SL trigger-generated closes use `expectedConfigHash == bytes32(0)` as an internal
+  unpinned marker. Protected parent opens and ordinary `OrderRouter.commitOrder(...)` requests require the same current
+  nonzero configuration hash.
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
 - Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
   `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances. The legacy
