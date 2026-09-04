@@ -186,6 +186,26 @@ library PerpsViewTypes {
         bool redeemRefundPending;
     }
 
+    /// @notice Cooldown and direct-redemption state for one finalized deposit request.
+    /// @param vault Configured Senior or Junior tranche vault.
+    /// @param requestId Shared LP epoch used as the asynchronous deposit request id.
+    /// @param controller Account that controls the deposit request.
+    /// @param activationTime Unix timestamp when settlement activated the deposit and began its cooldown, or zero when
+    ///        the deposit has not been activated.
+    /// @param cooldownEnd Unix timestamp when direct redemption becomes eligible, or zero when the deposit has not
+    ///        been activated.
+    /// @param remainingClaimableShares Finalized shares still available for wallet claim or direct redemption.
+    /// @param directRedeemableShares Shares currently eligible to route directly into a redemption request.
+    struct LpDepositCooldownStateView {
+        address vault;
+        uint256 requestId;
+        address controller;
+        uint256 activationTime;
+        uint256 cooldownEnd;
+        uint256 remainingClaimableShares;
+        uint256 directRedeemableShares;
+    }
+
     /// @notice High-level LP lifecycle and oracle status.
     /// @param tradingActive Whether the pool has completed bootstrap and activated trading.
     /// @param withdrawalLive Whether the settlement hold, degraded-mode, and mark-freshness gates permit new

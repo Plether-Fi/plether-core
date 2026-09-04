@@ -657,7 +657,8 @@ settlement transaction then:
    capital capacity;
 4. finalizes matured junior deposits and then matured senior deposits from the
    same signed accounting snapshot; and
-5. leaves funded assets or shares in vault escrow for later user claims.
+5. timestamps each successfully activated deposit lot and leaves funded assets
+   or shares in vault escrow for later user claims.
 
 Redemption priority is demand-based: dormant senior NAV does not reserve cash
 from junior claimants, but any newly matured senior request moves ahead of an
@@ -678,6 +679,28 @@ the explicit frozen-oracle exit regime.
 This implements the pending-to-claimable lifecycle standardized for
 asynchronous vaults in ERC-7540 [9], with protocol-specific shared request ids,
 terminal refund states, and bounded queue rules.
+
+The anti-flash cooldown begins when settlement successfully activates a deposit
+lot and its shares become part of outstanding tranche ownership. Claiming those
+shares later is an administrative custody transfer: the wallet inherits the
+lot's historical activation time, while any newer cooldown already attached to
+the receiver is preserved. Delaying the claim therefore cannot manufacture a
+new waiting period, and merely reaching epoch maturity without successful
+activation cannot start one.
+
+After the source lot's cooldown has elapsed, its controller or approved operator
+may instead consume claimable shares directly into the current redemption
+request. The destination retains the same controller. This operation moves no
+ERC-20 shares for the routed amount; it reclassifies an equal amount from
+deposit-claim escrow to pending-redemption escrow and advances the same source
+entitlement accounting used by an ordinary claim. A terminal route may
+additionally burn the epoch's allocation dust and materialize accrued Junior fee
+shares under the existing claim-sweep rules; vault-held shares still equal
+deposit-claim plus pending-redemption escrow after cleanup. A dedicated
+`ClaimableDepositRedeemRequest` event distinguishes this route from a wallet
+owner's canonical `RedeemRequest`. If those pending redemption shares are later
+returned to a wallet by cancellation or terminal refund, the return begins a
+fresh wallet cooldown.
 
 The delay separates request funding from activation; it is not a substitute for
 exact valuation. At settlement, both deposit activation and redemption pricing
@@ -1713,7 +1736,7 @@ guide:
 | Regime authorization matrix | Direct oracle-freshness/router/engine policy tests; boundary invariants do not span the complete two-axis action matrix |
 | FIFO and reservation conservation | `PerpAccountingInvariant.t.sol`, `PerpMultiAccountInvariant.t.sol` |
 | Binding order fields and first unique post-commit tick | Direct `OrderRouter.t.sol` tests; no dedicated stateful invariant covers intent immutability or strict historical-tick uniqueness |
-| Active tranche lifecycle, cooldowns, and excess | `PerpHousePoolLifecycleInvariant.t.sol`, `PerpValueConservationInvariant.t.sol` |
+| Active tranche lifecycle, activation-aged cooldowns, direct claim-escrow redemption, and excess | `ClaimableDepositRedeem.t.sol`, `PerpsPublicLensDepositCooldown.t.sol`, `PerpHousePoolLifecycleInvariant.t.sol`, `PerpValueConservationInvariant.t.sol` |
 | Junior-first loss, high-water restoration, coupon ratchet, and recapitalization priority | Direct `HousePool.t.sol` tests plus companion-model vectors; no dedicated stateful waterfall invariant at this revision |
 | Synchronized LP deposit/redemption epochs | Dedicated cutoff, coordinator, FIFO, allocation-dust, plateau-liveness, and exact inverse-rounding integration/fuzz tests; `GovernedSeniorCapacityInvariant.t.sol` statefully covers shared cutoff routing across both request directions plus reservation/covenant safety, but not the complete settlement-phase/backlog state space |
 | Account isolation | `PerpMultiAccountInvariant.t.sol` |

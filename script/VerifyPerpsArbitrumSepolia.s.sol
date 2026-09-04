@@ -26,6 +26,8 @@ import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
 import {SettlementMonitorLensSidecar} from "@plether/perps/SettlementMonitorLensSidecar.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
+import {IAsyncTrancheVaultClaimableRedeem} from "@plether/perps/interfaces/IAsyncTrancheVaultClaimableRedeem.sol";
 import "forge-std/Script.sol";
 
 /// @notice Read-only release verifier for the complete Arbitrum Sepolia Perps deployment graph.
@@ -300,6 +302,11 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(address(vault.POOL()) == address(deployed.housePool), "Vault pool mismatch");
         require(vault.IS_SENIOR() == isSenior, "Vault side mismatch");
         require(vault.asset() == deployed.usdc, "Vault asset mismatch");
+        require(vault.supportsInterface(type(IAsyncTrancheVault).interfaceId), "Vault missing custom async interface");
+        require(
+            vault.supportsInterface(type(IAsyncTrancheVaultClaimableRedeem).interfaceId),
+            "Vault missing claimable redeem interface"
+        );
         require(vault.maintenanceFeeConfigActivationTime() == 0, "Outstanding fee proposal");
         (uint256 pendingAprBps, address pendingRecipient) = vault.pendingMaintenanceFeeConfig();
         require(pendingAprBps == 0 && pendingRecipient == address(0), "Pending fee config is not empty");

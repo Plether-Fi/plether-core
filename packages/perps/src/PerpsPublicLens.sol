@@ -20,6 +20,8 @@ import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtect
 /// @dev Lightweight asynchronous-vault read surface used only by this lens.
 interface IAsyncTrancheVaultLensView {
 
+    function DEPOSIT_COOLDOWN() external view returns (uint256 cooldown);
+
     function accruedTotalSupply() external view returns (uint256 effectiveTotalShares);
 
     function pendingMaintenanceFeeShares() external view returns (uint256 feeShares);
@@ -56,6 +58,15 @@ interface IAsyncTrancheVaultLensView {
         uint256 requestId,
         address controller
     ) external view returns (uint256 shares);
+
+    function depositEpochActivationTime(
+        uint256 requestId
+    ) external view returns (uint256 activationTime);
+
+    function maxRequestRedeemFromClaimableDeposit(
+        uint256 depositRequestId,
+        address controller
+    ) external view returns (uint256 maxShares);
 
     function refundableDepositRequest(
         uint256 requestId,
@@ -346,6 +357,39 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         viewData.claimableRedeemAssets = vault.claimableRedeemAssets(requestId, controller);
         viewData.refundableRedeemShares = vault.refundableRedeemRequest(requestId, controller);
         viewData.redeemRefundPending = vault.redeemRefundPending(requestId, controller);
+    }
+
+    /// @notice Returns activation-aged cooldown and direct-redemption capacity for one deposit request.
+    /// @dev An unactivated, rejected, or unknown request reports zero activation and cooldown timestamps. Remaining
+    ///      shares include the request's full unconsumed entitlement, while `directRedeemableShares` additionally
+    ///      applies finalization, cooldown, and live direct-request eligibility checks in the vault.
+    /// @param isSenior True for the Senior vault and false for the Junior vault.
+    /// @param requestId Shared LP epoch used as the asynchronous deposit request id.
+    /// @param controller Account that controls the deposit request.
+    /// @return viewData Deposit activation time, cooldown end, and remaining/directly redeemable shares.
+    function getLpDepositCooldownState(
+        bool isSenior,
+        uint256 requestId,
+        address controller
+    ) external view returns (PerpsViewTypes.LpDepositCooldownStateView memory viewData) {
+        viewData.requestId = requestId;
+        viewData.controller = controller;
+        if (address(HOUSE_POOL) == address(0)) {
+            return viewData;
+        }
+
+        viewData.vault = isSenior ? HOUSE_POOL.seniorVault() : HOUSE_POOL.juniorVault();
+        if (viewData.vault == address(0)) {
+            return viewData;
+        }
+
+        IAsyncTrancheVaultLensView vault = IAsyncTrancheVaultLensView(viewData.vault);
+        viewData.activationTime = vault.depositEpochActivationTime(requestId);
+        if (viewData.activationTime != 0) {
+            viewData.cooldownEnd = viewData.activationTime + vault.DEPOSIT_COOLDOWN();
+        }
+        viewData.remainingClaimableShares = vault.claimableDepositShares(requestId, controller);
+        viewData.directRedeemableShares = vault.maxRequestRedeemFromClaimableDeposit(requestId, controller);
     }
 
     /// @notice Returns high-level protocol runtime status flags.

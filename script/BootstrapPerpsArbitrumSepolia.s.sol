@@ -11,6 +11,7 @@ import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
+import {IAsyncTrancheVaultClaimableRedeem} from "@plether/perps/interfaces/IAsyncTrancheVaultClaimableRedeem.sol";
 import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import "forge-std/Script.sol";
@@ -381,6 +382,10 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(
             candidate.supportsInterface(type(IAsyncTrancheVault).interfaceId),
             "TrancheVault missing custom async interface"
+        );
+        require(
+            candidate.supportsInterface(type(IAsyncTrancheVaultClaimableRedeem).interfaceId),
+            "TrancheVault missing claimable redeem interface"
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
         require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");

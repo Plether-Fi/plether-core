@@ -27,6 +27,7 @@ import {SettlementMonitorLensSidecar} from "@plether/perps/SettlementMonitorLens
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
+import {IAsyncTrancheVaultClaimableRedeem} from "@plether/perps/interfaces/IAsyncTrancheVaultClaimableRedeem.sol";
 import "forge-std/Script.sol";
 
 /// @dev Minimal deployment-time compatibility surface. Keeping this local makes the deploy script fail closed when
@@ -619,6 +620,10 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(
             candidate.supportsInterface(type(IAsyncTrancheVault).interfaceId),
             "TrancheVault missing custom async interface"
+        );
+        require(
+            candidate.supportsInterface(type(IAsyncTrancheVaultClaimableRedeem).interfaceId),
+            "TrancheVault missing claimable redeem interface"
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
         require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
