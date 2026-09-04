@@ -164,8 +164,14 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         orderId = host.nextCommitId();
-        OrderV2Types.OrderRequest memory request =
-            _protectionRetryRequest(host, protectionId, orderId, account, side, size);
+        OrderV2Types.OrderRequest memory request = _protectionCloseRequest(host, side, size);
+        request.clientOrderId = OrderV2Types.protocolClientOrderId(
+            keccak256(
+                abi.encode(
+                    "PLETHER_POSITION_PROTECTION_RETRY_V2", block.chainid, address(this), account, protectionId, orderId
+                )
+            )
+        );
         (uint64 registeredOrderId,, bool replayed) =
             host.lifecycleBook().registerPending(account, orderId, request, executionBountyUsdc);
         if (replayed || registeredOrderId != orderId) {
@@ -524,9 +530,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint64 linkedOrderId,
         IPositionProtectionBook.TriggerPlan memory plan
     ) private {
-        // Solidity zero-initializes margin and minimum-bound fields omitted from this synthetic close request.
-        // slither-disable-next-line uninitialized-local
-        OrderV2Types.OrderRequest memory request;
+        OrderV2Types.OrderRequest memory request = _protectionCloseRequest(host, plan.side, plan.size);
         request.clientOrderId = OrderV2Types.protocolClientOrderId(
             keccak256(
                 abi.encode(
@@ -539,21 +543,6 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                 )
             )
         );
-        request.side = plan.side;
-        request.sizeDelta = plan.size;
-        request.targetPrice = plan.side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
-        request.isClose = true;
-        request.bounds.validUntil = uint64(block.timestamp + host.maxOrderAge());
-        request.bounds.allowedExecutionModes = 1 | 2 | 4;
-        request.bounds.expectedConfigHash = bytes32(0);
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
-        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
-        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
-        request.bounds.maxPostPositionSize = type(uint256).max;
-        request.bounds.maxPostLeverageBps = type(uint32).max;
-
         (uint64 resolvedOrderId,, bool replayed) =
             host.lifecycleBook().registerPending(plan.account, linkedOrderId, request, plan.executionBountyUsdc);
         if (replayed || resolvedOrderId != linkedOrderId) {
@@ -562,27 +551,13 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         host.lifecycleBook().registerProtectionAttempt(linkedOrderId);
     }
 
-    /// @dev Builds the protocol-native intent for a later attempt without re-evaluating the original trigger.
-    function _protectionRetryRequest(
+    /// @dev Shares the execution envelope across initial and retried closes; callers supply their distinct client ids.
+    ///      Omitted margin and minimum-bound fields remain zero-initialized.
+    function _protectionCloseRequest(
         IOrderLiquidationBatchHost host,
-        uint64 protectionId,
-        uint64 linkedOrderId,
-        address account,
         CfdTypes.Side side,
         uint256 size
     ) private view returns (OrderV2Types.OrderRequest memory request) {
-        request.clientOrderId = OrderV2Types.protocolClientOrderId(
-            keccak256(
-                abi.encode(
-                    "PLETHER_POSITION_PROTECTION_RETRY_V2",
-                    block.chainid,
-                    address(this),
-                    account,
-                    protectionId,
-                    linkedOrderId
-                )
-            )
-        );
         request.side = side;
         request.sizeDelta = size;
         request.targetPrice = side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
