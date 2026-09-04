@@ -12,6 +12,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
@@ -540,6 +541,124 @@ contract PositionProtectionTest is BasePerpTest {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotLatched.selector);
         protectionActions.retryPositionProtectionClose(protectionId);
         assertEq(router.pendingOrderCounts(ALICE), 1, "double retry must not create another child");
+    }
+
+    function test_RetryPositionProtectionClose_StaleOldAttemptCallbacksCannotMutateReplacement() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 oldOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
+        _expireProtectionAttempt(oldOrderId, EXECUTION_KEEPER);
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+
+        vm.startPrank(address(router));
+        protectionBook.afterOrderTerminal(oldOrderId, ALICE, IOrderRouterAccounting.OrderStatus.Executed);
+        bool retained = protectionBook.handleFailedProtectionAttempt(
+            oldOrderId, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc
+        );
+        vm.stopPrank();
+
+        assertFalse(retained, "obsolete failed-attempt callback must be ignored");
+        PositionProtectionTypes.PositionProtectionView memory replacement =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(replacement.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "obsolete terminal callback must not resolve the replacement attempt"
+        );
+        assertEq(replacement.linkedOrderId, retryOrderId, "obsolete callbacks must not restore the old attempt");
+        assertEq(replacement.executionBountyUsdc, 0, "replacement child must retain bounty attribution");
+        assertEq(
+            protectionViews.activePositionProtectionId(ALICE), protectionId, "replacement must keep the trade lock"
+        );
+        assertFalse(router.lifecycleBook().isProtectionAttempt(oldOrderId), "old attempt marker must stay cleared");
+        assertTrue(
+            router.lifecycleBook().isProtectionAttempt(retryOrderId), "replacement attempt marker must stay live"
+        );
+        assertEq(router.pendingOrderCounts(ALICE), 1, "obsolete callbacks must not unlink the replacement");
+        assertEq(_orderRecord(retryOrderId).executionBountyUsdc, executionBountyUsdc, "replacement bounty must survive");
+    }
+
+    function test_RetryPositionProtectionClose_OracleWindowStartsStrictlyAfterFreshCommit() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 oldOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        CfdTypes.Order memory oldOrder = _orderRecord(oldOrderId).core;
+        _expireProtectionAttempt(oldOrderId, EXECUTION_KEEPER);
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        CfdTypes.Order memory retryOrder = _orderRecord(retryOrderId).core;
+        assertGt(retryOrder.commitTime, oldOrder.commitTime + 1, "retry must start after the old oracle window tick");
+
+        vm.warp(uint256(retryOrder.commitTime) + 1);
+        vm.roll(block.number + 1);
+
+        bytes[] memory oldWindowData =
+            _mockUniquePythUpdateDataAt(MARK_PRICE, oldOrder.commitTime + 1, oldOrder.commitTime);
+        vm.prank(EXECUTION_KEEPER);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(retryOrderId, oldWindowData);
+
+        bytes[] memory commitBoundaryData =
+            _mockUniquePythUpdateDataAt(MARK_PRICE, retryOrder.commitTime, retryOrder.commitTime - 1);
+        vm.prank(EXECUTION_KEEPER);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(retryOrderId, commitBoundaryData);
+
+        assertEq(router.nextExecuteId(), retryOrderId, "ticks at or before the retry commit must leave it pending");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "rejected old-window ticks must preserve the live retry"
+        );
+
+        bytes[] memory firstValidTickData =
+            _mockUniquePythUpdateDataAt(MARK_PRICE, retryOrder.commitTime + 1, retryOrder.commitTime);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(retryOrderId, firstValidTickData);
+
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed),
+            "first strictly post-retry tick must execute"
+        );
+    }
+
+    function test_RetryPositionProtectionClose_OracleWindowIncludesFreshDeadlineButNotLaterTicks() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 oldOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _expireProtectionAttempt(oldOrderId, EXECUTION_KEEPER);
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        CfdTypes.Order memory retryOrder = _orderRecord(retryOrderId).core;
+        uint64 settlementDeadline =
+            uint64(uint256(retryOrder.commitTime) + router.pletherOracle().orderSettlementWindow());
+
+        vm.warp(uint256(settlementDeadline) + 1);
+        vm.roll(block.number + 1);
+
+        bytes[] memory afterDeadlineData =
+            _mockUniquePythUpdateDataAt(MARK_PRICE, settlementDeadline + 1, retryOrder.commitTime);
+        vm.prank(EXECUTION_KEEPER);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        router.executeOrder(retryOrderId, afterDeadlineData);
+
+        assertEq(router.nextExecuteId(), retryOrderId, "post-deadline tick must leave the retry pending");
+        assertTrue(
+            router.lifecycleBook().isProtectionAttempt(retryOrderId), "rejected tick must keep retry attribution"
+        );
+
+        bytes[] memory deadlineData = _mockUniquePythUpdateDataAt(MARK_PRICE, settlementDeadline, retryOrder.commitTime);
+        vm.prank(EXECUTION_KEEPER);
+        router.executeOrder(retryOrderId, deadlineData);
+
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed),
+            "tick exactly at the retry settlement deadline must execute"
+        );
     }
 
     function test_RetryPositionProtectionClose_PriceRecoveryDoesNotCancelLatchedIntent() public {
@@ -2031,6 +2150,18 @@ contract PositionProtectionTest is BasePerpTest {
         bytes[] memory updateData = _mockPythUpdateData(price);
         vm.prank(TRIGGER_KEEPER);
         linkedOrderId = protectionActions.triggerPositionProtection(protectionId, updateData);
+    }
+
+    function _mockUniquePythUpdateDataAt(
+        uint256 price,
+        uint64 publishTime,
+        uint64 previousPublishTime
+    ) internal returns (bytes[] memory updateData) {
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), int64(uint64(price)), 0, int32(-8), publishTime, previousPublishTime
+        );
+        updateData = new bytes[](1);
+        updateData[0] = abi.encode(price);
     }
 
     function _expireProtectionAttempt(
