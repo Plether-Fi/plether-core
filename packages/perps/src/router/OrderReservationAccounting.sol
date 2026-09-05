@@ -4,7 +4,6 @@ pragma solidity 0.8.35;
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
@@ -199,56 +198,6 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         }
         clearinghouse.reserveCommittedOrderMargin(account, orderId, marginDelta);
         _linkMarginOrder(account, orderId);
-    }
-
-    /// @notice Settles the router-side reservation after an execution attempt.
-    /// @dev On failure, releases any still-active committed margin before paying the bounty. On success,
-    ///      committed margin has already been released immediately before the engine call, so only the bounty is collected.
-    /// @param orderId Order being finalized.
-    /// @param success Whether engine execution succeeded.
-    /// @param executionPrice Oracle execution price supplied to bounty accounting (8 decimals).
-    /// @param oraclePublishTime Oracle publish timestamp supplied to bounty accounting.
-    /// @return executionBountyUsdc Bounty credited to the caller (6-decimal USDC), or zero.
-    function _consumeOrderReservation(
-        uint64 orderId,
-        bool success,
-        uint256 executionPrice,
-        uint64 oraclePublishTime
-    ) internal returns (uint256 executionBountyUsdc) {
-        if (success) {
-            return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
-        }
-
-        _releaseCommittedMargin(orderId);
-        return _collectExecutionBounty(orderId, executionPrice, oraclePublishTime);
-    }
-
-    /// @notice Clears an order's recorded bounty and asks the engine to credit it to `msg.sender`.
-    /// @param orderId Finalized order id.
-    /// @param executionPrice Oracle execution price supplied to engine accounting (8 decimals).
-    /// @param oraclePublishTime Oracle publish timestamp supplied to engine accounting.
-    /// @return executionBountyUsdc Bounty credited to the caller (6-decimal USDC), or zero.
-    function _collectExecutionBounty(
-        uint64 orderId,
-        uint256 executionPrice,
-        uint64 oraclePublishTime
-    ) internal returns (uint256 executionBountyUsdc) {
-        OrderRecord storage record = _orderRecord(orderId);
-        executionBountyUsdc = record.executionBountyUsdc;
-        if (executionBountyUsdc == 0) {
-            return 0;
-        }
-        record.executionBountyUsdc = 0;
-        engine.creditBounty(record.core.account, msg.sender, executionBountyUsdc, executionPrice, oraclePublishTime);
-        return executionBountyUsdc;
-    }
-
-    /// @notice Idempotently releases any active clearinghouse committed-margin reservation for an order.
-    /// @param orderId Order whose clearinghouse reservation is released.
-    function _releaseCommittedMargin(
-        uint64 orderId
-    ) internal {
-        clearinghouse.releaseOrderReservationIfActive(orderId);
     }
 
     /// @notice Appends an order to an account's doubly linked margin-reservation queue.
