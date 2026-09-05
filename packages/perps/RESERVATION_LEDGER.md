@@ -69,3 +69,16 @@ records. Rebuild clients that consume the internal accounting interface and do n
 
 Deploy a matching stack together. No live-state migration, deployment-boundary consolidation, pricing change,
 waterfall change, or new payout policy is included. See [Deployment](DEPLOYMENT.md) for cutover constraints.
+
+## Stateful conservation test
+
+`test/perps/invariant/ProtectionBountyStateMachine.t.sol` maintains a separate ledger of funded, unpaid, paid,
+refunded, and forfeited bounty value. Expected amounts come from fixed configured bounties and successful actions;
+protocol return values supply record identities. Every step compares all current and historical records, account
+totals, reserve backing, keeper credits, and protection/order/position lifecycle against that model.
+
+Each fuzz case first exercises cross-account namespace collisions, cancellation of armed and pending-open protection,
+parent execution and expiry, repeated retained retries, successful close payout, risk-off refunds, and liquidation of
+armed, triggered, and latched protection. A forced transfer failure checks atomic rollback. It then mixes 32 actions
+across three accounts and drains every remaining bounty. Unexpected action reverts fail the case. Carry and VPI are
+zero in this focused fixture; their interactions remain covered by the package's separate accounting tests.
