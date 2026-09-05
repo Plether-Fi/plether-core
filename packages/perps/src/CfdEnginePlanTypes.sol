@@ -294,7 +294,7 @@ library CfdEnginePlanTypes {
     /// @param traderClaimFeeRecoveryUsdc `LOSS`-only consumed claim allocated to an uncollected execution fee.
     /// @param lossResult `LOSS`-only seized collateral, fee collection, shortfall, and pre-netting write-off breakdown.
     /// @param lossConsumption `LOSS`-only clearinghouse buckets consumed to collect the close loss.
-    /// @param syncMarginQueueAmount `LOSS`-only other locked margin consumed; nonzero requests router queue sync.
+    /// @param syncMarginQueueAmount Reserved legacy field; active reservation queues are maintained by the clearinghouse.
     /// @param executionFeeUsdc Fee included in close economics; for a loss it is limited to retained, collected, and
     ///        claim-recovered amounts.
     /// @param protocolFeeTopUpUsdc Additional unreserved pool cash planned for the protocol treasury fee credit.
@@ -418,7 +418,7 @@ library CfdEnginePlanTypes {
     /// @param freshPayoutCreatesClaim Whether the fresh payout is expected to remain a trader-claim liability.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted once against exact liquidation price loss.
     /// @param existingTraderClaimRemainingUsdc Account claim balance remaining after planned netting.
-    /// @param syncMarginQueueAmount Other locked margin unlocked; a nonzero value requests router queue sync.
+    /// @param syncMarginQueueAmount Reserved legacy field; active reservation queues are maintained by the clearinghouse.
     /// @param badDebtUsdc Compatibility diagnostic for price loss above claim-plus-pledge collection; never stored debt.
     /// @param pendingCarryUsdc Total checkpointed and indexed carry handled through the independent action path.
     /// @param solvency Projected post-liquidation solvency and degraded-mode flags.

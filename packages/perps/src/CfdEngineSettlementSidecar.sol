@@ -11,7 +11,6 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 
@@ -181,11 +180,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
         snap.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
         snap.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        address orderRouter = engine.orderRouter();
-        if (orderRouter != address(0)) {
-            snap.protectedExecutionBountyUsdc =
-            IOrderRouterAccounting(orderRouter).getAccountReservations(account).executionBountyUsdc;
-        }
+        snap.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
         snap.position.margin = snap.lockedBuckets.positionMarginUsdc;
 
         snap.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
@@ -856,7 +851,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         address keeper
     ) private returns (uint256 seizedUsdc) {
         uint64[] memory reservationOrderIds =
-            IOrderRouterAccounting(host.orderRouter()).getMarginReservationIds(delta.account);
+            IMarginClearinghouse(host.clearinghouse()).getMarginReservationIds(delta.account);
         IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
             IMarginClearinghouse.LiquidationSettlementPlan({
                 settlementRetainedUsdc: delta.settlementRetainedUsdc,

@@ -10,7 +10,6 @@ import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @title CfdEngineLens
@@ -506,7 +505,7 @@ contract CfdEngineLens is ICfdEngineLens {
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, oraclePrice, poolDepthUsdc, 0);
-        _applyLiquidationPreviewForfeiture(account, snap);
+        _applyLiquidationPreviewForfeiture(snap);
         CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, oraclePrice, 0);
 
         preview.liquidatable = delta.liquidatable;
@@ -583,11 +582,7 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
         snap.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
         snap.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        address router = engineContract.orderRouter();
-        if (router != address(0)) {
-            snap.protectedExecutionBountyUsdc =
-            IOrderRouterAccounting(router).getAccountReservations(account).executionBountyUsdc;
-        }
+        snap.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
         snap.unsettledCarryUsdc = engineContract.unsettledCarryUsdc(account);
         snap.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
         snap.traderClaimBalanceForAccount = engineContract.traderClaimBalanceUsdc(account);
@@ -604,20 +599,13 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @notice Adjusts a memory snapshot for execution-bounty value forfeited before liquidation settlement.
-    /// @dev Does nothing without a configured router or a nonzero bounty reserve. The debit and lock release are capped
+    /// @dev Does nothing without a nonzero bounty reserve. The debit and lock release are capped
     ///      by the corresponding snapshot buckets and no live state is changed.
-    /// @param account Account whose router reservation is queried.
     /// @param snap Snapshot mutated in memory before liquidation planning.
     function _applyLiquidationPreviewForfeiture(
-        address account,
         CfdEnginePlanTypes.RawSnapshot memory snap
-    ) internal view {
-        address orderRouter = engineContract.orderRouter();
-        if (orderRouter == address(0)) {
-            return;
-        }
-
-        uint256 forfeitedUsdc = IOrderRouterAccounting(orderRouter).getAccountReservations(account).executionBountyUsdc;
+    ) internal pure {
+        uint256 forfeitedUsdc = snap.protectedExecutionBountyUsdc;
         if (forfeitedUsdc == 0) {
             return;
         }

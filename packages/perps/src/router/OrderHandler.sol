@@ -6,19 +6,12 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 import {OrderBountyAccounting} from "@plether/perps/router/OrderBountyAccounting.sol";
 import {OrderExecutionHandler} from "@plether/perps/router/OrderExecutionHandler.sol";
 import {OrderLiquidationHandler} from "@plether/perps/router/OrderLiquidationHandler.sol";
-import {OrderReservationAccounting} from "@plether/perps/router/OrderReservationAccounting.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 import {PositionProtectionHandler} from "@plether/perps/router/PositionProtectionHandler.sol";
 
 /// @title OrderHandler
 /// @notice Composes commit, execution, and liquidation handlers and applies admin-finalized configuration.
 abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandler, OrderLiquidationHandler {
-
-    function _additionalExecutionBountyUsdc(
-        address account
-    ) internal view override(PositionProtectionHandler, OrderReservationAccounting) returns (uint256) {
-        return PositionProtectionHandler._additionalExecutionBountyUsdc(account);
-    }
 
     function _afterOrderDeleted(
         uint64 orderId,

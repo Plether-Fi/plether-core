@@ -654,7 +654,7 @@ contract PerpInvariantTest is BasePerpTest {
             uint256 rawQueuedCommitted;
 
             for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-                OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+                OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
                 if (record.core.account != account || record.core.sizeDelta == 0) {
                     continue;
                 }
@@ -745,7 +745,7 @@ contract PerpInvariantTest is BasePerpTest {
     ) private view returns (uint256 pendingExecutionBountyUsdc) {
         uint64 nextCommitId = router.nextCommitId();
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (
                 record.status == IOrderRouterAccounting.OrderStatus.Pending && record.core.account == account
                     && record.core.sizeDelta != 0
@@ -1075,7 +1075,7 @@ contract AdversarialPerpHandler is Test {
 
         bool retryableSlippageAtHead;
         if (beforeExecute < router.nextCommitId()) {
-            OrderRouter.OrderRecord memory headRecord = _orderRecord(beforeExecute);
+            OrderRouterDebugLens.OrderRecord memory headRecord = _orderRecord(beforeExecute);
             if (uint8(headRecord.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                 retryableSlippageAtHead = !_checkSlippage(headRecord.core, oraclePrice);
                 if (retryableSlippageAtHead) {
@@ -1089,7 +1089,7 @@ contract AdversarialPerpHandler is Test {
         ghost_batchExecutedOrders += _recordExecutedOrders(beforeExecute, afterExecute);
 
         if (retryableSlippageAtHead) {
-            OrderRouter.OrderRecord memory postRecord = _orderRecord(ghost_lastRetryableSlippageOrderId);
+            OrderRouterDebugLens.OrderRecord memory postRecord = _orderRecord(ghost_lastRetryableSlippageOrderId);
             if (uint8(postRecord.status) == uint8(IOrderRouterAccounting.OrderStatus.Failed)) {
                 ghost_lastRetryableSlippageBatch++;
                 ghost_lastRetryableSlippageAfterExecuteId = afterExecute;
@@ -1155,7 +1155,7 @@ contract AdversarialPerpHandler is Test {
 
     function _orderRecord(
         uint64 orderId
-    ) internal view returns (OrderRouter.OrderRecord memory record) {
+    ) internal view returns (OrderRouterDebugLens.OrderRecord memory record) {
         return OrderRouterDebugLens.loadOrderRecord(vm, router, orderId);
     }
 
@@ -1296,7 +1296,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         }
 
         while (cursor != 0 && cursor < nextCommitId && traversed <= pendingCount) {
-            OrderRouter.OrderRecord memory record = _orderRecord(cursor);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(cursor);
             assertEq(
                 uint8(record.status),
                 uint8(IOrderRouterAccounting.OrderStatus.Pending),
@@ -1342,7 +1342,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     ) private view returns (uint256 pendingExecutionBountyUsdc) {
         uint64 nextCommitId = router.nextCommitId();
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (
                 record.status == IOrderRouterAccounting.OrderStatus.Pending && record.core.account == account
                     && record.core.sizeDelta != 0

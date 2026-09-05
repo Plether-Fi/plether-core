@@ -30,12 +30,6 @@ abstract contract PositionProtectionHandler is OrderCommitHandler, ReentrancyGua
         }
     }
 
-    function _additionalExecutionBountyUsdc(
-        address account
-    ) internal view virtual override returns (uint256) {
-        return positionProtectionBook.unpaidBounties(account);
-    }
-
     function _afterOrderDeleted(
         uint64 orderId,
         address account,

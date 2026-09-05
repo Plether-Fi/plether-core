@@ -1025,8 +1025,8 @@ The accounting system should preserve the following:
 25. armed and latched protection is off queue; triggered protection links exactly one live full reduce-only attempt,
     while terminal lifecycle receipts retain the complete one-to-many attempt history
 26. the take-profit and stop-loss legs collectively trigger at most once
-27. every protection bounty unit is exactly reserved, attributed to either Book or Router but not both, and ultimately
-    paid, refunded, or forfeited once; retry never creates a new reservation
+27. every protection bounty unit is recorded in exactly one clearinghouse namespace (protection or order), and
+    ultimately paid, refunded, or forfeited once; retry moves that attribution without locking additional reserve
 28. terminal protection owns zero reserve, and liquidation leaves no protection or linked-order residue
 29. existing-position protection cannot arm after its reserve lock unless canonical exact-basis price equity, using
     only PnL pledge plus same-account claim, remains strictly above the stricter initial/active requirement
@@ -1047,3 +1047,5 @@ Design rules:
 - share logic only when the economic question is truly the same,
 - make cross-domain reuse deliberate rather than accidental,
 - prefer duplication over silently mixing assumptions from the wrong domain.
+
+See [Reservation ledger](RESERVATION_LEDGER.md) for reservation ownership, lifecycle transitions, and integration changes.

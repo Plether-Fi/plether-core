@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
+
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -61,7 +63,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         uint64 lastKnownOrderId = handler.lastKnownOrderId();
         uint256[] memory liveCounts = new uint256[](handler.actorCount());
         for (uint64 orderId = 1; orderId <= lastKnownOrderId; orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (uint256(record.status) != uint256(IOrderRouterAccounting.OrderStatus.Pending)) {
                 continue;
             }
@@ -151,7 +153,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
     function _livePendingOrderCount() internal view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending)) {
                 count++;
             }
@@ -160,7 +162,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
     function _liveMarginOrderCount() internal view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending) && record.inMarginQueue) {
                 count++;
             }

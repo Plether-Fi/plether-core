@@ -164,7 +164,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   a predicted Router, and that Router validates the Book's Router, Engine, Clearinghouse, and HousePool bindings in
   its constructor.
 - `PositionProtectionBook` is created by and immutable-bound to the Router and Engine. It owns retained protection
-  state, direct actions/views, retry-bounty attribution, and Router-only lifecycle hooks; it does not carry keeper or
+  state, direct actions/views, authenticated clearinghouse retry-bounty transfers, and Router-only lifecycle hooks; it does not carry keeper or
   liquidation orchestration.
 - `OrderRouterV2ExecutionSidecar` is a fixed, stateless Router delegate dependency. It orchestrates Oracle, evaluator,
   Engine, Clearinghouse, and lifecycle Book calls under the Router's address, but it cannot be called directly to
@@ -256,7 +256,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Single terminal owner | Router records are fully deleted terminally, while the Book retains permanent client identity, lifecycle outcome, and the full-receipt hash |
 | Bounty conservation | Clearinghouse-reserved execution bounty value is conserved across order lifecycle transitions until distributed or absorbed, and is excluded from close-loss reachability while reserved |
 | VPI reserve conservation | Every live negative lifetime-VPI balance has equal dedicated action-reserve backing; only an exact clawback, equivalent withholding, or lower surviving target may consume or release it |
-| Reservation source of truth | Clearinghouse reservation records remain the source of truth for committed order margin |
+| Reservation source of truth | Clearinghouse records own committed order margin, its active FIFO, all bounty classifications, and account bounty totals; Router and protection views compose these records |
 | Protection post-lock safety | Existing-position protection uses exact entry basis and only PnL pledge plus same-account claim for price equity; free/action reserves are excluded, uncovered carry and underfunded negative VPI fail closed, and equality at the stricter initial/active threshold is rejected |
 | Delegated Router isolation | The separately predeployed, exactly Router-bound keeper sidecar is delegate-only, storage-layout-independent, and cannot directly write Router storage; the Router remains `address(this)`, downstream caller, and direct-event address |
 | Earliest lot gate | Router commit rejects non-100-token-multiple opens and closes before reserving value or assigning an order id |
