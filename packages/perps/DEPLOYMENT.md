@@ -17,6 +17,7 @@ The current target network is Arbitrum Sepolia with:
 - Environment template: `.env.arbitrum-sepolia-perps.example`
 - Manifest template: `deployments/arbitrum-sepolia-perps.template.json`
 - Current preparation record: `deployments/releases/2026-09-04-perps-arbitrum-sepolia/README.md`
+- Latest deployment (inactive, awaiting bootstrap): `deployments/releases/2026-09-05-perps-arbitrum-sepolia/README.md`
 - Consumer ABI and build-evidence exporter: `scripts/export-perps-release.py`
 
 The deploy script handles contract creation and one-time wiring.
