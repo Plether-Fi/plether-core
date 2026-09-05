@@ -5,7 +5,6 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
 import {ICfdEngineProtocolLens} from "@plether/perps/interfaces/ICfdEngineProtocolLens.sol";
-import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
@@ -115,10 +114,13 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
         uint256 protocolTreasuryBalanceUsdc =
             engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
-        uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiability(
-            _sideState(CfdTypes.Side.LONG).maxProfitUsdc, _sideState(CfdTypes.Side.SHORT).maxProfitUsdc
-        );
-        SolvencyAccountingLib.SolvencyState memory solvencyState = _buildAdjustedSolvencyState();
+        ICfdEngineTypes.SideState memory longState = _sideState(CfdTypes.Side.LONG);
+        ICfdEngineTypes.SideState memory shortState = _sideState(CfdTypes.Side.SHORT);
+        uint256 maxLiabilityUsdc =
+            SolvencyAccountingLib.getMaxLiability(longState.maxProfitUsdc, shortState.maxProfitUsdc);
+        uint256 totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
+        SolvencyAccountingLib.SolvencyState memory solvencyState =
+            SolvencyAccountingLib.buildSolvencyState(poolAssetsUsdc, maxLiabilityUsdc, totalTraderClaimBalanceUsdc);
         snapshot.poolAssetsUsdc = poolAssetsUsdc;
         snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc > protocolTreasuryBalanceUsdc
             ? solvencyState.netPhysicalAssetsUsdc - protocolTreasuryBalanceUsdc
@@ -131,23 +133,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         snapshot.freeUsdc =
             poolAssetsUsdc > snapshot.withdrawalReservedUsdc ? poolAssetsUsdc - snapshot.withdrawalReservedUsdc : 0;
         snapshot.protocolTreasuryBalanceUsdc = protocolTreasuryBalanceUsdc;
-        snapshot.totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
+        snapshot.totalTraderClaimBalanceUsdc = totalTraderClaimBalanceUsdc;
         snapshot.degradedMode = engineContract.degradedMode();
-        ICfdEngineTypes.SideState memory longState = _sideState(CfdTypes.Side.LONG);
-        ICfdEngineTypes.SideState memory shortState = _sideState(CfdTypes.Side.SHORT);
         snapshot.hasLiveLiability = longState.maxProfitUsdc + shortState.maxProfitUsdc > 0;
-    }
-
-    /// @notice Builds solvency from pool assets, maximum side liability, and aggregate trader claims.
-    /// @return Current solvency state; protocol treasury is not a separate deduction.
-    function _buildAdjustedSolvencyState() internal view returns (SolvencyAccountingLib.SolvencyState memory) {
-        return SolvencyAccountingLib.buildSolvencyState(
-            engineContract.pool().totalAssets(),
-            SolvencyAccountingLib.getMaxLiability(
-                _sideState(CfdTypes.Side.LONG).maxProfitUsdc, _sideState(CfdTypes.Side.SHORT).maxProfitUsdc
-            ),
-            engineContract.totalTraderClaimBalanceUsdc()
-        );
     }
 
     /// @notice Reconstructs one aggregate side-state tuple from the engine getter.
@@ -159,12 +147,6 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     ) internal view returns (ICfdEngineTypes.SideState memory state) {
         (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) =
             engineContract.sides(uint8(side));
-    }
-
-    /// @notice Reconstructs the engine's current risk-parameter struct from its public tuple getter.
-    /// @return params Current risk, VPI, carry, margin, and bounty settings.
-    function _riskParams() internal view returns (CfdTypes.RiskParams memory params) {
-        params = ICfdEngineRiskParamsView(address(engineContract)).riskParams();
     }
 
 }
