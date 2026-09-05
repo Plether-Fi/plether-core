@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
-import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {OrderExecutionOrchestrator} from "@plether/perps/router/OrderExecutionOrchestrator.sol";
@@ -99,14 +98,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @notice Reads the admin's monotonic inclusive open-order invalidation cutoff.
     function _riskOffOrderCutoff() internal view returns (uint64) {
         return OrderRouterAdmin(admin).riskOffOrderCutoff();
-    }
-
-    /// @notice Releases any active committed-margin reservation immediately before engine execution.
-    /// @param orderId Order whose reservation is released.
-    function _releaseCommittedMarginForExecution(
-        uint64 orderId
-    ) internal override {
-        _releaseCommittedMargin(orderId);
     }
 
     /// @notice Delegates close-bounty reservation and solvency checks to the engine.

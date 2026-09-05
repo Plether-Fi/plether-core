@@ -371,9 +371,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                     .previewOpenFailurePolicyCategory(
                         account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
                     );
-                uint8 revertCode = host.engineLensForCommit()
-                    .previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
                 if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
+                    uint8 revertCode = host.engineLensForCommit()
+                        .previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
                     revert OrderRouter__PredictableOpenInvalid(revertCode);
                 }
             }
