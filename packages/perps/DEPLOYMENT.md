@@ -278,7 +278,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
 | `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
 | `maxSeniorShareBps` | `8_000` (release-HousePool constructor initialization) |
-| Senior / Junior seed | `10_000_000e6` each |
+| Senior / Junior seed | `1e6` each |
 
 `frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion without creating a protocol liability or terminal deficit, while a partial close must settle this separate spread obligation in full. Price loss beyond the terminal collectible cap is a diagnostic write-off and does not block the partial close.
 
@@ -450,8 +450,8 @@ PERPS_ORDER_ROUTER=0x...
 PERPS_EMERGENCY_COORDINATOR=0x...
 PERPS_GUARDIAN=0x...
 
-SENIOR_SEED_USDC=10000000000000
-JUNIOR_SEED_USDC=10000000000000
+SENIOR_SEED_USDC=1000000
+JUNIOR_SEED_USDC=1000000
 
 SENIOR_SEED_RECEIVER=0x...
 JUNIOR_SEED_RECEIVER=0x...
@@ -466,9 +466,9 @@ TEST_USER_AMOUNTS=1000000000000,500000000000
 Notes:
 
 - USDC amounts are raw 6-decimal values.
-- `10000000000000` means `10_000_000e6`, or 10,000,000 mock USDC.
+- `1000000` means `1e6`, or 1 mock USDC.
 - Seed amounts, seed receivers, guardian, and activation intent are explicit mandatory inputs. Bootstrap accepts only
-  the approved `$10M/$10M` seed values and independently reads and verifies the constructor-installed `$40M/80%`
+  the approved `$1/$1` seed values and independently reads and verifies the constructor-installed `$40M/80%`
   HousePool and `$1,000/2,500` Router values.
 - `PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR`, `PERPS_EMERGENCY_COORDINATOR`, and `PERPS_GUARDIAN` are mandatory, and
   the guardian must be nonzero. Bootstrap verifies the supplied released sidecar's code and implementation id for
@@ -664,7 +664,7 @@ latched retry, and liquidation remain live.
    `EmergencyPauseCoordinator` is bound to the exact RouterAdmin and HousePool, installed as pauser on both, and starts
    with no active settlement hold.
 5. Set bootstrap environment variables, including the printed redemption-math sidecar and coordinator, a nonzero
-   guardian, both explicit seed receivers, and exact `$10M/$10M` seeds. Run bootstrap with `ACTIVATE_TRADING=false` to
+   guardian, both explicit seed receivers, and exact `$1/$1` seeds. Run bootstrap with `ACTIVATE_TRADING=false` to
    configure the guardian and seed Junior then Senior without an initial governance wait.
 6. Run the seeded verifier, set `ACTIVATE_TRADING=true`, rerun bootstrap, and run the active verifier.
 7. Fund test wallets with Arbitrum Sepolia ETH as needed.

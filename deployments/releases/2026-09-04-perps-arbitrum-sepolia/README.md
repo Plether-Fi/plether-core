@@ -5,7 +5,9 @@ claims. The active deployment remains recorded in `deployments/arbitrum-sepolia-
 
 ## Source and scope
 
-- Candidate source: `d3b28d1520d46a730e3179303b70761e315e0ce2` (fetched `origin/master`).
+- Final candidate source: pending review and merge of the latest master plus the one-USDC seed change. Set
+  `manifest.json`'s `sourceCommit` to that final reviewed commit before preflight.
+- Previously validated baseline: `d3b28d1520d46a730e3179303b70761e315e0ce2`.
 - Previous deployed source: `69fa3e2bc2d2c9d32a5808e26e62b59c11119fb9`, deployed 2026-08-26.
 - Chain: Arbitrum Sepolia, `421614`; Pyth: `0x0B73614636C855Bf23F342F307FB981A3e47f42B`.
 - Build: Forge `1.5.1-stable`, Solidity `0.8.35`, optimizer 200 runs, via-IR.
@@ -32,11 +34,17 @@ new protection commits disabled. Inspect its live state before cutover instead o
 
 ## Prepared evidence
 
-- [CI passed](https://github.com/Plether-Fi/plether-core/actions/runs/33919232007) on the exact candidate source,
+The one-USDC seed update passed all **39 deployment/script tests**, including deployment, inactive seeding,
+idempotent bootstrap reruns, and separate activation with all three verifier phases. Formatting and package-boundary
+checks also passed.
+
+The CI, simulation, size, and ABI-bundle evidence below describes the previously validated baseline. Rebuild and
+revalidate the final source before deployment; the old exported bundle does not include the revised seed manifest.
+
+- [CI passed](https://github.com/Plether-Fi/plether-core/actions/runs/33919232007) on the baseline source,
   including production deployment-size checks.
 - [Full perps deep suite passed](https://github.com/Plether-Fi/plether-core/actions/runs/33919231980) on that source.
 - Local formatting and package-boundary checks passed.
-- Local deployment/script regressions: **39 passed, 0 failed**, including the fresh-stack verifier and release defaults.
 - Local production build passed. Focused non-via-IR regressions: **118 passed, 0 failed**, including protection,
   lifecycle, claimable-deposit redemption, public-lens cooldowns, market calendar, and oracle-boundary invariants.
 - No-broadcast RPC simulation passed: **31 transactions**, estimated **119,241,745 gas / 0.048263334891481745 ETH**.
@@ -100,7 +108,7 @@ output for each stage. Deployment, bootstrap, activation, consumer cutover, and 
    --rpc-url "$ARB_SEPOLIA_RPC_URL"` without broadcast.
 3. Bootstrap with `ACTIVATE_TRADING=false forge script
    script/BootstrapPerpsArbitrumSepolia.s.sol:BootstrapPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL" --broadcast`.
-   Seed exactly `10000000000000` raw mock USDC per tranche. Set receivers and guardian explicitly.
+   Seed exactly `1000000` raw mock USDC per tranche. Set receivers and guardian explicitly.
 4. Run the standalone verifier with `VERIFY_PHASE=seeded`. Remove optional test-user funding arrays before any
    bootstrap rerun because those mints are not idempotent.
 5. Rerun bootstrap with `ACTIVATE_TRADING=true`, then run the standalone verifier with `VERIFY_PHASE=active`.
@@ -111,6 +119,6 @@ output for each stage. Deployment, bootstrap, activation, consumer cutover, and 
    results. Leave `positionProtectionCommitsEnabled=false` until trigger/retry workers are ready; enabling it requires
    the separate, existing 48-hour governance proposal/finalization flow.
 
-Release economics remain the approved `$10M/$10M` seeds, `$40M/80%` Senior limits, `$1,000` minimum open,
+Initial seed funding is `$1/$1`; the other release economics remain `$40M/80%` Senior limits, `$1,000` minimum open,
 `2,500`-bps adverse-confidence multiplier, and `100`-bps Junior maintenance fee. The candidate manifest records these
 expected values; each deployment/seed/active verification must confirm the appropriate live state.

@@ -461,8 +461,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     function test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() public {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
 
-        assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 10_000_000e6, "senior seed");
-        assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 10_000_000e6, "junior seed");
+        assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 1e6, "senior seed");
+        assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 1e6, "junior seed");
     }
 
     function test_DeploymentUsesExpectedRedemptionMathSidecarAndSettlementStartsLive() public {
