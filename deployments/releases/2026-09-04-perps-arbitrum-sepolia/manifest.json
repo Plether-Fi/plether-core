@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 2,
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "release": {
+    "date": "2026-09-04",
+    "sourceCommit": null,
+    "forgeVersion": "1.5.1-stable",
+    "phase": "prepared",
+    "deploymentBlock": null,
+    "deployer": null,
+    "owner": null,
+    "guardian": null,
+    "deploymentTimeProtocolTreasury": null,
+    "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B"
+  },
+  "contracts": {
+    "mockUsdc": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "marginClearinghouse": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngine": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "terminalNavBookV2": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEnginePlanner": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineSettlementSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineAdmin": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "housePoolRedemptionMathSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "housePool": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool",
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "seniorVault": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "juniorVault": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineAccountLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdOrderPolicyEvaluator": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderRouterV2ExecutionSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "pletherOracle": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderLifecycleBook": {
+      "address": null,
+      "runtimeCodeHash": null,
+      "executionConfigHash": null
+    },
+    "orderRouter": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter",
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderRouterAdmin": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "positionProtectionBook": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "perpsPublicLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "settlementMonitorLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "settlementMonitorLensSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "emergencyPauseCoordinator": {
+      "address": null,
+      "runtimeCodeHash": null
+    }
+  },
+  "economics": {
+    "vpiFactorWad": "10000000000000000",
+    "maxSkewRatioWad": "400000000000000000",
+    "maintenanceMarginBps": 10,
+    "initialMarginBps": 20,
+    "liquidationChargeBps": 10,
+    "minimumLiquidationChargeUsdc": "1000000",
+    "keeperShareBps": 5000,
+    "protocolShareBps": 0,
+    "minimumKeeperPayoutUsdc": "500000",
+    "fadMarginBps": 300,
+    "baseCarryBps": 500,
+    "executionFeeBps": 4,
+    "settlementBufferBps": 25,
+    "frozenCloseSpreadBps": 50,
+    "basketMaxConfidenceRatioBps": 10,
+    "adverseConfidenceMultiplierBps": 2500,
+    "minimumOpenNotionalUsdc": "1000000000",
+    "maxPendingOrders": 5,
+    "closeOrderExecutionBountyUsdc": "200000",
+    "positionProtectionTriggerBountyUsdc": "200000",
+    "positionProtectionCommitsEnabled": false,
+    "maxSeniorExposureUsdc": "40000000000000",
+    "maxSeniorShareBps": 8000,
+    "seniorSeedUsdc": "1000000",
+    "juniorSeedUsdc": "1000000",
+    "seniorSeedReceiver": null,
+    "juniorSeedReceiver": null,
+    "juniorMaintenanceFeeAprBps": 100,
+    "juniorMaintenanceFeeRecipient": null,
+    "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
+  },
+  "deploymentInitialization": {
+    "housePoolReleaseValuesConstructorInitialized": true,
+    "routerReleaseValuesConstructorInitialized": true,
+    "housePoolConfigActivationTimeAtDeployment": "0",
+    "routerConfigActivationTimeAtDeployment": "0"
+  },
+  "transactions": {
+    "deployment": [],
+    "bootstrapSeeding": [],
+    "activation": []
+  },
+  "verification": {
+    "deployedPhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "seededPhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "activePhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "authenticatedPythDryRun": {
+      "timestamp": null,
+      "passed": false
+    }
+  },
+  "compatibility": {
+    "orderIntentDomain": "PletherOrderIntentV2",
+    "orderReceiptDomain": "PletherOrderReceiptV3",
+    "executionConfigDomain": "PletherExecutionConfigV3",
+    "freshStackRequired": true,
+    "stateMigrationSupported": false
+  }
+}

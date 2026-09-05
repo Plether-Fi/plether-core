@@ -3,8 +3,11 @@ set -euo pipefail
 
 release_env_file="${PERPS_RELEASE_ENV_FILE:-.env.arbitrum-sepolia-perps}"
 if [[ -f "$release_env_file" ]]; then
+  # The example uses plain assignments; export them for Forge's vm.env* reads.
+  set -a
   # shellcheck disable=SC1090
   source "$release_env_file"
+  set +a
 fi
 
 : "${ARB_SEPOLIA_RPC_URL:?ARB_SEPOLIA_RPC_URL must be set}"

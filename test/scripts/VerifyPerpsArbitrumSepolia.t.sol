@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
 import {DeployPerpsArbitrumSepolia} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {VerifyPerpsArbitrumSepolia} from "../../script/VerifyPerpsArbitrumSepolia.s.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -11,7 +12,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint256 internal constant DEPLOYER_KEY = 0xA11CE;
 
-    function test_VerifiesCompleteFreshDeploymentGraph() public {
+    function test_VerifiesOneUsdcReleaseAcrossDeploymentSeedingAndActivation() public {
         vm.chainId(421_614);
         MockPyth pyth = new MockPyth();
         vm.etch(RELEASE_PYTH, address(pyth).code);
@@ -51,6 +52,40 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
 
         VerifyPerpsArbitrumSepolia verifier = new VerifyPerpsArbitrumSepolia();
         verifier.run();
+
+        _setAddress("SENIOR_SEED_RECEIVER", address(0x5151));
+        _setAddress("JUNIOR_SEED_RECEIVER", address(0x7171));
+        vm.setEnv("SENIOR_SEED_USDC", "1000000");
+        vm.setEnv("JUNIOR_SEED_USDC", "1000000");
+        vm.setEnv("ACTIVATE_TRADING", "false");
+        BootstrapPerpsArbitrumSepolia bootstrap = new BootstrapPerpsArbitrumSepolia();
+        bootstrap.run();
+
+        assertEq(deployed.housePool.seniorPrincipal(), 1e6, "one USDC senior backing");
+        assertEq(deployed.housePool.juniorPrincipal(), 1e6, "one USDC junior backing");
+        assertEq(deployed.usdc.totalSupply(), 2e6, "only two USDC minted for seeds");
+        assertEq(deployed.seniorVault.seedReceiver(), address(0x5151));
+        assertEq(deployed.juniorVault.seedReceiver(), address(0x7171));
+        assertGt(deployed.seniorVault.seedShareFloor(), 0);
+        assertGt(deployed.juniorVault.seedShareFloor(), 0);
+        assertFalse(deployed.housePool.isTradingActive(), "seeding must not activate trading");
+        vm.setEnv("VERIFY_PHASE", "seeded");
+        verifier.run();
+
+        uint256 seniorShares = deployed.seniorVault.totalSupply();
+        uint256 juniorShares = deployed.juniorVault.totalSupply();
+        bootstrap.run();
+        assertEq(deployed.usdc.totalSupply(), 2e6, "seed rerun must not mint again");
+        assertEq(deployed.seniorVault.totalSupply(), seniorShares, "senior seed rerun is a no-op");
+        assertEq(deployed.juniorVault.totalSupply(), juniorShares, "junior seed rerun is a no-op");
+        assertFalse(deployed.housePool.isTradingActive(), "seed rerun must stay inactive");
+
+        vm.setEnv("ACTIVATE_TRADING", "true");
+        bootstrap.run();
+        vm.setEnv("VERIFY_PHASE", "active");
+        verifier.run();
+        assertTrue(deployed.housePool.isTradingActive());
+        assertEq(deployed.usdc.totalSupply(), 2e6, "activation must not repeat seed funding");
     }
 
     function _setAddress(
