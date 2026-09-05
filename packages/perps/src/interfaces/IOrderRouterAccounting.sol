@@ -23,10 +23,10 @@ interface IOrderRouterAccounting {
 
     /// @notice Router/accounting view of queued order reservations attributed to an account.
     /// @dev `committedMarginUsdc` is derived from canonical MarginClearinghouse reservation state.
-    ///      `executionBountyUsdc` is the router-attributed sum of clearinghouse-custodied bounties; the router holds
-    ///      no settlement cash itself. Monetary fields use 6-decimal USDC.
+    ///      `executionBountyUsdc` is the clearinghouse aggregate across order and protection bounty namespaces.
+    ///      The router owns lifecycle counts and holds no settlement cash. Monetary fields use 6-decimal USDC.
     /// @param committedMarginUsdc Remaining committed margin across active clearinghouse reservations.
-    /// @param executionBountyUsdc Unpaid execution bounties attributed to linked pending orders.
+    /// @param executionBountyUsdc Unpaid order, protection-trigger, and protection-execution bounties.
     /// @param pendingOrderCount Number of linked pending orders for the account.
     struct AccountReservationView {
         uint256 committedMarginUsdc;
@@ -58,16 +58,8 @@ interface IOrderRouterAccounting {
         uint256 executionBountyUsdc;
     }
 
-    /// @notice Prunes any zero-remaining committed-order reservations out of the router's margin queue for an account.
-    /// @dev Callable only by the engine or its current settlement sidecar. Mutates router linkage only; the
-    ///      clearinghouse remains canonical for reservation value.
-    /// @param account Account whose margin reservation queue should be synchronized
-    function syncMarginQueue(
-        address account
-    ) external;
-
     /// @notice Returns aggregate queued reservation attributed to an account across all pending orders.
-    /// @dev Traverses the account queue for bounty and count, while committed margin comes from the clearinghouse.
+    /// @dev Returns Router lifecycle counts and clearinghouse-owned margin and bounty totals.
     /// @param account Account to inspect
     /// @return reservation Pending count plus clearinghouse-custodied committed-margin and bounty totals
     function getAccountReservations(
@@ -98,9 +90,8 @@ interface IOrderRouterAccounting {
         address account
     ) external view returns (uint256);
 
-    /// @notice Returns the current router-maintained margin-queue order ids for an account in FIFO order.
-    /// @dev This is a structural traversal helper and can include links whose clearinghouse reservation reached zero
-    ///      but has not yet been pruned. It does not report value; the clearinghouse reservation ledger remains canonical.
+    /// @notice Returns the clearinghouse-owned active margin reservations for an account in FIFO order.
+    /// @dev Exhausted and released records unlink atomically; no Router synchronization is required.
     /// @param account Account to inspect
     /// @return orderIds Pending order ids linked into the account's margin reservation queue
     function getMarginReservationIds(

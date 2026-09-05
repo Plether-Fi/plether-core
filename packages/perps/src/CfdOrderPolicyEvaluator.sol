@@ -11,7 +11,6 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -249,11 +248,7 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         snapshot.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
         snapshot.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
         snapshot.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        address orderRouter = engine.orderRouter();
-        if (orderRouter != address(0)) {
-            snapshot.protectedExecutionBountyUsdc =
-            IOrderRouterAccounting(orderRouter).getAccountReservations(account).executionBountyUsdc;
-        }
+        snapshot.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
         // The clearinghouse bucket is the canonical active-margin source even if the Engine tuple was stale.
         snapshot.position.margin = snapshot.lockedBuckets.positionMarginUsdc;
 

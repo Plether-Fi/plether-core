@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterV2ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV2ExecutionHost.sol";
@@ -160,16 +161,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         );
     }
 
-    /// @notice Prunes spent margin-reservation links for an account's pending-order queue.
-    /// @dev Callable only by the engine or its current settlement sidecar. This changes router linkage only;
-    ///      the clearinghouse remains the source of truth for reserved value.
-    /// @param account Account whose router-side margin reservation queue should be synchronized.
-    function syncMarginQueue(
-        address account
-    ) external {
-        _syncMarginQueue(account);
-    }
-
     /// @notice Returns the pending-order view and next account-queue link for an order id.
     /// @dev Terminal records are deleted from the Router; permanent identity and outcomes are read from `lifecycleBook`.
     /// @param orderId Order id to inspect.
@@ -251,10 +242,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint64 accountingPublishTime
     ) external returns (IOrderRouterV2ExecutionHost.BountySettlement memory settlement) {
         _onlySelfCall();
-        (OrderRecord storage record, CfdTypes.Order memory order) = _pendingOrder(orderId);
+        (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         clearinghouse.releaseOrderReservationForTerminalCleanup(orderId);
-        uint256 bountyUsdc = record.executionBountyUsdc;
-        record.executionBountyUsdc = 0;
+        uint256 bountyUsdc =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId).amountUsdc;
 
         bool retained = !success && lifecycleBook.isProtectionAttempt(orderId)
             && positionProtectionBook.handleFailedProtectionAttempt(orderId, order.account, reason, bountyUsdc);
@@ -263,6 +254,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         if (retained) {
             settlement.bountyDisposition = OrderV2Types.BountyDisposition.RetainedForProtectionRetry;
         } else if (bountyUsdc != 0) {
+            clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, orderId);
             settlement.bountyRecipient = bountyRecipient;
             settlement.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
             if (bountyRecipient == order.account) {
@@ -285,13 +277,13 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint64 riskOffCutoff
     ) external returns (uint256 refundedBountyUsdc) {
         _onlySelfCall();
-        (OrderRecord storage record, CfdTypes.Order memory order) = _pendingOrder(orderId);
+        (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         if (!_isRiskOffOpen(orderId, order.isClose, riskOffCutoff)) {
             revert OrderRouter__OrderNotRiskOff();
         }
 
-        refundedBountyUsdc = record.executionBountyUsdc;
-        record.executionBountyUsdc = 0;
+        refundedBountyUsdc =
+            clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, orderId);
         uint64[] memory orderIds = new uint64[](1);
         orderIds[0] = orderId;
         emit OrderFailed(orderId, OrderFailReason.RiskOff);
@@ -378,13 +370,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         address account;
         CfdTypes.Side side;
         uint256 size;
-        uint256 executionBountyUsdc;
         assembly ("memory-safe") {
             linkedOrderId := calldataload(4)
             account := calldataload(36)
             side := calldataload(68)
             size := calldataload(100)
-            executionBountyUsdc := calldataload(132)
         }
         if (linkedOrderId != nextCommitId) {
             revert OrderRouter__Unauthorized();
@@ -401,8 +391,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
                 orderId: linkedOrderId,
                 side: side,
                 isClose: true
-            }),
-            executionBountyUsdc
+            })
         );
     }
 

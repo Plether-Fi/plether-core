@@ -83,42 +83,27 @@ contract MockClearinghouseEngine {
 
 contract MockMarginReservationRouter {
 
-    mapping(address => uint64[]) internal reservationIdsByAccount;
-    mapping(address => uint256) internal executionBountyByAccount;
+    IMarginClearinghouse internal clearinghouse;
+    mapping(address => uint64) internal bountyIds;
+    uint64 internal nextBountyId = 1;
 
-    function setMarginReservationIds(
-        address account,
-        uint64[] calldata orderIds
+    function setClearinghouse(
+        address clearinghouse_
     ) external {
-        delete reservationIdsByAccount[account];
-        for (uint256 i = 0; i < orderIds.length; ++i) {
-            reservationIdsByAccount[account].push(orderIds[i]);
-        }
-    }
-
-    function getMarginReservationIds(
-        address account
-    ) external view returns (uint64[] memory orderIds) {
-        uint64[] storage stored = reservationIdsByAccount[account];
-        orderIds = new uint64[](stored.length);
-        for (uint256 i = 0; i < stored.length; ++i) {
-            orderIds[i] = stored[i];
-        }
+        clearinghouse = IMarginClearinghouse(clearinghouse_);
     }
 
     function setExecutionBountyUsdc(
         address account,
-        uint256 executionBountyUsdc
+        uint256 amount
     ) external {
-        executionBountyByAccount[account] = executionBountyUsdc;
-    }
-
-    function getAccountReservations(
-        address account
-    ) external view returns (uint256 committedMarginUsdc, uint256 executionBountyUsdc, uint256 pendingOrderCount) {
-        committedMarginUsdc = 0;
-        executionBountyUsdc = executionBountyByAccount[account];
-        pendingOrderCount = executionBountyUsdc == 0 ? 0 : 1;
+        if (amount == 0) {
+            clearinghouse.takeBountyReservation(account, IMarginClearinghouse.BountyKind.Order, bountyIds[account]);
+        } else {
+            uint64 id = nextBountyId++;
+            bountyIds[account] = id;
+            clearinghouse.recordBountyReservation(account, IMarginClearinghouse.BountyKind.Order, id, amount);
+        }
     }
 
 }
@@ -197,6 +182,7 @@ contract MarginClearinghouseTest is Test {
         accountingHarness = new MarginClearinghouseAccountingHarness();
 
         clearinghouse = new MarginClearinghouse(address(usdc));
+        mockRouter.setClearinghouse(address(clearinghouse));
         aliceAccount = alice;
 
         // Authorize our mock engine to lock and settle funds.
@@ -599,10 +585,6 @@ contract MarginClearinghouseTest is Test {
         vm.startPrank(engine);
         clearinghouse.reserveCommittedOrderMargin(aliceAccount, 21, 100 * 1e6);
         clearinghouse.reserveCommittedOrderMargin(aliceAccount, 22, 120 * 1e6);
-        uint64[] memory reservationIds = new uint64[](2);
-        reservationIds[0] = 21;
-        reservationIds[1] = 22;
-        mockRouter.setMarginReservationIds(aliceAccount, reservationIds);
         uint256 consumedUsdc = clearinghouse.consumeAccountOrderReservations(aliceAccount, 150 * 1e6);
         vm.stopPrank();
 
@@ -738,7 +720,11 @@ contract MarginClearinghouseTest is Test {
         uint64[] memory orderIds = new uint64[](2);
         orderIds[0] = 1001;
         orderIds[1] = 1002;
-        mockRouter.setExecutionBountyUsdc(aliceAccount, 1);
+        vm.mockCallRevert(
+            address(mockRouter),
+            abi.encodeWithSignature("getAccountReservations(address)", aliceAccount),
+            "router must not be consulted"
+        );
         uint256 checkpointCallsBefore = mockEngine.carryCheckpointCalls();
 
         vm.expectEmit(true, false, false, true, address(clearinghouse));
@@ -1192,13 +1178,13 @@ contract MarginClearinghouseTest is Test {
 
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1200 * 1e6);
-        mockRouter.setExecutionBountyUsdc(aliceAccount, 150 * 1e6);
 
         vm.startPrank(engine);
         clearinghouse.lockPositionMargin(aliceAccount, 300 * 1e6);
         clearinghouse.lockLiquidationReserve(aliceAccount, 100 * 1e6);
         clearinghouse.lockCommittedOrderMargin(aliceAccount, 100 * 1e6);
         clearinghouse.lockActionReserve(aliceAccount, 350 * 1e6);
+        mockRouter.setExecutionBountyUsdc(aliceAccount, 150 * 1e6);
 
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ActionReserveMismatch.selector);
         clearinghouse.consumeActionCharge(aliceAccount, 450 * 1e6, 350 * 1e6, 0, recipient, protocolTreasury, 50 * 1e6);

@@ -9,7 +9,6 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginAccount} from "@plether/perps/interfaces/IMarginAccount.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 
@@ -50,7 +49,21 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     mapping(address => uint256) internal liquidationReserveBalances;
     mapping(uint64 => IMarginClearinghouse.OrderReservation) internal orderReservations;
     mapping(address => uint256) internal activeCommittedOrderReservationUsdc;
-    mapping(address => uint256) internal activeReservationCount;
+
+    struct ReservationQueue {
+        uint64 head;
+        uint64 tail;
+        uint128 count;
+    }
+    mapping(address => ReservationQueue) internal reservationQueues;
+    mapping(IMarginClearinghouse.BountyKind => mapping(uint64 => IMarginClearinghouse.BountyReservation)) internal
+        bountyReservations;
+    mapping(address => uint256) public totalBountyReservationsUsdc;
+
+    error MarginClearinghouse__InvalidBountyReservation();
+    event BountyReservationUpdated(
+        IMarginClearinghouse.BountyKind indexed kind, uint64 indexed id, address indexed account, uint256 amountUsdc
+    );
 
     /// @notice Settlement ERC-20 whose native units are used for every balance and margin amount.
     /// @dev Expected to be six-decimal USDC; the constructor does not inspect the token contract or its decimals.
@@ -547,7 +560,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint64 orderId,
         uint256 amountUsdc
     ) external onlyEngineOrOrderRouter {
-        if (orderReservations[orderId].status != IMarginClearinghouse.ReservationStatus.None) {
+        if (orderId == 0 || orderReservations[orderId].status != IMarginClearinghouse.ReservationStatus.None) {
             revert MarginClearinghouse__ReservationAlreadyExists();
         }
         if (amountUsdc == 0) {
@@ -557,15 +570,24 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _checkpointCarryBeforeMarginChange(account);
         _lockMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
         uint96 amount96 = _toUint96(amountUsdc);
+        uint64 previousOrderId = reservationQueues[account].tail;
         orderReservations[orderId] = IMarginClearinghouse.OrderReservation({
+            previousOrderId: previousOrderId,
+            nextOrderId: 0,
             account: account,
             bucket: IMarginClearinghouse.ReservationBucket.CommittedOrder,
             status: IMarginClearinghouse.ReservationStatus.Active,
             originalAmountUsdc: amount96,
             remainingAmountUsdc: amount96
         });
+        if (previousOrderId == 0) {
+            reservationQueues[account].head = orderId;
+        } else {
+            orderReservations[previousOrderId].nextOrderId = orderId;
+        }
+        reservationQueues[account].tail = orderId;
         activeCommittedOrderReservationUsdc[account] += amountUsdc;
-        activeReservationCount[account] += 1;
+        reservationQueues[account].count += 1;
 
         emit ReservationCreated(orderId, account, IMarginClearinghouse.ReservationBucket.CommittedOrder, amountUsdc);
     }
@@ -638,11 +660,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Releases risk-off order margin and refundable bounty classifications back to free settlement.
-    /// @dev Callable only by the Engine-reported order router after it has removed the invalidated bounties from its
-    ///      live accounting. Unknown and terminal reservation ids are tolerated, but every existing record must belong
+    /// @dev Callable only by the Engine-reported order router after it has taken the invalidated bounty records from the
+    ///      clearinghouse ledger. Unknown and terminal reservation ids are tolerated, but every existing record must belong
     ///      to `account`. This incident path deliberately skips the Engine carry checkpoint: settlement balance, token
     ///      custody, PnL pledge, and carry state remain unchanged. The exact bounty release must leave enough reserved
-    ///      settlement to protect negative-VPI backing and all bounties that the router still reports as live.
+    ///      settlement to protect negative-VPI backing and all remaining clearinghouse bounty reservations.
     /// @param account Account receiving the released margin classifications
     /// @param orderIds Order reservation ids invalidated by the risk-off cutoff
     /// @param refundableBountyUsdc Exact invalidated order and attached-protection bounties to unlock
@@ -681,7 +703,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Releases a settled execution bounty back to the same account that funded it.
     /// @dev Callable only by the Engine-reported Router. Unlike the general Engine bounty-credit path, this exact
     ///      self-transfer changes only the reserved classification and deliberately skips carry checkpointing. The
-    ///      Router must first remove the bounty from its live accounting so the protected-reserve floor remains exact.
+    ///      Router must first take the clearinghouse bounty record so the protected-reserve floor remains exact.
     /// @param account Account whose bounty classification is released to free settlement.
     /// @param executionBountyUsdc Exact bounty amount in six-decimal USDC units.
     function releaseReservedExecutionBountyToSource(
@@ -740,9 +762,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit MarginLocked(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
     }
 
-    /// @notice Consumes an account's active order reservations in router-reported FIFO order.
-    /// @dev Callable only by the engine or its reported settlement sidecar. The function queries the configured order
-    ///      router for reservation ids, skips inactive records, and may return less than requested. Consumption reduces
+    /// @notice Consumes an account's active order reservations in clearinghouse FIFO order.
+    /// @dev Callable only by the engine or its reported settlement sidecar. The function walks the clearinghouse-owned
+    ///      active reservation queue and may return less than requested. Consumption reduces
     ///      committed-order locks and reservation aggregates but does not debit settlement balance or move tokens.
     /// @param account Account whose active reservations should be consumed
     /// @param amountUsdc Maximum amount to consume in six-decimal USDC units
@@ -1001,9 +1023,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
-    /// @dev Negative-VPI backing and router-attributed execution bounties remain protected in the shared action-reserve
+    /// @dev Negative-VPI backing and clearinghouse-attributed execution bounties remain protected in the shared action-reserve
     ///      bucket. The caller supplies the exact planned reserve and committed-margin split so a state mismatch
-    ///      reverts. Committed order margin is consumed in router-reported FIFO order. PnL pledge and liquidation
+    ///      reverts. Committed order margin is consumed in clearinghouse FIFO order. PnL pledge and liquidation
     ///      reserve are never reachable, and any charge above eligible value is waived.
     function consumeActionCharge(
         address account,
@@ -1069,7 +1091,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account
     ) private view returns (uint256) {
         uint256 actionReserveBalanceUsdc = reservedSettlementUsdc[account];
-        uint256 protectedActionReserveUsdc = _activeExecutionBountyUsdc(account) + vpiRebateReserveBalances[account];
+        uint256 protectedActionReserveUsdc = totalBountyReservationsUsdc[account] + vpiRebateReserveBalances[account];
         if (actionReserveBalanceUsdc < protectedActionReserveUsdc) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
@@ -1559,7 +1581,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     function _requireNoActiveReservations(
         address account
     ) internal view {
-        if (activeReservationCount[account] != 0) {
+        if (reservationQueues[account].count != 0) {
             revert MarginClearinghouse__ReservationLedgerActive();
         }
     }
@@ -1731,38 +1753,156 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
             revert MarginClearinghouse__ReservationNotActive();
         }
+        uint64 previousOrderId = reservation.previousOrderId;
+        uint64 nextOrderId = reservation.nextOrderId;
+        if (previousOrderId == 0) {
+            reservationQueues[reservation.account].head = nextOrderId;
+        } else {
+            orderReservations[previousOrderId].nextOrderId = nextOrderId;
+        }
+        if (nextOrderId == 0) {
+            reservationQueues[reservation.account].tail = previousOrderId;
+        } else {
+            orderReservations[nextOrderId].previousOrderId = previousOrderId;
+        }
+        reservation.previousOrderId = 0;
+        reservation.nextOrderId = 0;
         reservation.status = terminalStatus;
         reservation.remainingAmountUsdc = 0;
-        activeReservationCount[reservation.account] -= 1;
+        reservationQueues[reservation.account].count -= 1;
     }
 
-    /// @dev The router already maintains the active reservation FIFO for each account, so the
-    ///      clearinghouse no longer needs an append-only historical reservation index.
+    function marginReservationHead(
+        address account
+    ) external view returns (uint64) {
+        return reservationQueues[account].head;
+    }
+
+    function marginReservationTail(
+        address account
+    ) external view returns (uint64) {
+        return reservationQueues[account].tail;
+    }
+
+    /// @notice Returns the clearinghouse-owned active committed-margin FIFO, excluding exhausted records.
+    function getMarginReservationIds(
+        address account
+    ) external view returns (uint64[] memory) {
+        return _activeMarginReservationIds(account);
+    }
+
     function _activeMarginReservationIds(
         address account
-    ) internal view returns (uint64[] memory reservationIds) {
-        address engine_ = engine;
-        if (engine_ == address(0)) {
-            return new uint64[](0);
+    ) internal view returns (uint64[] memory ids) {
+        ids = new uint64[](reservationQueues[account].count);
+        uint64 cursor = reservationQueues[account].head;
+        for (uint256 i; i < ids.length; ++i) {
+            ids[i] = cursor;
+            cursor = orderReservations[cursor].nextOrderId;
         }
-
-        return IOrderRouterAccounting(ICfdEngineCore(engine_).orderRouter()).getMarginReservationIds(account);
     }
 
-    /// @dev Returns the aggregate unpaid execution bounty that must remain in the shared action-reserve bucket.
-    function _activeExecutionBountyUsdc(
-        address account
-    ) internal view returns (uint256) {
-        address engine_ = engine;
-        if (engine_ == address(0)) {
-            revert MarginClearinghouse__NotOperator();
+    /// @notice Creates the canonical bounty record from action reserve locked by the existing funding path.
+    /// @dev Classification and funding are in the same transaction. Neither this call nor a transfer checkpoints carry.
+    function recordBountyReservation(
+        address account,
+        IMarginClearinghouse.BountyKind kind,
+        uint64 id,
+        uint256 amountUsdc
+    ) external {
+        _requireBountyOwner(kind);
+        if (amountUsdc == 0) {
+            return;
         }
-
-        address router = ICfdEngineCore(engine_).orderRouter();
-        if (router == address(0)) {
+        IMarginClearinghouse.BountyReservation storage reservation = bountyReservations[kind][id];
+        if (account == address(0) || id == 0 || reservation.account != address(0)) {
+            revert MarginClearinghouse__InvalidBountyReservation();
+        }
+        if (
+            vpiRebateReserveBalances[account] + totalBountyReservationsUsdc[account] + amountUsdc
+                > reservedSettlementUsdc[account]
+        ) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
-        return IOrderRouterAccounting(router).getAccountReservations(account).executionBountyUsdc;
+        reservation.account = account;
+        reservation.amountUsdc = _toUint96(amountUsdc);
+        totalBountyReservationsUsdc[account] += amountUsdc;
+        emit BountyReservationUpdated(kind, id, account, amountUsdc);
+    }
+
+    /// @notice Takes a complete bounty classification for terminal payout/refund; the action reserve remains locked.
+    /// @dev The trusted owner completes the existing payout/refund in the same atomic transition. Other reservations
+    ///      and the VPI floor remain protected throughout that transition.
+    function takeBountyReservation(
+        address account,
+        IMarginClearinghouse.BountyKind kind,
+        uint64 id
+    ) external returns (uint256 amountUsdc) {
+        _requireBountyOwner(kind);
+        IMarginClearinghouse.BountyReservation storage reservation = bountyReservations[kind][id];
+        if (reservation.account != address(0) && reservation.account != account) {
+            revert MarginClearinghouse__ReservationAccountMismatch(id, account, reservation.account);
+        }
+        amountUsdc = reservation.amountUsdc;
+        reservation.amountUsdc = 0;
+        totalBountyReservationsUsdc[account] -= amountUsdc;
+        if (amountUsdc != 0) {
+            emit BountyReservationUpdated(kind, id, account, 0);
+        }
+    }
+
+    /// @notice Reattributes a protection execution bounty without unlocking it or changing the account total.
+    /// @dev The immutable Book authenticates the protection/attempt relationship before this call. Only the
+    ///      Order ↔ ProtectionExecution pair is permitted; a live destination or cross-account transfer reverts.
+    function moveBountyReservation(
+        address account,
+        IMarginClearinghouse.BountyKind fromKind,
+        uint64 fromId,
+        IMarginClearinghouse.BountyKind toKind,
+        uint64 toId
+    ) external {
+        _requireBountyOwner(IMarginClearinghouse.BountyKind.ProtectionExecution);
+        if (!((fromKind == IMarginClearinghouse.BountyKind.Order
+                        && toKind == IMarginClearinghouse.BountyKind.ProtectionExecution)
+                    || (fromKind == IMarginClearinghouse.BountyKind.ProtectionExecution
+                        && toKind == IMarginClearinghouse.BountyKind.Order))) {
+            revert MarginClearinghouse__InvalidBountyReservation();
+        }
+        IMarginClearinghouse.BountyReservation storage source = bountyReservations[fromKind][fromId];
+        IMarginClearinghouse.BountyReservation storage target = bountyReservations[toKind][toId];
+        if (
+            source.account != account || source.amountUsdc == 0 || toId == 0 || target.amountUsdc != 0
+                || (target.account != address(0)
+                    && (target.account != account || toKind == IMarginClearinghouse.BountyKind.Order))
+        ) {
+            revert MarginClearinghouse__InvalidBountyReservation();
+        }
+        target.account = account;
+        target.amountUsdc = source.amountUsdc;
+        source.amountUsdc = 0;
+        emit BountyReservationUpdated(fromKind, fromId, account, 0);
+        emit BountyReservationUpdated(toKind, toId, account, target.amountUsdc);
+    }
+
+    function getBountyReservation(
+        IMarginClearinghouse.BountyKind kind,
+        uint64 id
+    ) external view returns (IMarginClearinghouse.BountyReservation memory) {
+        return bountyReservations[kind][id];
+    }
+
+    function _requireBountyOwner(
+        IMarginClearinghouse.BountyKind kind
+    ) internal view {
+        address engine_ = engine;
+        if (
+            engine_ == address(0)
+                || (kind == IMarginClearinghouse.BountyKind.Order
+                        ? !_isOrderRouter(engine_, msg.sender)
+                        : !_isPositionProtectionBook(engine_, msg.sender))
+        ) {
+            revert MarginClearinghouse__NotOperator();
+        }
     }
 
     /// @dev Reverts if a generic action-reserve decrease would consume negative-VPI backing or a queued bounty.
@@ -1774,7 +1914,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (amountUsdc > currentReserveUsdc) {
             revert MarginClearinghouse__InsufficientBucketMargin();
         }
-        uint256 protectedFloorUsdc = vpiRebateReserveBalances[account] + _activeExecutionBountyUsdc(account);
+        uint256 protectedFloorUsdc = vpiRebateReserveBalances[account] + totalBountyReservationsUsdc[account];
         if (currentReserveUsdc - amountUsdc < protectedFloorUsdc) {
             revert MarginClearinghouse__ActionReserveMismatch();
         }
@@ -1983,7 +2123,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         address account
     ) external view returns (IMarginClearinghouse.AccountReservationSummary memory summary) {
         summary.activeCommittedOrderMarginUsdc = activeCommittedOrderReservationUsdc[account];
-        summary.activeReservationCount = activeReservationCount[account];
+        summary.activeReservationCount = reservationQueues[account].count;
     }
 
     function _toUint96(

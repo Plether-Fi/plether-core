@@ -1025,7 +1025,7 @@ abstract contract BasePerpTest is Test {
 
     function _orderRecord(
         uint64 orderId
-    ) internal view returns (OrderRouter.OrderRecord memory record) {
+    ) internal view returns (OrderRouterDebugLens.OrderRecord memory record) {
         return OrderRouterDebugLens.loadOrderRecord(vm, router, orderId);
     }
 

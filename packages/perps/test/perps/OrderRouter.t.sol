@@ -475,7 +475,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
-        OrderRouter.OrderRecord memory record = _orderRecord(1);
+        OrderRouterDebugLens.OrderRecord memory record = _orderRecord(1);
         assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.Pending));
         assertEq(record.core.orderId, 1);
         assertEq(record.core.account, alice);
@@ -494,7 +494,7 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 
-        OrderRouter.OrderRecord memory record = OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1);
+        OrderRouterDebugLens.OrderRecord memory record = OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1);
         assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.None));
         assertEq(record.core.orderId, 0, "Terminal Router record should be fully deleted");
         OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
@@ -845,9 +845,6 @@ contract OrderRouterTest is BasePerpTest {
         vm.prank(address(engine));
         clearinghouse.consumeAccountOrderReservations(account, 400 * 1e6);
 
-        vm.prank(address(engine));
-        router.syncMarginQueue(account);
-
         assertEq(_remainingCommittedMargin(1), 600 * 1e6, "Partial consumption should leave residual committed margin");
         assertEq(
             clearinghouse.getOrderReservation(1).remainingAmountUsdc,
@@ -871,9 +868,6 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.prank(address(engine));
         clearinghouse.consumeAccountOrderReservations(account, 1000 * 1e6);
-
-        vm.prank(address(engine));
-        router.syncMarginQueue(account);
 
         assertEq(_remainingCommittedMargin(1), 0, "First margin-paying order should be fully drained");
         assertEq(
@@ -926,9 +920,6 @@ contract OrderRouterTest is BasePerpTest {
         reservationIds[1] = 2;
         (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc) =
             clearinghouse.consumeCloseLoss(account, reservationIds, 300 * 1e6, 0, true, address(engine), address(0), 0);
-
-        vm.prank(address(engine));
-        router.syncMarginQueue(account);
 
         assertEq(seizedUsdc, 0, "Price loss cannot seize committed-order margin");
         assertEq(shortfallUsdc, 300 * 1e6, "Loss without a PnL pledge should remain uncovered");
@@ -1123,8 +1114,8 @@ contract OrderRouterTest is BasePerpTest {
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, empty);
 
-        OrderRouter.OrderRecord memory firstRecord = _orderRecord(1);
-        OrderRouter.OrderRecord memory secondRecord = _orderRecord(2);
+        OrderRouterDebugLens.OrderRecord memory firstRecord = _orderRecord(1);
+        OrderRouterDebugLens.OrderRecord memory secondRecord = _orderRecord(2);
         assertEq(uint256(firstRecord.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(uint256(secondRecord.status), uint256(IOrderRouterAccounting.OrderStatus.Executed));
         assertEq(_remainingCommittedMargin(1), 0, "Executed batch order should clear committed margin reservation");

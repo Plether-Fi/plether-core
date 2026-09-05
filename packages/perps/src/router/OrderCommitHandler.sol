@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
@@ -23,25 +24,27 @@ abstract contract OrderCommitHandler is OrderValidation {
         uint64 orderId = order.orderId;
         address account = order.account;
         _reserveExecutionBounty(account, order.sizeDelta, executionBountyUsdc, order.isClose);
+        clearinghouse.recordBountyReservation(
+            account, IMarginClearinghouse.BountyKind.Order, orderId, executionBountyUsdc
+        );
         _reserveCommittedMargin(account, orderId, order.isClose, order.marginDelta);
 
-        _recordCommittedOrder(order, executionBountyUsdc);
+        _recordCommittedOrder(order);
     }
 
     // slither-disable-end reentrancy-benign
 
-    /// @notice Stores and links an already-validated order whose reservations have already been established.
-    /// @dev Position-protection triggering reuses this primitive with a bounty transferred from the external book.
+    /// @notice Stores and links an already-validated order.
+    /// @dev Ordinary commit establishes reservations first. A protection retry keeps its bounty protected in the
+    ///      clearinghouse protection namespace until the Book reattributes it after this queue callback returns.
     function _recordCommittedOrder(
-        CfdTypes.Order memory order,
-        uint256 executionBountyUsdc
+        CfdTypes.Order memory order
     ) internal {
         uint64 orderId = order.orderId;
         address account = order.account;
         OrderRecord storage record = orderRecords[orderId];
         record.core = order;
         record.status = IOrderRouterAccounting.OrderStatus.Pending;
-        record.executionBountyUsdc = executionBountyUsdc;
         if (order.isClose) {
             pendingCloseSize[account] += order.sizeDelta;
         }
@@ -58,15 +61,6 @@ abstract contract OrderCommitHandler is OrderValidation {
         address account
     ) internal view virtual {
         account;
-    }
-
-    /// @notice Prunes spent reservation links after authenticating the engine or settlement sidecar.
-    /// @param account Account whose full margin queue is synchronized.
-    function _syncMarginQueue(
-        address account
-    ) internal {
-        _onlyEngine();
-        _pruneMarginQueue(account);
     }
 
     /// @notice Builds the accounting view stored for an order id and returns its live account-queue successor.
@@ -90,7 +84,8 @@ abstract contract OrderCommitHandler is OrderValidation {
             commitTime: order.commitTime,
             commitBlock: order.commitBlock,
             committedMarginUsdc: clearinghouse.getOrderReservation(orderId).remainingAmountUsdc,
-            executionBountyUsdc: record.executionBountyUsdc
+            executionBountyUsdc: clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId)
+            .amountUsdc
         });
         nextAccountOrderId = record.nextAccountOrderId;
     }

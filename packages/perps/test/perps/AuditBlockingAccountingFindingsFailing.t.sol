@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
+
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -500,7 +502,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
             "Keeper should receive only the liquidation bounty as a clearinghouse credit"
         );
 
-        OrderRouter.OrderRecord memory record = _orderRecord(1);
+        OrderRouterDebugLens.OrderRecord memory record = _orderRecord(1);
         assertEq(record.executionBountyUsdc, 0, "Reserved bounty should be cleared on liquidation");
     }
 

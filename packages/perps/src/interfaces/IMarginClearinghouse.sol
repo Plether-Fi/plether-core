@@ -47,6 +47,59 @@ interface IMarginClearinghouse {
         uint64 orderId, address expectedAccount, address actualAccount
     );
 
+    /// @notice Owner namespace for keeper-bounty reservations; ids are unique within each namespace.
+    enum BountyKind {
+        Order,
+        ProtectionTrigger,
+        ProtectionExecution
+    }
+
+    struct BountyReservation {
+        address account;
+        uint96 amountUsdc;
+    }
+
+    /// @notice Classifies already-locked action reserve. Orders are Router-owned; protection records are Book-owned.
+    function recordBountyReservation(
+        address account,
+        BountyKind kind,
+        uint64 id,
+        uint256 amountUsdc
+    ) external;
+
+    /// @notice Removes one exact bounty classification before its authorized payout/refund. No custody moves.
+    function takeBountyReservation(
+        address account,
+        BountyKind kind,
+        uint64 id
+    ) external returns (uint256 amountUsdc);
+
+    /// @notice Book-only transfer between a protection's execution bounty and its authenticated close attempt.
+    function moveBountyReservation(
+        address account,
+        BountyKind fromKind,
+        uint64 fromId,
+        BountyKind toKind,
+        uint64 toId
+    ) external;
+
+    function getBountyReservation(
+        BountyKind kind,
+        uint64 id
+    ) external view returns (BountyReservation memory);
+    function totalBountyReservationsUsdc(
+        address account
+    ) external view returns (uint256);
+    function getMarginReservationIds(
+        address account
+    ) external view returns (uint64[] memory);
+    function marginReservationHead(
+        address account
+    ) external view returns (uint64);
+    function marginReservationTail(
+        address account
+    ) external view returns (uint64);
+
     /// @notice Canonical locked-margin bucket whose balance is being classified or mutated.
     enum MarginBucket {
         /// @notice Custody backing the account's live position.
@@ -113,12 +166,16 @@ interface IMarginClearinghouse {
     /// @param status Current reservation lifecycle status.
     /// @param originalAmountUsdc Amount locked when the reservation was created.
     /// @param remainingAmountUsdc Amount still available while the reservation is active.
+    /// @param previousOrderId Previous active committed-margin reservation for the account, or zero at the head.
+    /// @param nextOrderId Next active committed-margin reservation for the account, or zero at the tail.
     struct OrderReservation {
         address account;
-        ReservationBucket bucket;
-        ReservationStatus status;
         uint96 originalAmountUsdc;
         uint96 remainingAmountUsdc;
+        uint64 previousOrderId;
+        uint64 nextOrderId;
+        ReservationBucket bucket;
+        ReservationStatus status;
     }
 
     /// @notice Aggregate active committed-margin reservation state for one account.
