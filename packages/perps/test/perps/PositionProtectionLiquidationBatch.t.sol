@@ -8,7 +8,6 @@ import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
@@ -98,9 +97,6 @@ contract PositionProtectionLiquidationBatchTest is BasePerpTest {
         protectionActions = IPositionProtectionActions(address(protectionBook));
         protectionViews = IPositionProtectionViews(address(protectionBook));
 
-        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionCommitsEnabled = true;
-        _setRouterConfig(config);
         _refreshMark(MARK_PRICE);
     }
 

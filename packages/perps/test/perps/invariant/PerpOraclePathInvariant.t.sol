@@ -94,7 +94,6 @@ contract PerpOraclePathHandler is Test {
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
         config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
         config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
@@ -123,7 +122,6 @@ contract PerpOraclePathHandler is Test {
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
         config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
         config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();

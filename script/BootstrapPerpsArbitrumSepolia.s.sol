@@ -160,7 +160,6 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Junior seed initialized:", housePool.juniorSeedInitialized());
         console.log("HousePool pauser:", housePool.pauser());
         console.log("Router pauser:", routerAdmin.pauser());
-        console.log("Position protection commits enabled:", router.positionProtectionCommitsEnabled());
         console.log("Position protection trigger bounty USDC:", router.positionProtectionTriggerBountyUsdc());
         console.log("Emergency guardian:", emergencyCoordinator.guardian());
         console.log("Risk-off order cutoff:", routerAdmin.riskOffOrderCutoff());

@@ -78,9 +78,6 @@ contract PositionProtectionTest is BasePerpTest {
         _fundTrader(BOB, 20_000e6);
         _fundTrader(CAROL, 20_000e6);
 
-        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionCommitsEnabled = true;
-        _setRouterConfig(config);
         _refreshMark(MARK_PRICE);
     }
 
@@ -907,14 +904,10 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
 
-        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionCommitsEnabled = false;
-        _setRouterConfig(config);
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
         routerAdmin.pause();
         vm.warp(FRIDAY_FAD_START + 3 hours);
 
-        assertFalse(router.positionProtectionCommitsEnabled(), "fixture should disable new protections");
         assertTrue(routerAdmin.paused(), "fixture should pause new risk");
         assertTrue(engine.degradedMode(), "fixture should enable degraded mode");
         assertTrue(engine.isOracleFrozen(), "fixture should enter frozen-oracle policy");
@@ -1187,38 +1180,47 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.accountHeadOrderId(BOB), linkedOrderId, "paused trigger should append the close normally");
     }
 
-    function test_FeatureOff_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
+    function test_DefaultDeployment_AllowsProtectionWithoutRouterConfigProposal() public {
+        assertEq(routerAdmin.activeConfigVersion(), 1, "fresh Router must use its constructor configuration");
+        assertEq(routerAdmin.routerConfigActivationTime(), 0, "protection must not require an activation proposal");
         uint64 cancelledProtectionId = _createProtectionFor(
             ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, LONG_STOP_LOSS
         );
         uint64 triggeredProtectionId =
             _createProtectionFor(BOB, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, 0);
 
-        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionCommitsEnabled = false;
-        _setRouterConfig(config);
-
         vm.prank(ALICE);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
         protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
+        assertEq(
+            protectionViews.getPositionProtection(cancelledProtectionId).takeProfitTriggerPrice,
+            LONG_TAKE_PROFIT - 1,
+            "fresh deployment must allow replacement"
+        );
 
-        OrderV2Types.OrderRequest memory disabledRequest =
+        OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(CAROL);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionDisabled.selector);
-        protectionActions.commitOpenOrderWithProtection(disabledRequest, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+        (, uint64 attachedProtectionId) =
+            protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+        assertEq(
+            uint8(protectionViews.getPositionProtection(attachedProtectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen),
+            "fresh deployment must allow attached protection"
+        );
 
         vm.prank(ALICE);
         protectionActions.cancelPositionProtection(cancelledProtectionId);
-        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "feature-off must not block cancellation");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "cancellation must clear protection");
 
         uint64 linkedOrderId = _triggerAt(triggeredProtectionId, LONG_TAKE_PROFIT);
         assertEq(
             uint8(protectionViews.getPositionProtection(triggeredProtectionId).status),
             uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
-            "feature-off must not disable existing safety instructions"
+            "fresh deployment must allow triggering"
         );
-        assertEq(router.accountHeadOrderId(BOB), linkedOrderId, "feature-off trigger should append the close normally");
+        assertEq(router.accountHeadOrderId(BOB), linkedOrderId, "trigger should append the close normally");
+        assertEq(routerAdmin.activeConfigVersion(), 1, "protection must not change the Router configuration");
+        assertEq(routerAdmin.routerConfigActivationTime(), 0, "no activation proposal should be pending");
     }
 
     function test_ReplacePositionProtection_RemainsAvailableInDegradedMode() public {

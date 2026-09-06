@@ -70,8 +70,6 @@ interface IPositionProtectionRouterHost {
 
     function pletherOracle() external view returns (IPletherOracle);
 
-    function positionProtectionCommitsEnabled() external view returns (bool);
-
     function positionProtectionTriggerBountyUsdc() external view returns (uint256);
 
     function closeOrderExecutionBountyUsdc() external view returns (uint256);
@@ -746,9 +744,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     function _validateProtectionCommitAllowed() private view {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
-        if (!router.positionProtectionCommitsEnabled()) {
-            revert OrderRouter__ProtectionDisabled();
-        }
         if (IPositionProtectionAdmin(router.admin()).paused()) {
             revert Pausable.EnforcedPause();
         }

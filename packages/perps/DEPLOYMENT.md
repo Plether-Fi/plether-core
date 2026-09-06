@@ -209,12 +209,9 @@ Important:
 - `OrderRouter` is non-upgradeable and `CfdEngine.setOrderRouter(...)` is one-time. A release containing position
   protection therefore requires a fresh complete perps stack; do not point a new router at an existing engine or
   migrate live positions into the new release.
-- The position-protection fields expand `OrderRouterAdmin.RouterConfig` from 15 to 17 fields. This changes the
-  `proposeRouterConfig` selector from `0xf8eb837c` to `0xbe6e421a`, the Router's `applyRouterConfig` selector from
-  `0xf2444582` to `0x5f3838b0`, and both configuration event topics. Although `pendingRouterConfig()` keeps its
-  selector, its return tuple is longer, so an old decoder can silently misinterpret the final fields. Regenerate and
-  version Router/Admin ABIs, retain the old event topics for historical deployments, and update every governance,
-  indexer, keeper, and product consumer before proposing configuration on the new stack.
+- `OrderRouterAdmin.RouterConfig` contains 16 fields, including the protection-trigger bounty. Position protection
+  has no enablement flag. Generate Router/Admin ABIs from this release for governance, indexer, keeper, and product
+  consumers; configuration selectors, event topics, and return tuples must match the deployed stack.
 - Treat the Router, its two predeployed Router-bound dependencies, and its internally created protection Book as one
   bytecode release. The delegated sidecar logic reads integrations through Router external getters, does not read or
   write Router storage by layout, and changes Router-owned state only through authorized external self/item calls.
@@ -222,10 +219,9 @@ Important:
   Neither lifecycle-Book nor keeper-sidecar creation code is embedded in Router initcode; position-protection Book
   creation code remains embedded because the Router constructor deploys it. Verify the creation inputs and EIP-170
   runtimes of the Router, both Books, the keeper sidecar, and the V2 execution sidecar with explicit safety margin.
-- Position-protection creation is disabled on a fresh router. Ordinary trading can be bootstrapped independently while
-  the trigger worker, indexer, and product integrations are verified. Do not enable the flag until the product has the
-  Book ABI and attached-open/existing-position flows, the trigger worker is live, and every offchain oracle-policy
-  reader uses `basketMaxConfidenceRatioBps()` rather than the retired `pythMaxConfidenceRatioBps()` getter.
+- Position protection is available on a fresh router without a separate activation transaction. Deploy the trigger
+  and retry workers, indexer, and product integrations with the stack. Oracle-policy readers use
+  `basketMaxConfidenceRatioBps()`.
 
 ## Oracle Configuration
 
@@ -274,7 +270,6 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `maxPendingOrders` | `5` (unchanged) |
 | `closeOrderExecutionBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
-| `positionProtectionCommitsEnabled` | `false` |
 | `juniorMaintenanceFeeAprBps` | `100` nominal APR |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
 | `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
@@ -526,12 +521,11 @@ the test-user recipient/amount inputs after the intended funding run.
 
 This is useful if the first bootstrap attempt completes only partially.
 
-Bootstrap does not enable position protection or submit any Router proposal. It verifies the constructor-installed
+Position protection needs no enablement proposal. Bootstrap verifies the constructor-installed
 minimum opening notional and adverse-confidence multiplier plus the unchanged `10`-bps basket confidence and
-pending-order limit `5`. Final output reports the Book address, current feature flag, and trigger bounty so operators
-can verify ordinary trading without exposing an unprepared conditional-order surface.
+pending-order limit `5`. Final output reports the Book address and trigger bounty.
 
-## Position Protection Activation
+## Position Protection Operation
 
 Position protection has a trigger/attempt/retry keeper model:
 
@@ -557,7 +551,7 @@ mark. They target the `PositionProtectionBook` discovered through `OrderRouter.p
 payable `triggerPositionProtection(...)` keeper call. The Router does not forward these public selectors. Only the
 trigger call ingests payable Pyth update data. This keeps the trader flow compatible with zero-native-value sponsored
 accounts while retaining an independently verified trigger observation. The nonpayable retry selector remains live
-while new protection commits are paused or disabled and while the Engine is degraded or the oracle is frozen.
+while new protection commits are paused and while the Engine is degraded or the oracle is frozen.
 
 The protected parent open is a caller-authored bounded V2 request and must pin the active lifecycle-Book digest. Only
 Router-authenticated triggered or retried close attempts set `expectedConfigHash == bytes32(0)`, which is an unpinned
@@ -572,7 +566,7 @@ only as part of a fresh complete perps-stack deployment, regenerate consumer ABI
 `IPositionProtectionActions` interface, and update integrations to the newly discovered Book address. Live-state
 migration and mixed old/new Router-Book stacks are unsupported.
 
-Before enabling the feature, verify the existing-position post-reservation gate against boundary tests. The Book locks
+Release tests verify the existing-position post-reservation gate against boundary tests. The Book locks
 both bounties first, then calls the Engine-configured planner's canonical V2 exact-price predicate with exact entry cost
 and price equity composed only of PnL pledge plus the same-account trader claim plus exact capped unrealized PnL. Free
 settlement and generic action/reservation buckets are excluded; uncovered carry and an underfunded negative-VPI reserve
@@ -595,20 +589,12 @@ action, lifecycle-Book registration/view surface, and close-attempt events. `Pos
 will not know the new values. The receipt and execution-config hash domains are V3 even though the request/intent ABI
 remains V2; do not compare their hashes with an earlier stack.
 
-The feature flag and trigger bounty are members of the 48-hour timelocked `OrderRouterAdmin.RouterConfig`. Enabling the
-feature must use the normal proposal/finalization path:
-
-1. Read every current router and oracle-policy field onchain.
-2. Build a complete `RouterConfig` from those current values, changing only the intended protection fields.
-3. Propose the configuration through `OrderRouterAdmin` and record the proposal transaction and activation timestamp.
-4. Wait the full 48-hour delay.
-5. Re-read the pending configuration, verify every field, and finalize it.
-6. Confirm `positionProtectionCommitsEnabled() == true` and the expected snapshotted bounty values on the router.
-
-Do not reconstruct unrelated fields from old release notes or hardcoded defaults: finalizing `RouterConfig` replaces the
-complete router configuration. Disabling new protection commits follows the same timelocked path. Disabling or pausing
-must not strand existing records: cancellation, valid triggering, linked FIFO execution, terminal cleanup, and
-latched retry, and liquidation remain live.
+Position protection is available immediately on an unpaused fresh Router; no protection-specific governance proposal
+or timelock is required. The trigger bounty remains part of the ordinary 48-hour timelocked
+`OrderRouterAdmin.RouterConfig`. Changing that bounty requires a complete configuration built from current onchain
+values, followed by the normal proposal/finalization path. Finalization replaces the complete router configuration.
+Router pause blocks new protection creation, replacement, and attached opens. Cancellation, valid triggering, linked
+FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
 
 ## Operational Notes
 
@@ -681,13 +667,12 @@ latched retry, and liquidation remain live.
     cutoff for risk-off actions, settlement rollback, and deliberately live closes, protection lifecycle paths, and
     funded claims; clear invalidated opens with the protocol incident keeper, then have governance perform independent
     recovery of every active restriction.
-11. Exercise trigger- and retry-worker discovery and dry-run/simulation paths while protection creation remains disabled.
-12. Propose, wait 48 hours, verify, and finalize the complete router configuration that enables protection commits.
-13. Test attached-open activation, existing-position protection, both trigger directions, cancellation/replacement,
+11. Exercise trigger- and retry-worker discovery and dry-run/simulation paths on the fresh stack.
+12. Test attached-open activation, existing-position protection, both trigger directions, cancellation/replacement,
     first-attempt execution, failure-to-latch, repeated retry with fresh oracle windows, frozen-oracle retry/execution,
     emergency-pause cancellation/trigger/retry liveness, exact bounty recycling, and liquidation from both `Latched`
     and `Triggered` end to end.
-14. Run a limited-TVL soak for at least seven days before broader use. Monitor armed, latched, and triggered counts;
+13. Run a limited-TVL soak for at least seven days before broader use. Monitor armed, latched, and triggered counts;
     time latched without a live attempt; retry count; trigger-to-first-attempt and per-attempt FIFO-to-terminal latency;
     unpaid failed-attempt cleanup; keeper profitability; liquidation before fill; exact Book-versus-Router reservation
     reconciliation; LP queue backlog; epoch-settlement progress; monitor dependency/critical masks; observation
@@ -805,7 +790,7 @@ evidence and selected execution route for keeper preflight. Each bounded `Atomic
 new validated Pyth update; a `CachedMark` pass requires neither a Hermes payload nor ETH.
 
 Create a new dated release note after deployment. Do not edit historical release notes. Identify the previous source
-commit and inspect its protection support and live feature flag instead of assuming the old stack lacks protection.
+commit and inspect its protection support and configuration instead of assuming the old stack lacks protection.
 State clearly that a trigger queues a close; it does not guarantee execution time, execution price, or execution before
 liquidation. Keep prepared candidate manifests separate from the active deployment record until deployment and all
 phase verifiers have succeeded.

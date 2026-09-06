@@ -31,14 +31,12 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     uint256 public maxOpenOrderExecutionBountyUsdc;
     /// @notice Fixed close-order keeper bounty (6-decimal USDC).
     uint256 public closeOrderExecutionBountyUsdc;
-    /// @notice Whether new position-protection creation, replacement, and attached opening orders are enabled.
-    bool public positionProtectionCommitsEnabled;
     /// @notice Fixed keeper bounty paid when an armed protection is validly triggered (6-decimal USDC).
     uint256 public positionProtectionTriggerBountyUsdc;
 
     /// @notice Initializes oracle/accounting integrations, deploys the admin, and installs router defaults.
     /// @dev Defaults are: $100 minimum open notional, 1 bp open bounty with $0.01/$0.20 floor/cap,
-    ///      $0.20 close and protection-trigger bounties, protection commits disabled, 600,000 minimum engine gas,
+    ///      $0.20 close and protection-trigger bounties, 600,000 minimum engine gas,
     ///      and 64 expired-order prunes per call.
     /// @param _engine CfdEngine that processes trades and liquidations.
     /// @param _engineLens CfdEngineLens used for open-order commit preflight.
@@ -75,7 +73,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         minOpenOrderExecutionBountyUsdc = 10_000;
         maxOpenOrderExecutionBountyUsdc = 200_000;
         closeOrderExecutionBountyUsdc = 200_000;
-        positionProtectionCommitsEnabled = false;
         positionProtectionTriggerBountyUsdc = 200_000;
         minEngineGas = 600_000;
         maxPruneOrdersPerCall = 64;
