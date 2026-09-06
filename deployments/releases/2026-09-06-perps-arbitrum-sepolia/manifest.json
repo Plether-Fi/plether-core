@@ -1,0 +1,343 @@
+{
+  "schemaVersion": 2,
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "release": {
+    "date": "2026-09-06",
+    "sourceCommit": "d704122c779d4d681d0fa2be517707b7f7df3902",
+    "forgeVersion": "1.5.1-stable",
+    "phase": "deployed",
+    "deploymentBlock": 306119399,
+    "deployer": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "owner": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "guardian": "0x0000000000000000000000000000000000000000",
+    "deploymentTimeProtocolTreasury": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B",
+    "version": "v1.2.2",
+    "deploymentEndBlock": 306119486,
+    "deploymentGasUsed": 91195120,
+    "deploymentGasCostWei": "20098249449028000"
+  },
+  "contracts": {
+    "mockUsdc": {
+      "address": "0xc3CE8590B7EcDE7454f9D5b51a797bbDe96fe56B",
+      "runtimeCodeHash": "0x48c37e777fa2e1689f413b98d246305a05b53c038502e03e0c177c427b40c626",
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:MockUSDC",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0xc3CE8590B7EcDE7454f9D5b51a797bbDe96fe56B#code"
+    },
+    "marginClearinghouse": {
+      "address": "0xA863F985EedA8BF5BE2320693BB93d109EBB2dBd",
+      "runtimeCodeHash": "0xaed38bfc9a3647ab9c4480b9c24aa08f71650a93843781a2f2fe194be4c04e7f",
+      "artifact": "packages/perps/src/MarginClearinghouse.sol:MarginClearinghouse",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0xA863F985EedA8BF5BE2320693BB93d109EBB2dBd#code"
+    },
+    "cfdEngine": {
+      "address": "0x9611E643aC4691E8fDeD8a0c2C22c56438B6f352",
+      "runtimeCodeHash": "0x49788dd7c8fd740f5af6cfb74e836a4c25d96cfa251f70f1728ce1c7ed12cf97",
+      "artifact": "packages/perps/src/CfdEngine.sol:CfdEngine",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x9611E643aC4691E8fDeD8a0c2C22c56438B6f352#code"
+    },
+    "terminalNavBookV2": {
+      "address": "0x56d9f628a1FE45625777e48FEE6F27c10e49d786",
+      "runtimeCodeHash": "0x933d39a12a3353fad275f90bc673d9f1540a1e3ff6ee7812eddc8e1981a45063",
+      "artifact": "packages/perps/src/TerminalNavBookV2.sol:TerminalNavBookV2",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x56d9f628a1FE45625777e48FEE6F27c10e49d786#code"
+    },
+    "cfdEnginePlanner": {
+      "address": "0x8d5146ed1f8Bd18998235A2DFa26a9a7Bcf15b5F",
+      "runtimeCodeHash": "0x7e88d3cd03a313a7a341ae8c6bd26f0a4544961fda9c23d0c49db24151627ac9",
+      "artifact": "packages/perps/src/CfdEnginePlanner.sol:CfdEnginePlanner",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x8d5146ed1f8Bd18998235A2DFa26a9a7Bcf15b5F#code"
+    },
+    "cfdEngineSettlementSidecar": {
+      "address": "0x5CBb5A2f75ea005753a6C0AcCE01f7bB02B668D7",
+      "runtimeCodeHash": "0xdc5542b95995f3a7beee410a7d6697b2959997a00b1d83a110982bc7af783360",
+      "artifact": "packages/perps/src/CfdEngineSettlementSidecar.sol:CfdEngineSettlementSidecar",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x5CBb5A2f75ea005753a6C0AcCE01f7bB02B668D7#code"
+    },
+    "cfdEngineAdmin": {
+      "address": "0xc1c5027a609a1188B745aa04ADcDeEc9Db37ebaE",
+      "runtimeCodeHash": "0x708bb5c616b9814562a0f2ba416ac3000a3729873050646c16bc3aafd133afb1",
+      "artifact": "packages/perps/src/CfdEngineAdmin.sol:CfdEngineAdmin",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0xc1c5027a609a1188B745aa04ADcDeEc9Db37ebaE#code"
+    },
+    "housePoolRedemptionMathSidecar": {
+      "address": "0x950c9d6d4936cdbD67fAf789d4Ac6ADF11E1bd7D",
+      "runtimeCodeHash": "0xe1e105b27bb5dee63b4b647d31e307503b8db8587b67dd9d8db8e607f82318f0",
+      "artifact": "packages/perps/src/HousePoolRedemptionMathSidecar.sol:HousePoolRedemptionMathSidecar",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x950c9d6d4936cdbD67fAf789d4Ac6ADF11E1bd7D#code"
+    },
+    "housePool": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool",
+      "address": "0x21D52509Bb9b9857DaBc8c7FD36dD7fed9118918",
+      "runtimeCodeHash": "0xbc53c1c26481a6b94d54100c1ee0776b7bad1eaa75bb0a452af269960e7cbc2a",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x21D52509Bb9b9857DaBc8c7FD36dD7fed9118918#code"
+    },
+    "seniorVault": {
+      "address": "0x7Bf2B3d3912b5B8D367987C9ADfC6Bd1216E8129",
+      "runtimeCodeHash": "0xfed6b5f1879de741512d1af1a4c9334439163dd57161617fccd38f0c15a64c66",
+      "artifact": "packages/perps/src/TrancheVault.sol:TrancheVault",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x7Bf2B3d3912b5B8D367987C9ADfC6Bd1216E8129#code"
+    },
+    "juniorVault": {
+      "address": "0x41D785d3BcF4D0e306E491a66Ddb0d938135Cc1c",
+      "runtimeCodeHash": "0x09f797dafb5d424c67a202d6d90855cc2e716027d7dc017a70eae377a2f6cffb",
+      "artifact": "packages/perps/src/TrancheVault.sol:TrancheVault",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x41D785d3BcF4D0e306E491a66Ddb0d938135Cc1c#code"
+    },
+    "cfdEngineAccountLens": {
+      "address": "0xd949E5987c3d33299dA4Da4d06b064729000d2EB",
+      "runtimeCodeHash": "0xb8481c2f719ffbedb1cc61ae973a38457e57f45d2752ccc331fa2e778a4b3ea1",
+      "artifact": "packages/perps/src/CfdEngineAccountLens.sol:CfdEngineAccountLens",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0xd949E5987c3d33299dA4Da4d06b064729000d2EB#code"
+    },
+    "cfdEngineLens": {
+      "address": "0xE004D20803B484fb62734b78d6144438669Bad18",
+      "runtimeCodeHash": "0x34111fb1b881e06babe3de701b7bccf010b6e3d409dede5031a46c30e312e3db",
+      "artifact": "packages/perps/src/CfdEngineLens.sol:CfdEngineLens",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0xE004D20803B484fb62734b78d6144438669Bad18#code"
+    },
+    "cfdOrderPolicyEvaluator": {
+      "address": "0x1ed622ed2Cbd64bd36115dB9D4f4c0006b5894fB",
+      "runtimeCodeHash": "0xd7ea7edd260eed74adea8178dd4a4153f2b384037a430c49fe2b3d2db0f69a7d",
+      "artifact": "packages/perps/src/CfdOrderPolicyEvaluator.sol:CfdOrderPolicyEvaluator",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x1ed622ed2Cbd64bd36115dB9D4f4c0006b5894fB#code"
+    },
+    "orderRouterV2ExecutionSidecar": {
+      "address": "0x5528Dea8EF5a223aeE951Ba40D62ed24430a0D50",
+      "runtimeCodeHash": "0x896d63c1ffeb8e699366ef7df218a2bcf2a309633772d05a2ccac5d720e33003",
+      "artifact": "packages/perps/src/OrderRouterV2ExecutionSidecar.sol:OrderRouterV2ExecutionSidecar",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x5528Dea8EF5a223aeE951Ba40D62ed24430a0D50#code"
+    },
+    "pletherOracle": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
+      "address": "0x9e7f0a912a9CB3e1c1d77Ed433F171E23E2D7c87",
+      "runtimeCodeHash": "0x7891eb1dcdcda98643affe8946e5f484476edd21da409f43b77d11127a5f5783",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x9e7f0a912a9CB3e1c1d77Ed433F171E23E2D7c87#code"
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "address": "0x8d6168a70CC28696BFB08a3CD6F5f9B0227AAefc",
+      "runtimeCodeHash": "0x17f6835452098e1053be548b9c2d015b4b90890493c4a67df4011d8a7506b472",
+      "artifact": "packages/perps/src/OrderRouterLiquidationBatchSidecar.sol:OrderRouterLiquidationBatchSidecar",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x8d6168a70CC28696BFB08a3CD6F5f9B0227AAefc#code"
+    },
+    "orderLifecycleBook": {
+      "address": "0x616aD381Df40047e9b060a1E85085B3Ed2CC6D3C",
+      "runtimeCodeHash": "0x407c6953b2d7aa469ca6ca630c6e96d924b67bad9f38dffc7b01cbba5da28bb0",
+      "executionConfigHash": "0x5d820cb01fb885d56aaf4c40c918e593b5dcc46978678203f485761f139f2082",
+      "artifact": "packages/perps/src/OrderLifecycleBook.sol:OrderLifecycleBook",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x616aD381Df40047e9b060a1E85085B3Ed2CC6D3C#code"
+    },
+    "orderRouter": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter",
+      "address": "0xbd2f286efca5F761E21452673ab9b8C14e17aad7",
+      "runtimeCodeHash": "0x0799b27517930dad3febca1ad5a882cbaba1347e62157e4cc99d1da0fd25edb3",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0xbd2f286efca5F761E21452673ab9b8C14e17aad7#code"
+    },
+    "orderRouterAdmin": {
+      "address": "0x7447ee8A4a80Fd8668a2dF00F655f2df36D6cCEd",
+      "runtimeCodeHash": "0xc42169077b8e7061f3d3d8e201572a8eca6786161e40c0eda0cd507442d702c1",
+      "artifact": "packages/perps/src/OrderRouterAdmin.sol:OrderRouterAdmin",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x7447ee8A4a80Fd8668a2dF00F655f2df36D6cCEd#code"
+    },
+    "positionProtectionBook": {
+      "address": "0x35f495fFDbB4d6ae395691D4632629f67603C926",
+      "runtimeCodeHash": "0xe6b5e676d08cb069aa34093ebb525e52585815bba1ea7c0667748998b7ca7b01",
+      "artifact": "packages/perps/src/PositionProtectionBook.sol:PositionProtectionBook",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x35f495fFDbB4d6ae395691D4632629f67603C926#code"
+    },
+    "perpsPublicLens": {
+      "address": "0x53B1B00748E7D1A87dc30433e87c331CeDe30149",
+      "runtimeCodeHash": "0x208d5bf43851ecd82bae28f07ccd665a6beba06360e380ee96eedbb801ab0666",
+      "artifact": "packages/perps/src/PerpsPublicLens.sol:PerpsPublicLens",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x53B1B00748E7D1A87dc30433e87c331CeDe30149#code"
+    },
+    "settlementMonitorLens": {
+      "address": "0xf799Be4f8B5142C052d821F0067ADdFBF9Ce5820",
+      "runtimeCodeHash": "0x75aa0306479a46c5ba246164e3556102a5fa403d041f4db33df22d19521366ad",
+      "artifact": "packages/perps/src/SettlementMonitorLens.sol:SettlementMonitorLens",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0xf799Be4f8B5142C052d821F0067ADdFBF9Ce5820#code"
+    },
+    "settlementMonitorLensSidecar": {
+      "address": "0x81c3a8D145C14f28334314Fa67A0dA0Ba5c50c6B",
+      "runtimeCodeHash": "0xa7abb03a102f90deec169fbc6c8e581bb3c1b5861430453e55f2ec1f7d81604b",
+      "artifact": "packages/perps/src/SettlementMonitorLensSidecar.sol:SettlementMonitorLensSidecar",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x81c3a8D145C14f28334314Fa67A0dA0Ba5c50c6B#code"
+    },
+    "emergencyPauseCoordinator": {
+      "address": "0x8c5586C051F26651AfB2fA6bbD7BeB24fDdC87aD",
+      "runtimeCodeHash": "0x0d47205746bf5ed0c213989593130ba219e8f7f78ed6e59178c4767b5363c9d5",
+      "artifact": "packages/perps/src/EmergencyPauseCoordinator.sol:EmergencyPauseCoordinator",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x8c5586C051F26651AfB2fA6bbD7BeB24fDdC87aD#code"
+    },
+    "cfdEngineProtocolLens": {
+      "address": "0x80b39ba83d44332f3ee6690c74e10d97cb57babe",
+      "runtimeCodeHash": "0x787a07c1921dfbd03547188143dc873953459a5070b5b137572f4d9b29a501f4",
+      "artifact": "packages/perps/src/CfdEngineProtocolLens.sol:CfdEngineProtocolLens",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x80b39ba83d44332f3ee6690c74e10d97cb57babe#code"
+    }
+  },
+  "economics": {
+    "vpiFactorWad": "10000000000000000",
+    "maxSkewRatioWad": "400000000000000000",
+    "maintenanceMarginBps": 10,
+    "initialMarginBps": 20,
+    "liquidationChargeBps": 10,
+    "minimumLiquidationChargeUsdc": "1000000",
+    "keeperShareBps": 5000,
+    "protocolShareBps": 0,
+    "minimumKeeperPayoutUsdc": "500000",
+    "fadMarginBps": 300,
+    "baseCarryBps": 500,
+    "executionFeeBps": 4,
+    "settlementBufferBps": 25,
+    "frozenCloseSpreadBps": 50,
+    "basketMaxConfidenceRatioBps": 10,
+    "adverseConfidenceMultiplierBps": 2500,
+    "minimumOpenNotionalUsdc": "1000000000",
+    "maxPendingOrders": 5,
+    "closeOrderExecutionBountyUsdc": "200000",
+    "positionProtectionTriggerBountyUsdc": "200000",
+    "maxSeniorExposureUsdc": "40000000000000",
+    "maxSeniorShareBps": 8000,
+    "seniorSeedUsdc": "1000000",
+    "juniorSeedUsdc": "1000000",
+    "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorMaintenanceFeeAprBps": 100,
+    "juniorMaintenanceFeeRecipient": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
+  },
+  "deploymentInitialization": {
+    "housePoolReleaseValuesConstructorInitialized": true,
+    "routerReleaseValuesConstructorInitialized": true,
+    "housePoolConfigActivationTimeAtDeployment": "0",
+    "routerConfigActivationTimeAtDeployment": "0",
+    "positionProtectionActivationGate": "removed; no separate enablement transaction"
+  },
+  "transactions": {
+    "deployment": [
+      "0xb33cd36885d3b20182a67301bb34fb4bed727bfc9ac38b6b32c3f8ffa3ecb416",
+      "0x3ee9f2bd8679eb5836769b03285c23f7278cdc5dbe6ad54f367ef63013d26138",
+      "0x8a934baf0f7a3e8bd4cebce2653bd65e6ea370a2d23c147bbcd85be8ea2233d8",
+      "0x619b2c9a8aaaa3a1a8a29c6ef6eb861806838ff39fa2a51483696b2f986b4df9",
+      "0xb67e3cf5a8ae8f1af634c67e904f89b15b8f3b748c4c084fac19e0c499e3a3fa",
+      "0xa93b2a1f55494be3218a3990e12d1268b30ab11c305153b39f9552097d04077e",
+      "0x421b96d2c988ee6b8b81528ac96d229e9dea904ac2ff89a41ec024f683f907cf",
+      "0x2d9affed30a3f1b03be55c78db8dc997eae98bc1b7efac6173b2b6e7555ea11d",
+      "0xa609624919dec69c361436575aeb57f32fa0c06266457bf9e6f814c2d50ca3ee",
+      "0xdcb66445fe83faf6500da23d4f4bb8c18bd8dc46591dae1246b01f34c3186687",
+      "0x6b1229ae475477919af46b4772a9ce3d1b136be37fcb7bc9edba04034e2ea7cf",
+      "0x63a953b211a8252714bcaf7dd14f9c2a94bbcb13628db57d8e879ecb31d1fc0d",
+      "0x6e0f00e51245723b3f7c8dc516807fd254b9bd4d08367fc02eaca4178cbefed6",
+      "0x33de86dac987a9d322d1b9aede35bfeb8439d4bb21bf2ebaa282e52e0c43a6ac",
+      "0x843c8c1650684014d64c2fc03681f7860aaa133b54ce2e913196d20268e671da",
+      "0x848f6aad8626be6987743e357dbfbc81da8cb36f336e785464e20980a23e0ae3",
+      "0x5715f682a4261414b33c36aded1ce362b38df0a7744198884da12b7180783f1b",
+      "0x167b210889b0c9a35fbcc8974664de1677323162d7f90cf36e953dfca638733c",
+      "0xfd3badfbd9c2083047f2ef5fdcd6c267b075c7c1572f7edfc63c03e311e64285",
+      "0xb6d628c0e4bbade47eb1b92befac9b3093d1739979e93c8dd29d1ade980156bc",
+      "0x4f2c1e05a5d53c2afe251cce5f54b8a4a254f3f1d7fdd564481b910ef85d4077",
+      "0x14c9e7fea9547b1d59f59cef66937d5d9cfb936485cdce073ff3d70ec3c7981f",
+      "0x7adca47fdf987d87123c9829ae684f7f524a8006e2bf6ba46bcf0acabf9c29f5",
+      "0x087ae8c173226140d8817d15c92df365a0494a6abb6f4f60e8065be7591004e7",
+      "0xf7f1a65b8ef80ecb9dd63bee8d9607fc4830c0d7efd958ccb644fe877f6cb641",
+      "0x149eaa9bfde7c7a4037b320a361bab33c505609811ec931406c68bcd1023e817",
+      "0x51a811e1eb45f865af06b1f7c944aea254d7accd6a99f6029b307526f0f95d9c",
+      "0xbce466bd61e535be9cdc02eda6490faa22d9cc40370f6c719924f9f04ec36258",
+      "0x5136778ac209d3ae4d83a80f75ee5c1faae5da6cfd49d183f1794b28213c3dbf",
+      "0x61cf77bdd8427ab8fa6c561967718e325e0f9febd23360df3b6cd2c3487b0f76",
+      "0x7758de9d715b0b21d5a8806d3d53327e58071154bc5d58a961fb02736afb102e"
+    ],
+    "bootstrapSeeding": [],
+    "activation": []
+  },
+  "verification": {
+    "deployedPhase": {
+      "txOrRunId": "read-only@306119832",
+      "blockHash": "0xae7033611e7f24e1719cbfca8b9c2e2c3673ff045182eba55912f9bd253d2d46",
+      "passed": true
+    },
+    "seededPhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "activePhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "authenticatedPythDryRun": {
+      "timestamp": "2026-09-06T18:26:45Z",
+      "passed": true
+    },
+    "ci": {
+      "conclusion": "success",
+      "headSha": "d704122c779d4d681d0fa2be517707b7f7df3902",
+      "status": "completed",
+      "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34051305070"
+    },
+    "perpsDeep": {
+      "conclusion": "success",
+      "headSha": "d704122c779d4d681d0fa2be517707b7f7df3902",
+      "status": "completed",
+      "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34051305075"
+    },
+    "explorerSourceVerification": {
+      "passed": true,
+      "contractCount": 26,
+      "timestamp": "2026-09-06T18:44:17.850360+00:00"
+    }
+  },
+  "compatibility": {
+    "orderIntentDomain": "PletherOrderIntentV2",
+    "orderReceiptDomain": "PletherOrderReceiptV3",
+    "executionConfigDomain": "PletherExecutionConfigV3",
+    "freshStackRequired": true,
+    "stateMigrationSupported": false
+  },
+  "bootstrap": {
+    "status": "pending-weekend-oracle-freeze",
+    "earliestSeedTimeUtc": "2026-09-06T21:00:00Z",
+    "intendedGuardian": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "activateTrading": false,
+    "observedState": {
+      "tradingActive": "false",
+      "seniorSeedInitialized": "false",
+      "juniorSeedInitialized": "false",
+      "oracleFrozen": "true",
+      "guardian": "0x0000000000000000000000000000000000000000",
+      "routerPaused": "false",
+      "poolPaused": "false"
+    },
+    "observedBlock": 306119832,
+    "observedBlockHash": "0xae7033611e7f24e1719cbfca8b9c2e2c3673ff045182eba55912f9bd253d2d46"
+  }
+}

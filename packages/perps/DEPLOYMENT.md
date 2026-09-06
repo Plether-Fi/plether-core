@@ -639,7 +639,8 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
    the distinct stateless helper returned by `liquidationBatchSidecar()`. Confirm the redemption-math sidecar
    implementation id and HousePool constructor input, all four lifecycle-Book bindings, the keeper sidecar's
    `ROUTER()` binding, the protection Book's `ROUTER()` and `ENGINE()` bindings, and that protection creation
-   is disabled with a `200_000` trigger bounty and `200_000` linked-close execution bounty. Exercise direct and
+   requires no separate activation flag, with a `200_000` trigger bounty and `200_000` linked-close execution bounty.
+   Normal pause, position, margin, and oracle checks still apply. Exercise direct and
    foreign-context rejection for the sidecar-carried Router helpers, including the risk-off-aware batch entrypoint,
    plus the canonical Router success paths for mark refresh, protection-trigger oracle resolution, single liquidation,
    batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
