@@ -17,7 +17,6 @@ import {IPerpsLPActions} from "@plether/perps/interfaces/IPerpsLPActions.sol";
 import {ITrancheVaultBootstrap} from "@plether/perps/interfaces/ITrancheVaultBootstrap.sol";
 import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 import {HousePoolFreshnessLib} from "@plether/perps/libraries/HousePoolFreshnessLib.sol";
-import {HousePoolPendingLivePlanLib} from "@plether/perps/libraries/HousePoolPendingLivePlanLib.sol";
 import {HousePoolPendingPreviewLib} from "@plether/perps/libraries/HousePoolPendingPreviewLib.sol";
 import {HousePoolReconcilePlanLib} from "@plether/perps/libraries/HousePoolReconcilePlanLib.sol";
 import {HousePoolSeedLifecycleLib} from "@plether/perps/libraries/HousePoolSeedLifecycleLib.sol";
@@ -77,18 +76,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
     using SafeERC20 for IERC20;
 
-    /// @dev In-memory projection of tranche accounting after applying a reconcile plan.
-    struct PendingAccountingState {
-        /// @dev Projected senior principal, junior principal, and senior high-water mark.
-        HousePoolWaterfallAccountingLib.WaterfallState waterfall;
-        /// @dev Projected ownerless canonical assets, denominated in USDC with 6 decimals.
-        uint256 unassignedAssets;
-        /// @dev Current senior-vault share supply.
-        uint256 seniorSupply;
-        /// @dev Current junior-vault share supply.
-        uint256 juniorSupply;
-    }
-
     /// @dev Engine snapshots and derived pending state used to keep preview and live accounting aligned.
     struct HousePoolContext {
         /// @dev Engine values used for liquidity and waterfall accounting.
@@ -96,7 +83,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         /// @dev Engine mark timestamp and runtime-mode flags.
         HousePoolEngineViewTypes.HousePoolStatusSnapshot statusSnapshot;
         /// @dev Projected tranche accounting after applying currently settleable value.
-        PendingAccountingState pendingState;
+        HousePoolPendingPreviewLib.PendingAccountingState pendingState;
         /// @dev Pending claimant value that remains unsettled and reserved, in 6-decimal USDC.
         uint256 residualPendingClaimantAssets;
     }
@@ -1553,12 +1540,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
         bool allowRevenueContinuation = seniorPrincipal + juniorPrincipal != 0;
         HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
-            HousePoolPendingPreviewLib.PendingAccountingState({
-                waterfall: _getWaterfallState(),
-                unassignedAssets: unassignedAssets,
-                seniorSupply: _seniorShareSupply(),
-                juniorSupply: _juniorShareSupply()
-            }),
+            _currentPendingAccountingState(),
             reconcileSnapshot,
             _pendingClaimantBucketAssets(settleableClaimantBuckets),
             poolConfig.seniorRateBps,
@@ -1631,22 +1613,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
         HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
         bool allowRevenueContinuation
-    ) internal view returns (PendingAccountingState memory pendingState) {
-        pendingState.waterfall = _getWaterfallState();
-        pendingState.unassignedAssets = unassignedAssets;
-        pendingState.seniorSupply = _seniorShareSupply();
-        pendingState.juniorSupply = _juniorShareSupply();
+    ) internal view returns (HousePoolPendingPreviewLib.PendingAccountingState memory pendingState) {
+        pendingState = _currentPendingAccountingState();
 
         bool markFresh = _markIsFreshForReconcile(accountingSnapshot, statusSnapshot);
         uint256 couponElapsed =
             block.timestamp > lastSeniorCouponCheckpointTime ? block.timestamp - lastSeniorCouponCheckpointTime : 0;
         HousePoolReconcilePlanLib.ReconcilePlan memory plan = HousePoolReconcilePlanLib.planReconcile(
-            HousePoolPendingPreviewLib.PendingAccountingState({
-                waterfall: pendingState.waterfall,
-                unassignedAssets: pendingState.unassignedAssets,
-                seniorSupply: pendingState.seniorSupply,
-                juniorSupply: pendingState.juniorSupply
-            }),
+            pendingState,
             reconcileSnapshot,
             _pendingClaimantBucketAssets(settleableClaimantBuckets),
             poolConfig.seniorRateBps,
@@ -1654,12 +1628,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             markFresh
         );
 
-        pendingState = PendingAccountingState({
-            waterfall: plan.state.waterfall,
-            unassignedAssets: plan.state.unassignedAssets,
-            seniorSupply: plan.state.seniorSupply,
-            juniorSupply: plan.state.juniorSupply
-        });
+        pendingState = plan.state;
 
         if (markFresh) {
             uint256 juniorRevenueWithoutOwners = HousePoolReconcilePlanLib.juniorRevenueWithoutOwners(plan);
@@ -1669,7 +1638,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             }
         }
 
-        _applyPendingClaimantBucketsPreview(
+        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(
             pendingState, settleableClaimantBuckets, claimantBuckets, allowRevenueContinuation
         );
     }
@@ -1784,47 +1753,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             return;
         }
 
-        HousePoolPendingLivePlanLib.PendingLivePlan memory plan =
-            HousePoolPendingLivePlanLib.planApplyPendingClaimantBuckets(
-                _copyPendingAccountingState(
-                    PendingAccountingState({
-                        waterfall: _getWaterfallState(),
-                        unassignedAssets: unassignedAssets,
-                        seniorSupply: _seniorShareSupply(),
-                        juniorSupply: _juniorShareSupply()
-                    })
-                ),
-                HousePoolPendingPreviewLib.ClaimantPendingBuckets({
-                    recapitalizationUsdc: settleableClaimantBuckets.recapitalizationUsdc,
-                    revenueUsdc: settleableClaimantBuckets.revenueUsdc
-                }),
-                claimantBuckets,
-                allowRevenueContinuation
-            );
+        HousePoolPendingPreviewLib.PendingAccountingState memory state = _currentPendingAccountingState();
+        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(
+            state, settleableClaimantBuckets, claimantBuckets, allowRevenueContinuation
+        );
         _decreasePendingClaimantBuckets(settleableClaimantBuckets);
 
-        _setWaterfallState(plan.state.waterfall);
-        unassignedAssets = plan.state.unassignedAssets;
-    }
-
-    function _applyPendingClaimantBucketsPreview(
-        PendingAccountingState memory state,
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets,
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets,
-        bool allowRevenueContinuation
-    ) internal pure {
-        HousePoolPendingPreviewLib.PendingAccountingState memory previewState = _copyPendingAccountingState(state);
-        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(
-            previewState,
-            HousePoolPendingPreviewLib.ClaimantPendingBuckets({
-                recapitalizationUsdc: settleableClaimantBuckets.recapitalizationUsdc,
-                revenueUsdc: settleableClaimantBuckets.revenueUsdc
-            }),
-            claimantBuckets,
-            allowRevenueContinuation
-        );
-        state.waterfall = previewState.waterfall;
-        state.unassignedAssets = previewState.unassignedAssets;
+        _setWaterfallState(state.waterfall);
+        unassignedAssets = state.unassignedAssets;
     }
 
     function _getPendingClaimantBuckets()
@@ -1854,14 +1790,17 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         }
     }
 
-    function _copyPendingAccountingState(
-        PendingAccountingState memory state
-    ) internal pure returns (HousePoolPendingPreviewLib.PendingAccountingState memory copiedState) {
-        copiedState = HousePoolPendingPreviewLib.PendingAccountingState({
-            waterfall: state.waterfall,
-            unassignedAssets: state.unassignedAssets,
-            seniorSupply: state.seniorSupply,
-            juniorSupply: state.juniorSupply
+    /// @dev Reads a fresh memory state at each preview or live accounting initialization point.
+    function _currentPendingAccountingState()
+        internal
+        view
+        returns (HousePoolPendingPreviewLib.PendingAccountingState memory state)
+    {
+        state = HousePoolPendingPreviewLib.PendingAccountingState({
+            waterfall: _getWaterfallState(),
+            unassignedAssets: unassignedAssets,
+            seniorSupply: _seniorShareSupply(),
+            juniorSupply: _juniorShareSupply()
         });
     }
 
