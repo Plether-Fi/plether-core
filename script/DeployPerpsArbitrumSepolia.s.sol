@@ -679,7 +679,6 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));
         console.log("PositionProtectionBook:", deployed.positionProtectionBook);
-        console.log("PositionProtectionCommitsEnabled:", deployed.router.positionProtectionCommitsEnabled());
         console.log("PositionProtectionTriggerBountyUsdc:", deployed.router.positionProtectionTriggerBountyUsdc());
         console.log("OrderLifecycleBook:", address(deployed.lifecycleBook));
         console.log("OrderExecutionConfigHash:");

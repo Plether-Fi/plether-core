@@ -63,7 +63,6 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
         minOpenOrderExecutionBountyUsdc = config.minOpenOrderExecutionBountyUsdc;
         maxOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc;
         closeOrderExecutionBountyUsdc = config.closeOrderExecutionBountyUsdc;
-        positionProtectionCommitsEnabled = config.positionProtectionCommitsEnabled;
         positionProtectionTriggerBountyUsdc = config.positionProtectionTriggerBountyUsdc;
         maxPendingOrders = config.maxPendingOrders;
         minEngineGas = config.minEngineGas;

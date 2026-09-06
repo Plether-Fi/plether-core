@@ -269,7 +269,6 @@ contract AdminConfigVersionTest is Test {
         config.minOpenOrderExecutionBountyUsdc = 1;
         config.maxOpenOrderExecutionBountyUsdc = 1;
         config.closeOrderExecutionBountyUsdc = 1;
-        config.positionProtectionCommitsEnabled = false;
         config.positionProtectionTriggerBountyUsdc = 1;
         config.maxPendingOrders = 1;
         config.minEngineGas = 100_000;

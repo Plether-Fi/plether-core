@@ -273,7 +273,6 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(router.minOpenNotionalUsdc(), 100_000_000, "generic minimum opening notional");
         assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "basket confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
-        assertFalse(router.positionProtectionCommitsEnabled(), "position protection disabled");
         assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000, "position protection trigger bounty");
         assertEq(router.closeOrderExecutionBountyUsdc(), 200_000, "position protection close bounty");
     }
@@ -733,7 +732,6 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
         config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
-        config.positionProtectionCommitsEnabled = router.positionProtectionCommitsEnabled();
         config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();

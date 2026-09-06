@@ -76,7 +76,6 @@
     "maxPendingOrders": 5,
     "closeOrderExecutionBountyUsdc": "200000",
     "positionProtectionTriggerBountyUsdc": "200000",
-    "positionProtectionCommitsEnabled": false,
     "maxSeniorExposureUsdc": "40000000000000",
     "maxSeniorShareBps": 8000,
     "seniorSeedUsdc": "1000000",

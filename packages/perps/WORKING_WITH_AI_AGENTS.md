@@ -511,7 +511,7 @@ TP/SL thresholds are also raw 8-decimal FX-basket prices. Their product-facing d
 | SHORT dollar index | raw mark at or above TP | raw mark at or below SL |
 
 1. Discover the protection Book from the verified Router and read the account's active protection plus current
-   position, pending orders, cached mark, feature flag, and configured bounties at one block.
+   position, pending orders, cached mark, Router pause state, and configured bounties at one block.
 2. Authorize explicit OCO thresholds and action selectors. Zero disables one threshold leg, but both legs cannot be
    zero. A trigger threshold authorizes queuing a delayed full-position market-style close; it does not guarantee a
    fill at the threshold.

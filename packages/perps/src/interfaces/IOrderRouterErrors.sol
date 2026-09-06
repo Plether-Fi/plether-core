@@ -121,8 +121,6 @@ interface IOrderRouterErrors {
     /// @notice An open/increase commit or execution is blocked by the active oracle close-only policy.
     error OrderRouter__CloseOnlyWindow();
 
-    /// @notice Creating or replacing position protection is disabled by router configuration.
-    error OrderRouter__ProtectionDisabled();
     /// @notice Existing-position protection was requested for an account without a live position.
     error OrderRouter__NoOpenPosition();
     /// @notice Protection creation or attached-open submission requires an account with no ordinary pending orders.

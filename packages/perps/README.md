@@ -1246,8 +1246,8 @@ pending order; then deploy and verify the complete new graph and start its index
 - Router pausing blocks new risk-increasing commits and permanently snapshots the highest existing order id. Opens at
   or below that cutoff are refunded internally when lazily cleaned; closes, liquidations, mark refresh, and other
   protective paths remain available. Unpausing never revives invalidated opens.
-- Router pause and `positionProtectionCommitsEnabled == false` block new protection creation, replacement, and attached
-  opens. They do not strand cancellation, valid triggering, latched retry, linked-attempt execution, terminal cleanup,
+- Router pause blocks new protection creation, replacement, and attached
+  opens. It does not strand cancellation, valid triggering, latched retry, linked-attempt execution, terminal cleanup,
   or liquidation. Risk-off cleanup of an attached parent open also terminally fails its `PendingOpen` protection and
   refunds the unpaid protection bounties.
 - HousePool pausing is entry-only: it blocks new LP deposit requests and deposit activation. Redemption requests,
@@ -1286,7 +1286,7 @@ pending order; then deploy and verify the complete new graph and start its index
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
 | Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Position-protection trigger bounty | 0.20 USDC | Timelocked activation-keeper reserve, capped at 1 USDC |
-| Position-protection commits | disabled | Fresh deployments require a later timelocked enablement |
+| Position-protection commits | available | Fresh deployments need no protection-specific activation; Router pause still applies |
 | Full default protection reserve | 0.40 USDC | Snapshotted trigger plus linked-close bounties, funded from free settlement |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
@@ -1308,8 +1308,8 @@ pending order; then deploy and verify the complete new graph and start its index
 The two senior-capacity rows describe the required post-timelock operating configuration. Fresh deployments initially
 use the neutral constructor sentinels `type(uint256).max` and `10,000` bps, which cannot pass trading activation.
 
-OrderRouter also exposes timelocked admin control over `positionProtectionCommitsEnabled`,
-`positionProtectionTriggerBountyUsdc`, `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
+OrderRouter also exposes timelocked admin control over `positionProtectionTriggerBountyUsdc`, `maxPendingOrders`,
+`minEngineGas`, and `maxPruneOrdersPerCall`.
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
 `frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).
