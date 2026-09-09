@@ -129,7 +129,8 @@ In practice, the compact public API is:
   - the read-only `IHousePool` capacity getters exposed by `HousePool`:
     `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
     `areSeniorDepositReservationsWithinLimits()`
-  - `CfdEngineLens.previewOpen(...)` / `previewClose(...)` for trade-ticket simulations using caller-supplied oracle prices
+  - `CfdEngineLens.quoteMaxOpen(...)` / `previewOpen(...)` / `previewClose(...)` for trade-ticket sizing and simulations
+    using caller-supplied oracle prices
 
 The simplified public interfaces live in `packages/perps/src/interfaces/`:
 
@@ -139,7 +140,7 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 - `IPositionProtectionViews.sol`
 - `PositionProtectionTypes.sol`
 - `IPerpsTraderViews.sol`
-- `ICfdEngineLens.sol` for `previewOpen(...)` / `previewClose(...)` trade-ticket previews
+- `ICfdEngineLens.sol` for `quoteMaxOpen(...)`, `previewOpen(...)`, and `previewClose(...)` trade-ticket views
 - `IPerpsLPActions.sol` for configured-vault-to-pool integration hooks, not direct LP calls
 - `IPerpsLPViews.sol`, including the additive deposit-activation cooldown view
 - `IAsyncTrancheVault.sol` for the base asynchronous LP request, cancellation, estimate, and claim surface
@@ -164,7 +165,23 @@ the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
-Frontends should use `CfdEngineLens.previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime)` to simulate opens and same-side increases before committing an order. The lens is read-only: it uses the caller-supplied `oraclePrice` and `publishTime`, does not fetch Hermes data, does not ingest Pyth updates, and does not mutate engine mark state.
+Frontends can use `CfdEngineLens.quoteMaxOpen(account, side, marginDelta, oraclePrice, publishTime)` to obtain the
+largest quantum-aligned open or same-side increase accepted by the current engine plan. It returns a `MaxOpenQuote`
+containing `maxSizeDelta`, the complete `preview` for that size, and `limitingReason` (the planner rejection at the
+next quantum). `previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime)` remains available for
+simulating a user-selected size. If capacity is zero, the quote's invalid preview and reason describe the minimum
+notional-admissible candidate (one quantum at zero price); `preview.sizeDelta` is that attempted size.
+Both calls are read-only: they use the caller-supplied `oraclePrice` and `publishTime`, do not fetch Hermes data, do not
+ingest Pyth updates, and do not mutate engine mark state. Router timing, queue, slippage, and execution-bounty policy
+remain outside these engine-lens quotes, as do terminal-NAV-book execution bounds.
+
+The maximum search projects carry before deriving buying-power and skew bounds. It visits candidate intervals from
+largest to smallest and discards an interval only when optimistic collateral, reserve, equity, or solvency bounds
+rule out every size within it. This supports disconnected valid ranges around VPI rebates and includes integer
+rounding. Every selected maximum is checked with the canonical planner against the original snapshot.
+The stateless `CfdEngineOpenQuoter` helper is deployed automatically by the lens; the lens constructor arguments are
+unchanged. A search exceeding 512 interval evaluations reverts with `CfdEngineLens__QuoteSearchLimitExceeded()`;
+it never returns a partial maximum. Dependency and unsupported numeric-range reverts follow the preview assumptions.
 
 Preview units match the rest of perps:
 
