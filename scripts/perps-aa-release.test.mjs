@@ -1,10 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { assertProtectedEnvironment, assertRegistryMatch } from './release-perps-aa-client.mjs'
-import { integrity, packageName, validateRelease } from './perps-aa-artifact.mjs'
+import { integrity, packageName, run, validateRelease } from './perps-aa-artifact.mjs'
 
 const artifact = { version: '0.1.0', gitHead: '1'.repeat(40), integrity: integrity(Buffer.from('tested tarball')) }
 const published = { name: packageName, version: artifact.version, gitHead: artifact.gitHead, dist: { integrity: artifact.integrity } }
+
+test('package commands support inherited stdio without treating successful execution as an error', () => {
+  assert.equal(run(process.execPath, ['-e', ''], { stdio: 'ignore' }), '')
+  assert.equal(run(process.execPath, ['-e', 'console.log("ok")']), 'ok')
+})
 
 test('a named environment without required reviewers cannot publish', () => {
   assert.throws(() => assertProtectedEnvironment({}))

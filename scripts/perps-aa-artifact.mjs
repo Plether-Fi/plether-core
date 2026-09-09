@@ -11,7 +11,7 @@ export const registry = 'https://npm.pkg.github.com'
 export const repository = 'Plether-Fi/plether-core'
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const packageRoot = path.join(root, 'packages/perps-aa-client')
-export const run = (command, args, options = {}) => execFileSync(command, args, { encoding: 'utf8', ...options }).trim()
+export const run = (command, args, options = {}) => execFileSync(command, args, { encoding: 'utf8', ...options })?.trim() ?? ''
 export const readJson = file => JSON.parse(readFileSync(file, 'utf8'))
 export const integrity = bytes => `sha512-${createHash('sha512').update(bytes).digest('base64')}`
 
