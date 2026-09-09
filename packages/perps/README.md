@@ -839,14 +839,20 @@ Carry behavior:
 - Continues accruing even during stale or frozen oracle windows.
 - Is assessed per position on a stored borrow base, not on a checkpoint-time mark price.
 - Both `LONG` and `SHORT` positions can accrue carry at the same time if both sides have nonzero borrow base.
-- Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
+- Before claim or bounty credits, collects available margin and free settlement and retains the unpaid remainder in
+  `unsettledCarryUsdc`. The full incoming credit is applied afterward and can pay arrears at a later checkpoint, even
+  at the same timestamp. Claim payouts still require pool cash to cover all outstanding claims after collection; a
+  failure rolls back the whole transaction.
 - Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
 - On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
 - On withdraw, carry is realized before settlement balance is reduced.
 - Flows to LP trading revenue once realized.
-- Is first projected against eligible free settlement for guard and risk checks. Fully funded carry leaves exact
-  price-risk health unchanged; any uncovered remainder blocks withdrawal and independently makes the position
-  liquidatable. PnL pledge and same-account claim cannot cover that remainder.
+- Guard and risk checks project carry against active position margin first, then free settlement. The reduced pledge
+  determines price-risk health. Carry uncovered by both buckets blocks withdrawal and independently makes the position
+  liquidatable; same-account claims cannot pay carry. Stored arrears can coexist with new claim or bounty credits, so
+  health checks project current coverage rather than treating the stored amount alone as delinquency.
+- Reports collection and arrears through `CarryRealized`, including zero collection when backing is exhausted. The
+  legacy `CarryCheckpointed` event remains in the ABI but is no longer emitted.
 
 Close and liquidation use the planner's canonical carry-adjusted settlement/equity outputs; the live executor does not recompute a separate carry-blind loss or liquidation kernel.
 

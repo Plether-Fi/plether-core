@@ -189,17 +189,20 @@ interface ICfdEngineTypes {
     event BountyCredited(address indexed sourceAccount, address indexed beneficiary, uint256 amountUsdc);
     /// @notice Emitted when the immutable-bound terminal NAV book is configured exactly once.
     event TerminalNavBookSet(address indexed terminalNavBook);
-    /// @notice Emitted when elapsed carry cannot be collected and is added to an account's unsettled carry.
+    /// @notice Legacy checkpoint-only carry event retained for ABI compatibility; no longer emitted.
+    /// @dev CarryRealized reports collection and retained arrears, including zero collection when backing is exhausted.
     /// @param account Position account whose carry was checkpointed.
     /// @param addedUnsettledCarryUsdc Newly added uncovered carry in USDC.
     /// @param totalUnsettledCarryUsdc Account's total unsettled carry after the checkpoint, in USDC.
     event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
-    /// @notice Emitted when carry is collected from an account and routed to the HousePool claimant path.
+    /// @notice Emitted when nonzero carry due is evaluated; collected value follows the HousePool claimant path.
+    /// @dev Collected value may be zero when no backing is available. Claim and bounty credits occur afterward
+    ///      and can cover retained arrears at a later checkpoint.
     /// @param account Position account paying carry.
     /// @param realizedCarryUsdc Total carry collected in USDC.
     /// @param freeSettlementConsumedUsdc Portion collected from free settlement, in USDC.
     /// @param marginConsumedUsdc Portion collected from active position margin, in USDC.
-    /// @param remainingUnsettledCarryUsdc Previously checkpointed carry still unpaid after collection, in USDC.
+    /// @param remainingUnsettledCarryUsdc Total carry still unpaid after collection, in USDC.
     event CarryRealized(
         address indexed account,
         uint256 realizedCarryUsdc,

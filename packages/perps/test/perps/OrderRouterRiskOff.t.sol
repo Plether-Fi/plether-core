@@ -28,6 +28,8 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     uint256 internal constant UNSAFE_LONG_PRICE = 1.98e8;
     uint256 internal constant SATURDAY_NOON = 1_710_021_600;
 
+    bytes32 internal constant CARRY_REALIZED_TOPIC =
+        keccak256("CarryRealized(address,uint256,uint256,uint256,uint256)");
     bytes32 internal constant CARRY_CHECKPOINTED_TOPIC = keccak256("CarryCheckpointed(address,uint256,uint256)");
     bytes32 internal constant BOUNTY_CREDITED_TOPIC = keccak256("BountyCredited(address,address,uint256)");
     bytes32 internal constant RESERVED_SETTLEMENT_TRANSFERRED_TOPIC =
@@ -532,6 +534,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
     ) internal pure {
         for (uint256 i; i < logs.length; ++i) {
             bytes32 topic = logs[i].topics[0];
+            assertTrue(topic != CARRY_REALIZED_TOPIC, "refund must not collect carry");
             assertTrue(topic != CARRY_CHECKPOINTED_TOPIC, "refund must not checkpoint carry");
             assertTrue(topic != BOUNTY_CREDITED_TOPIC, "refund must not route through Engine bounty credit");
             assertTrue(

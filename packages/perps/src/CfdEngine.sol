@@ -204,17 +204,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
     }
 
-    function _checkpointTraderClaimCarryIfPossible(
-        address account,
-        StoredPosition storage pos
-    ) internal {
-        if (pos.lots == 0) {
-            return;
-        }
-
-        _checkpointCarryBeforeBasisChange(account, pos);
-    }
-
     function _checkpointBountyRecipient(
         address account,
         uint256 price,
@@ -227,7 +216,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
         StoredPosition storage pos = _positions[account];
         if (pos.lots > 0) {
-            _checkpointCarryBeforeBasisChange(account, pos);
+            _realizeCarryFromSettlement(account, pos);
         }
     }
 
@@ -474,8 +463,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
     /// @notice Transfers reserved bounty value from a source account into a beneficiary clearinghouse account.
     /// @dev Callable only by the router. For a beneficiary with an open position, carry is checkpointed before the
-    ///      settlement credit changes reachable collateral; covered carry is physically realized and any uncovered
-    ///      elapsed carry is added to `unsettledCarryUsdc`. A strictly newer mark is capped at `CAP_PRICE` and cached.
+    ///      settlement credit changes reachable collateral. Available margin and free settlement pay carry, and the
+    ///      unpaid remainder stays in `unsettledCarryUsdc`. The incoming bounty is not collected in this call.
+    ///      A strictly newer mark is capped at `CAP_PRICE` and cached.
     ///      The engine relies on the router to validate the supplied mark. A zero amount is a complete no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit.
     /// @param beneficiary Account receiving the clearinghouse settlement credit.
@@ -542,10 +532,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit MarginAdded(account, amount);
     }
 
-    /// @notice Realizes or checkpoints accrued carry when the clearinghouse changes an account's collateral basis.
+    /// @notice Collects available backing toward accrued carry when the clearinghouse changes an account's collateral basis.
     /// @dev Callable only by the configured clearinghouse. The clearinghouse invokes this during deposits and before
     ///      withdrawals and other basis-changing bucket operations. Accounts without an open position are no-ops.
-    /// @param account Account whose open-position carry should be realized or checkpointed.
+    /// @param account Account whose open-position carry should be collected, retaining any unpaid remainder.
     function realizeCarryBeforeMarginChange(
         address account
     ) external nonReentrant {
@@ -566,8 +556,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Settles the caller's trader claim balance into the clearinghouse.
     /// @dev The caller must equal `account`. Settlement is all-or-nothing and is available only when HousePool cash
     ///      covers all outstanding trader claims. Side carry indexes and any open-position indexed carry are
-    ///      checkpointed before the pool payout and clearinghouse credit change their respective carry bases. When a
-    ///      live-position claim becomes PnL pledge, aggregate side margin and borrow-base accounting are refreshed.
+    ///      checkpointed before the pool payout and clearinghouse credit change their respective carry bases. Available
+    ///      margin and free settlement pay carry first, retaining arrears. The incoming claim payment is not collected
+    ///      in this call. When it becomes PnL pledge, aggregate side margin and borrow-base accounting are refreshed.
     /// @param account Claim beneficiary and required caller.
     function settleTraderClaim(
         address account
@@ -578,7 +569,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         _advanceAllCarryIndexes(block.timestamp);
         StoredPosition storage pos = _positions[account];
-        _checkpointTraderClaimCarryIfPossible(account, pos);
+        if (pos.lots > 0) {
+            _realizeCarryFromSettlement(account, pos);
+        }
 
         uint256 amount = traderClaimBalanceUsdc[account];
         if (amount == 0) {
@@ -1389,38 +1382,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 timestampNow
     ) internal view returns (uint256) {
         return unsettledCarryUsdc[account] + _elapsedCarryUsdc(account, timestampNow);
-    }
-
-    function _canFullyRealizeCarryFromSettlement(
-        address account
-    ) internal view returns (bool) {
-        uint256 pendingCarryUsdc = _totalPendingCarryUsdc(account, block.timestamp);
-        if (pendingCarryUsdc == 0) {
-            return true;
-        }
-
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-        // Coverage is independent of priority; both canonical carry-eligible buckets must be exhausted first.
-        return pendingCarryUsdc <= buckets.activePositionMarginUsdc + buckets.freeSettlementUsdc;
-    }
-
-    function _checkpointCarryBeforeBasisChange(
-        address account,
-        StoredPosition storage pos
-    ) internal {
-        if (_canFullyRealizeCarryFromSettlement(account)) {
-            _realizeCarryFromSettlement(account, pos);
-            return;
-        }
-
-        uint256 elapsedCarryUsdc = _elapsedCarryUsdc(account, block.timestamp);
-        if (elapsedCarryUsdc > 0) {
-            unsettledCarryUsdc[account] += elapsedCarryUsdc;
-            emit CarryCheckpointed(account, elapsedCarryUsdc, unsettledCarryUsdc[account]);
-        }
-        _advanceAllCarryIndexes(block.timestamp);
-        pos.lastCarryTimestamp = uint64(block.timestamp);
-        pos.lastCarryIndex = _currentSideCarryIndex(pos.side, block.timestamp, _poolAssetsForCarry());
     }
 
     function _realizeCarryFromSettlement(
