@@ -10,6 +10,20 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 ///      prices and publish times. USDC amounts use 6 decimals, prices use 8 decimals, and sizes use 18 decimals.
 interface ICfdEngineLens {
 
+    /// @notice The interval budget was exhausted; no approximate or partial maximum is returned.
+    error CfdEngineLens__QuoteSearchLimitExceeded();
+
+    /// @notice Maximum size and its economics from one snapshot.
+    /// @param maxSizeDelta Largest planner-valid increase (18 decimals), or zero if none exists.
+    /// @param preview Preview of the maximum; for zero capacity, diagnostics at the minimum notional-admissible size
+    ///        (one quantum for zero price). In that case preview.sizeDelta is the attempted size, not zero.
+    /// @param limitingReason Planner rejection at maxSizeDelta + SIZE_QUANTUM; for zero capacity, preview.invalidReason.
+    struct MaxOpenQuote {
+        uint256 maxSizeDelta;
+        ICfdEngineTypes.OpenPreview preview;
+        CfdEnginePlanTypes.OpenRevertCode limitingReason;
+    }
+
     /// @notice Returns the engine inspected by this lens.
     /// @return Bound CfdEngine address
     function engine() external view returns (address);
@@ -47,6 +61,25 @@ interface ICfdEngineLens {
         uint256 oraclePrice,
         uint64 publishTime
     ) external view returns (ICfdEngineTypes.OpenPreview memory preview);
+
+    /// @notice Quotes the largest planner-valid open/increase at current pool depth.
+    /// @dev Uses carry-adjusted bounds and an interval search that supports disconnected valid ranges. Returns an
+    ///      exact, quantum-aligned result or explicitly reverts on search-budget exhaustion. Uses the same read-only
+    ///      assumptions and numeric/dependency revert behavior as `previewOpen`; router policy, bounty reservations,
+    ///      and terminal-book execution checks remain outside this planner quote.
+    /// @param account Account that would open or increase the position
+    /// @param side Position side
+    /// @param marginDelta Margin supplied with the hypothetical order in USDC
+    /// @param oraclePrice Candidate execution price (8 decimals)
+    /// @param publishTime Hypothetical oracle publish timestamp
+    /// @return quote Largest planner-valid increase, its complete preview, and a limiting rejection code
+    function quoteMaxOpen(
+        address account,
+        CfdTypes.Side side,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (MaxOpenQuote memory quote);
 
     /// @notice Previews the open/increase business-rule revert code at current pool depth.
     /// @dev Equivalent to `uint8(previewOpen(...).invalidReason)` and subject to the same read-only assumptions.

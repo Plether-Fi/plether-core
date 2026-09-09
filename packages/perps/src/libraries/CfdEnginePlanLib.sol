@@ -485,6 +485,21 @@ library CfdEnginePlanLib {
             openCostPlan.resultingPositionMarginUsdc - delta.vpiRebateReserveFromPledgeUsdc - reserveIncreaseUsdc;
     }
 
+    /// @notice Projects the same size-independent carry collection used by open planning, in place.
+    /// @dev Quote bounds must use this projected depth and pledge. A false result rules out every open size.
+    ///      Callers needing the original snapshot must copy it before calling this function.
+    /// @param snap Canonical snapshot to update with projected carry collection.
+    /// @return fullyCollectible Whether all pending carry can be collected, or there is no live position.
+    function projectOpenCarry(
+        CfdEnginePlanTypes.RawSnapshot memory snap
+    ) internal pure returns (bool fullyCollectible) {
+        if (snap.position.size == 0) {
+            return true;
+        }
+        uint256 pending = _pendingCarryUsdc(snap);
+        return _applyPendingCarryRealizationToSnapshot(snap, pending) == pending;
+    }
+
     /// @notice Projects margin-first carry collection before trade validation and terminal settlement.
     /// @dev Mutates the existing local snapshot in place, including custody, pledge, side margin, borrow base, and
     ///      pool depth. Uncovered carry remains available for existing terminal recovery/waiver rules.
