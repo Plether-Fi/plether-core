@@ -94,9 +94,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Supplied reservation ids do not cover committed-order margin that the settlement plan consumes.
     error MarginClearinghouse__IncompleteReservationCoverage();
 
-    /// @notice Aggregate committed-margin mutation was attempted while per-order reservations remain active.
-    error MarginClearinghouse__ReservationLedgerActive();
-
     /// @notice The owner attempted to replace the already configured engine.
     error MarginClearinghouse__EngineAlreadySet();
 
@@ -522,20 +519,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
     }
 
-    /// @notice Encumbers free settlement in the aggregate committed-order margin bucket.
-    /// @dev Callable only by the engine or its reported settlement sidecar. This legacy aggregate path checkpoints
-    ///      carry and reverts while the account has active per-order reservations. The settlement balance is unchanged.
-    /// @param account Account whose settlement should be encumbered
-    /// @param amountUsdc Amount to lock in six-decimal USDC units
-    function lockCommittedOrderMargin(
-        address account,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        _requireNoActiveReservations(account);
-        _checkpointCarryBeforeMarginChange(account);
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
-    }
-
     /// @notice Locks free settlement as committed-order margin and records it against a unique order id.
     /// @dev Callable only by the engine or its reported order router. Checkpoints carry, requires a nonzero amount that
     ///      fits `uint96`, and permanently prevents reuse of an id once any record exists. No tokens move.
@@ -568,55 +551,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         activeReservationCount[account] += 1;
 
         emit ReservationCreated(orderId, account, IMarginClearinghouse.ReservationBucket.CommittedOrder, amountUsdc);
-    }
-
-    /// @notice Decreases the aggregate committed-order margin bucket by an exact amount.
-    /// @dev Callable only by the engine or its reported settlement sidecar. This legacy aggregate path checkpoints
-    ///      carry and reverts while any per-order reservation is active. It also reverts on bucket underflow; no tokens
-    ///      move and the settlement balance is unchanged.
-    /// @param account Account whose committed-order margin should be decreased
-    /// @param amountUsdc Exact amount to remove in six-decimal USDC units
-    function unlockCommittedOrderMargin(
-        address account,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        _requireNoActiveReservations(account);
-        _checkpointCarryBeforeMarginChange(account);
-        _unlockMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
-    }
-
-    /// @notice Releases all remaining committed-order margin for an active reservation.
-    /// @dev Callable only by the engine or its reported settlement sidecar. Checkpoints carry, decreases the locked
-    ///      bucket and active aggregates, marks the reservation released, and leaves settlement balance unchanged so
-    ///      the released amount becomes free settlement.
-    /// @param orderId Order reservation id to release
-    /// @return releasedUsdc Amount released in six-decimal USDC units
-    function releaseOrderReservation(
-        uint64 orderId
-    ) external onlyOperator returns (uint256 releasedUsdc) {
-        IMarginClearinghouse.OrderReservation storage reservation = _activeReservation(orderId);
-        _checkpointCarryBeforeMarginChange(reservation.account);
-        releasedUsdc = _releaseReservation(reservation, true);
-        emit ReservationReleased(orderId, reservation.account, releasedUsdc);
-    }
-
-    /// @notice Releases all remaining committed-order margin if the reservation is still active.
-    /// @dev Callable only by the engine or its reported order router. An inactive or unknown id returns zero without
-    ///      checkpointing carry or mutating state. An active release updates the bucket, aggregates, and terminal status
-    ///      without changing settlement balance.
-    /// @param orderId Order reservation id to release
-    /// @return releasedUsdc Amount released in six-decimal USDC units, or zero if not active
-    function releaseOrderReservationIfActive(
-        uint64 orderId
-    ) external onlyEngineOrOrderRouter returns (uint256 releasedUsdc) {
-        IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderId];
-        if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
-            return 0;
-        }
-
-        _checkpointCarryBeforeMarginChange(reservation.account);
-        releasedUsdc = _releaseReservation(reservation, true);
-        emit ReservationReleased(orderId, reservation.account, releasedUsdc);
     }
 
     /// @notice Releases an order reservation during terminal Router cleanup if it remains active.
@@ -695,112 +629,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, executionBountyUsdc);
     }
 
-    /// @notice Consumes up to a requested amount from one active order reservation.
-    /// @dev Callable only by the engine or its reported settlement sidecar. Consumption decreases committed-order
-    ///      locked margin and active reservation aggregates but does not debit settlement balance or move tokens. The
-    ///      reservation becomes `Consumed` when exhausted; an inactive id reverts.
-    /// @param orderId Order reservation id to consume
-    /// @param amountUsdc Maximum amount to consume in six-decimal USDC units
-    /// @return consumedUsdc Amount consumed, capped by the reservation's remainder, in six-decimal USDC units
-    function consumeOrderReservation(
-        uint64 orderId,
-        uint256 amountUsdc
-    ) external onlyOperator returns (uint256 consumedUsdc) {
-        IMarginClearinghouse.OrderReservation storage reservation = _activeReservation(orderId);
-        consumedUsdc = amountUsdc > reservation.remainingAmountUsdc ? reservation.remainingAmountUsdc : amountUsdc;
-        if (consumedUsdc == 0) {
-            return 0;
-        }
-
-        _consumeReservation(reservation, consumedUsdc, true, IMarginClearinghouse.ReservationStatus.Consumed);
-
-        emit ReservationConsumed(orderId, reservation.account, consumedUsdc, reservation.remainingAmountUsdc);
-    }
-
-    /// @notice Atomically promotes exact pending-order margin into live-position PnL pledge.
-    /// @dev Settlement custody and total locked settlement are unchanged. The exact amount must fit within the active
-    ///      reservation; unlike the legacy consumption entrypoint, this function never clamps an oversized request.
-    function promoteOrderReservationToPnlPledge(
-        uint64 orderId,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        IMarginClearinghouse.OrderReservation storage reservation = _activeReservation(orderId);
-        if (amountUsdc > reservation.remainingAmountUsdc) {
-            revert MarginClearinghouse__InsufficientBucketMargin();
-        }
-        if (amountUsdc == 0) {
-            return;
-        }
-
-        address account = reservation.account;
-        _consumeReservation(reservation, amountUsdc, true, IMarginClearinghouse.ReservationStatus.Consumed);
-        positionMarginUsdc[account] += amountUsdc;
-
-        emit ReservationConsumed(orderId, account, amountUsdc, reservation.remainingAmountUsdc);
-        emit MarginLocked(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
-    }
-
-    /// @notice Consumes an account's active order reservations in router-reported FIFO order.
-    /// @dev Callable only by the engine or its reported settlement sidecar. The function queries the configured order
-    ///      router for reservation ids, skips inactive records, and may return less than requested. Consumption reduces
-    ///      committed-order locks and reservation aggregates but does not debit settlement balance or move tokens.
-    /// @param account Account whose active reservations should be consumed
-    /// @param amountUsdc Maximum amount to consume in six-decimal USDC units
-    /// @return consumedUsdc Amount consumed in six-decimal USDC units
-    function consumeAccountOrderReservations(
-        address account,
-        uint256 amountUsdc
-    ) external onlyOperator returns (uint256 consumedUsdc) {
-        return _consumeAccountOrderReservations(account, amountUsdc, true);
-    }
-
-    /// @notice Consumes active order reservations in the exact order supplied until the requested amount is exhausted.
-    /// @dev Callable only by the engine or its reported settlement sidecar. Inactive ids are skipped and ids are not
-    ///      required to belong to one account. Consumption decreases each reservation's committed-order bucket and
-    ///      aggregates without debiting settlement balance or moving tokens; the return may be less than requested.
-    /// @param orderIds Reservation order ids to inspect and consume in supplied order
-    /// @param amountUsdc Maximum aggregate amount to consume in six-decimal USDC units
-    /// @return consumedUsdc Aggregate amount consumed in six-decimal USDC units
-    function consumeOrderReservationsById(
-        uint64[] calldata orderIds,
-        uint256 amountUsdc
-    ) external onlyOperator returns (uint256 consumedUsdc) {
-        return _consumeOrderReservationsById(orderIds, amountUsdc);
-    }
-
-    function _consumeOrderReservationsById(
-        uint64[] memory orderIds,
-        uint256 amountUsdc
-    ) internal returns (uint256 consumedUsdc) {
-        if (amountUsdc == 0) {
-            return 0;
-        }
-
-        uint256 remainingUsdc = amountUsdc;
-        for (uint256 i = 0; i < orderIds.length && remainingUsdc > 0; i++) {
-            IMarginClearinghouse.OrderReservation storage reservation = orderReservations[orderIds[i]];
-            if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
-                continue;
-            }
-
-            uint256 reservationConsumedUsdc =
-                remainingUsdc > reservation.remainingAmountUsdc ? reservation.remainingAmountUsdc : remainingUsdc;
-            if (reservationConsumedUsdc == 0) {
-                continue;
-            }
-
-            _consumeReservation(
-                reservation, reservationConsumedUsdc, true, IMarginClearinghouse.ReservationStatus.Consumed
-            );
-
-            remainingUsdc -= reservationConsumedUsdc;
-            consumedUsdc += reservationConsumedUsdc;
-            emit ReservationConsumed(
-                orderIds[i], reservation.account, reservationConsumedUsdc, reservation.remainingAmountUsdc
-            );
-        }
-    }
-
+    /// @dev Router indexes determine traversal order; every active reservation consumed must belong to `account`.
     function _consumeAccountOrderReservations(
         address account,
         uint256 amountUsdc,
@@ -816,6 +645,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             IMarginClearinghouse.OrderReservation storage reservation = orderReservations[reservationIds[i]];
             if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
                 continue;
+            }
+            if (reservation.account != account) {
+                revert MarginClearinghouse__ReservationAccountMismatch(reservationIds[i], account, reservation.account);
             }
 
             uint256 reservationConsumedUsdc =
@@ -902,34 +734,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _checkpointCarryBeforeMarginChange(account);
         _requireActionReserveDecreaseAboveProtectedFloor(account, amountUsdc);
         _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
-    }
-
-    /// @notice Canonical V2 alias that locks free settlement for action charges and execution bounties.
-    function lockActionReserve(
-        address account,
-        uint256 amountUsdc
-    ) external onlyEngineIntegration {
-        _checkpointCarryBeforeMarginChange(account);
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
-    }
-
-    /// @notice Releases action reserve back to free settlement.
-    function releaseActionReserve(
-        address account,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        _checkpointCarryBeforeMarginChange(account);
-        _requireActionReserveDecreaseAboveProtectedFloor(account, amountUsdc);
-        _unlockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
-    }
-
-    /// @notice Consumes action reserve into another clearinghouse account without moving tokens.
-    function consumeActionReserve(
-        address account,
-        address recipient,
-        uint256 amountUsdc
-    ) external onlyEngine {
-        _transferActionReserve(account, recipient, amountUsdc);
     }
 
     /// @notice Locks free settlement into the action reserve and its mandatory negative-VPI sub-ledger.
@@ -1076,15 +880,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         return actionReserveBalanceUsdc - protectedActionReserveUsdc;
     }
 
-    /// @notice Locks free settlement exclusively for keeper and protocol liquidation charges.
-    function lockLiquidationReserve(
-        address account,
-        uint256 amountUsdc
-    ) external onlyEngineIntegration {
-        _checkpointCarryBeforeMarginChange(account);
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.LiquidationReserve, amountUsdc);
-    }
-
     /// @notice Releases liquidation reserve back to free settlement without debiting custody.
     function releaseLiquidationReserve(
         address account,
@@ -1106,19 +901,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         );
     }
 
-    /// @notice Reclassifies liquidation reserve as PnL pledge; total locked settlement is unchanged.
-    function reclassifyLiquidationReserveToPnlPledge(
-        address account,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        _reclassifyMargin(
-            account,
-            IMarginClearinghouse.MarginBucket.LiquidationReserve,
-            IMarginClearinghouse.MarginBucket.Position,
-            amountUsdc
-        );
-    }
-
     /// @notice Applies a signed delta to an account's internal settlement balance.
     /// @dev Callable only by the engine or its reported settlement sidecar. Positive values credit and negative values
     ///      debit; zero is a no-op. This accounting mutation does not transfer tokens, alter locked buckets, or
@@ -1134,18 +916,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         } else if (amount < 0) {
             _debitSettlementUsdc(account, uint256(-amount));
         }
-    }
-
-    /// @notice Credits internal settlement balance and locks the same amount as active-position margin.
-    /// @dev Callable only by the engine or its reported settlement sidecar. This is an accounting-only mutation: no
-    ///      tokens move and carry is not checkpointed. A zero amount is a no-op.
-    /// @param account Account receiving the settlement credit and position margin lock
-    /// @param amountUsdc Amount to credit and lock in six-decimal USDC units
-    function creditSettlementAndLockMargin(
-        address account,
-        uint256 amountUsdc
-    ) external onlyOperator {
-        _creditPnlPledge(account, amountUsdc);
     }
 
     /// @notice Credits settlement already transferred into custody and classifies it as PnL pledge.
@@ -1311,81 +1081,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         settlementBalances[account] -= consumedUsdc;
         IERC20(settlementAsset).safeTransfer(recipient, consumedUsdc);
         emit AssetSeized(account, settlementAsset, consumedUsdc, recipient);
-    }
-
-    /// @notice Legacy partial-close entrypoint that collects price loss from PnL pledge only.
-    /// @dev The residual pledge is protected by `protectedLockedMarginUsdc`. The deprecated reservation and other-lock
-    ///      arguments are ignored, and a nonzero protocol fee reverts because fees use the action-charge path.
-    /// @param account Account paying the close loss
-    /// @param reservationOrderIds Deprecated and ignored
-    /// @param lossUsdc Maximum loss to collect in six-decimal USDC units
-    /// @param protectedLockedMarginUsdc Position margin that must remain protected, in six-decimal USDC units
-    /// @param includeOtherLockedMargin Deprecated and ignored
-    /// @param recipient External recipient of collected price-loss cash
-    /// @param protocolFeeAccount Deprecated and ignored
-    /// @param protocolFeeUsdc Must be zero; action fees use `consumeActionCharge`
-    /// @return seizedUsdc PnL pledge collected and transferred
-    /// @return shortfallUsdc Requested loss left uncovered in six-decimal USDC units
-    /// @return protocolFeeCreditedUsdc Always zero
-    function consumeCloseLoss(
-        address account,
-        uint64[] calldata reservationOrderIds,
-        uint256 lossUsdc,
-        uint256 protectedLockedMarginUsdc,
-        bool includeOtherLockedMargin,
-        address recipient,
-        address protocolFeeAccount,
-        uint256 protocolFeeUsdc
-    ) external onlyOperator returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc) {
-        return _consumeCloseLoss(
-            account,
-            reservationOrderIds,
-            lossUsdc,
-            protectedLockedMarginUsdc,
-            includeOtherLockedMargin,
-            recipient,
-            protocolFeeAccount,
-            protocolFeeUsdc
-        );
-    }
-
-    function _consumeCloseLoss(
-        address account,
-        uint64[] calldata reservationOrderIds,
-        uint256 lossUsdc,
-        uint256 protectedLockedMarginUsdc,
-        bool includeOtherLockedMargin,
-        address recipient,
-        address protocolFeeAccount,
-        uint256 protocolFeeUsdc
-    ) internal returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc) {
-        reservationOrderIds;
-        includeOtherLockedMargin;
-        protocolFeeAccount;
-        if (protocolFeeUsdc != 0) {
-            revert MarginClearinghouse__InvalidMarginBucket();
-        }
-        (seizedUsdc, shortfallUsdc) = _consumePnlPledgeLoss(account, lossUsdc, protectedLockedMarginUsdc, recipient);
-        protocolFeeCreditedUsdc = 0;
-    }
-
-    function _buildCloseLossBuckets(
-        address account,
-        bool includeOtherLockedMargin
-    ) internal view returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
-        uint256 reservedUsdc = reservedSettlementUsdc[account] + liquidationReserveBalances[account];
-        uint256 settlementAvailableUsdc =
-            settlementBalances[account] > reservedUsdc ? settlementBalances[account] - reservedUsdc : 0;
-
-        if (includeOtherLockedMargin) {
-            return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-                settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
-            );
-        }
-
-        return MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
-            settlementAvailableUsdc, positionMarginUsdc[account], committedOrderMarginUsdc[account], 0
-        );
     }
 
     /// @notice Applies an engine-planned isolated full-liquidation settlement.
@@ -1556,14 +1251,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _realizeOrCheckpointCarryBeforeMarginChange(account);
     }
 
-    function _requireNoActiveReservations(
-        address account
-    ) internal view {
-        if (activeReservationCount[account] != 0) {
-            revert MarginClearinghouse__ReservationLedgerActive();
-        }
-    }
-
     function _realizeOrCheckpointCarryBeforeMarginChange(
         address account
     ) internal {
@@ -1662,47 +1349,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit MarginLocked(account, to, amountUsdc);
     }
 
-    /// @dev Consumes non-position locked margin by priority: committed-order margin first, then reserved settlement.
-    ///      Queued order margin is released before reserved settlement because failed/cancelled order intents are softer
-    ///      obligations than explicitly reserved settlement buckets.
-    function _consumeOtherLockedMargin(
-        address account,
-        uint256 amountUsdc
-    ) internal {
-        if (amountUsdc == 0) {
-            return;
-        }
-
-        uint256 committedConsumedUsdc =
-            amountUsdc > committedOrderMarginUsdc[account] ? committedOrderMarginUsdc[account] : amountUsdc;
-        if (committedConsumedUsdc > 0) {
-            committedOrderMarginUsdc[account] -= committedConsumedUsdc;
-            emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.CommittedOrder, committedConsumedUsdc);
-        }
-
-        uint256 remainingUsdc = amountUsdc - committedConsumedUsdc;
-        if (remainingUsdc > 0) {
-            _requireActionReserveDecreaseAboveProtectedFloor(account, remainingUsdc);
-            if (reservedSettlementUsdc[account] < remainingUsdc) {
-                revert MarginClearinghouse__InsufficientBucketMargin();
-            }
-            reservedSettlementUsdc[account] -= remainingUsdc;
-            emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, remainingUsdc);
-        }
-    }
-
-    function _consumeOtherLockedMarginViaReservations(
-        address account,
-        uint64[] calldata reservationOrderIds,
-        uint256 amountUsdc
-    ) internal {
-        uint256 consumedReservationUsdc = _consumeOrderReservationsById(reservationOrderIds, amountUsdc);
-        account;
-        if (consumedReservationUsdc != amountUsdc) {
-            revert MarginClearinghouse__IncompleteReservationCoverage();
-        }
-    }
-
     function _consumeReservationBucket(
         address account,
         IMarginClearinghouse.ReservationBucket bucket,
@@ -1712,15 +1358,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.CommittedOrder, amountUsdc);
         } else {
             revert MarginClearinghouse__InvalidMarginBucket();
-        }
-    }
-
-    function _activeReservation(
-        uint64 orderId
-    ) internal view returns (IMarginClearinghouse.OrderReservation storage reservation) {
-        reservation = orderReservations[orderId];
-        if (reservation.status != IMarginClearinghouse.ReservationStatus.Active) {
-            revert MarginClearinghouse__ReservationNotActive();
         }
     }
 

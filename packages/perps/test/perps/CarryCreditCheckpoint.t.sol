@@ -28,7 +28,7 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         _fundTrader(ACCOUNT, 5100e6);
         _open(ACCOUNT, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         vm.startPrank(address(engine));
-        clearinghouse.lockCommittedOrderMargin(ACCOUNT, 30e6);
+        clearinghouse.reserveCommittedOrderMargin(ACCOUNT, type(uint64).max, 30e6);
         clearinghouse.lockReservedSettlement(ACCOUNT, 20e6);
         clearinghouse.lockVpiRebateReserve(ACCOUNT, 10e6);
         vm.stopPrank();
