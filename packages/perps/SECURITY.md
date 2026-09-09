@@ -739,6 +739,9 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 - destination: realized carry becomes LP trading revenue
 - collection priority: active position margin first, then free settlement; all other locked buckets and trader claims
   remain protected during carry collection
+- projection: planners and account views share `projectCarryLoss` for post-carry buckets. Its output must not alias
+  raw custody; ledger diagnostics retain raw values. The planner updates side margin, borrowing bases, carry indexes,
+  arrears and pool revenue together, using carry accrued against live depth even for hypothetical trade simulations
 - health: project margin consumption before evaluating exact price risk. Fully paid carry is not delinquency, but a
   reduced pledge may breach maintenance. Carry uncovered by both margin and free settlement independently blocks
   withdrawal and makes the account liquidatable; claims cannot fund carry. Stored arrears alone are not delinquency
