@@ -107,10 +107,17 @@ contract CfdEngineLens is ICfdEngineLens {
     ) external view returns (MaxOpenQuote memory quote) {
         CfdEnginePlanTypes.RawSnapshot memory snap =
             _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
-        CfdTypes.Order memory order;
-        order.account = account;
-        order.side = side;
-        order.marginDelta = marginDelta;
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: 0,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
         CfdEnginePlanTypes.OpenDelta memory delta;
         ICfdEnginePlanner planner = engineContract.planner();
         (quote.maxSizeDelta, delta, quote.limitingReason) =

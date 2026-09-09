@@ -28,6 +28,14 @@ contract CfdEngineOpenQuoter {
         uint256 high;
     }
 
+    // Keep canonical probe inputs together while retaining the original snapshot separately in calldata.
+    struct ProbeContext {
+        ICfdEnginePlanner planner;
+        CfdTypes.Order order;
+        uint256 executionPrice;
+        uint64 publishTime;
+    }
+
     struct Context {
         CfdEnginePlanTypes.RawSnapshot snap;
         uint256 price;
@@ -68,7 +76,23 @@ contract CfdEngineOpenQuoter {
             CfdEnginePlanTypes.OpenRevertCode limitingReason
         )
     {
-        uint256 price = Math.min(executionPrice, raw.capPrice);
+        ProbeContext memory probe = ProbeContext(planner, order, executionPrice, publishTime);
+        return _quote(raw, probe);
+    }
+
+    function _quote(
+        CfdEnginePlanTypes.RawSnapshot calldata raw,
+        ProbeContext memory probe
+    )
+        private
+        pure
+        returns (
+            uint256 maxSizeDelta,
+            CfdEnginePlanTypes.OpenDelta memory delta,
+            CfdEnginePlanTypes.OpenRevertCode limitingReason
+        )
+    {
+        uint256 price = Math.min(probe.executionPrice, raw.capPrice);
         uint256 currentLots = raw.position.size / CfdTypes.SIZE_QUANTUM;
         uint256 minimumLots = price == 0
             ? currentLots + 1
@@ -80,21 +104,38 @@ contract CfdEngineOpenQuoter {
         bool carryCollectible = CfdEnginePlanLib.projectOpenCarry(projected);
         if (
             price == 0 || !carryCollectible || projected.degradedMode
-                || (projected.position.size > 0 && projected.position.side != order.side)
+                || (projected.position.size > 0 && projected.position.side != probe.order.side)
                 || projected.vpiRebateReserveUsdc < _negativeReserve(projected.position.vpiAccrued)
         ) {
-            delta = _probe(planner, raw, order, low, executionPrice, publishTime);
+            delta = _probe(raw, probe, low);
             return (0, delta, delta.revertCode);
         }
 
-        Context memory ctx = _context(projected, order, price);
-        uint256 high = _upperBound(ctx);
+        Context memory ctx = _context(projected, probe.order, price);
+        return _search(raw, probe, ctx, low, _upperBound(ctx));
+    }
+
+    function _search(
+        CfdEnginePlanTypes.RawSnapshot calldata raw,
+        ProbeContext memory probe,
+        Context memory ctx,
+        uint256 low,
+        uint256 high
+    )
+        private
+        pure
+        returns (
+            uint256 maxSizeDelta,
+            CfdEnginePlanTypes.OpenDelta memory delta,
+            CfdEnginePlanTypes.OpenRevertCode limitingReason
+        )
+    {
         if (high >= low) {
             // An ABI size has at most 190 lot bits (uint256 / 1e20). Right-first bisection therefore needs at most
             // 191 pending intervals, regardless of the number of nodes visited or the shape of planner validity.
             Interval[192] memory pending;
             uint256 count = 1;
-            uint256 visited;
+            uint256 visited = 0;
             pending[0] = Interval(low, high);
             while (count > 0) {
                 if (++visited > MAX_SEARCH_NODES) {
@@ -104,11 +145,10 @@ contract CfdEngineOpenQuoter {
                 if (!_mayContainValid(ctx, range.low, range.high)) {
                     continue;
                 }
-                delta = _probe(planner, raw, order, range.high, executionPrice, publishTime);
+                delta = _probe(raw, probe, range.high);
                 if (delta.valid) {
                     maxSizeDelta = range.high * CfdTypes.SIZE_QUANTUM;
-                    CfdEnginePlanTypes.OpenDelta memory next =
-                        _probe(planner, raw, order, range.high + 1, executionPrice, publishTime);
+                    CfdEnginePlanTypes.OpenDelta memory next = _probe(raw, probe, range.high + 1);
                     return (maxSizeDelta, delta, next.revertCode);
                 }
                 // Only this single tested endpoint is known to fail. Both remaining halves stay in the search.
@@ -122,20 +162,17 @@ contract CfdEngineOpenQuoter {
                 }
             }
         }
-        delta = _probe(planner, raw, order, low, executionPrice, publishTime);
+        delta = _probe(raw, probe, low);
         return (0, delta, delta.revertCode);
     }
 
     function _probe(
-        ICfdEnginePlanner planner,
         CfdEnginePlanTypes.RawSnapshot calldata raw,
-        CfdTypes.Order memory order,
-        uint256 lots,
-        uint256 executionPrice,
-        uint64 publishTime
+        ProbeContext memory probe,
+        uint256 lots
     ) private pure returns (CfdEnginePlanTypes.OpenDelta memory) {
-        order.sizeDelta = lots * CfdTypes.SIZE_QUANTUM;
-        return planner.planOpen(raw, order, executionPrice, publishTime);
+        probe.order.sizeDelta = lots * CfdTypes.SIZE_QUANTUM;
+        return probe.planner.planOpen(raw, probe.order, probe.executionPrice, probe.publishTime);
     }
 
     function _context(
@@ -203,51 +240,7 @@ contract CfdEngineOpenQuoter {
         uint256 high
     ) private pure returns (bool) {
         (int256 minVpi, int256 maxVpi) = _vpiBounds(ctx, low, high);
-        uint256 feeFloor = Math.mulDiv(low * ctx.price, ctx.snap.executionFeeBps, 10_000);
-        int256 minCost = minVpi + SafeCast.toInt256(feeFloor);
-        uint256 minVpiReserve = _negativeReserve(ctx.snap.position.vpiAccrued + maxVpi);
-        uint256 maxRelease =
-            ctx.snap.vpiRebateReserveUsdc > minVpiReserve ? ctx.snap.vpiRebateReserveUsdc - minVpiReserve : 0;
-
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = ctx.snap.accountBuckets;
-        // Copy this nested struct before changing it: memory assignment alone aliases the search context.
-        buckets = abi.decode(abi.encode(buckets), (IMarginClearinghouse.AccountUsdcBuckets));
-        buckets.otherLockedMarginUsdc -= maxRelease;
-        buckets.totalLockedMarginUsdc -= maxRelease;
-        buckets.freeSettlementUsdc = buckets.settlementBalanceUsdc > buckets.totalLockedMarginUsdc
-            ? buckets.settlementBalanceUsdc - buckets.totalLockedMarginUsdc
-            : 0;
-        MarginClearinghouseAccountingLib.OpenCostPlan memory cost =
-            MarginClearinghouseAccountingLib.planOpenCostApplication(buckets, ctx.marginDelta, minCost);
-        if (cost.insufficientFreeEquity || cost.insufficientPositionMargin) {
-            return false;
-        }
-
-        uint256 minVpiIncrease =
-            minVpiReserve > ctx.snap.vpiRebateReserveUsdc ? minVpiReserve - ctx.snap.vpiRebateReserveUsdc : 0;
-        uint256 minVpiFromPledge =
-            minVpiIncrease > cost.resultingFreeSettlementUsdc ? minVpiIncrease - cost.resultingFreeSettlementUsdc : 0;
-        uint256 totalNotionalFloor = (ctx.currentLots + low) * ctx.price;
-        uint256 minLiquidationReserve = Math.max(
-            Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.bountyBps, 10_000), ctx.snap.riskParams.minBountyUsdc
-        );
-        uint256 minReserveIncrease = minLiquidationReserve > ctx.snap.liquidationReserveUsdc
-            ? minLiquidationReserve - ctx.snap.liquidationReserveUsdc
-            : 0;
-        uint256 maxNewPledge = cost.resultingPositionMarginUsdc - ctx.snap.position.margin;
-        if (minVpiFromPledge > maxNewPledge || minReserveIncrease > maxNewPledge - minVpiFromPledge) {
-            return false;
-        }
-        uint256 maxMargin = cost.resultingPositionMarginUsdc - minVpiFromPledge - minReserveIncrease;
-        int256 maxEquity = SafeCast.toInt256(maxMargin + ctx.snap.traderClaimBalanceForAccount) + ctx.pricePnl;
-        uint256 minInitial = Math.max(
-            Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.initMarginBps, 10_000),
-            ctx.snap.riskParams.minBountyUsdc
-        );
-        uint256 activeMarginBps =
-            ctx.snap.isFadWindow ? ctx.snap.riskParams.fadMarginBps : ctx.snap.riskParams.maintMarginBps;
-        uint256 minMaintenance = Math.mulDiv(totalNotionalFloor, activeMarginBps, 10_000);
-        if (maxEquity < SafeCast.toInt256(minInitial) || maxEquity <= SafeCast.toInt256(minMaintenance)) {
+        if (!_mayMeetMarginRequirements(ctx, low, minVpi, maxVpi)) {
             return false;
         }
 
@@ -263,6 +256,82 @@ contract CfdEngineOpenQuoter {
         uint256 minLiability = Math.max(ctx.selectedLiability + low * ctx.profitPerLot, ctx.opposingLiability);
         return
             SolvencyAccountingLib.hasRequiredSettlementBuffer(maxEffective, minLiability, ctx.snap.settlementBufferBps);
+    }
+
+    function _optimisticCostPlan(
+        Context memory ctx,
+        uint256 low,
+        int256 minVpi,
+        int256 maxVpi
+    ) private pure returns (MarginClearinghouseAccountingLib.OpenCostPlan memory cost, uint256 minVpiReserve) {
+        uint256 feeFloor = Math.mulDiv(low * ctx.price, ctx.snap.executionFeeBps, 10_000);
+        int256 minCost = minVpi + SafeCast.toInt256(feeFloor);
+        minVpiReserve = _negativeReserve(ctx.snap.position.vpiAccrued + maxVpi);
+        uint256 maxRelease =
+            ctx.snap.vpiRebateReserveUsdc > minVpiReserve ? ctx.snap.vpiRebateReserveUsdc - minVpiReserve : 0;
+
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets = ctx.snap.accountBuckets;
+        // Copy this nested struct before changing it: memory assignment alone aliases the search context.
+        buckets = abi.decode(abi.encode(buckets), (IMarginClearinghouse.AccountUsdcBuckets));
+        buckets.otherLockedMarginUsdc -= maxRelease;
+        buckets.totalLockedMarginUsdc -= maxRelease;
+        buckets.freeSettlementUsdc = buckets.settlementBalanceUsdc > buckets.totalLockedMarginUsdc
+            ? buckets.settlementBalanceUsdc - buckets.totalLockedMarginUsdc
+            : 0;
+        cost = MarginClearinghouseAccountingLib.planOpenCostApplication(buckets, ctx.marginDelta, minCost);
+    }
+
+    function _mayMeetMarginRequirements(
+        Context memory ctx,
+        uint256 low,
+        int256 minVpi,
+        int256 maxVpi
+    ) private pure returns (bool) {
+        (bool affordable, uint256 maxMargin, uint256 totalNotionalFloor) =
+            _maxAffordableMargin(ctx, low, minVpi, maxVpi);
+        if (!affordable) {
+            return false;
+        }
+        int256 maxEquity = SafeCast.toInt256(maxMargin + ctx.snap.traderClaimBalanceForAccount) + ctx.pricePnl;
+        uint256 minInitial = Math.max(
+            Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.initMarginBps, 10_000),
+            ctx.snap.riskParams.minBountyUsdc
+        );
+        uint256 activeMarginBps =
+            ctx.snap.isFadWindow ? ctx.snap.riskParams.fadMarginBps : ctx.snap.riskParams.maintMarginBps;
+        uint256 minMaintenance = Math.mulDiv(totalNotionalFloor, activeMarginBps, 10_000);
+        return maxEquity >= SafeCast.toInt256(minInitial) && maxEquity > SafeCast.toInt256(minMaintenance);
+    }
+
+    function _maxAffordableMargin(
+        Context memory ctx,
+        uint256 low,
+        int256 minVpi,
+        int256 maxVpi
+    ) private pure returns (bool affordable, uint256 maxMargin, uint256 totalNotionalFloor) {
+        (MarginClearinghouseAccountingLib.OpenCostPlan memory cost, uint256 minVpiReserve) =
+            _optimisticCostPlan(ctx, low, minVpi, maxVpi);
+        if (cost.insufficientFreeEquity || cost.insufficientPositionMargin) {
+            return (false, 0, 0);
+        }
+
+        uint256 minVpiIncrease =
+            minVpiReserve > ctx.snap.vpiRebateReserveUsdc ? minVpiReserve - ctx.snap.vpiRebateReserveUsdc : 0;
+        uint256 minVpiFromPledge =
+            minVpiIncrease > cost.resultingFreeSettlementUsdc ? minVpiIncrease - cost.resultingFreeSettlementUsdc : 0;
+        totalNotionalFloor = (ctx.currentLots + low) * ctx.price;
+        uint256 minLiquidationReserve = Math.max(
+            Math.mulDiv(totalNotionalFloor, ctx.snap.riskParams.bountyBps, 10_000), ctx.snap.riskParams.minBountyUsdc
+        );
+        uint256 minReserveIncrease = minLiquidationReserve > ctx.snap.liquidationReserveUsdc
+            ? minLiquidationReserve - ctx.snap.liquidationReserveUsdc
+            : 0;
+        uint256 maxNewPledge = cost.resultingPositionMarginUsdc - ctx.snap.position.margin;
+        if (minVpiFromPledge > maxNewPledge || minReserveIncrease > maxNewPledge - minVpiFromPledge) {
+            return (false, 0, totalNotionalFloor);
+        }
+        maxMargin = cost.resultingPositionMarginUsdc - minVpiFromPledge - minReserveIncrease;
+        return (true, maxMargin, totalNotionalFloor);
     }
 
     function _vpiBounds(

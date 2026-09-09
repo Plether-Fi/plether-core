@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
+import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdEngineOpenQuoter} from "@plether/perps/CfdEngineOpenQuoter.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -11,6 +12,18 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 
 contract CfdEngineLensQuoteTest is BasePerpTest {
+
+    function test_Runtime_QuoteComponentsFitDeploymentLimits() public {
+        CfdEngineOpenQuoter quoter = new CfdEngineOpenQuoter();
+        assertLe(address(engineLens).code.length, 24_576, "lens runtime exceeds EIP-170");
+        assertLe(address(quoter).code.length, 24_576, "quoter runtime exceeds EIP-170");
+        assertLe(
+            type(CfdEngineLens).creationCode.length + abi.encode(address(engine)).length,
+            49_152,
+            "lens creation input exceeds EIP-3860"
+        );
+        assertLe(type(CfdEngineOpenQuoter).creationCode.length, 49_152, "quoter initcode exceeds EIP-3860");
+    }
 
     function _quote(
         address account,
