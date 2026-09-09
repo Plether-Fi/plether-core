@@ -498,29 +498,25 @@ library CfdEnginePlanLib {
         if (pendingCarryUsdc == 0 || snap.position.size == 0) {
             return 0;
         }
-        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(snap.accountBuckets, pendingCarryUsdc);
+        (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(snap.accountBuckets, pendingCarryUsdc);
         realizedCarryUsdc = consumption.totalConsumedUsdc;
-        snap.position.margin -= consumption.activeMarginConsumedUsdc;
-        snap.lockedBuckets.positionMarginUsdc -= consumption.activeMarginConsumedUsdc;
-        snap.lockedBuckets.totalLockedMarginUsdc -= consumption.activeMarginConsumedUsdc;
+        snap.accountBuckets = afterBuckets;
+        snap.position.margin = afterBuckets.activePositionMarginUsdc;
+        snap.lockedBuckets.positionMarginUsdc = afterBuckets.activePositionMarginUsdc;
+        snap.lockedBuckets.totalLockedMarginUsdc = afterBuckets.totalLockedMarginUsdc;
         CfdEnginePlanTypes.SideSnapshot memory selected = _selectedSide(snap, snap.position.side);
         selected.totalMargin -= consumption.activeMarginConsumedUsdc;
         uint256 borrowBaseAfterUsdc =
-            snap.position.maxProfitUsdc > snap.position.margin ? snap.position.maxProfitUsdc - snap.position.margin : 0;
+            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin);
         selected.borrowBaseUsdc = selected.borrowBaseUsdc - snap.positionBorrowBaseUsdc + borrowBaseAfterUsdc;
         snap.positionBorrowBaseUsdc = borrowBaseAfterUsdc;
         snap.positionLastCarryIndex = selected.carryIndex;
         snap.unsettledCarryUsdc = consumption.uncoveredUsdc;
         snap.poolAssetsUsdc += realizedCarryUsdc;
         snap.poolCashUsdc += realizedCarryUsdc;
-        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
-            snap.accountBuckets.settlementBalanceUsdc - realizedCarryUsdc,
-            snap.lockedBuckets.positionMarginUsdc,
-            snap.liquidationReserveUsdc,
-            snap.lockedBuckets.committedOrderMarginUsdc,
-            snap.lockedBuckets.reservedSettlementUsdc
-        );
     }
 
     /// @notice Builds risk state for the position projected by a successful open-cost plan.

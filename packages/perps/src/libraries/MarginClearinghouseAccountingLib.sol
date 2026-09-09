@@ -11,9 +11,9 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 library MarginClearinghouseAccountingLib {
 
     /// @notice Priority breakdown for a requested settlement loss.
-    /// @param freeSettlementConsumedUsdc Unlocked settlement consumed first.
-    /// @param activeMarginConsumedUsdc Active-position margin consumed after free settlement.
-    /// @param otherLockedMarginConsumedUsdc Other locked margin consumed last; zero on the carry-loss path.
+    /// @param freeSettlementConsumedUsdc Portion consumed from unlocked settlement under the selected loss policy.
+    /// @param activeMarginConsumedUsdc Portion consumed from active-position margin under the selected loss policy.
+    /// @param otherLockedMarginConsumedUsdc Portion consumed from other locked margin; zero on the carry-loss path.
     /// @param totalConsumedUsdc Total settlement balance to debit.
     /// @param uncoveredUsdc Requested loss not covered by eligible settlement balance.
     struct SettlementConsumption {
@@ -171,6 +171,28 @@ library MarginClearinghouseAccountingLib {
             buckets.freeSettlementUsdc < remainderUsdc ? buckets.freeSettlementUsdc : remainderUsdc;
         consumption.totalConsumedUsdc = consumption.activeMarginConsumedUsdc + consumption.freeSettlementConsumedUsdc;
         consumption.uncoveredUsdc = lossUsdc - consumption.totalConsumedUsdc;
+    }
+
+    /// @notice Projects carry allocation and the resulting account collateral without changing the input snapshot.
+    /// @dev Requires canonical, internally consistent buckets. Returns a fresh bucket object: callers can retain raw
+    ///      custody for diagnostics while using projected margin for price equity and projected free cash for actions.
+    ///      Claims and other locked buckets are not carry funding sources. Uncovered carry remains an obligation.
+    function projectCarryLoss(
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
+        uint256 pendingCarryUsdc
+    )
+        internal
+        pure
+        returns (SettlementConsumption memory consumption, IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets)
+    {
+        consumption = planCarryLossConsumption(buckets, pendingCarryUsdc);
+        afterBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: buckets.settlementBalanceUsdc - consumption.totalConsumedUsdc,
+            totalLockedMarginUsdc: buckets.totalLockedMarginUsdc - consumption.activeMarginConsumedUsdc,
+            activePositionMarginUsdc: buckets.activePositionMarginUsdc - consumption.activeMarginConsumedUsdc,
+            otherLockedMarginUsdc: buckets.otherLockedMarginUsdc,
+            freeSettlementUsdc: buckets.freeSettlementUsdc - consumption.freeSettlementConsumedUsdc
+        });
     }
 
     /// @notice Plans how signed action cost and newly supplied margin change settlement and PnL pledge.

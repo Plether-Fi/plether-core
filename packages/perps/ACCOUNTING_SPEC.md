@@ -622,6 +622,17 @@ Rules:
 `CarryRealized` reports collection and retained arrears whenever nonzero carry is due, including zero collection when
 no backing remains. `CarryCheckpointed` remains a deprecated ABI declaration and is no longer emitted.
 
+`MarginClearinghouseAccountingLib.projectCarryLoss` owns the post-carry collateral arithmetic used by trade planners,
+withdrawal estimates, and account-risk views. It reuses the live collector's allocation policy and returns fresh buckets;
+the input snapshot remains unchanged. Raw ledger diagnostics, displayed position margin, and the stored terminal-price
+collectible cap continue to describe custody before collection. Price-risk equity and withdrawal capacity use projected
+margin and free settlement, respectively; same-account claims contribute to price equity without funding carry.
+
+The existing planner adapter applies these buckets together with the corresponding side-margin, borrowing-base,
+carry-index, arrears, and pool-revenue updates. Carry is assessed before those updates. Hypothetical trade depth remains
+separate from the live pool depth used to accrue carry; projecting collection adds revenue to the supplied planning
+context without changing that accrual basis. Snapshot loading and live collection remain owned by their existing callers.
+
 For every checkpoint sequence, `starting arrears + newly accrued carry = margin collected + free settlement collected
 + ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.
 A close commitment still prepays its bounty exclusively from free settlement after carry collection. Insufficient free
