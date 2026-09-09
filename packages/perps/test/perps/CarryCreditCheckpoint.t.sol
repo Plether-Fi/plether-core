@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CarryNavProbeToken} from "../utils/CarryNavProbeToken.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
-import {CarryNavProbeToken} from "./MarginFirstCarry.t.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";

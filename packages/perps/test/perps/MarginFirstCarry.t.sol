@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CarryNavProbeToken} from "../utils/CarryNavProbeToken.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -9,42 +10,8 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-
-/// @dev Preserve MockUSDC storage while probing the Engine during its carry revenue transfer.
-contract CarryNavProbeToken is MockUSDC {
-
-    address private immutable ENGINE;
-    bool private immutable FAIL_AFTER_READ;
-    uint256 public blockedReads;
-
-    constructor(
-        address engine_,
-        bool failAfterRead_
-    ) {
-        ENGINE = engine_;
-        FAIL_AFTER_READ = failAfterRead_;
-    }
-
-    function transfer(
-        address to,
-        uint256 amount
-    ) public override returns (bool) {
-        if (msg.sender == ENGINE) {
-            (bool ok, bytes memory data) = ENGINE.staticcall(abi.encodeWithSignature("terminalNavSnapshot()"));
-            require(
-                !ok && bytes4(data) == ICfdEngineTypes.CfdEngine__AccountingMutationInProgress.selector,
-                "transient accounting was readable"
-            );
-            blockedReads++;
-            require(!FAIL_AFTER_READ, "downstream revert");
-        }
-        return super.transfer(to, amount);
-    }
-
-}
 
 contract MarginFirstCarryAllocationTest is Test {
 
