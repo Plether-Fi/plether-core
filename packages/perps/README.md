@@ -743,10 +743,10 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
 ### Reachability domains
 
 - Generic collateral reachability excludes queued committed-order and reserved-settlement buckets.
-- Project and realize pending carry from eligible free settlement before evaluating position health. Carry fully funded
-  there does not reduce the separate exact price-risk health basis. Any uncovered carry blocks trader withdrawal and
-  independently makes the position liquidatable.
-- PnL pledge plus same-account claim backs only exact price risk; neither can offset uncovered carry.
+- Project and realize carry from active position margin first, then free settlement. Price-risk health uses the reduced
+  pledge plus same-account claim. Carry can therefore cause a maintenance breach even when fully collected.
+- Carry left uncovered by both margin and free settlement blocks withdrawal and independently makes the position
+  liquidatable. Trader claims and unrelated locked reserves cannot fund carry collection.
 - Terminal collateral reachability may consume queued/reserved buckets, but only in full-close and liquidation settlement paths that explicitly unlock them.
 
 ### Bootstrap and withdrawal gates
@@ -826,10 +826,14 @@ mechanism.
 ```text
 borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)
 sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)
-positionCarryUsdc = borrowBaseUsdc * (sideCarryIndex - positionLastCarryIndex)
+positionCarryUsdc = unsettledCarryUsdc + floor(borrowBaseUsdc * (sideCarryIndex - positionLastCarryIndex) / 1e18)
 ```
 
 Carry behavior:
+
+- Consumes active position margin first and free settlement second, preserving other locked buckets and claims.
+- Close and liquidation first collect accrued carry, then settle price PnL against the reduced pledge. Only still-unpaid
+  carry enters existing terminal action recovery and waiver.
 
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.

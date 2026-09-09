@@ -52,7 +52,8 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external;
 
     /// @notice Reserves close-order execution bounty exclusively from free settlement.
-    /// @dev Callable only by the router. Carry is realized first; PnL pledge and all locked reserves stay protected.
+    /// @dev Callable only by the router. Realizes margin-first carry, then funds the bounty from free settlement
+    ///      while protecting all locked buckets.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close (18 decimals)
     /// @param amountUsdc Execution bounty amount to reserve in USDC

@@ -170,10 +170,11 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.lastMarkTime = engine.lastMarkTime();
         snap.riskParams = _loadRiskParams(engine);
 
-        snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, poolDepthUsdc, snap.riskParams.baseCarryBps);
-        snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, poolDepthUsdc, snap.riskParams.baseCarryBps);
-        snap.poolAssetsUsdc = poolDepthUsdc;
+        // Historical carry uses live pool assets, even when trade planning receives a different batch depth.
         snap.poolCashUsdc = IHousePool(host.pool()).totalAssets();
+        snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
+        snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
+        snap.poolAssetsUsdc = poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
@@ -309,30 +310,41 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
         CfdTypes.Position memory pos = _loadPosition(engine, account);
-        if (pos.size == 0 || sizeDelta == 0 || sizeDelta > pos.size || sizeDelta % CfdTypes.SIZE_QUANTUM != 0) {
-            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking();
+        if (pos.size == 0) {
+            revert ICfdEngineTypes.CfdEngine__NoOpenPosition();
+        }
+        if (sizeDelta == 0) {
+            revert ICfdEngineTypes.CfdEngine__ZeroAmount();
+        }
+        if (sizeDelta > pos.size) {
+            revert ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition();
+        }
+        if (sizeDelta % CfdTypes.SIZE_QUANTUM != 0) {
+            revert ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum();
         }
 
-        bool isFullClose = sizeDelta == pos.size;
         (bool priceFresh, uint256 price) = _liveMark(engine, host);
         if (price == 0) {
-            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking();
+            revert ICfdEngineTypes.CfdEngine__MarkPriceStale();
         }
         OracleFreshnessPolicyLib.Policy memory closePolicy =
             _markPolicy(engine, host, OracleFreshnessPolicyLib.Mode.CloseCommitFallback);
         if (closePolicy.requireStoredMark && engine.lastMarkTime() == 0) {
-            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking();
+            revert ICfdEngineTypes.CfdEngine__MarkPriceStale();
         }
 
         host.settlementRealizeCarry(account);
         pos = _loadPosition(engine, account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
         uint256 positionMarginUsdc = clearinghouse.pnlPledgeUsdc(account);
-        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < amountUsdc) {
-            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking();
+        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        if (freeSettlementUsdc < amountUsdc) {
+            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking(
+                amountUsdc, freeSettlementUsdc, engine.unsettledCarryUsdc(account)
+            );
         }
 
-        if (!isFullClose) {
+        if (sizeDelta != pos.size) {
             pos.margin = positionMarginUsdc;
             _requirePartialCloseBountyHealthy(engine, account, pos, price);
         }
@@ -362,7 +374,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 requiredBps
             );
         if (liquidatable) {
-            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking();
+            revert ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy();
         }
     }
 
@@ -700,7 +712,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function _recoveredFrozenSpreadUsdc(
         CfdEnginePlanTypes.CloseDelta calldata delta
     ) private pure returns (uint256 recoveredUsdc) {
-        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc;
+        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc;
         if (delta.closeState.vpiDeltaUsdc > 0) {
             priorChargesUsdc += uint256(delta.closeState.vpiDeltaUsdc);
         }

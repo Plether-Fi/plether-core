@@ -1232,15 +1232,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         }
     }
 
-    /// @notice Collects a non-price settlement charge from free settlement only.
+    /// @notice Collects carry from canonical active position margin first, then free settlement.
     /// @dev Callable only by the engine or its reported settlement sidecar. The unnamed second argument is the legacy
     ///      locked-position-margin hint, retained for ABI compatibility and ignored by this implementation; consumption
-    ///      is planned from canonical stored buckets. PnL pledge and every reserve bucket remain protected, and any
-    ///      uncovered amount is returned for the caller to waive.
+    ///      is planned from canonical stored buckets. Other locked buckets and trader claims remain protected; the caller
+    ///      retains uncovered carry until subsequent collection or terminal recovery/waiver.
     /// @param account Account paying the loss
     /// @param lossUsdc Loss to collect in six-decimal USDC units
     /// @param recipient External recipient of the settlement tokens collected
-    /// @return marginConsumedUsdc Always zero under PnL-isolated accounting
+    /// @return marginConsumedUsdc Active position margin consumed in six-decimal USDC units
     /// @return freeSettlementConsumedUsdc Free settlement consumed in six-decimal USDC units
     /// @return uncoveredUsdc Requested loss left uncovered in six-decimal USDC units
     function consumeSettlementLoss(

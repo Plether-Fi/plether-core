@@ -424,7 +424,7 @@ Question answered:
 Rules:
 
 - generic account views distinguish free settlement, PnL pledge, liquidation reserve, order margin, and action reserve,
-- exact price-risk health uses `pnlPledgeUsdc + traderClaimBalanceUsdc`, including for open/increase, trader-withdraw,
+- exact price-risk health uses post-carry `pnlPledgeUsdc + traderClaimBalanceUsdc`, including for open/increase, trader-withdraw,
   close, and liquidation checks; the claim is nettable exactly once against that same account's price loss,
 - the separately funded VPI reserve backs only that account's typed VPI obligation: excess reserve never increases
   price-risk equity or the terminal price-PnL cap, while backing below `max(-vpiAccrued, 0)` is an independent
@@ -583,7 +583,7 @@ Definitions:
 - `borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
 - `sideBorrowBaseUsdc`: sum of open-position borrow bases for one side
 - `sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)`
-- `pendingCarryUsdc = borrowBaseUsdc * (currentSideCarryIndex - positionLastCarryIndex)`
+- `pendingCarryUsdc = unsettledCarryUsdc + floor(borrowBaseUsdc * (currentSideCarryIndex - positionLastCarryIndex) / 1e18)`
 - `unsettledCarryUsdc[account]`: carry that has been checkpointed at a basis change but not yet physically collected
 
 Rules:
@@ -591,16 +591,33 @@ Rules:
 - carry accrues continuously by wall-clock time,
 - carry does not pause when the oracle is stale or frozen,
 - both sides pay when they have nonzero borrow base,
-- guard, open/modify, withdrawal, and liquidation checks first project pending carry against eligible free settlement,
-- carry fully covered by eligible free settlement does not reduce the separate exact price-risk health basis,
-- any uncovered carry remainder blocks withdrawal and independently makes the account liquidatable; PnL pledge plus
-  same-account claim cannot offset that remainder,
+- guard, open/modify, withdrawal, close, and liquidation paths allocate pending carry to canonical active position
+  margin first, then free settlement. Collection protects all other locked buckets and same-account trader claims,
+- projected price-risk health uses the remaining margin plus same-account claim and exact price PnL. Fully collected
+  carry is not an independent delinquency, but its margin debit can cause a maintenance breach,
+- any uncovered carry remainder means both margin and free settlement are exhausted; it blocks withdrawal and
+  independently makes the account liquidatable. A trader claim cannot pay that remainder,
 - basis-changing settlement credits must checkpoint carry even when physical collection remains pending,
 - carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
 - on withdraw, carry is realized before settlement balance is reduced,
-- liquidation does not have its own separate carry-realization path,
-- realized carry is booked as LP trading revenue.
+- close and liquidation planners project this same allocation before calculating price-loss caps, residual margin,
+  action charges, and pool solvency. Live settlement invokes the shared collector before applying the remaining plan,
+- only still-unpaid carry enters the subsequent action settlement. Existing terminal recovery from eligible action
+  sources or withheld new gains, partial-close rejection, and full-close/liquidation waiver rules remain unchanged,
+- realized carry is booked as LP trading revenue once. Receipts and financial bounds include the direct collection once,
+  in addition to the residual action settlement; carried-forward arrears are not counted as newly accrued carry,
+- margin-consuming collection opens a terminal-curve mutation before custody changes and closes it after margin,
+  borrowing-base, carry-index, and pool updates. Brackets nest per account: only the outermost authenticates and
+  synchronizes, including independent trader/keeper mutations. Reverts restore all accounting and bracket state,
+- the existing transient reentrancy guard continues to block terminal-NAV reads during intermediate accounting.
+
+For every checkpoint sequence, `starting arrears + newly accrued carry = margin collected + free settlement collected
++ ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.
+A close commitment still prepays its bounty exclusively from free settlement after carry collection. Insufficient free
+cash reports required bounty, available free settlement, and unpaid carry; unrelated validation errors propagate unchanged.
+A zero-free-cash account may therefore still need bounty funding. This policy requires a new deployment; existing v1.2.2
+positions are unaffected.
 
 ## Trader Claim Liabilities
 
@@ -746,11 +763,11 @@ Every voluntary close uses the normal signed VPI curve and the lifetime rebate c
 
 When a close realizes a loss:
 
-1. allocate exact entry cost to the closed lots and compute their price PnL from that basis,
+1. collect margin-first carry, then allocate exact entry cost to the closed lots and compute their price PnL from that basis,
 2. seize price loss from the dedicated PnL pledge and explicitly net same-account claim value up to the book's cap,
 3. treat price loss above that cap as a diagnostic write-off; it does not create LP equity, LP deficit, trader claim,
    or protocol debt and does not by itself block a partial close,
-4. handle carry, VPI, fees, spreads, and liquidation charges through their separate settlement paths; those distinct
+4. handle still-unpaid carry, VPI, fees, spreads, and liquidation charges through their separate settlement paths; those distinct
    charges retain their explicit partial-close collection policy,
 5. if this is a full close, waive any still-uncollectible frozen-close spread without creating a protocol liability,
 6. atomically replace or remove the account's terminal curve, including the residual position's updated collectible
@@ -783,6 +800,9 @@ Required properties:
 
 ### Open projection
 
+- carry projection reduces position margin, its locked bucket, the selected side margin total, and settlement custody
+  consistently, recomputes the position and side borrowing bases from the reduced pledge, and credits pool assets/cash
+  only by the amount actually collected,
 - skew-reducing rebates must count as reachable collateral for projected IMR checks,
 - post-trade skew above the configured cap is allowed only while the open strictly reduces the existing imbalance
   without making the order side heavier; unchanged or worsening skew and above-cap sign flips remain invalid,
@@ -801,7 +821,8 @@ Required properties:
 
 Liquidation must:
 
-1. collect position price loss from the PnL pledge and explicitly nettable claim, matching the pre-liquidation book cap,
+1. collect margin-first carry, then collect position price loss from the reduced PnL pledge and explicitly nettable
+   claim, matching the cap after carry collection,
 2. allocate the capped liquidation charge using the configured `keeperShareBps` and `protocolShareBps`, crediting the
    keeper and protocol-treasury shares through clearinghouse settlement and transferring the exact LP remainder to
    `HousePool` claimant revenue,
@@ -824,8 +845,9 @@ Liquidation-charge rule:
 
 Required property:
 
-- liquidation eligibility first projects carry from eligible free settlement, then uses exact price-risk equity; any
-  uncovered carry independently makes the account liquidatable and cannot be offset by PnL pledge or claim,
+- liquidation eligibility first projects carry from active position margin and then free settlement, and uses the
+  reduced pledge for exact price-risk equity. Carry left uncovered by both sources independently makes the account
+  liquidatable; same-account claims remain exclusive to price-loss netting,
 - liquidation charge caps and residual planning use their typed physically eligible sources rather than folding carry
   into the price channel,
 - negative accrued VPI does not reduce P+C price-risk equity. Its gross target must instead remain fully backed by the

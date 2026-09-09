@@ -299,12 +299,13 @@ contract VpiRebateReserveTest is Test {
         assertTrue(liquidation.liquidatable);
         assertEq(
             liquidation.riskState.equityUsdc,
-            baselineDelta.riskState.equityUsdc,
-            "Unfunded carry is an independent delinquency and must not alter exact P+C price equity"
+            baselineDelta.riskState.equityUsdc - 11e6,
+            "Margin-funded carry reduces price equity while preserving VPI and bounty reserves"
         );
         assertEq(liquidation.vpiRebateReserveConsumedUsdc, 10e6);
         assertEq(liquidation.actionReserveConsumedUsdc, 0, "Generic collection must not consume a queued bounty");
-        assertEq(liquidation.actionChargeWaivedUsdc, 11e6);
+        assertEq(liquidation.realizedCarryUsdc, 11e6);
+        assertEq(liquidation.actionChargeWaivedUsdc, 0);
     }
 
     function test_LiquidationRejectsUnderfundedVpiReserve() public {

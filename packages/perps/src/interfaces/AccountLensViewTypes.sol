@@ -55,9 +55,9 @@ library AccountLensViewTypes {
     /// @param margin Canonical position-margin bucket backing the live position.
     /// @param entryPrice Average position entry price, with 8 decimals.
     /// @param unrealizedPnlUsdc Mark-to-market PnL at the cached engine mark, excluding pending carry and VPI.
-    /// @param netEquityUsdc Exact price-risk equity from PnL pledge, same-account claim, and unrealized price PnL. Carry
-    ///        and VPI are excluded from this field. PnL pledge and claim cannot offset uncovered carry or an underfunded
-    ///        negative-VPI reserve; generic settlement and all action reserves are excluded from price risk.
+    /// @param netEquityUsdc Exact price-risk equity from projected post-carry PnL pledge, same-account claim, and
+    ///        unrealized price PnL. VPI, generic settlement, and action reserves are excluded. Carry uncovered by both
+    ///        margin and free settlement and an underfunded negative-VPI reserve independently fail health checks.
     /// @param liquidatable Whether exact price risk breaches the active margin requirement, projected carry remains
     ///        uncovered, or the negative-VPI reserve is underfunded; this cached-mark diagnostic does not validate mark
     ///        freshness.

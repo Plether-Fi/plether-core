@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
@@ -23,7 +25,7 @@ contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTe
         assertEq(_freeSettlementUsdc(account), 0, "Setup must leave no free settlement for a close bounty");
 
         vm.prank(trader);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         assertEq(

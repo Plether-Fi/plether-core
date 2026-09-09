@@ -533,14 +533,14 @@ interface IMarginClearinghouse {
         uint256 protocolFeeUsdc
     ) external returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc);
 
-    /// @notice Consumes a non-price settlement charge from free settlement only.
+    /// @notice Consumes carry from canonical active position margin first, then free settlement.
     /// @dev Callable only by the engine or settlement sidecar. The legacy `lockedPositionMarginUsdc` argument is
-    ///      ignored. PnL pledge and every reserve bucket remain protected; any uncovered amount is waived.
+    ///      ignored in favor of stored buckets. Other locked buckets and claims are protected; uncovered carry is returned.
     /// @param account Account paying the loss
     /// @param lockedPositionMarginUsdc Deprecated ABI parameter ignored by the implementation
     /// @param lossUsdc Maximum loss to collect in USDC
     /// @param recipient External recipient of collected USDC
-    /// @return marginConsumedUsdc Always zero under PnL-isolated accounting
+    /// @return marginConsumedUsdc Active position margin consumed in six-decimal USDC units
     /// @return freeSettlementConsumedUsdc Free settlement consumed in USDC
     /// @return uncoveredUsdc Requested loss left uncovered in USDC
     function consumeSettlementLoss(

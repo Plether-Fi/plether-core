@@ -11,10 +11,13 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {OrderExecutionSettlement} from "@plether/perps/router/OrderExecutionSettlement.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Focused regressions for the Router's persistent emergency risk-off order semantics.
 contract OrderRouterRiskOffTest is BasePerpTest {
+
+    using stdStorage for StdStorage;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
@@ -304,12 +307,25 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(_positionSize(ALICE), 0, "unsafe position must liquidate");
     }
 
+    function _seedCarryDelinquencyWithPriceClaim() private {
+        // Margin is exhausted by carry both before and after refund. A prior same-account price claim keeps price
+        // health solvent once the refunded free settlement covers the residual carry obligation.
+        bytes32 oldHash = terminalNavBook.curveHashOf(RESTORED);
+        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(RESTORED).checked_write(1000e6);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(1000e6);
+        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(RESTORED)
+            .checked_write(clearinghouse.pnlPledgeUsdc(RESTORED) + 20e6);
+        vm.prank(address(engine));
+        terminalNavBook.syncFromEngine(RESTORED, oldHash);
+    }
+
     function test_EmbeddedRefundCanRestoreSolvencyWithoutRollingBackRefund() public {
         _fundTrader(RESTORED, 300e6);
         _open(RESTORED, CfdTypes.Side.LONG, 10_000e18, 250e6, MARK_PRICE);
         uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
         vm.warp(block.timestamp + 365 days);
+        _seedCarryDelinquencyWithPriceClaim();
 
         assertTrue(
             engineLens.isLiquidatableAt(RESTORED, MARK_PRICE, pool.totalAssets()),
@@ -369,6 +385,7 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         uint64 invalidOpenId = _commitOpen(RESTORED, CfdTypes.Side.LONG, 100e18, 49e6);
         routerAdmin.pause();
         vm.warp(block.timestamp + 365 days);
+        _seedCarryDelinquencyWithPriceClaim();
 
         assertTrue(
             engineLens.isLiquidatableAt(RESTORED, MARK_PRICE, pool.totalAssets()),

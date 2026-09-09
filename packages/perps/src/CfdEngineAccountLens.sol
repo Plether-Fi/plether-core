@@ -79,8 +79,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ///      open position, the estimate is zero in degraded mode, with no usable cached mark, after the applicable
     ///      engine/HousePool freshness limit, when exact price-risk equity does not exceed the active requirement, or
     ///      when any carry remains uncovered. The calculation hypothetically consumes stored plus elapsed carry from
-    ///      eligible free settlement first. Fully funded carry does not worsen price health; PnL pledge plus same-account
-    ///      claim remains exclusive to exact price risk and cannot offset residual carry. The full post-carry free amount
+    ///      active position margin first, then free settlement. Price health uses the reduced pledge plus same-account
+    ///      claim. Claims and other reserves cannot pay residual carry. The full post-carry free amount
     ///      is withdrawable only when the position clears the stricter of initial margin and the active FAD or maintenance
     ///      requirement. This view does not checkpoint carry.
     /// @param account Clearinghouse account to inspect.
@@ -192,9 +192,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @notice Returns expanded custody, reservation, and cached-mark solvency state for an account.
     /// @dev Requires a configured ABI-compatible order router. For an open position, risk uses the cached mark without
     ///      freshness validation, exact lot-based entry cost, PnL pledge plus same-account claim, exact price PnL, and the
-    ///      active FAD or maintenance requirement. Pending carry is first projected against eligible free settlement: a
-    ///      fully funded amount leaves price health unchanged, while any uncovered remainder independently makes the
-    ///      account liquidatable and cannot consume pledge or claim. Negative VPI is independently required to have full
+    ///      active FAD or maintenance requirement. Pending carry consumes projected margin first, then free settlement.
+    ///      Price health uses the reduced pledge; any carry uncovered by both sources independently makes the
+    ///      account liquidatable and cannot consume claims or other reserves. Negative VPI is independently required to have full
     ///      dedicated-reserve backing; underfunding makes the account liquidatable, while excess reserve never adds price
     ///      collateral. The separate terminal-price cap excludes action reserves and clips price collateral to the
     ///      reachable endpoint. A flat account still returns raw ledger values but leaves every position and risk field,
@@ -282,7 +282,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             );
         bool vpiReserveUnderfunded =
             engineContract.clearinghouse().vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(pos.vpiAccrued);
-        uint256 riskCollateralUsdc = pos.margin + engineContract.traderClaimBalanceUsdc(account);
+        uint256 riskCollateralUsdc =
+            pos.margin - carryConsumption.activeMarginConsumedUsdc + engineContract.traderClaimBalanceUsdc(account);
 
         PositionRiskAccountingLib.PositionRiskState memory state = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,

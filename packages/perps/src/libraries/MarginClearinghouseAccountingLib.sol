@@ -154,9 +154,9 @@ library MarginClearinghouseAccountingLib {
         reachableUsdc = settlementBalanceUsdc > queuedReservedUsdc ? settlementBalanceUsdc - queuedReservedUsdc : 0;
     }
 
-    /// @notice Plans carry-loss collection exclusively from free settlement.
-    /// @dev PnL pledge and every reserve bucket remain protected. If free settlement is insufficient, the remainder is
-    ///      reported in `uncoveredUsdc`; callers waive it rather than converting it into position price-loss debt.
+    /// @notice Plans carry-loss collection from active position margin, then free settlement.
+    /// @dev Other locked buckets and trader claims remain protected. Uncovered carry is retained until collection or
+    ///      terminal recovery/waiver; it is never converted into position price-loss debt.
     /// @param buckets Account bucket snapshot.
     /// @param lossUsdc Carry loss requested for collection.
     /// @return consumption Free/active consumption, total debit, and uncovered remainder.
@@ -164,10 +164,13 @@ library MarginClearinghouseAccountingLib {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets,
         uint256 lossUsdc
     ) internal pure returns (SettlementConsumption memory consumption) {
-        uint256 freeSettlementUsdc = buckets.freeSettlementUsdc;
-        consumption.freeSettlementConsumedUsdc = freeSettlementUsdc > lossUsdc ? lossUsdc : freeSettlementUsdc;
-        consumption.totalConsumedUsdc = consumption.freeSettlementConsumedUsdc;
-        consumption.uncoveredUsdc = lossUsdc - consumption.freeSettlementConsumedUsdc;
+        consumption.activeMarginConsumedUsdc =
+            buckets.activePositionMarginUsdc < lossUsdc ? buckets.activePositionMarginUsdc : lossUsdc;
+        uint256 remainderUsdc = lossUsdc - consumption.activeMarginConsumedUsdc;
+        consumption.freeSettlementConsumedUsdc =
+            buckets.freeSettlementUsdc < remainderUsdc ? buckets.freeSettlementUsdc : remainderUsdc;
+        consumption.totalConsumedUsdc = consumption.activeMarginConsumedUsdc + consumption.freeSettlementConsumedUsdc;
+        consumption.uncoveredUsdc = lossUsdc - consumption.totalConsumedUsdc;
     }
 
     /// @notice Plans how signed action cost and newly supplied margin change settlement and PnL pledge.

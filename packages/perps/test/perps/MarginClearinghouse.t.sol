@@ -934,18 +934,18 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockPositionMargin(aliceAccount, 600 * 1e6);
         clearinghouse.lockReservedSettlement(aliceAccount, 300 * 1e6);
         (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
-            clearinghouse.consumeSettlementLoss(aliceAccount, 600 * 1e6, 1200 * 1e6, engine);
+            clearinghouse.consumeSettlementLoss(aliceAccount, 0, 1200 * 1e6, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
-        assertEq(freeConsumed, 1100 * 1e6);
-        assertEq(marginConsumed, 0, "Carry/action loss must not consume PnL pledge");
-        assertEq(uncovered, 100 * 1e6);
-        assertEq(buckets.settlementBalanceUsdc, 900 * 1e6);
-        assertEq(buckets.totalLockedMarginUsdc, 900 * 1e6);
-        assertEq(buckets.activePositionMarginUsdc, 600 * 1e6);
+        assertEq(freeConsumed, 600 * 1e6);
+        assertEq(marginConsumed, 600 * 1e6, "Canonical stored margin overrides the legacy zero hint");
+        assertEq(uncovered, 0);
+        assertEq(buckets.settlementBalanceUsdc, 800 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 0);
         assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
-        assertEq(buckets.freeSettlementUsdc, 0);
+        assertEq(buckets.freeSettlementUsdc, 500 * 1e6);
     }
 
     function test_ConsumeSettlementLoss_ReturnsUncoveredWhenFreeAndActiveMarginInsufficient() public {
@@ -956,17 +956,17 @@ contract MarginClearinghouseTest is Test {
         clearinghouse.lockPositionMargin(aliceAccount, 600 * 1e6);
         clearinghouse.reserveCommittedOrderMargin(aliceAccount, 61, 300 * 1e6);
         (uint256 marginConsumed, uint256 freeConsumed, uint256 uncovered) =
-            clearinghouse.consumeSettlementLoss(aliceAccount, 600 * 1e6, 2000 * 1e6, engine);
+            clearinghouse.consumeSettlementLoss(aliceAccount, 0, 2000 * 1e6, engine);
         vm.stopPrank();
 
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(aliceAccount);
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(61);
         assertEq(freeConsumed, 1100 * 1e6);
-        assertEq(marginConsumed, 0);
-        assertEq(uncovered, 900 * 1e6, "Only free settlement is eligible for carry/action loss");
-        assertEq(buckets.settlementBalanceUsdc, 900 * 1e6);
-        assertEq(buckets.totalLockedMarginUsdc, 900 * 1e6);
-        assertEq(buckets.activePositionMarginUsdc, 600 * 1e6);
+        assertEq(marginConsumed, 600 * 1e6);
+        assertEq(uncovered, 300 * 1e6, "Only unrelated locked margin remains protected");
+        assertEq(buckets.settlementBalanceUsdc, 300 * 1e6);
+        assertEq(buckets.totalLockedMarginUsdc, 300 * 1e6);
+        assertEq(buckets.activePositionMarginUsdc, 0);
         assertEq(buckets.otherLockedMarginUsdc, 300 * 1e6);
         assertEq(buckets.freeSettlementUsdc, 0);
         assertEq(uint256(reservation.status), uint256(IMarginClearinghouse.ReservationStatus.Active));

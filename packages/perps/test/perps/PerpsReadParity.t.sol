@@ -348,8 +348,8 @@ contract PerpsReadParityTest is BasePerpTest {
         );
         assertEq(
             snapshot.netEquityUsdc,
-            beforeCarry.netEquityUsdc,
-            "Funded action carry must stay isolated from exact terminal price equity"
+            beforeCarry.netEquityUsdc - int256(carryProjection.pendingCarryUsdc),
+            "Margin-funded carry reduces projected price equity exactly once"
         );
         assertEq(
             traderView.equityUsdc,

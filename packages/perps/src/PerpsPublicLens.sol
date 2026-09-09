@@ -140,9 +140,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns equity, withdrawal capacity, pending reservations, and position risk for an account.
-    /// @dev For an open position, exact price-risk equity is PnL pledge plus same-account claim plus exact price PnL.
-    ///      Carry is projected from eligible free settlement first; an uncovered remainder independently marks the
-    ///      account liquidatable rather than debiting price equity. Negative VPI is independently required to have full
+    /// @dev For an open position, exact price-risk equity is post-carry pledge plus same-account claim plus exact PnL.
+    ///      Carry is projected from active margin first, then free settlement. The reduced pledge affects price health;
+    ///      an uncovered remainder independently marks the account liquidatable. Negative VPI must have full
     ///      dedicated-reserve backing; an underfunded floor also marks the account liquidatable, while excess reserve
     ///      never adds price collateral. Negative net equity is floored at zero. Without a position, clearinghouse
     ///      account equity is returned. Monetary fields use 6-decimal USDC units.

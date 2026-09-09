@@ -550,7 +550,7 @@ contract OrderRouterTest is BasePerpTest {
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
@@ -581,7 +581,7 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
         vm.prank(trader);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
@@ -618,20 +618,22 @@ contract OrderRouterTest is BasePerpTest {
         );
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
+        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(account);
         uint256 expectedCarry = _expectedIndexedCarryUsdc(account);
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
+        assertEq(clearinghouse.pnlPledgeUsdc(account), marginBefore - expectedCarry);
         assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still reservation the full bounty");
         assertEq(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
-            1_100_000 - expectedCarry,
+            1_100_000,
             "Stale close fallback should realize indexed carry before reserving from free settlement"
         );
     }
 
-    function test_CloseCommit_FreshCarryCheckpointUsesFreeSettlement() public {
+    function test_CloseCommit_FreshCarryCheckpointUsesPositionMargin() public {
         address trader = address(0x3343);
         address account = trader;
         usdc.mint(trader, 252_000_000);
@@ -675,11 +677,11 @@ contract OrderRouterTest is BasePerpTest {
         );
         assertApproxEqAbs(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
-            freeSettlementBefore - expectedCarry - 200_000,
+            freeSettlementBefore - 200_000,
             32,
             "Carry-aware reservation should only consume the reduced close-order bounty from post-carry free settlement"
         );
-        assertEq(marginConsumed, 0, "The close-order bounty should fit inside post-carry free settlement");
+        assertEq(marginConsumed, expectedCarry, "Carry consumes margin while bounty alone consumes free settlement");
     }
 
     function test_ReserveCloseOrderExecutionBounty_RevertsWhenFreeSettlementUnavailable() public {
@@ -699,7 +701,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6);
     }
 
@@ -722,7 +724,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(trader);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, invalidPartialCloseSize, 0, 0, true);
 
         (, uint256 marginAfterCommit,,,,,) = engine.positions(account);

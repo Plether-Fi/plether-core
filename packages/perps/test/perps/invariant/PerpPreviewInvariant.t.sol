@@ -9,6 +9,7 @@ import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTyp
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
+import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
@@ -114,8 +115,9 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
-                "Liquidation preview must use PnL pledge, same-account claim, and the dedicated VPI reserve"
+                priceRiskCollateralUsdc - _marginCarryConsumption(account, snapshot.activePositionMarginUsdc)
+                    + clearinghouse.vpiRebateReserveUsdc(account),
+                "Liquidation preview must use post-carry pledge, same-account claim, and the dedicated VPI reserve"
             );
             assertLe(
                 snapshot.terminalPriceCollectibleCapUsdc,
@@ -141,7 +143,8 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
             assertEq(
                 liquidationPreview.reachableCollateralUsdc,
-                priceRiskCollateralUsdc + clearinghouse.vpiRebateReserveUsdc(account),
+                priceRiskCollateralUsdc - _marginCarryConsumption(account, snapshot.activePositionMarginUsdc)
+                    + clearinghouse.vpiRebateReserveUsdc(account),
                 "Liquidation preview must remain isolated to pledge, same-account claim, and VPI reserve"
             );
             assertEq(
@@ -150,6 +153,26 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 "Account liquidation custody must exclude the reserved execution bounty"
             );
         }
+    }
+
+    function _marginCarryConsumption(
+        address account,
+        uint256 marginUsdc
+    ) internal view returns (uint256) {
+        (,,,, CfdTypes.Side side,,) = engine.positions(account);
+        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
+        (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
+        uint256 endIndex = PositionRiskAccountingLib.computeCurrentCarryIndex(
+            engine.sideCarryIndex(uint256(side)),
+            engine.sideCarryTimestamp(uint256(side)),
+            block.timestamp,
+            engine.sideBorrowBaseUsdc(uint256(side)),
+            housePool.totalAssets(),
+            baseCarryBps
+        );
+        uint256 pendingCarryUsdc = engine.unsettledCarryUsdc(account)
+            + PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+        return pendingCarryUsdc < marginUsdc ? pendingCarryUsdc : marginUsdc;
     }
 
     function _assertInvariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth() internal view {
