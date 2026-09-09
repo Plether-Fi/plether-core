@@ -499,6 +499,17 @@ contract LiquidationBatchTest is BasePerpTest {
     }
 
     function test_Batch_LongAndShortUseDirectionalAdversePricesButStoreNeutralMark() public {
+        _assertDirectionalLiquidationBatch(true);
+    }
+
+    function test_Gas_BatchDirectionalPricesWithPendingCarryFitDefaultItemBudget() public {
+        assertEq(router.minEngineGas(), 600_000, "retain the default engine gas allowance");
+        _assertDirectionalLiquidationBatch(false);
+    }
+
+    function _assertDirectionalLiquidationBatch(
+        bool checkpointSetupCarry
+    ) private {
         address long = address(0xBA7CB011);
         address short = address(0xBA7CBEA2);
 
@@ -509,6 +520,17 @@ contract LiquidationBatchTest is BasePerpTest {
 
         vm.warp(SATURDAY_NOON);
         assertTrue(engine.isOracleFrozen(), "setup must use the frozen FAD oracle policy");
+
+        // Coverage's minimum-optimization bytecode can exhaust the production item cap when it also collects carry.
+        // Keep pricing assertions independent of that cost; the production gas test retains pending carry and the cap.
+        assertGt(_expectedIndexedCarryUsdc(long), 0, "setup must accrue long carry");
+        assertGt(_expectedIndexedCarryUsdc(short), 0, "setup must accrue short carry");
+        if (checkpointSetupCarry) {
+            vm.startPrank(address(clearinghouse));
+            engine.realizeCarryBeforeMarginChange(long);
+            engine.realizeCarryBeforeMarginChange(short);
+            vm.stopPrank();
+        }
 
         baseMockPyth.setAllPrices(
             _basePythFeedIds(), int64(uint64(NEUTRAL_PRICE)), uint64(100_000), int32(-8), block.timestamp
@@ -530,8 +552,12 @@ contract LiquidationBatchTest is BasePerpTest {
 
         vm.recordLogs();
         vm.prank(KEEPER);
-        IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
+        uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
         Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        assertEq(nextIndex, accounts.length, "both items must finish within their gas caps");
+        assertEq(_positionSize(long), 0, "long liquidation must commit");
+        assertEq(_positionSize(short), 0, "short liquidation must commit");
 
         (bool foundLong, CfdTypes.Side longSide, uint256 longPrice) = _liquidationEvent(logs, long);
         (bool foundShort, CfdTypes.Side shortSide, uint256 shortPrice) = _liquidationEvent(logs, short);
