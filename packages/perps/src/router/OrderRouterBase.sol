@@ -98,7 +98,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     }
 
     /// @notice Delegates close-bounty reservation and solvency checks to the engine.
-    /// @dev Any engine revert is normalized to `OrderRouter__InsufficientFreeEquity`.
+    /// @dev Engine validation and funding errors propagate with their original selectors and diagnostics.
     /// @param account Account funding the close bounty.
     /// @param sizeDelta Close size used by engine validation (18 decimals).
     /// @param executionBountyUsdc Fixed bounty to reserve (6-decimal USDC).
@@ -107,11 +107,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         uint256 sizeDelta,
         uint256 executionBountyUsdc
     ) internal override {
-        try engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc) {
-            return;
-        } catch {
-            revert OrderRouter__InsufficientFreeEquity();
-        }
+        engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc);
     }
 
     /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.

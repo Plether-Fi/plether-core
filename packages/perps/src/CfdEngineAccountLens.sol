@@ -79,8 +79,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ///      open position, the estimate is zero in degraded mode, with no usable cached mark, after the applicable
     ///      engine/HousePool freshness limit, when exact price-risk equity does not exceed the active requirement, or
     ///      when any carry remains uncovered. The calculation hypothetically consumes stored plus elapsed carry from
-    ///      eligible free settlement first. Fully funded carry does not worsen price health; PnL pledge plus same-account
-    ///      claim remains exclusive to exact price risk and cannot offset residual carry. The full post-carry free amount
+    ///      active position margin first, then free settlement. Price health uses the reduced pledge plus same-account
+    ///      claim. Claims and other reserves cannot pay residual carry. The full post-carry free amount
     ///      is withdrawable only when the position clears the stricter of initial margin and the active FAD or maintenance
     ///      requirement. This view does not checkpoint carry.
     /// @param account Clearinghouse account to inspect.
@@ -122,20 +122,10 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             return 0;
         }
 
-        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account);
-        pendingCarryUsdc += _elapsedCarryUsdc(account, pos);
-        if (pendingCarryUsdc > 0) {
-            MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-                MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc);
-            if (carryConsumption.uncoveredUsdc != 0) {
-                return 0;
-            }
-            buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-                buckets.settlementBalanceUsdc - carryConsumption.totalConsumedUsdc,
-                buckets.activePositionMarginUsdc - carryConsumption.activeMarginConsumedUsdc,
-                buckets.otherLockedMarginUsdc,
-                0
-            );
+        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
+        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
+        if (carryConsumption.uncoveredUsdc != 0) {
+            return 0;
         }
 
         withdrawableUsdc = buckets.freeSettlementUsdc;
@@ -192,9 +182,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @notice Returns expanded custody, reservation, and cached-mark solvency state for an account.
     /// @dev Requires a configured ABI-compatible order router. For an open position, risk uses the cached mark without
     ///      freshness validation, exact lot-based entry cost, PnL pledge plus same-account claim, exact price PnL, and the
-    ///      active FAD or maintenance requirement. Pending carry is first projected against eligible free settlement: a
-    ///      fully funded amount leaves price health unchanged, while any uncovered remainder independently makes the
-    ///      account liquidatable and cannot consume pledge or claim. Negative VPI is independently required to have full
+    ///      active FAD or maintenance requirement. Pending carry consumes projected margin first, then free settlement.
+    ///      Price health uses the reduced pledge; any carry uncovered by both sources independently makes the
+    ///      account liquidatable and cannot consume claims or other reserves. Negative VPI is independently required to have full
     ///      dedicated-reserve backing; underfunding makes the account liquidatable, while excess reserve never adds price
     ///      collateral. The separate terminal-price cap excludes action reserves and clips price collateral to the
     ///      reachable endpoint. A flat account still returns raw ledger values but leaves every position and risk field,
@@ -253,7 +243,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             return snapshot;
         }
 
-        PositionRiskAccountingLib.PositionRiskState memory riskState = _buildSnapshotRiskState(account, pos);
+        PositionRiskAccountingLib.PositionRiskState memory riskState = _buildSnapshotRiskState(account, pos, buckets);
 
         snapshot.hasPosition = true;
         snapshot.side = pos.side;
@@ -268,21 +258,20 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @notice Computes account solvency risk at the cached mark without a freshness check.
     /// @param account Account whose exact position basis, dedicated price collateral, and isolated carry are included.
     /// @param pos Current position.
+    /// @param buckets Already-loaded canonical custody snapshot; kept unchanged for ledger diagnostics.
     /// @return state Exact price PnL, P+C price equity, notional, active requirement, and a liquidation flag that
     ///         independently includes any uncovered carry or underfunded negative-VPI reserve.
     function _buildSnapshotRiskState(
         address account,
-        CfdTypes.Position memory pos
+        CfdTypes.Position memory pos,
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
     ) internal view returns (PositionRiskAccountingLib.PositionRiskState memory) {
         CfdTypes.RiskParams memory params = _riskParams();
-        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(
-                engineContract.clearinghouse().getAccountUsdcBuckets(account), pendingCarryUsdc
-            );
+        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
+        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
         bool vpiReserveUnderfunded =
             engineContract.clearinghouse().vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(pos.vpiAccrued);
-        uint256 riskCollateralUsdc = pos.margin + engineContract.traderClaimBalanceUsdc(account);
+        uint256 riskCollateralUsdc = buckets.activePositionMarginUsdc + engineContract.traderClaimBalanceUsdc(account);
 
         PositionRiskAccountingLib.PositionRiskState memory state = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,
@@ -296,6 +285,24 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             state.liquidatable = true;
         }
         return state;
+    }
+
+    /// @dev Projects stored and newly indexed carry from the supplied raw buckets without changing ledger fields.
+    function _projectAccountCarry(
+        address account,
+        CfdTypes.Position memory pos,
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+    )
+        private
+        view
+        returns (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+        )
+    {
+        return MarginClearinghouseAccountingLib.projectCarryLoss(
+            buckets, engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos)
+        );
     }
 
     function _negativeVpiReserveTarget(

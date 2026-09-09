@@ -351,7 +351,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         assertGt(juniorVault.maxRequestDeposit(lp), 0, "pending deposit requests should remain available");
     }
 
-    function test_CarryIndexIsAccountCheckpointTimingInvariantAcrossPriceSwing() public {
+    function test_CarryCheckpointsChargeIndexedBorrowBaseAcrossPriceSwing() public {
         address checkpointed = address(0xCA11);
         address lazy = address(0x1A2E);
         uint256 size = 100_000e18;
@@ -366,28 +366,33 @@ contract AuditFixRegressionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
 
+        uint256 expectedFirst = _expectedIndexedCarryUsdc(checkpointed);
         uint256 poolBeforeCheckpoint = pool.totalAssets();
         _fundTrader(checkpointed, 100e6);
         uint256 checkpointedFirstCarry = pool.totalAssets() - poolBeforeCheckpoint;
         assertGt(checkpointedFirstCarry, 0, "first interval should accrue carry");
+        assertEq(checkpointedFirstCarry, expectedFirst);
 
         vm.warp(block.timestamp + 10 days);
         vm.prank(address(router));
         engine.updateMarkPrice(50_000_000, uint64(block.timestamp));
 
+        uint256 expectedSecond = _expectedIndexedCarryUsdc(checkpointed);
         uint256 poolBeforeSecondCheckpoint = pool.totalAssets();
         _fundTrader(checkpointed, 100e6);
         uint256 checkpointedSecondCarry = pool.totalAssets() - poolBeforeSecondCheckpoint;
 
+        assertEq(checkpointedSecondCarry, expectedSecond);
+        uint256 expectedLazy = _expectedIndexedCarryUsdc(lazy);
         uint256 poolBeforeLazyCheckpoint = pool.totalAssets();
         _fundTrader(lazy, 100e6);
         uint256 lazyCarry = pool.totalAssets() - poolBeforeLazyCheckpoint;
 
-        assertApproxEqAbs(
-            lazyCarry,
+        assertEq(lazyCarry, expectedLazy);
+        assertGt(
             checkpointedFirstCarry + checkpointedSecondCarry,
-            2,
-            "one late checkpoint should match two earlier checkpoints"
+            lazyCarry,
+            "Earlier margin collection increases the later borrow base; previously assessed carry is never recomputed"
         );
     }
 
@@ -412,7 +417,7 @@ contract AuditFixRegressionTest is BasePerpTest {
         assertGt(realizedCarry, 0, "old borrow base should accrue before the margin increase");
         assertEq(
             _positionBorrowBaseUsdc(account),
-            borrowBaseBefore - 10_000e6,
+            borrowBaseBefore + realizedCarry - 10_000e6,
             "added position margin should reduce future borrow base"
         );
     }

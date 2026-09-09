@@ -21,8 +21,8 @@ library PerpsViewTypes {
 
     /// @notice Compact custody, reservation, and risk summary for one trader account.
     /// @dev All monetary fields use USDC's 6 decimals.
-    /// @param equityUsdc Cached-mark exact price-risk equity: PnL pledge plus same-account claim plus exact price PnL.
-    ///        Carry and VPI are excluded. Uncovered carry or an underfunded negative-VPI reserve independently sets
+    /// @param equityUsdc Cached-mark price-risk equity: post-carry pledge plus same-account claim plus exact price PnL.
+    ///        VPI is excluded. Uncovered carry or an underfunded negative-VPI reserve independently sets
     ///        `liquidatable` and withdrawal capacity to zero. This field is floored at zero and equals raw settlement
     ///        equity when flat.
     /// @param withdrawableUsdc Same-state withdrawal estimate from the account lens. Uncovered carry or an underfunded

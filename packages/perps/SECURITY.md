@@ -731,12 +731,27 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 - carry base: `max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
-- basis-change fallback: if physical collection is unsafe, elapsed carry is checkpointed into `unsettledCarryUsdc`
+- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryUsdc`,
+  then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
+  timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
+  rolls back the collection and credit
 - realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and clearinghouse deposit/withdraw before the carry base/rate denominator changes; deposits may collect realized carry from post-deposit settlement in the same transaction, while withdraws realize carry before reducing settlement
 - destination: realized carry becomes LP trading revenue
-- health isolation: project carry against eligible free settlement first. Fully funded carry does not reduce exact
-  price-risk health; any uncovered remainder blocks withdrawal and independently makes the account liquidatable.
-  PnL pledge plus same-account claim remains exclusive to exact price risk and cannot offset residual carry
+- collection priority: active position margin first, then free settlement; all other locked buckets and trader claims
+  remain protected during carry collection
+- projection: planners and account views share `projectCarryLoss` for post-carry buckets. Its output must not alias
+  raw custody; ledger diagnostics retain raw values. The planner updates side margin, borrowing bases, carry indexes,
+  arrears and pool revenue together, using carry accrued against live depth even for hypothetical trade simulations
+- health: project margin consumption before evaluating exact price risk. Fully paid carry is not delinquency, but a
+  reduced pledge may breach maintenance. Carry uncovered by both margin and free settlement independently blocks
+  withdrawal and makes the account liquidatable; claims cannot fund carry. Stored arrears alone are not delinquency
+  when a subsequent credit has made backing available; health projects collection from the current buckets
+- terminal settlement: first realize projected carry through the shared collector, then apply price settlement against
+  reduced pledge. Only unpaid carry enters existing action recovery/waiver; count direct collection once in receipts,
+  financial bounds and LP revenue
+- NAV authentication: collection that changes margin is bracketed before collection. Per-account nested brackets
+  authenticate and synchronize only at the outer boundary, preserve independent keeper mutations, and roll back on
+  downstream failure. Intermediate terminal-NAV reads remain blocked by the existing transient guard
 
 Close and liquidation security depends on using the planner's canonical carry-adjusted settlement outputs directly in the live executor rather than recomputing a second carry-blind kernel.
 

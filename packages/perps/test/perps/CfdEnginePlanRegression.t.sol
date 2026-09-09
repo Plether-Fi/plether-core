@@ -578,6 +578,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             30 days
         );
         uint256 freeSettlementBeforeCarry = snap.accountBuckets.freeSettlementUsdc;
+        uint256 marginBeforeCarry = snap.position.margin;
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
             snap, _openOrder(account, CfdTypes.Side.LONG, 5000e18, 0, 1e8), 1e8, uint64(block.timestamp)
         );
@@ -590,14 +591,14 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertTrue(delta.valid, "An OK carry-realized plan should be valid");
         assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue pending carry");
         assertGe(
-            freeSettlementBeforeCarry - delta.pendingCarryUsdc,
+            freeSettlementBeforeCarry,
             uint256(delta.tradeCostUsdc),
-            "Free settlement should fund both carry and the incremental action charge"
+            "Margin-funded carry preserves free settlement for the incremental action charge"
         );
         assertEq(
             delta.positionMarginAfterOpen,
-            snap.position.margin,
-            "Free-funded carry must not erode the exact price-PnL pledge"
+            marginBeforeCarry - delta.pendingCarryUsdc,
+            "Projected price collateral must include the carry debit exactly once"
         );
     }
 
@@ -1019,7 +1020,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         _attachFullRateCarry(snap, CfdTypes.Side.LONG, borrowBaseUsdc, 30 days);
 
         CfdEnginePlanTypes.OpenDelta memory delta =
-            CfdEnginePlanLib.planOpen(snap, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8, 0);
+            engine.planner().planOpen(snap, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8, 0);
         CfdEnginePlanTypes.RawSnapshot memory withoutQueuedReservations = snap;
         withoutQueuedReservations.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 5000e6,
@@ -1034,9 +1035,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             reservedSettlementUsdc: 0,
             totalLockedMarginUsdc: 2000e6
         });
-        CfdEnginePlanTypes.OpenDelta memory noQueueDelta = CfdEnginePlanLib.planOpen(
-            withoutQueuedReservations, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8, 0
-        );
+        CfdEnginePlanTypes.OpenDelta memory noQueueDelta = engine.planner()
+            .planOpen(withoutQueuedReservations, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8, 0);
 
         assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue indexed carry");
         assertEq(

@@ -2860,7 +2860,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(1_709_985_600);
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(account).checked_write(uint256(0));
+        _removePnlPledgeAndSyncTerminalCurve(account);
 
         ICfdEngineTypes.ClosePreview memory withoutClaim = engineLens.previewClose(account, size, closePrice);
         uint256 assessedFeeUsdc = _engineExecutionFeeUsdc(size, closePrice);
@@ -3674,17 +3674,13 @@ contract CfdEngineTest is BasePerpTest {
         CfdEnginePlanTypes.LiquidationDelta memory fullyFunded =
             harness.planLiquidationWithUnsettledCarry(200e6, 50e6, 1000e6, 50e6, 10_000e18, 1e8, 1e8);
         CfdEnginePlanTypes.LiquidationDelta memory oneAtomUncovered =
-            harness.planLiquidationWithUnsettledCarry(200e6, 50e6, 1000e6, 50e6 + 1, 10_000e18, 1e8, 1e8);
+            harness.planLiquidationWithUnsettledCarry(200e6, 50e6, 1000e6, 250e6 + 1, 10_000e18, 1e8, 1e8);
 
         assertFalse(fullyFunded.liquidatable, "Carry fully collectible from free settlement must not liquidate");
         assertEq(fullyFunded.pendingCarryUsdc, 50e6, "Fixture must checkpoint the funded carry exactly");
         assertTrue(oneAtomUncovered.liquidatable, "One uncovered carry atom must be independently delinquent");
-        assertEq(oneAtomUncovered.pendingCarryUsdc, 50e6 + 1, "Fixture must preserve the one-atom boundary");
-        assertEq(
-            oneAtomUncovered.actionChargeCollectedUsdc,
-            50e6,
-            "Liquidation may collect carry only from eligible free settlement"
-        );
+        assertEq(oneAtomUncovered.pendingCarryUsdc, 250e6 + 1, "Fixture must preserve the one-atom boundary");
+        assertEq(oneAtomUncovered.realizedCarryUsdc, 250e6, "Liquidation first collects all margin and free settlement");
         assertEq(oneAtomUncovered.actionChargeWaivedUsdc, 1, "Exactly the uncovered carry atom must be waived");
         assertEq(
             oneAtomUncovered.existingTraderClaimRemainingUsdc,
@@ -4251,10 +4247,10 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900e6, type(uint256).max, false);
 
-        // Make the terminal action charge large enough to exhaust free settlement. This is deliberately separate from
+        // Make the terminal action charge large enough to exhaust margin and free settlement. This is deliberately separate from
         // the adverse price move: only the action slice may reach the queued committed-margin bucket.
         stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
-            .checked_write(uint256(500e6));
+            .checked_write(uint256(2500e6));
 
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
             account: account,
@@ -4720,7 +4716,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }
 
-    function test_PreviewOpen_ClassifiesCarryDrainedReleasedFreeSettlementAsUserInvalid() public {
+    function test_PreviewOpen_PreservesFreeSettlementForIncreaseAfterMarginFundedCarry() public {
         address trader = address(0xCA2211);
         address account = trader;
         _fundTrader(trader, 20_000e6);
@@ -4751,13 +4747,13 @@ contract CfdEngineTest is BasePerpTest {
 
         assertEq(
             revertCode,
-            uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES),
-            "Preview should catch carry-drained free settlement before apply"
+            uint8(CfdEnginePlanTypes.OpenRevertCode.OK),
+            "Margin-funded carry must preserve free settlement for the increase"
         );
         assertEq(
             uint256(failureCategory),
-            uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.ExecutionTimeUserInvalid),
-            "Preview should classify carry-drained opens as execution-time user invalid"
+            uint256(CfdEnginePlanTypes.OpenFailurePolicyCategory.None),
+            "A funded and healthy increase should remain valid"
         );
     }
 
@@ -5285,7 +5281,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(0, uint64(block.timestamp));
         vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 1e6);
     }
 
@@ -5316,7 +5312,7 @@ contract CfdEngineTest is BasePerpTest {
         );
 
         vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 6000e6);
     }
 
@@ -5476,7 +5472,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
 
         vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 1400e6);
     }
 
@@ -5495,7 +5491,7 @@ contract CfdEngineTest is BasePerpTest {
         uint256 carryTimeDelta = 3_839_405;
 
         // Leave a distinct free-settlement slice so the historical carry and close bounty are actually collectible;
-        // neither obligation may borrow from the isolated price pledge or liquidation reserve in V2.
+        // carry consumes position margin; the bounty remains exclusively free-funded.
         _fundTrader(trader, marginUsdc + 100e6);
         _open(account, CfdTypes.Side.LONG, size, marginUsdc, price);
 
@@ -5516,8 +5512,8 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
         assertEq(
             _positionBorrowBaseUsdc(account),
-            borrowBaseBefore,
-            "Free-funded historical carry and an action reserve must not change the price-pledge borrow base"
+            borrowBaseBefore + expectedCarry,
+            "Margin-funded carry increases the borrow base only after historical carry is assessed"
         );
         assertEq(
             clearinghouse.balanceUsdc(account),
@@ -5526,8 +5522,8 @@ contract CfdEngineTest is BasePerpTest {
         );
         assertEq(
             clearinghouse.pnlPledgeUsdc(account),
-            pnlPledgeBefore,
-            "Carry and bounty reservation must preserve the isolated PnL pledge"
+            pnlPledgeBefore - expectedCarry,
+            "Only carry consumes position margin; bounty reservation preserves the remaining pledge"
         );
         assertEq(
             clearinghouse.actionReserveUsdc(account),
@@ -5554,7 +5550,7 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, size, 1e6);
     }
 
@@ -5574,7 +5570,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
 
         vm.prank(address(router));
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, size / 2, 1e6);
     }
 
@@ -6060,6 +6056,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         bytes[] memory priceData = _mockPythUpdateData(0.8e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
+        preview = engineLens.previewClose(account, 100_000e18, 0.8e8);
         // Preserve the original Engine C-01 regression independently of V2 policy. The V2 Router correctly
         // terminalizes this underwater partial close because its surviving position has negative execution equity.
         _close(account, CfdTypes.Side.SHORT, 100_000 * 1e18, 0.8e8);

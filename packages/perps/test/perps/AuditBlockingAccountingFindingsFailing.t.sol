@@ -349,7 +349,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);

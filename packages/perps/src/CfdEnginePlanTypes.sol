@@ -373,6 +373,8 @@ library CfdEnginePlanTypes {
         uint256 protocolFeeTopUpUsdc;
         uint256 badDebtUsdc;
         uint256 pendingCarryUsdc;
+        /// @notice Carry collected from margin and free settlement before the remaining action settlement.
+        uint256 realizedCarryUsdc;
 
         uint256 totalMarginBefore;
         uint256 totalMarginAfterClose;
@@ -420,7 +422,7 @@ library CfdEnginePlanTypes {
     /// @param existingTraderClaimRemainingUsdc Account claim balance remaining after planned netting.
     /// @param syncMarginQueueAmount Other locked margin unlocked; a nonzero value requests router queue sync.
     /// @param badDebtUsdc Compatibility diagnostic for price loss above claim-plus-pledge collection; never stored debt.
-    /// @param pendingCarryUsdc Total checkpointed and indexed carry handled through the independent action path.
+    /// @param pendingCarryUsdc Total checkpointed and indexed carry; only carry not directly realized enters the action path.
     /// @param solvency Projected post-liquidation solvency and degraded-mode flags.
     /// @param account Account copied from the snapshot and liquidated during settlement.
     /// @param price Liquidation price capped at `RawSnapshot.capPrice`, with 8 decimals.
@@ -480,6 +482,8 @@ library CfdEnginePlanTypes {
 
         uint256 badDebtUsdc;
         uint256 pendingCarryUsdc;
+        /// @notice Carry collected from margin and free settlement before the remaining action settlement.
+        uint256 realizedCarryUsdc;
 
         SolvencyPreview solvency;
 

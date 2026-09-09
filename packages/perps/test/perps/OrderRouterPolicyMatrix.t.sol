@@ -228,27 +228,23 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount),
-            keeperSettlementBefore + 1e6,
-            "Uncovered carry must checkpoint before the incoming keeper bounty reaches settlement"
+            keeperSettlementBefore + 1e6 - expectedCarry,
+            "Carry is collected from margin before incoming bounty reaches settlement"
         );
         assertEq(
-            engine.unsettledCarryUsdc(keeperAccount),
-            expectedCarry,
-            "Incoming bounty must not retroactively cover carry checkpointed before the credit"
+            engine.unsettledCarryUsdc(keeperAccount), 0, "Margin covers carry without spending the incoming bounty"
         );
         assertEq(_freeSettlementUsdc(keeperAccount), 1e6, "Incoming bounty should remain newly free settlement");
-        assertEq(
-            clearinghouse.pnlPledgeUsdc(keeperAccount), pledgeBefore, "Carry and bounty credit must preserve PnL pledge"
-        );
+        assertEq(clearinghouse.pnlPledgeUsdc(keeperAccount), pledgeBefore - expectedCarry, "Only carry debits pledge");
 
         bytes32 terminalCurveHashAfter = terminalNavBook.curveHashOf(keeperAccount);
         ITerminalNavBookV2.CurveRecord memory terminalCurveAfter = terminalNavBook.curveOf(keeperAccount);
         ITerminalNavBookV2.BookState memory terminalBookAfter = terminalNavBook.bookState();
-        assertEq(terminalCurveHashAfter, terminalCurveHashBefore, "Stable canonical cap must preserve the curve hash");
+        assertNotEq(terminalCurveHashAfter, terminalCurveHashBefore, "Margin debit must change the curve commitment");
         assertEq(
             terminalCurveAfter.effectiveCapUsdcAtoms,
-            terminalCurveBefore.effectiveCapUsdcAtoms,
-            "Pledge-isolated carry and free bounty settlement must preserve the terminal cap"
+            terminalCurveBefore.effectiveCapUsdcAtoms - expectedCarry,
+            "Terminal cap reflects exactly the margin-funded carry debit"
         );
         assertEq(terminalCurveAfter.lots, terminalCurveBefore.lots, "Bounty credit must preserve terminal lots");
         assertEq(
@@ -259,8 +255,8 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         assertEq(uint8(terminalCurveAfter.side), uint8(terminalCurveBefore.side), "Bounty credit must preserve side");
         assertEq(
             terminalBookAfter.bookVersion,
-            terminalBookBefore.bookVersion,
-            "Canonical no-op synchronization must preserve the terminal book version"
+            terminalBookBefore.bookVersion + 1,
+            "Nested carry and keeper mutation synchronize the account curve once"
         );
         _assertTerminalCurveMatchesEngine(keeperAccount);
     }

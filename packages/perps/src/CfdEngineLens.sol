@@ -347,7 +347,7 @@ contract CfdEngineLens is ICfdEngineLens {
     function _frozenSpreadPaidUsdc(
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (uint256 paidUsdc) {
-        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc;
+        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc;
         if (delta.closeState.vpiDeltaUsdc > 0) {
             priorChargesUsdc += uint256(delta.closeState.vpiDeltaUsdc);
         }

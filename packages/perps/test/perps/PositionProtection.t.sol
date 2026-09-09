@@ -1132,9 +1132,14 @@ contract PositionProtectionTest is BasePerpTest {
         stdstore.target(address(router)).sig("closeOrderExecutionBountyUsdc()").checked_write(uint256(0));
         stdstore.target(address(router)).sig("positionProtectionTriggerBountyUsdc()").checked_write(uint256(0));
 
-        vm.warp(block.timestamp + 365 days);
+        // An exact number of weeks preserves the fixture's live oracle window.
+        vm.warp(block.timestamp + 1001 * 365 days);
         _refreshMark(MARK_PRICE);
-        assertGt(_expectedIndexedCarryUsdc(ALICE), 0, "fixture must accrue carry with no eligible free settlement");
+        assertGt(
+            _expectedIndexedCarryUsdc(ALICE),
+            clearinghouse.pnlPledgeUsdc(ALICE),
+            "fixture must exhaust both position margin and free settlement"
+        );
 
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);

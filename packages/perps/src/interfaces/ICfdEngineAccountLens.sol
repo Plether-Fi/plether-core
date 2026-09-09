@@ -19,8 +19,8 @@ interface ICfdEngineAccountLens {
 
     /// @notice Returns a conservative upper bound on currently withdrawable USDC under engine-side guards.
     /// @dev Flat accounts return free settlement without applying degraded-mode or mark-freshness gates. For open
-    ///      positions the view projects carry from eligible free settlement first: fully funded carry does not worsen
-    ///      exact price health, while any uncovered remainder blocks withdrawal and cannot consume PnL pledge or claim.
+    ///      positions the view projects carry from active margin first, then free settlement. Price health uses the
+    ///      reduced pledge; any remainder uncovered by both sources blocks withdrawal. Claims cannot fund carry.
     ///      The view also applies the stricter of initial and active maintenance margin, degraded mode, and cached-mark
     ///      freshness. Because live withdrawal rejects equality at the collateral boundary, withdrawing the exact
     ///      reported headroom can still revert; callers should leave a small safety buffer.

@@ -168,7 +168,7 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         (, uint256 marginBefore,,,,,) = engine.positions(aliceAccount);
 
         vm.prank(alice);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(aliceAccount);
