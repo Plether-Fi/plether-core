@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [shared, spot, options]
+        package: [shared, spot, options, perps-aa]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +65,44 @@ jobs:
       - name: Run package tests
         if: matrix.package != 'shared'
         run: forge test --root packages/${{ matrix.package }} --no-match-test "testFuzz_|invariant_"
+
+  typescript-aa-client:
+    name: TypeScript (perps-aa-client)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: packages/perps-aa-client
+        run: npm ci
+
+      - name: Run tests
+        working-directory: packages/perps-aa-client
+        run: npm test
+
+      - name: Type-check
+        working-directory: packages/perps-aa-client
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: packages/perps-aa-client
+        run: npm run build
+
+      - name: Check immutable package release tooling
+        run: node --test scripts/perps-aa-release.test.mjs
+
+      - name: Pack and test installed package
+        run: |
+          npm pack ./packages/perps-aa-client --dry-run
+          node scripts/perps-aa-artifact.mjs pack "$RUNNER_TEMP/perps-aa-client"
+          node scripts/perps-aa-artifact.mjs smoke "$RUNNER_TEMP/perps-aa-client"
 
   package-test-perps:
     name: Package (perps)
@@ -210,7 +248,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [shared, spot, options, perps]
+        package: [shared, spot, options, perps, perps-aa]
     permissions:
       contents: read
       security-events: write

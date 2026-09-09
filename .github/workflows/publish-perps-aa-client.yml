@@ -1,0 +1,94 @@
+name: Publish perps AA client
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact stable version from packages/perps-aa-client/package.json
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-perps-aa-client
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'Plether-Fi/plether-core' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/perps-aa-client/package-lock.json
+      - name: Validate requested version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          node --input-type=module -e 'import { validateRelease, readJson } from "./scripts/perps-aa-artifact.mjs"; import assert from "node:assert/strict"; validateRelease(process.env.RELEASE_VERSION, process.env.GITHUB_SHA); assert.equal(readJson("packages/perps-aa-client/package.json").version, process.env.RELEASE_VERSION)'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: Check paymaster contracts
+        run: |
+          forge fmt --check packages/perps-aa
+          bash scripts/check-package-boundaries.sh
+          forge build --sizes --root packages/perps-aa
+          forge test --root packages/perps-aa
+      - name: Check client and release tooling
+        run: |
+          npm ci --prefix packages/perps-aa-client
+          npm run typecheck --prefix packages/perps-aa-client
+          npm test --prefix packages/perps-aa-client
+          npm run build --prefix packages/perps-aa-client
+          node --test scripts/perps-aa-release.test.mjs
+      - name: Build and test immutable tarball
+        run: |
+          node scripts/perps-aa-artifact.mjs pack "$RUNNER_TEMP/perps-aa-release"
+          node scripts/perps-aa-artifact.mjs smoke "$RUNNER_TEMP/perps-aa-release"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perps-aa-client-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/perps-aa-release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: github-packages
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://npm.pkg.github.com
+          scope: '@plether-fi'
+      - uses: actions/download-artifact@v4
+        with:
+          name: perps-aa-client-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/perps-aa-release/
+      - name: Publish tested tarball and finalize immutable tag/release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-perps-aa-client.mjs "$RUNNER_TEMP/perps-aa-release" "$RELEASE_VERSION" "$GITHUB_SHA"
