@@ -597,7 +597,14 @@ Rules:
   carry is not an independent delinquency, but its margin debit can cause a maintenance breach,
 - any uncovered carry remainder means both margin and free settlement are exhausted; it blocks withdrawal and
   independently makes the account liquidatable. A trader claim cannot pay that remainder,
-- basis-changing settlement credits must checkpoint carry even when physical collection remains pending,
+- claim payments and keeper bounty credits first collect all available margin and free settlement toward carry,
+  retaining any unpaid remainder. Then the full credit is applied: paid claims become pledge for live positions,
+  bounties become free settlement. No second collection pass or waiver occurs; a later checkpoint can collect that
+  credit even at the same timestamp, without reassessing elapsed carry,
+- stored `unsettledCarryUsdc` may therefore coexist with new backing immediately after a credit. Health checks project
+  collection from current buckets; stored arrears alone do not prove carry delinquency,
+- claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
+  may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
 - carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
 - on withdraw, carry is realized before settlement balance is reduced,
@@ -611,6 +618,20 @@ Rules:
   borrowing-base, carry-index, and pool updates. Brackets nest per account: only the outermost authenticates and
   synchronizes, including independent trader/keeper mutations. Reverts restore all accounting and bracket state,
 - the existing transient reentrancy guard continues to block terminal-NAV reads during intermediate accounting.
+
+`CarryRealized` reports collection and retained arrears whenever nonzero carry is due, including zero collection when
+no backing remains. `CarryCheckpointed` remains a deprecated ABI declaration and is no longer emitted.
+
+`MarginClearinghouseAccountingLib.projectCarryLoss` owns the post-carry collateral arithmetic used by trade planners,
+withdrawal estimates, and account-risk views. It reuses the live collector's allocation policy and returns fresh buckets;
+the input snapshot remains unchanged. Raw ledger diagnostics, displayed position margin, and the stored terminal-price
+collectible cap continue to describe custody before collection. Price-risk equity and withdrawal capacity use projected
+margin and free settlement, respectively; same-account claims contribute to price equity without funding carry.
+
+The existing planner adapter applies these buckets together with the corresponding side-margin, borrowing-base,
+carry-index, arrears, and pool-revenue updates. Carry is assessed before those updates. Hypothetical trade depth remains
+separate from the live pool depth used to accrue carry; projecting collection adds revenue to the supplied planning
+context without changing that accrual basis. Snapshot loading and live collection remain owned by their existing callers.
 
 For every checkpoint sequence, `starting arrears + newly accrued carry = margin collected + free settlement collected
 + ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.

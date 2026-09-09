@@ -63,12 +63,25 @@ contract MarginFirstCarryAllocationTest is Test {
     ) private pure {
         IMarginClearinghouse.AccountUsdcBuckets memory buckets =
             MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(210e6, 100e6, 10e6, 20e6, 30e6);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory c =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, due);
+        bytes32 beforeHash = keccak256(abi.encode(buckets));
+        (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory c,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, due);
         assertEq(c.activeMarginConsumedUsdc, margin);
         assertEq(c.freeSettlementConsumedUsdc, free);
         assertEq(c.uncoveredUsdc, unpaid);
         assertEq(c.otherLockedMarginConsumedUsdc, 0);
+        assertEq(afterBuckets.settlementBalanceUsdc, 210e6 - margin - free);
+        assertEq(afterBuckets.activePositionMarginUsdc, 100e6 - margin);
+        assertEq(afterBuckets.totalLockedMarginUsdc, 160e6 - margin);
+        assertEq(afterBuckets.otherLockedMarginUsdc, 60e6);
+        assertEq(afterBuckets.freeSettlementUsdc, 50e6 - free);
+        assertEq(keccak256(abi.encode(buckets)), beforeHash, "projection must retain raw custody");
+        afterBuckets.activePositionMarginUsdc = 1;
+        assertEq(
+            keccak256(abi.encode(buckets)), beforeHash, "returned buckets must not alias input, even for zero carry"
+        );
     }
 
     function testFuzz_AllocationConservesAndProtectsOtherBuckets(
@@ -81,8 +94,11 @@ contract MarginFirstCarryAllocationTest is Test {
             MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
                 uint256(margin) + free + uint256(reserve) * 3, margin, reserve, reserve, reserve
             );
-        MarginClearinghouseAccountingLib.SettlementConsumption memory c =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, due);
+        bytes32 beforeHash = keccak256(abi.encode(buckets));
+        (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory c,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, due);
         assertEq(c.totalConsumedUsdc + c.uncoveredUsdc, due);
         assertEq(c.totalConsumedUsdc, c.activeMarginConsumedUsdc + c.freeSettlementConsumedUsdc);
         assertLe(c.activeMarginConsumedUsdc, margin);
@@ -94,6 +110,15 @@ contract MarginFirstCarryAllocationTest is Test {
         if (c.uncoveredUsdc > 0) {
             assertEq(c.totalConsumedUsdc, uint256(margin) + free);
         }
+        assertEq(afterBuckets.settlementBalanceUsdc + c.totalConsumedUsdc, buckets.settlementBalanceUsdc);
+        assertEq(afterBuckets.activePositionMarginUsdc + c.activeMarginConsumedUsdc, margin);
+        assertEq(afterBuckets.freeSettlementUsdc + c.freeSettlementConsumedUsdc, free);
+        assertEq(afterBuckets.otherLockedMarginUsdc, uint256(reserve) * 3);
+        assertEq(afterBuckets.totalLockedMarginUsdc, afterBuckets.activePositionMarginUsdc + uint256(reserve) * 3);
+        assertEq(
+            afterBuckets.settlementBalanceUsdc, afterBuckets.totalLockedMarginUsdc + afterBuckets.freeSettlementUsdc
+        );
+        assertEq(keccak256(abi.encode(buckets)), beforeHash);
     }
 
 }

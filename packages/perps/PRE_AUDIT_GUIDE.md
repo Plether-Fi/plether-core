@@ -183,6 +183,10 @@ Reachability note:
 - Carry checks project collection from canonical active position margin first, then free settlement. Price-risk health
   uses the reduced pledge. Any remainder after both sources are exhausted blocks withdrawal and makes the position
   liquidatable; same-account claims cannot fund carry. Terminal action recovery/waiver applies only to unpaid carry.
+- Claim and bounty credits collect available backing before applying the full incoming credit, retaining unpaid carry.
+  There is no second pass or waiver. Stored arrears can coexist with the new backing until a later checkpoint, so audit
+  health against projected current coverage. Claim liquidity checks follow collection; failed payouts or transfers
+  must restore both accounts, custody, carry bases, pool accounting, and NAV commitments.
 
 ## Liveness vs Safety Choices
 

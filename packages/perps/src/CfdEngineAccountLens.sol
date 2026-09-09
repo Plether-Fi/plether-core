@@ -122,20 +122,10 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             return 0;
         }
 
-        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account);
-        pendingCarryUsdc += _elapsedCarryUsdc(account, pos);
-        if (pendingCarryUsdc > 0) {
-            MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-                MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc);
-            if (carryConsumption.uncoveredUsdc != 0) {
-                return 0;
-            }
-            buckets = MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-                buckets.settlementBalanceUsdc - carryConsumption.totalConsumedUsdc,
-                buckets.activePositionMarginUsdc - carryConsumption.activeMarginConsumedUsdc,
-                buckets.otherLockedMarginUsdc,
-                0
-            );
+        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
+        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
+        if (carryConsumption.uncoveredUsdc != 0) {
+            return 0;
         }
 
         withdrawableUsdc = buckets.freeSettlementUsdc;
@@ -253,7 +243,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             return snapshot;
         }
 
-        PositionRiskAccountingLib.PositionRiskState memory riskState = _buildSnapshotRiskState(account, pos);
+        PositionRiskAccountingLib.PositionRiskState memory riskState = _buildSnapshotRiskState(account, pos, buckets);
 
         snapshot.hasPosition = true;
         snapshot.side = pos.side;
@@ -268,22 +258,20 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @notice Computes account solvency risk at the cached mark without a freshness check.
     /// @param account Account whose exact position basis, dedicated price collateral, and isolated carry are included.
     /// @param pos Current position.
+    /// @param buckets Already-loaded canonical custody snapshot; kept unchanged for ledger diagnostics.
     /// @return state Exact price PnL, P+C price equity, notional, active requirement, and a liquidation flag that
     ///         independently includes any uncovered carry or underfunded negative-VPI reserve.
     function _buildSnapshotRiskState(
         address account,
-        CfdTypes.Position memory pos
+        CfdTypes.Position memory pos,
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
     ) internal view returns (PositionRiskAccountingLib.PositionRiskState memory) {
         CfdTypes.RiskParams memory params = _riskParams();
-        uint256 pendingCarryUsdc = engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(
-                engineContract.clearinghouse().getAccountUsdcBuckets(account), pendingCarryUsdc
-            );
+        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
+        (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
         bool vpiReserveUnderfunded =
             engineContract.clearinghouse().vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(pos.vpiAccrued);
-        uint256 riskCollateralUsdc =
-            pos.margin - carryConsumption.activeMarginConsumedUsdc + engineContract.traderClaimBalanceUsdc(account);
+        uint256 riskCollateralUsdc = buckets.activePositionMarginUsdc + engineContract.traderClaimBalanceUsdc(account);
 
         PositionRiskAccountingLib.PositionRiskState memory state = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,
@@ -297,6 +285,24 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             state.liquidatable = true;
         }
         return state;
+    }
+
+    /// @dev Projects stored and newly indexed carry from the supplied raw buckets without changing ledger fields.
+    function _projectAccountCarry(
+        address account,
+        CfdTypes.Position memory pos,
+        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+    )
+        private
+        view
+        returns (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+        )
+    {
+        return MarginClearinghouseAccountingLib.projectCarryLoss(
+            buckets, engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos)
+        );
     }
 
     function _negativeVpiReserveTarget(
