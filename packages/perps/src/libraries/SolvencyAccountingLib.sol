@@ -162,15 +162,6 @@ library SolvencyAccountingLib {
         return state.effectiveAssetsUsdc > pendingPoolPayoutUsdc ? state.effectiveAssetsUsdc - pendingPoolPayoutUsdc : 0;
     }
 
-    /// @notice Tests whether effective assets are strictly below maximum liability.
-    /// @param state Solvency state to test.
-    /// @return True only when `effectiveAssetsUsdc < maxLiabilityUsdc`; equality is solvent.
-    function isInsolvent(
-        SolvencyState memory state
-    ) internal pure returns (bool) {
-        return state.effectiveAssetsUsdc < state.maxLiabilityUsdc;
-    }
-
     /// @notice Previews effective assets, maximum liability, and degraded-mode state after an operation.
     /// @dev Negative physical-asset and trader-claim deltas saturate at zero. The pending payout is deducted after
     ///      rebuilding state and does not alter the previewed physical-asset field. `alreadyDegraded` affects only

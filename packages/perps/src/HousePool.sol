@@ -588,27 +588,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         USDC.safeTransfer(recipient, amount);
     }
 
-    /// @notice Accounts a legitimate protocol-owned inflow into canonical pool assets.
-    /// @dev Only the engine or settlement sidecar may use this path. Unlike `accountExcess()`, this does
-    ///      not require raw excess to exist: it is the explicit accounting hook for endogenous
-    ///      protocol gains and may also be used to restore canonical accounting after a raw-balance
-    ///      shortfall has already reduced effective assets through `totalAssets() = min(raw, accounted)`.
-    ///      This function does not transfer or verify raw USDC, so the authorized caller must ensure the inflow
-    ///      is legitimately backed. A zero amount is a no-op and emits no event.
-    /// @param amount USDC amount to add to canonical accounted assets (6 decimals)
-    function recordProtocolInflow(
-        uint256 amount
-    ) external {
-        if (msg.sender != address(ENGINE) && msg.sender != ENGINE.settlementSidecar()) {
-            revert HousePool__Unauthorized();
-        }
-        if (amount == 0) {
-            return;
-        }
-        accountedAssets += amount;
-        emit ProtocolInflowAccounted(msg.sender, amount, accountedAssets);
-    }
-
     /// @notice Records claimant-owned value into the tranche claimant path.
     /// @dev Revenue and recapitalization remain distinct economic buckets, but share one API. The engine or
     ///      settlement sidecar may record revenue; recapitalization is engine-only. `CashArrived` increments

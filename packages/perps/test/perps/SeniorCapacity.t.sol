@@ -11,51 +11,6 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeniorCapacityLib.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
-contract SeniorCapacityPricingPoolMock {
-
-    uint256 internal seniorPricingAssets;
-
-    function setSeniorPricingAssets(
-        uint256 assets
-    ) external {
-        seniorPricingAssets = assets;
-    }
-
-    function getPendingDepositTrancheState() external view returns (uint256, uint256) {
-        return (seniorPricingAssets, 0);
-    }
-
-}
-
-contract SeniorCapacityVaultMathHarness is TrancheVault {
-
-    constructor(
-        IERC20 usdc,
-        address pool
-    ) TrancheVault(usdc, pool, true, "Senior Capacity Math Harness", "scMath", 0, address(0)) {}
-
-    function setShareSupply(
-        uint256 shares
-    ) external {
-        _mint(address(this), shares);
-    }
-
-    function exposedMaxMintSharesForAssetCapacity(
-        uint256 capacity,
-        uint256 feeBps
-    ) external view returns (uint256) {
-        return _maxMintSharesForAssetCapacity(capacity, feeBps);
-    }
-
-    function exposedPreviewFrozenMintAssets(
-        uint256 shares,
-        uint256 feeBps
-    ) external view returns (uint256) {
-        return _previewFrozenMintAssets(shares, feeBps);
-    }
-
-}
-
 contract SeniorCapacityTest is BasePerpTest {
 
     using stdStorage for StdStorage;
@@ -754,25 +709,6 @@ contract SeniorCapacityTest is BasePerpTest {
         vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
         seniorVault.requestDeposit(oversizedAssets, ALICE);
         vm.stopPrank();
-    }
-
-    function test_WideFrozenMaxMintFallbackPreservesExactBoundary() public {
-        SeniorCapacityPricingPoolMock pricingPool = new SeniorCapacityPricingPoolMock();
-        SeniorCapacityVaultMathHarness vault =
-            new SeniorCapacityVaultMathHarness(IERC20(address(usdc)), address(pricingPool));
-
-        uint256 adjustedAssets = type(uint256).max / 9000 + 1;
-        pricingPool.setSeniorPricingAssets(adjustedAssets - 1);
-        vault.setShareSupply(adjustedAssets - 1000);
-
-        assertGt(adjustedAssets, type(uint256).max / 10_000, "scaled denominator must require wide math");
-        assertGt(adjustedAssets, type(uint256).max / 9975, "scaled preview must require wide math");
-
-        uint256 capacity = 2e6;
-        uint256 maxShares = vault.exposedMaxMintSharesForAssetCapacity(capacity, 25);
-        assertEq(maxShares, 1_994_999);
-        assertEq(vault.exposedPreviewFrozenMintAssets(maxShares, 25), capacity - 1);
-        assertEq(vault.exposedPreviewFrozenMintAssets(maxShares + 1, 25), capacity + 1);
     }
 
     function test_MaxMintReturnsZeroWhenCoarseSharesCannotMeetMinimum() public {

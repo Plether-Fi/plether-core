@@ -249,20 +249,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _;
     }
 
-    /// @dev Restricts calls to the engine, its settlement sidecar, or its order router.
-    modifier onlyEngineIntegration() {
-        address engine_ = engine;
-        if (
-            engine_ == address(0)
-                || (msg.sender != engine_
-                    && !_isSettlementSidecar(engine_, msg.sender)
-                    && !_isOrderRouter(engine_, msg.sender))
-        ) {
-            revert MarginClearinghouse__NotOperator();
-        }
-        _;
-    }
-
     /// @dev Restricts calls to the configured engine itself.
     modifier onlyEngine() {
         address engine_ = engine;
@@ -1433,15 +1419,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit MarginUnlocked(account, bucket, amountUsdc);
     }
 
-    function _reservePositionMarginAsSettlement(
-        address account,
-        uint256 amountUsdc
-    ) internal {
-        _consumeLockedMargin(account, IMarginClearinghouse.MarginBucket.Position, amountUsdc);
-        reservedSettlementUsdc[account] += amountUsdc;
-        emit MarginLocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amountUsdc);
-    }
-
     function _bucketStorage(
         IMarginClearinghouse.MarginBucket bucket,
         address account
@@ -1550,24 +1527,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
         emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
         emit ReservedSettlementTransferred(account, recipient, amount);
-    }
-
-    /// @notice Retired fresh position-margin close-bounty selector; every authorized call reverts.
-    /// @dev V2 close bounties are backed exclusively by free settlement so PnL pledge remains isolated.
-    function reserveCloseExecutionBountyFromPositionMargin(
-        address,
-        uint256
-    ) external view onlyEngine {
-        revert MarginClearinghouse__InvalidMarginBucket();
-    }
-
-    /// @notice Retired stale position-margin close-bounty selector; every authorized call reverts.
-    /// @dev Stale V2 close bounties are also backed exclusively by free settlement so PnL pledge remains isolated.
-    function reserveStaleCloseExecutionBountyFromPositionMargin(
-        address,
-        uint256
-    ) external view onlyEngine {
-        revert MarginClearinghouse__InvalidMarginBucket();
     }
 
     /// @notice Returns an account's internal settlement USDC balance.

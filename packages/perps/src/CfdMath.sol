@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @title CfdMath
@@ -34,45 +33,9 @@ library CfdMath {
     // 1. PNL & SOLVENCY MATH
     // ==========================================
 
-    /// @notice Calculates unrealized PnL after clamping the oracle price to the protocol cap.
-    /// @dev A zero-size position returns `(false, 0)`. At exactly the entry price, a nonzero position is
-    ///      classified as profitable with zero PnL. Multiplication uses ordinary checked arithmetic.
-    /// @param pos Position to evaluate; size is 18 decimals and entry price is 8 decimals.
-    /// @param currentOraclePrice Current raw FX-basket mark (8 decimals).
-    /// @param capPrice Protocol maximum oracle price (8 decimals).
-    /// @return isProfit Whether the price move is favorable to `pos.side` (including equality).
-    /// @return pnlUsdc Absolute PnL in 6-decimal USDC.
-    function calculatePnL(
-        CfdTypes.Position memory pos,
-        uint256 currentOraclePrice,
-        uint256 capPrice
-    ) internal pure returns (bool isProfit, uint256 pnlUsdc) {
-        if (pos.size == 0) {
-            return (false, 0);
-        }
-
-        // O(1) Solvency Guarantee: Clamp oracle price to Protocol CAP
-        uint256 price = currentOraclePrice > capPrice ? capPrice : currentOraclePrice;
-        uint256 priceDiff;
-
-        if (pos.side == CfdTypes.Side.LONG) {
-            // LONG profits when oracle price drops (USD strengthens)
-            isProfit = price <= pos.entryPrice;
-            priceDiff = isProfit ? (pos.entryPrice - price) : (price - pos.entryPrice);
-        } else {
-            // SHORT profits when oracle price rises (USD weakens)
-            isProfit = price >= pos.entryPrice;
-            priceDiff = isProfit ? (price - pos.entryPrice) : (pos.entryPrice - price);
-        }
-
-        // size(18) * priceDiff(8) / 1e20 = USDC(6)
-        pnlUsdc = (pos.size * priceDiff) / USDC_TO_TOKEN_SCALE;
-    }
-
     /// @notice Calculates exact capped price PnL from canonical lots and entry cost.
     /// @dev `entryCostUsdcAtoms` is the sum of `addedLots * executionPrice` and therefore already uses 6-decimal
-    ///      USDC atoms. No average-entry-price rounding is involved. Equality is classified as profit for parity with
-    ///      `calculatePnL`.
+    ///      USDC atoms. No average-entry-price rounding is involved. Equality is classified as profit.
     /// @param lots Position size in canonical 100-token lots.
     /// @param entryCostUsdcAtoms Exact entry cost in 6-decimal USDC atoms.
     /// @param side Position direction.
@@ -122,61 +85,6 @@ library CfdMath {
         }
         uint256 capValueUsdcAtoms = lots * capPrice;
         return capValueUsdcAtoms > entryCostUsdcAtoms ? capValueUsdcAtoms - entryCostUsdcAtoms : 0;
-    }
-
-    /// @notice Calculates the maximum profit available between zero and the protocol price cap.
-    /// @dev LONG uses a zero-price endpoint. SHORT uses `capPrice` and therefore returns zero when the
-    ///      entry price is at or above the cap. A zero-size position also returns zero.
-    /// @param size Notional size in synthetic-token units (18 decimals).
-    /// @param entryPrice Entry oracle price (8 decimals).
-    /// @param side Position direction.
-    /// @param capPrice Protocol maximum oracle price (8 decimals).
-    /// @return maxProfitUsdc Maximum profit in 6-decimal USDC.
-    function calculateMaxProfit(
-        uint256 size,
-        uint256 entryPrice,
-        CfdTypes.Side side,
-        uint256 capPrice
-    ) internal pure returns (uint256 maxProfitUsdc) {
-        if (size == 0) {
-            return 0;
-        }
-
-        uint256 maxPriceDiff;
-        if (side == CfdTypes.Side.LONG) {
-            // Max profit when price hits 0
-            maxPriceDiff = entryPrice;
-        } else {
-            // Max profit when price hits CAP
-            maxPriceDiff = capPrice > entryPrice ? capPrice - entryPrice : 0;
-        }
-        maxProfitUsdc = (size * maxPriceDiff) / USDC_TO_TOKEN_SCALE;
-    }
-
-    /// @notice Conservative upper bound for a side's current gross winning-trader MtM liability.
-    /// @dev Uses each position's max-profit envelope so same-side losing positions cannot net down
-    ///      winning positions before their losses are physically realized. Returns zero when either
-    ///      `maxProfitUsdc` or `capPrice` is zero and rounds a nonzero result up to whole USDC atoms.
-    /// @param maxProfitUsdc Aggregate maximum-profit envelope for the side (6-decimal USDC).
-    /// @param side Side whose liability envelope is being marked.
-    /// @param price Current oracle price (8 decimals); values above `capPrice` are clamped.
-    /// @param capPrice Protocol maximum oracle price (8 decimals).
-    /// @return Conservative marked liability in 6-decimal USDC.
-    function conservativeMtmLiability(
-        uint256 maxProfitUsdc,
-        CfdTypes.Side side,
-        uint256 price,
-        uint256 capPrice
-    ) internal pure returns (uint256) {
-        if (maxProfitUsdc == 0 || capPrice == 0) {
-            return 0;
-        }
-
-        uint256 clampedPrice = price > capPrice ? capPrice : price;
-        if (side == CfdTypes.Side.LONG) {
-            return Math.mulDiv(maxProfitUsdc, capPrice - clampedPrice, capPrice, Math.Rounding.Ceil);
-        }
-        return Math.mulDiv(maxProfitUsdc, clampedPrice, capPrice, Math.Rounding.Ceil);
     }
 
     // ==========================================

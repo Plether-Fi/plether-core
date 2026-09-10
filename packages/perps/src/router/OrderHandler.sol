@@ -37,7 +37,7 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
     function _failPendingOpenProtectionForRiskOff(
         uint64 parentOrderId,
         address account
-    ) internal override returns (uint256 refundableProtectionBountyUsdc) {
+    ) internal returns (uint256 refundableProtectionBountyUsdc) {
         return positionProtectionBook.failPendingOpenForRiskOff(parentOrderId, account);
     }
 

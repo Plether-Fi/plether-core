@@ -53,13 +53,6 @@ abstract contract OrderCommitHandler is OrderValidation {
         emit OrderCommitted(orderId, account, order.side);
     }
 
-    /// @dev Retained as an override seam for position-protection handlers; delegated commit logic owns the live check.
-    function _requireNoActivePositionProtection(
-        address account
-    ) internal view virtual {
-        account;
-    }
-
     /// @notice Prunes spent reservation links after authenticating the engine or settlement sidecar.
     /// @param account Account whose full margin queue is synchronized.
     function _syncMarginQueue(

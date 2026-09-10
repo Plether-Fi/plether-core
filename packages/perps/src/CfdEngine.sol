@@ -16,10 +16,8 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
-import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 
 /// @title CfdEngine
 /// @notice Canonical position ledger and execution coordinator for Plether's capped-price CFDs.
@@ -143,29 +141,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return uint256(side);
     }
 
-    function _storedSize(
-        StoredPosition storage pos
-    ) internal view returns (uint256) {
-        return uint256(pos.lots) * CfdTypes.SIZE_QUANTUM;
-    }
-
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (SideState storage state) {
         return sides[_sideIndex(side)];
-    }
-
-    function _oppositeSide(
-        CfdTypes.Side side
-    ) internal pure returns (CfdTypes.Side) {
-        return side == CfdTypes.Side.LONG ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
-    }
-
-    function _sideAndOppositeStates(
-        CfdTypes.Side side
-    ) internal view returns (SideState storage selected, SideState storage opposite) {
-        selected = _sideState(side);
-        opposite = _sideState(_oppositeSide(side));
     }
 
     function _longAndShortStates() internal view returns (SideState storage longState, SideState storage shortState) {
@@ -742,16 +721,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
     }
 
-    /// @dev Compatibility hook for test harnesses; production paths call the sidecar directly.
-    function _buildRawSnapshot(
-        address account,
-        uint256,
-        uint256 poolDepthUsdc,
-        uint64
-    ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        return settlementSidecar.buildRawSnapshot(account, poolDepthUsdc);
-    }
-
     // ==========================================
     // 3. INTERNAL LEDGER UPDATES
     // ==========================================
@@ -800,16 +769,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 newBorrowBaseUsdc = _positionBorrowBase(pos.maxProfitUsdc, marginUsdc);
         _applySideBorrowBaseDelta(pos.side, pos.borrowBaseUsdc, newBorrowBaseUsdc);
         pos.borrowBaseUsdc = newBorrowBaseUsdc;
-    }
-
-    function _syncMarginQueue(
-        address account,
-        uint256 consumedCommittedReservationUsdc
-    ) internal {
-        if (consumedCommittedReservationUsdc == 0 || orderRouter == address(0)) {
-            return;
-        }
-        IOrderRouterAccounting(orderRouter).syncMarginQueue(account);
     }
 
     function _payOrRecordTraderClaim(
@@ -1335,12 +1294,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
     }
 
-    function _terminalReachableCollateralUsdc(
-        address account
-    ) internal view returns (uint256) {
-        return MarginClearinghouseAccountingLib.getTerminalReachableUsdc(clearinghouse.getAccountUsdcBuckets(account));
-    }
-
     function _positionMarginBucketUsdc(
         address account
     ) internal view returns (uint256) {
@@ -1458,15 +1411,5 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // MARK-TO-MARKET
     // ==========================================
 
-    function _getVaultMtmLiability() internal view returns (uint256) {
-        if (lastMarkTime == 0) {
-            return 0;
-        }
-
-        uint256 price = lastMarkPrice;
-        (SideState storage longState, SideState storage shortState) = _longAndShortStates();
-        return CfdMath.conservativeMtmLiability(longState.maxProfitUsdc, CfdTypes.Side.LONG, price, CAP_PRICE)
-            + CfdMath.conservativeMtmLiability(shortState.maxProfitUsdc, CfdTypes.Side.SHORT, price, CAP_PRICE);
-    }
 
 }

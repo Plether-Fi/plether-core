@@ -51,12 +51,24 @@ contract CfdMathTest is Test {
         });
 
         // Price drops to $0.98 (LONG makes $0.02 * 100k = $2,000)
-        (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 0.98e8, CAP_PRICE);
+        (bool isProfit, uint256 pnl) = CfdMath.calculateExactPnl(
+            pos.size / CfdTypes.SIZE_QUANTUM,
+            (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
+            pos.side,
+            0.98e8,
+            CAP_PRICE
+        );
         assertTrue(isProfit);
         assertEq(pnl, 2000 * 1e6); // $2,000 USDC
 
         // Price rises to $1.05 (LONG loses $0.05 * 100k = $5,000)
-        (isProfit, pnl) = CfdMath.calculatePnL(pos, 1.05e8, CAP_PRICE);
+        (isProfit, pnl) = CfdMath.calculateExactPnl(
+            pos.size / CfdTypes.SIZE_QUANTUM,
+            (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
+            pos.side,
+            1.05e8,
+            CAP_PRICE
+        );
         assertFalse(isProfit);
         assertEq(pnl, 5000 * 1e6); // $5,000 USDC
     }
@@ -75,7 +87,13 @@ contract CfdMathTest is Test {
 
         // Oracle teleports to $5.00 (way above the $2.00 CAP)
         // Profit should be clamped to ($2.00 - $1.00) * 100k = $100,000
-        (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 5e8, CAP_PRICE);
+        (bool isProfit, uint256 pnl) = CfdMath.calculateExactPnl(
+            pos.size / CfdTypes.SIZE_QUANTUM,
+            (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
+            pos.side,
+            5e8,
+            CAP_PRICE
+        );
         assertTrue(isProfit);
         assertEq(pnl, 100_000 * 1e6); // PnL strictly clamped
     }
@@ -85,11 +103,21 @@ contract CfdMathTest is Test {
         uint256 entryPrice = 1.0e8;
 
         // LONG max profit (Price drops from $1.00 to $0.00)
-        uint256 longMax = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.LONG, CAP_PRICE);
+        uint256 longMax = CfdMath.calculateExactMaxProfit(
+            (size) / CfdTypes.SIZE_QUANTUM,
+            ((size) / CfdTypes.SIZE_QUANTUM) * (entryPrice),
+            CfdTypes.Side.LONG,
+            CAP_PRICE
+        );
         assertEq(longMax, 100_000 * 1e6); // $100k max
 
         // SHORT max profit (Price rises from $1.00 to $2.00 CAP)
-        uint256 shortMax = CfdMath.calculateMaxProfit(size, entryPrice, CfdTypes.Side.SHORT, CAP_PRICE);
+        uint256 shortMax = CfdMath.calculateExactMaxProfit(
+            (size) / CfdTypes.SIZE_QUANTUM,
+            ((size) / CfdTypes.SIZE_QUANTUM) * (entryPrice),
+            CfdTypes.Side.SHORT,
+            CAP_PRICE
+        );
         assertEq(shortMax, 100_000 * 1e6); // $100k max
     }
 
@@ -162,12 +190,24 @@ contract CfdMathTest is Test {
         });
 
         // Price rises to $0.95 → SHORT profits (profits when oracle rises)
-        (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 0.95e8, CAP_PRICE);
+        (bool isProfit, uint256 pnl) = CfdMath.calculateExactPnl(
+            pos.size / CfdTypes.SIZE_QUANTUM,
+            (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
+            pos.side,
+            0.95e8,
+            CAP_PRICE
+        );
         assertTrue(isProfit);
         assertEq(pnl, 15_000 * 1e6); // $0.15 * 100k = $15,000
 
         // Price drops to $0.70 → SHORT loses
-        (isProfit, pnl) = CfdMath.calculatePnL(pos, 0.7e8, CAP_PRICE);
+        (isProfit, pnl) = CfdMath.calculateExactPnl(
+            pos.size / CfdTypes.SIZE_QUANTUM,
+            (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
+            pos.side,
+            0.7e8,
+            CAP_PRICE
+        );
         assertFalse(isProfit);
         assertEq(pnl, 10_000 * 1e6); // $0.10 * 100k = $10,000
     }
@@ -184,7 +224,13 @@ contract CfdMathTest is Test {
             vpiAccrued: 0
         });
 
-        (bool isProfit, uint256 pnl) = CfdMath.calculatePnL(pos, 1.5e8, CAP_PRICE);
+        (bool isProfit, uint256 pnl) = CfdMath.calculateExactPnl(
+            pos.size / CfdTypes.SIZE_QUANTUM,
+            (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
+            pos.side,
+            1.5e8,
+            CAP_PRICE
+        );
         assertFalse(isProfit);
         assertEq(pnl, 0);
     }
@@ -209,7 +255,12 @@ contract CfdMathTest is Test {
     }
 
     function test_MaxProfit_ShortAtCap_IsZero() public pure {
-        uint256 maxProfit = CfdMath.calculateMaxProfit(100_000 * 1e18, CAP_PRICE, CfdTypes.Side.SHORT, CAP_PRICE);
+        uint256 maxProfit = CfdMath.calculateExactMaxProfit(
+            (100_000 * 1e18) / CfdTypes.SIZE_QUANTUM,
+            ((100_000 * 1e18) / CfdTypes.SIZE_QUANTUM) * (CAP_PRICE),
+            CfdTypes.Side.SHORT,
+            CAP_PRICE
+        );
         assertEq(maxProfit, 0, "SHORT at CAP entry has zero max profit");
     }
 

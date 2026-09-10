@@ -23,7 +23,7 @@ contract AccountDomainParityTest is BasePerpTest {
         assertEq(buckets.freeSettlementUsdc, 3000e6);
         assertEq(buckets.activePositionMarginUsdc, 3000e6);
         assertEq(buckets.otherLockedMarginUsdc, 6000e6);
-        assertEq(MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets), 6000e6);
+        assertEq(buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc, 6000e6);
         assertEq(MarginClearinghouseAccountingLib.getTerminalReachableUsdc(buckets), 12_000e6);
     }
 
@@ -76,7 +76,7 @@ contract AccountDomainParityTest is BasePerpTest {
             "Liquidation settlement reachability should exclude queued execution bounty"
         );
         assertLt(
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),
+            buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc,
             collateralView.liquidationReachableSettlementUsdc,
             "Queued reservations should distinguish generic from liquidation reachability"
         );

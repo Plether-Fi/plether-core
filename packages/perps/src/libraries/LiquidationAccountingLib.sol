@@ -2,7 +2,6 @@
 pragma solidity 0.8.35;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {CfdEngineSettlementLib} from "@plether/perps/libraries/CfdEngineSettlementLib.sol";
 
 /// @title LiquidationAccountingLib
 /// @notice Calculates maintenance requirement, liquidation-charge allocation, and residual settlement for a liquidated position.
@@ -76,21 +75,6 @@ library LiquidationAccountingLib {
         state.keeperBountyUsdc = Math.mulDiv(liquidationChargeUsdc, keeperShareBps, 10_000);
         state.protocolLiquidationFeeUsdc = Math.mulDiv(liquidationChargeUsdc, protocolShareBps, 10_000);
         state.lpLiquidationFeeUsdc = liquidationChargeUsdc - state.keeperBountyUsdc - state.protocolLiquidationFeeUsdc;
-    }
-
-    /// @notice Converts liquidation equity net of the total charge into seizure, payout, or bad-debt settlement.
-    /// @dev Uses all `reachableCollateralUsdc` as the existing account balance for settlement. A nonnegative residual
-    ///      targets that remaining balance; a negative residual seizes all reachable collateral and reports its full
-    ///      magnitude as bad debt. Equity and the total charge must fit the supported signed range; signed subtraction and
-    ///      negating `type(int256).min` otherwise revert or follow explicit fixed-width conversion semantics.
-    /// @param state Liquidation equity, reachable collateral, and split liquidation charge.
-    /// @return result Target balance, seizure, fresh payout, and bad-debt allocation after subtracting the total charge.
-    function settlementForState(
-        LiquidationState memory state
-    ) internal pure returns (CfdEngineSettlementLib.LiquidationSettlementResult memory result) {
-        result = CfdEngineSettlementLib.liquidationSettlementResult(
-            state.reachableCollateralUsdc, state.equityUsdc - int256(state.liquidationChargeUsdc)
-        );
     }
 
 }

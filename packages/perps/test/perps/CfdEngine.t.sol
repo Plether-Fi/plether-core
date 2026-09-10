@@ -14,7 +14,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -33,10 +32,8 @@ import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {LiquidationAccountingLib} from "@plether/perps/libraries/LiquidationAccountingLib.sol";
-import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -5306,7 +5303,7 @@ contract CfdEngineTest is BasePerpTest {
             "Other locked value must include queued margin, execution bounty, and the dedicated liquidation reserve"
         );
         assertEq(
-            MarginClearinghouseAccountingLib.getGenericReachableUsdc(buckets),
+            buckets.freeSettlementUsdc + buckets.activePositionMarginUsdc,
             buckets.settlementBalanceUsdc - buckets.otherLockedMarginUsdc,
             "Generic reachability must exclude the queued reservation"
         );

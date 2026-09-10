@@ -8,7 +8,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -208,8 +207,7 @@ contract AuditLatestFindingsFailing_VPI is BasePerpTest {
         router.executeOrder(2, _mockPythUpdateData(1e8));
 
         usdc.mint(address(pool), 9_000_000e6);
-        vm.prank(address(engine));
-        pool.recordProtocolInflow(9_000_000e6);
+        pool.accountExcess();
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);

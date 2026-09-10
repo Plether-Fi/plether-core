@@ -22,14 +22,6 @@ abstract contract PositionProtectionHandler is OrderCommitHandler, ReentrancyGua
             IPositionProtectionBook(address(new PositionProtectionBook(address(this), address(engine))));
     }
 
-    function _requireNoActivePositionProtection(
-        address account
-    ) internal view override {
-        if (positionProtectionBook.activePositionProtectionId(account) != 0) {
-            revert OrderRouter__ProtectionActive();
-        }
-    }
-
     function _additionalExecutionBountyUsdc(
         address account
     ) internal view virtual override returns (uint256) {
