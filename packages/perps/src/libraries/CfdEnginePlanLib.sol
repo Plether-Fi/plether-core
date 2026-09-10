@@ -29,24 +29,6 @@ library CfdEnginePlanLib {
     //  HELPERS
     // ──────────────────────────────────────────────
 
-    /// @notice Applies a signed net change to position margin and reports whether it would go below zero.
-    /// @dev Exactly zero is not considered drained. Inputs must be within the supported signed range; the explicit
-    ///      unsigned-to-signed conversion otherwise follows Solidity's fixed-width conversion semantics.
-    /// @param marginAfterCarry Position margin after carry realization.
-    /// @param netMarginChange Signed margin change; positive adds margin and negative removes it.
-    /// @return drained Whether the mathematical result is negative.
-    /// @return marginAfter Updated margin, or zero when drained.
-    function computeOpenMarginAfter(
-        uint256 marginAfterCarry,
-        int256 netMarginChange
-    ) internal pure returns (bool drained, uint256 marginAfter) {
-        int256 computedMarginAfterSigned = int256(marginAfterCarry) + netMarginChange;
-        if (computedMarginAfterSigned < 0) {
-            return (true, 0);
-        }
-        return (false, uint256(computedMarginAfterSigned));
-    }
-
     /// @notice Replaces one position's post-carry margin inside its aggregate side-margin total.
     /// @dev Computes `sideTotalMarginAfterCarry + positionMarginAfterOpen - effectivePositionMarginAfterCarry` using
     ///      signed intermediates. Callers must maintain a nonnegative aggregate result and values representable as

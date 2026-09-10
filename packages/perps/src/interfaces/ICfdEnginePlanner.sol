@@ -25,19 +25,6 @@ interface ICfdEnginePlanner {
         uint256 fadRunwaySeconds
     ) external pure returns (bool fadWindow, bool oracleFrozen);
 
-    /// @notice Applies a signed margin change to post-carry margin and reports whether it drains the position.
-    /// @dev Exact depletion returns `(false, 0)`; only a mathematically negative result reports `drained`.
-    ///      Meaningful inputs require `marginAfterCarry <= type(int256).max`; larger values reinterpret as negative on
-    ///      explicit conversion, and signed addition reverts if the result falls outside the `int256` range.
-    /// @param marginAfterCarry Position margin after pending carry realization, in USDC
-    /// @param netMarginChange Signed margin change, where positive adds margin and negative removes it
-    /// @return drained Whether the signed result would be negative
-    /// @return marginAfter Resulting nonnegative margin in USDC, or zero when drained
-    function computeOpenMarginAfter(
-        uint256 marginAfterCarry,
-        int256 netMarginChange
-    ) external pure returns (bool drained, uint256 marginAfter);
-
     /// @notice Projects a side carry index from utilization and elapsed time.
     function computeCurrentCarryIndex(
         uint256 storedIndex,
@@ -53,17 +40,6 @@ interface ICfdEnginePlanner {
         uint256 borrowBaseUsdc,
         uint256 carryIndexDelta
     ) external pure returns (uint256 carryUsdc);
-
-    /// @notice Returns the exact lot-based liquidation test after carry and lifetime VPI.
-    function isExactPositionLiquidatableWithCarry(
-        CfdTypes.Position memory pos,
-        uint256 entryCostUsdcAtoms,
-        uint256 price,
-        uint256 capPrice,
-        uint256 pendingCarryUsdc,
-        uint256 reachableCollateralUsdc,
-        uint256 requiredBps
-    ) external pure returns (bool liquidatable);
 
     /// @notice Returns the exact lot-based price-risk liquidation test used for close-bounty reservations.
     function isExactPriceRiskLiquidatable(

@@ -54,38 +54,29 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
 
         uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc);
+        (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterCarry
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, pendingCarryUsdc);
         assertGt(pendingCarryUsdc, 0, "setup must accrue carry");
-        assertEq(carryConsumption.uncoveredUsdc, 0, "free settlement must fully fund carry");
+        assertEq(carryConsumption.uncoveredUsdc, 0, "margin and free settlement must fully fund carry");
+        assertGt(carryConsumption.activeMarginConsumedUsdc, 0, "carry must consume active margin first");
+        assertGt(afterCarry.freeSettlementUsdc, 0, "free cash must remain despite impaired price health");
 
-        CfdTypes.Position memory pos = _position(account);
-        uint256 priceCollateralUsdc = pos.margin + engine.traderClaimBalanceUsdc(account);
+        uint256 priceCollateralUsdc = buckets.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account);
         uint256 maintenanceBps = _maintenanceMarginBps();
         assertFalse(
-            engine.planner()
-                .isExactPriceRiskLiquidatable(
-                    pos,
-                    engine.positionEntryCostUsdcAtoms(account),
-                    executionPrice,
-                    engine.CAP_PRICE(),
-                    priceCollateralUsdc,
-                    maintenanceBps
-                ),
+            _isPriceRiskLiquidatable(account, executionPrice, priceCollateralUsdc, maintenanceBps),
             "exact price risk must be healthy"
         );
         assertTrue(
-            engine.planner()
-                .isExactPositionLiquidatableWithCarry(
-                    pos,
-                    engine.positionEntryCostUsdcAtoms(account),
-                    executionPrice,
-                    engine.CAP_PRICE(),
-                    pendingCarryUsdc,
-                    priceCollateralUsdc,
-                    maintenanceBps
-                ),
-            "setup must distinguish the retired carry-in-equity calculation"
+            _isPriceRiskLiquidatable(
+                account,
+                executionPrice,
+                afterCarry.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account),
+                maintenanceBps
+            ),
+            "margin-funded carry must breach the maintained price-risk threshold"
         );
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
@@ -106,27 +97,23 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         clearinghouse.withdraw(account, withdrawableUsdc);
 
         vm.warp(block.timestamp + 10 * 365 days);
+        // A favorable price leaves exact price equity healthy even after carry consumes all available cash.
+        uint256 riskPrice = 90_000_000;
+        vm.prank(address(router));
+        engine.updateMarkPrice(riskPrice, uint64(block.timestamp));
         uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(buckets, pendingCarryUsdc);
+        (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterCarry
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(buckets, pendingCarryUsdc);
         assertGt(carryConsumption.uncoveredUsdc, 0, "setup must leave carry independently delinquent");
 
-        CfdTypes.Position memory pos = _position(account);
-        uint256 priceCollateralUsdc = pos.margin + engine.traderClaimBalanceUsdc(account);
+        uint256 priceCollateralUsdc = afterCarry.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account);
         uint256 maintenanceBps = _maintenanceMarginBps();
         assertFalse(
-            engine.planner()
-                .isExactPositionLiquidatableWithCarry(
-                    pos,
-                    engine.positionEntryCostUsdcAtoms(account),
-                    executionPrice,
-                    engine.CAP_PRICE(),
-                    carryConsumption.uncoveredUsdc,
-                    priceCollateralUsdc,
-                    maintenanceBps
-                ),
-            "residual must be too small to fail the retired fungible-equity test"
+            _isPriceRiskLiquidatable(account, riskPrice, priceCollateralUsdc, maintenanceBps),
+            "post-carry price equity must remain healthy independently of uncovered carry"
         );
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
@@ -138,9 +125,10 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
     function test_WithdrawResidualCarryBlocksAndRollsBackEveryProvisionalMutation() public {
         address account = address(0xCA770001);
         uint256 executionPrice = 1e8;
+        uint256 riskPrice = 90_000_000;
 
         // The opening action leaves a healthy isolated PnL pledge plus a small amount of free settlement.
-        // Ten years of indexed carry exceeds both the free settlement and the position's risk headroom.
+        // Ten years of indexed carry exceeds margin plus free settlement, despite favorable price PnL.
         _fundTrader(account, 3500e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 3000e6, executionPrice);
 
@@ -149,49 +137,32 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
             engine.checkpointCarryIndexes();
             uint64 refreshedAt = engine.sideCarryTimestamp(uint256(CfdTypes.Side.LONG));
             vm.prank(address(router));
-            engine.updateMarkPrice(executionPrice, refreshedAt);
-            assertEq(engine.lastMarkPrice(), executionPrice, "setup must keep the intended live mark");
+            engine.updateMarkPrice(riskPrice, refreshedAt);
+            assertEq(engine.lastMarkPrice(), riskPrice, "setup must keep the intended live mark");
             assertEq(engine.lastMarkTime(), refreshedAt, "setup must refresh mark time after carry accrual");
         }
 
         CfdTypes.Side positionSide;
         {
             uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
-            IMarginClearinghouse.PnlIsolationBuckets memory buckets = clearinghouse.getPnlIsolationBuckets(account);
-            assertGt(pendingCarryUsdc, buckets.freeSettlementUsdc, "setup must leave uncovered carry after realization");
-            uint256 residualCarryUsdc = pendingCarryUsdc - buckets.freeSettlementUsdc;
+            (
+                MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption,
+                IMarginClearinghouse.AccountUsdcBuckets memory afterCarry
+            ) = MarginClearinghouseAccountingLib.projectCarryLoss(
+                clearinghouse.getAccountUsdcBuckets(account), pendingCarryUsdc
+            );
+            assertGt(carryConsumption.activeMarginConsumedUsdc, 0, "setup must provisionally debit active margin");
+            assertGt(carryConsumption.freeSettlementConsumedUsdc, 0, "setup must provisionally debit free settlement");
+            assertGt(carryConsumption.uncoveredUsdc, 0, "setup must leave uncovered carry after realization");
 
-            CfdTypes.Position memory pos = _position(account);
-            positionSide = pos.side;
+            positionSide = _position(account).side;
             uint256 reachablePriceCollateralUsdc =
-                buckets.pnlPledgeUsdc + engine.traderClaimBalanceUsdc(account) + buckets.vpiRebateReserveUsdc;
+                afterCarry.activePositionMarginUsdc + engine.traderClaimBalanceUsdc(account);
             uint256 requiredMarginBps = _withdrawRequiredMarginBps();
 
             assertFalse(
-                engine.planner()
-                    .isExactPositionLiquidatableWithCarry(
-                        pos,
-                        engine.positionEntryCostUsdcAtoms(account),
-                        executionPrice,
-                        engine.CAP_PRICE(),
-                        0,
-                        reachablePriceCollateralUsdc,
-                        requiredMarginBps
-                    ),
-                "without residual carry, the exact post-withdraw price-risk state must be healthy"
-            );
-            assertTrue(
-                engine.planner()
-                    .isExactPositionLiquidatableWithCarry(
-                        pos,
-                        engine.positionEntryCostUsdcAtoms(account),
-                        executionPrice,
-                        engine.CAP_PRICE(),
-                        residualCarryUsdc,
-                        reachablePriceCollateralUsdc,
-                        requiredMarginBps
-                    ),
-                "the uncollectible residual alone must make the exact position liquidatable"
+                _isPriceRiskLiquidatable(account, riskPrice, reachablePriceCollateralUsdc, requiredMarginBps),
+                "post-carry price equity must remain healthy so uncovered carry independently blocks withdrawal"
             );
         }
 
@@ -218,6 +189,23 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
             beforeState.terminalBook.totalEffectiveCapUsdcAtoms,
             "terminal collectible cap must roll back"
         );
+    }
+
+    function _isPriceRiskLiquidatable(
+        address account,
+        uint256 price,
+        uint256 priceCollateralUsdc,
+        uint256 requiredMarginBps
+    ) internal view returns (bool) {
+        return engine.planner()
+            .isExactPriceRiskLiquidatable(
+                _position(account),
+                engine.positionEntryCostUsdcAtoms(account),
+                price,
+                engine.CAP_PRICE(),
+                priceCollateralUsdc,
+                requiredMarginBps
+            );
     }
 
     function _rollbackState(
