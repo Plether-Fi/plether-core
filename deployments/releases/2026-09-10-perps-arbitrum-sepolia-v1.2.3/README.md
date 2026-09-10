@@ -1,7 +1,7 @@
 # v1.2.3 — Arbitrum Sepolia perps deployment
 
 All **27 contracts are deployed and source-verified on Arbiscan**. Both tranches were subsequently seeded with **0.01 mock USDC each** at blocks 307404152–307404154.
-Trading remains inactive. The emergency guardian is `0x6b72fE6CC52201a1eb7892A813C6C10cCe62745c`. The active deployment record is unchanged.
+**Trading is active**, enabled at block `307410278`. The emergency guardian is `0x6b72fE6CC52201a1eb7892A813C6C10cCe62745c`. The active deployment record is unchanged.
 The original manifest, bundle, and deployment validation retain their pre-seeding snapshots;
 `seeding-evidence.json` records the subsequent operation and independent checks at block 307404339.
 
@@ -50,8 +50,21 @@ Guardian configuration was confirmed at block 307407614; see `guardian-evidence.
 [guardian transaction](https://sepolia.arbiscan.io/tx/0x95b3c9772963f629ba8aa97cddd38df23412b9a29be5be3c7ec50d0e1c612aa8). Standard bootstrap/verifier defaults remain 1 USDC per tranche;
 the actual initialized seeds remain 0.01 USDC each.
 
-Before activation, verify the live stack against its recorded seed amounts. Recheck live oracle/pause state and arrange servicing of all old-stack positions, orders, protections, balances,
-claims, and LP obligations before coordinated consumer cutover.
+Arrange servicing of all old-stack positions, orders, protections, balances, claims, and LP obligations before coordinated consumer cutover.
+
+## Trading activation
+
+- [Fresh six-feed Pyth update](https://sepolia.arbiscan.io/tx/0xff75a9f79d133a7f607893a5d9e47cf5907ae723e5ebbf65d9794c2fd24b7bbc) succeeded at block 307410268.
+  Live OrderExecution and PoolReconcile baskets passed validation; mark price was `99322282` (8 decimals),
+  with a two-second-old publish time and no frozen or close-only policy.
+- [Trading activation](https://sepolia.arbiscan.io/tx/0x9fa11e16aa2d88641aaad71c0db0ddcdc9671b1b688938f91af58ea7470d2d89) succeeded at block 307410278.
+- The full seeded-stack verifier passed at block 307409695, and the full active-state
+  verifier passed at block 307410350. An isolated copy changed only the two seed constants
+  to `10000` raw USDC and the script name. All graph, economics, governance, seed, guardian, and phase checks
+  were retained; repository defaults remain 1 USDC. See `activation-evidence.json` for evidence and verifier hashes.
+- The risk-increase lifecycle gate is open; HousePool, RouterAdmin, and LP-settlement pause flags are clear.
+  The guardian and 0.01-USDC seed in each tranche are unchanged. Oracle freshness is a point-in-time check;
+  subsequent trading and settlement operations must supply updates under their normal oracle policies.
 
 ## Contract addresses
 
@@ -102,7 +115,7 @@ claims, and LP obligations before coordinated consumer cutover.
 
 The release bundle contains **77 ABIs**, ABI hashes, build settings, the live deployment manifest, creation-input
 comparisons and constructor arguments, runtime and explorer verification evidence, validation results, transaction receipts,
-and file checksums. Trading activation and consumer cutover remain pending.
+and file checksums. Consumer cutover remains pending.
 
 [Deployment runbook](https://github.com/Plether-Fi/plether-core/blob/ffe45937b7f38133133ad292c5435828bf99357d/packages/perps/DEPLOYMENT.md) ·
 [Changes since v1.2.2](https://github.com/Plether-Fi/plether-core/compare/v1.2.2...v1.2.3)
