@@ -18,8 +18,12 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 350_000e18, 35_000e6, 1e8, false);
 
+        // Exhaust free settlement so the live action charge reaches exactly the intended order margin.
+        uint256 freeSettlement = clearinghouse.getFreeBuyingPowerUsdc(aliceAccount);
+        vm.prank(aliceAccount);
+        clearinghouse.withdraw(aliceAccount, freeSettlement);
         vm.prank(address(engine));
-        clearinghouse.consumeAccountOrderReservations(aliceAccount, 35_000e6);
+        clearinghouse.consumeActionCharge(aliceAccount, 35_000e6, 0, 35_000e6, address(engine), address(0), 0);
 
         vm.prank(address(engine));
         router.syncMarginQueue(aliceAccount);

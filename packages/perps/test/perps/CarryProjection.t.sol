@@ -25,7 +25,7 @@ contract CarryProjectionTest is BasePerpTest {
         _fundTrader(OTHER, 10_000e6);
         _open(OTHER, shortSide ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT, 100_000e18, 5000e6, 1e8);
         vm.startPrank(address(engine));
-        clearinghouse.lockCommittedOrderMargin(ACCOUNT, 200e6);
+        clearinghouse.reserveCommittedOrderMargin(ACCOUNT, type(uint64).max, 200e6);
         clearinghouse.lockReservedSettlement(ACCOUNT, 100e6);
         clearinghouse.lockVpiRebateReserve(ACCOUNT, 50e6);
         vm.stopPrank();

@@ -1,5 +1,18 @@
 # Plether Perps
 
+## Next release: clearinghouse ABI cleanup
+
+The next deployment removes unused privileged clearinghouse entrypoints: `lockCommittedOrderMargin`,
+`unlockCommittedOrderMargin`, `promoteOrderReservationToPnlPledge`, `consumeOrderReservation`,
+`consumeOrderReservationsById`, `consumeAccountOrderReservations`, `releaseOrderReservation`,
+`releaseOrderReservationIfActive`, `lockActionReserve`, `releaseActionReserve`, `consumeActionReserve`,
+`lockLiquidationReserve`, `reclassifyLiquidationReserveToPnlPledge`, `creditSettlementAndLockMargin`, and
+`consumeCloseLoss`. Regenerate bindings against the next release ABI; these selectors have no compatibility wrappers.
+The maintained action-charge settlement path now rejects an active reservation belonging to another account.
+This is defensive hardening and bytecode cleanup. Existing immutable deployments and historical release artifacts
+are unchanged.
+
+
 Plether Perps is a bounded, delayed-order perpetuals engine for synthetic USD-directional exposure.
 
 This package depends only on `shared` and third-party libraries. Build it independently from the repository root with

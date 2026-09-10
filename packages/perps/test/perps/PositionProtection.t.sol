@@ -1650,7 +1650,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         uint256 branch = vm.snapshotState();
         vm.prank(address(router));
-        clearinghouse.releaseOrderReservationIfActive(parentOrderId);
+        clearinghouse.releaseOrderReservationForTerminalCleanup(parentOrderId);
         assertEq(
             engineLens.previewOpenRevertCode(
                 ALICE, CfdTypes.Side.LONG, size, marginUsdc, MARK_PRICE, uint64(block.timestamp)
