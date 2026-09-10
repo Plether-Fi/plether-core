@@ -1,0 +1,96 @@
+{
+  "release": "v1.2.3",
+  "chainId": 421614,
+  "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+  "recordedAt": "2026-09-10T11:36:41.219254+00:00",
+  "verificationBlock": 307404339,
+  "verificationBlockHash": "0xdf0da24858489f458494f21f06a6f37449bedac95acd4c27da77d0ab97b6f1a4",
+  "passed": true,
+  "seedAmountUsdcPerTranche": "0.01",
+  "seedAmountRawPerTranche": 10000,
+  "seedReceiver": "0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+  "housePool": "0x87622630fb1941fe02731d4a9fcdec0388efd78b",
+  "mockUsdc": "0xf7cbfcc74f2d9eb6fa7dc11941b3bef9fd7f8eb8",
+  "method": "HousePool.initializeSeedPosition; Junior then Senior",
+  "note": "User explicitly requested 0.01 USDC per tranche instead of the standard bootstrap script\u2019s fixed 1 USDC. A dedicated fork simulation and independent on-chain state checks validated this operation. The standard seeded-phase verifier was not used because it requires 1 USDC principal per tranche and a nonzero guardian. Trading remains inactive and the guardian remains disabled.",
+  "scriptSha256": "c6f45336943415ad718524d230d98d8adbae09c803e1d035b60b9e961b75f69f",
+  "state": {
+    "seniorInitialized": true,
+    "juniorInitialized": true,
+    "seniorPrincipalRaw": 10000,
+    "juniorPrincipalRaw": 10000,
+    "accountedAssetsRaw": 20000,
+    "poolTokenBalanceRaw": 20000,
+    "remainingAllowanceRaw": 0,
+    "tradingActive": false,
+    "guardian": "0x0000000000000000000000000000000000000000",
+    "vaults": {
+      "seniorVault": {
+        "address": "0x970ac2cfe9a19d4318806812719a5c291711b33a",
+        "receiver": "0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+        "seedShareFloor": "10000000",
+        "receiverShares": "10000000",
+        "totalSupply": "10000000"
+      },
+      "juniorVault": {
+        "address": "0x2075a46921fc5fbcf5fca808e3a2c66c6f812d79",
+        "receiver": "0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+        "seedShareFloor": "10000000",
+        "receiverShares": "10000000",
+        "totalSupply": "10000000"
+      }
+    }
+  },
+  "transactions": [
+    {
+      "hash": "0x9f1249d0ac0997e1d60d1252d9c057ca79b44a3eafd5790659d2981ec08a0665",
+      "function": "mint(address,uint256)",
+      "arguments": [
+        "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+        "20000"
+      ],
+      "blockNumber": 307404147,
+      "status": 1,
+      "gasUsed": 68165,
+      "explorerUrl": "https://sepolia.arbiscan.io/tx/0x9f1249d0ac0997e1d60d1252d9c057ca79b44a3eafd5790659d2981ec08a0665"
+    },
+    {
+      "hash": "0x551cf77ad97e23038868a90d6adc12a269b9fb741ff6146f383445212a7610ab",
+      "function": "approve(address,uint256)",
+      "arguments": [
+        "0x87622630fb1941fE02731d4a9FCDEc0388Efd78b",
+        "20000"
+      ],
+      "blockNumber": 307404150,
+      "status": 1,
+      "gasUsed": 46025,
+      "explorerUrl": "https://sepolia.arbiscan.io/tx/0x551cf77ad97e23038868a90d6adc12a269b9fb741ff6146f383445212a7610ab"
+    },
+    {
+      "hash": "0x4a6eeb9061b85796ac20f17b7c75df59ddf48336f2099d561550f20439a16c69",
+      "function": "initializeSeedPosition(bool,uint256,address)",
+      "arguments": [
+        "false",
+        "10000",
+        "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B"
+      ],
+      "blockNumber": 307404152,
+      "status": 1,
+      "gasUsed": 438673,
+      "explorerUrl": "https://sepolia.arbiscan.io/tx/0x4a6eeb9061b85796ac20f17b7c75df59ddf48336f2099d561550f20439a16c69"
+    },
+    {
+      "hash": "0xeeb93262b88831af34b200f5a5f4509aa4280a23d266964ac329dc9ec6c278b6",
+      "function": "initializeSeedPosition(bool,uint256,address)",
+      "arguments": [
+        "true",
+        "10000",
+        "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B"
+      ],
+      "blockNumber": 307404154,
+      "status": 1,
+      "gasUsed": 439076,
+      "explorerUrl": "https://sepolia.arbiscan.io/tx/0xeeb93262b88831af34b200f5a5f4509aa4280a23d266964ac329dc9ec6c278b6"
+    }
+  ]
+}

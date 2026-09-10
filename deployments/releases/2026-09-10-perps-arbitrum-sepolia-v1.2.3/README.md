@@ -1,7 +1,9 @@
 # v1.2.3 — Arbitrum Sepolia perps deployment
 
-All **27 contracts are deployed and source-verified on Arbiscan**. Trading is inactive; both tranches are unseeded and
-the emergency guardian is disabled. The active deployment record and existing deployments are unchanged.
+All **27 contracts are deployed and source-verified on Arbiscan**. Both tranches were subsequently seeded with **0.01 mock USDC each** at blocks 307404152–307404154.
+Trading remains inactive and the emergency guardian is disabled. The active deployment record is unchanged.
+The original manifest, bundle, and deployment validation retain their pre-seeding snapshots;
+`seeding-evidence.json` records the subsequent operation and independent checks at block 307404339.
 
 ## Changes since v1.2.2
 
@@ -34,10 +36,19 @@ A protection trigger queues a close; it does not guarantee execution time, price
   explicitly in `source-verification.json`.
 - Deployed-phase verification and runtime checks passed at block 307397477.
 
-Index this stack from block `307397196`. Before activating, configure the intended nonzero guardian
-and seed receivers, seed exactly `1000000` raw mock USDC per tranche with `ACTIVATE_TRADING=false`, verify the seeded
-phase, activate, and verify the active phase. Recheck live oracle/pause state and arrange servicing of all old-stack
-positions, orders, protections, balances, claims, and LP obligations before coordinated consumer cutover.
+Index this stack from block `307397196`. Both seed receivers are the deployment owner, `0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b`.
+
+- [Junior seed: 0.01 USDC](https://sepolia.arbiscan.io/tx/0x4a6eeb9061b85796ac20f17b7c75df59ddf48336f2099d561550f20439a16c69).
+- [Senior seed: 0.01 USDC](https://sepolia.arbiscan.io/tx/0xeeb93262b88831af34b200f5a5f4509aa4280a23d266964ac329dc9ec6c278b6).
+- All four funding/seeding transactions succeeded. Each tranche has `10000` raw USDC principal and `10000000`
+  permanent seed shares. Pool token balance and accounted assets are `20000` raw USDC, with zero remaining approval.
+- This explicitly requested amount differs from the standard bootstrap script and seeded verifier, which require
+  1 USDC per tranche. A dedicated fork simulation and independent on-chain checks validated the 0.01-USDC operation;
+  the standard seeded-phase verifier was not used. Do not attempt to seed these initialized tranches again.
+
+Before activation, configure the intended guardian and adapt operational validation to the recorded seed amounts.
+Recheck live oracle/pause state and arrange servicing of all old-stack positions, orders, protections, balances,
+claims, and LP obligations before coordinated consumer cutover.
 
 ## Contract addresses
 
@@ -88,7 +99,7 @@ positions, orders, protections, balances, claims, and LP obligations before coor
 
 The release bundle contains **77 ABIs**, ABI hashes, build settings, the live deployment manifest, creation-input
 comparisons and constructor arguments, runtime and explorer verification evidence, validation results, transaction receipts,
-and file checksums. Guardian configuration, seeding, trading activation, and consumer cutover remain pending.
+and file checksums. Guardian configuration, trading activation, and consumer cutover remain pending.
 
 [Deployment runbook](https://github.com/Plether-Fi/plether-core/blob/ffe45937b7f38133133ad292c5435828bf99357d/packages/perps/DEPLOYMENT.md) ·
 [Changes since v1.2.2](https://github.com/Plether-Fi/plether-core/compare/v1.2.2...v1.2.3)
