@@ -5,8 +5,9 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.35-363636?logo=solidity)](https://docs.soliditylang.org/)
 
-Plether is a Solidity monorepo for on-chain products that provide bounded, dollar-directional exposure. Spot, options, and
-perpetuals are peer Foundry packages under `packages/`; product-neutral contracts and test utilities live in `shared`.
+Plether is a Solidity monorepo for on-chain products that provide bounded, dollar-directional exposure. Spot, options,
+perpetuals, and the Sepolia perps paymaster are peer Foundry packages under `packages/`; product-neutral contracts and
+test utilities live in `shared`.
 
 The repository root is deliberately a narrow integration, deployment, and fork-test workspace. Production contracts and
 their unit, fuzz, invariant, and security tests are owned by their package.
@@ -19,6 +20,8 @@ their unit, fuzz, invariant, and security tests are owned by their package.
 | [`spot`](packages/spot/README.md) | Paired plDXY synthetics, staking, leverage routers, yield adapters, Spot oracles, and INVAR | `shared` |
 | [`options`](packages/options/README.md) | Fully collateralized covered calls, margin and settlement, option tokens, and DOV vaults | `shared`, Spot API |
 | [`perps`](packages/perps/README.md) | Delayed-order bounded perpetuals, margin clearing, a tranched LP pool, execution routing, and lenses | `shared` |
+| [`perps-aa`](packages/perps-aa/README.md) | ERC-4337 v0.8 verifying paymaster and deployment tooling for sponsored perps calls | None |
+| [`perps-aa-client`](packages/perps-aa-client/README.md) | Vendor-neutral action builders, sponsorship envelope validation, and UserOperation orchestration | None |
 
 All package imports use stable aliases:
 
@@ -27,6 +30,7 @@ All package imports use stable aliases:
 @plether/spot/    -> packages/spot/src/
 @plether/options/ -> packages/options/src/
 @plether/perps/   -> packages/perps/src/
+@plether/perps-aa/ -> packages/perps-aa/src/
 ```
 
 Cross-package relative imports are not allowed. Run `make check-boundaries` to validate the dependency rules.
@@ -38,7 +42,9 @@ packages/
 ├── shared/       # Product-neutral production code and test support
 ├── spot/         # Spot production code and package-owned tests
 ├── options/      # Options production code and package-owned tests
-└── perps/        # Perps production code and package-owned tests
+├── perps/        # Perps production code and package-owned tests
+├── perps-aa/     # Verifying paymaster, deployment script, and tests
+└── perps-aa-client/ # Frontend account-abstraction primitives
 integration/src/  # Minimal root Foundry source directory
 test/             # Cross-package, deployment-script, and RPC fork tests
 script/           # Deployment and operational scripts
@@ -57,14 +63,17 @@ CI uses Foundry v1.5.1 and Solidity 0.8.35. Clone submodules before building:
 git submodule update --init --recursive
 make build-packages
 make test
+npm ci --prefix packages/perps-aa-client
+npm test --prefix packages/perps-aa-client
 ```
 
 ### Build
 
 ```bash
-make build-packages                 # Build shared, spot, options, and perps independently
+make build-packages                 # Build every Solidity package independently
 make build-spot                     # Build one package through Make
 forge build --root packages/perps   # Build one package directly
+npm run build --prefix packages/perps-aa-client
 forge build                         # Build the root integration/script workspace
 ```
 
@@ -72,10 +81,11 @@ forge build                         # Build the root integration/script workspac
 
 ```bash
 make test                           # Run all product packages, then root integration tests
-make test-packages                  # Run spot, options, and perps package tests
+make test-packages                  # Run every package-owned Solidity test suite
 make test-options                   # Run one package
 make test-integration               # Run root tests, excluding RPC-backed fork tests
 forge test --root packages/perps    # Run one package directly
+npm test --prefix packages/perps-aa-client
 ```
 
 The shared package currently has no standalone test suite; its code is exercised by the product packages that consume it.
@@ -108,8 +118,9 @@ The real Pyth update test needs an additional Hermes fixture; see the [integrati
 
 CI keeps package failures isolated:
 
-- `Package (shared|spot|options|perps)` builds each package independently and runs its owned suites.
-- `Slither (shared|spot|options|perps)` analyzes each package as a separate job and uploads package-scoped SARIF.
+- `Package (shared|spot|options|perps-aa)` and the dedicated perps job build each Solidity package independently.
+- `TypeScript (perps-aa-client)` runs the client tests, typecheck, and build.
+- `Slither (shared|spot|options|perps|perps-aa)` analyzes each package and uploads package-scoped SARIF.
 - Spot, options, and perps coverage run as separate jobs with package-scoped LCOV output.
 - The root `build` job checks formatting and dependency boundaries, builds the integration workspace, and runs root tests.
 - Matrix jobs use `fail-fast: false`, so one package failure does not cancel results for the others.
@@ -128,6 +139,8 @@ Start with the package that owns the product:
 - [Perps emergency response and circuit breakers](packages/perps/EMERGENCY_RESPONSE_GUIDE.md)
 - [Perps bounded-credit white paper](packages/perps/WHITEPAPER.md)
 - [Perps bounded-credit white paper (PDF)](output/pdf/plether-perps-bounded-credit-whitepaper.pdf)
+- [Perps verifying paymaster](packages/perps-aa/README.md)
+- [Perps account-abstraction client](packages/perps-aa-client/README.md)
 - [Integration and fork tests](test/README.md)
 
 Generate NatSpec documentation for a package with:
@@ -144,6 +157,7 @@ Deployment and operational scripts live in [`script/`](script/). Product-specifi
 
 - [Spot operations and deployment guide](packages/spot/OPERATIONS.md)
 - [Perps deployment guide](packages/perps/DEPLOYMENT.md)
+- [Arbitrum Sepolia paymaster deployment](packages/perps-aa/README.md#deployment)
 - [Options package architecture and operational model](packages/options/README.md)
 
 Always simulate the exact script and deployment scope before broadcasting.
@@ -157,6 +171,7 @@ Security assumptions are product-specific:
 - [Perps security model](packages/perps/SECURITY.md)
 - [Perps pre-audit guide](packages/perps/PRE_AUDIT_GUIDE.md)
 - [Perps emergency response and circuit breakers](packages/perps/EMERGENCY_RESPONSE_GUIDE.md)
+- [Perps gas sponsorship security model](packages/perps-aa/SECURITY.md)
 
 Some components have undergone external security review, but audit coverage is partial and release-specific. Review the
 security model, audit reports, deployment parameters, and exact bytecode before production use.

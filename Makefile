@@ -1,5 +1,5 @@
-PACKAGES := shared spot options perps
-TEST_PACKAGES := spot options perps
+PACKAGES := shared spot options perps perps-aa
+TEST_PACKAGES := spot options perps perps-aa
 COVERAGE_PACKAGES := spot options perps
 
 .PHONY: build build-packages check-boundaries test test-packages test-integration fmt-check \

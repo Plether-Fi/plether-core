@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "release": {
+    "date": null,
+    "sourceCommit": null,
+    "forgeVersion": "1.5.1-stable",
+    "solcVersion": "0.8.35",
+    "deployer": null
+  },
+  "paymaster": {
+    "artifact": "packages/perps-aa/src/PletherVerifyingPaymaster.sol:PletherVerifyingPaymaster",
+    "address": null,
+    "creationCodeHash": null,
+    "runtimeCodeHash": null,
+    "deploymentTransaction": null,
+    "deploymentBlock": null,
+    "verified": false,
+    "paused": true,
+    "maxSponsoredCostWei": null
+  },
+  "profile": {
+    "entryPoint": "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108",
+    "entryPointRuntimeCodeHash": "0xe3f30f78ae55058acdefea00952c8e44f2263215cf720fe1b27b6f148add0278",
+    "policyId": "0x8dd77324b94da492342191f762a32cdf99e828a7f24d77c8ed5ace90cf4f5ae3",
+    "simpleAccountFactory": "0x13E9ed32155810FDbd067D4522C492D6f68E5944",
+    "simpleAccountFactoryRuntimeCodeHash": "0xa2e635152a61e180383c7afc045620b7461ef6f43ba27d592262513106b991b7",
+    "simpleAccountImplementation": "0x28426d752372D68d34340bd94390950DcE3C9ec3",
+    "simpleAccountImplementationRuntimeCodeHash": "0x689a90eff03926a12aedad2fc6d4fdbcbdd9ffac86e7d0d70ce6355961305c74",
+    "simpleAccountProxyRuntimeCodeHash": "0x41ee894da413cc99e8dec0a1784470eceb736845ad1591e06ff0ecdf0aca26c9",
+    "maximumValiditySeconds": 600,
+    "paymasterVerificationGasLimit": 100000,
+    "paymasterPostOpGasLimit": 0,
+    "nonceKey": 0,
+    "allowedOuterSelectors": [
+      "0xb61d27f6",
+      "0x34fcd5be"
+    ]
+  },
+  "governance": {
+    "deployedOwner": null,
+    "pendingOwner": null,
+    "acceptedOwner": null,
+    "safeThreshold": null,
+    "safeOwners": [],
+    "sponsorSigner": null
+  },
+  "funding": {
+    "entryPointDepositWei": "0",
+    "entryPointStakeWei": "0",
+    "unstakeDelaySeconds": 0,
+    "depositTransaction": null,
+    "stakeTransaction": null
+  },
+  "activation": {
+    "configurationReadbackPassed": false,
+    "signerAttestationPassed": false,
+    "pauseDrillPassed": false,
+    "rotationDrillPassed": false,
+    "unpauseTransaction": null,
+    "canaryEnabledAt": null
+  }
+}

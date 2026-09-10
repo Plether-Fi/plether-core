@@ -10,6 +10,7 @@ remappings = [
     "@plether/spot/=packages/spot/src/",
     "@plether/options/=packages/options/src/",
     "@plether/perps/=packages/perps/src/",
+    "@plether/perps-aa/=packages/perps-aa/src/",
     "@plether/test-utils/=packages/shared/test-support/",
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "@morpho-blue/=lib/morpho-blue/src/",

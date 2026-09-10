@@ -21,11 +21,13 @@ check_forbidden shared 'spot|options|perps'
 check_forbidden spot 'options|perps'
 check_forbidden options 'perps'
 check_forbidden perps 'spot|options'
+check_forbidden perps-aa 'shared|spot|options|perps'
 
 check_forbidden shared 'spot|options|perps' packages/shared/test-support 'shared test support'
 check_forbidden spot 'options|perps' packages/spot/test 'spot tests'
 check_forbidden options 'perps' packages/options/test 'options tests'
 check_forbidden perps 'spot|options' packages/perps/test 'perps tests'
+check_forbidden perps-aa 'shared|spot|options|perps' packages/perps-aa/test 'perps-aa tests'
 
 if matches=$(
     rg -n '@plether/spot/' packages/options/src -g '*.sol' \
