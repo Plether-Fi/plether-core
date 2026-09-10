@@ -1101,7 +1101,7 @@ abstract contract BasePerpTest is Test {
         index = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),
-            block.timestamp,
+            vm.getBlockTimestamp(),
             engine.sideBorrowBaseUsdc(sideIndex),
             pool.totalAssets(),
             baseCarryBps

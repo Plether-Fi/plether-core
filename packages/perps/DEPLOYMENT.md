@@ -28,11 +28,19 @@ unchanged. See [Reservation ledger](RESERVATION_LEDGER.md) for the complete owne
 - Preflight and no-broadcast dry run: `scripts/prepare-perps-arbitrum-sepolia-release.sh`
 - Environment template: `.env.arbitrum-sepolia-perps.example`
 - Manifest template: `deployments/arbitrum-sepolia-perps.template.json`
-- Current preparation record: `deployments/releases/2026-09-04-perps-arbitrum-sepolia/README.md`
-- Latest deployment (inactive, awaiting bootstrap): `deployments/releases/2026-09-05-perps-arbitrum-sepolia/README.md`
+- Current preparation record: `deployments/releases/2026-09-10-perps-arbitrum-sepolia/README.md`
+- Latest recorded deployment (inactive, awaiting bootstrap): `deployments/releases/2026-09-06-perps-arbitrum-sepolia/README.md`
 - Consumer ABI and build-evidence exporter: `scripts/export-perps-release.py`
 
 The deploy script handles contract creation and one-time wiring.
+
+The manifest and ABI export include constructor-created contracts. Record `CfdEngineProtocolLens` from
+`HousePool.ENGINE_PROTOCOL_LENS()` and verify its Engine binding. `CfdEngineLens` now creates the stateless
+`CfdEngineOpenQuoter` helper internally; recover its address from the lens creation trace and verify the deployed
+runtime against the release build. Its immutable address is internal and has no public getter. Consumers call
+`CfdEngineLens.quoteMaxOpen(...)`, not the helper. Include the helper's embedded creation code when checking the
+lens's full creation input against EIP-3860. With these children, the current stack contains 27 deployed contracts;
+internal creations do not add deployer transactions or change the Router-bound three-`CREATE` sequence.
 
 The bootstrap script handles operator actions after deploy:
 

@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-10T09:47:04.683418+00:00",
+  "productionSourceCommit": "cc694e6d44898fd388bede733eba9bca8a52ab10",
+  "status": "prepared; deployment gates outstanding",
+  "productionSourceModified": false,
+  "testFixturePatch": {
+    "path": "artifacts/perps-release-2026-09-10/test-fixture.patch",
+    "sha256": "27795a9b141f91dd8a592ee8c1f93775898ea6458e48f27b469b43c7d3af44ab",
+    "note": "Uncommitted test-only correction to warp clock reads and the expected-carry helper; merge and rerun CI/deep tests before selecting the final release SHA."
+  },
+  "localChecks": {
+    "productionBuild": "passed",
+    "abiExport": "passed",
+    "abiCount": 76,
+    "contractInventoryCount": 27,
+    "runtimeAndConstructorInclusiveSizeChecks": "passed (offline measurement)",
+    "formatting": "passed",
+    "packageBoundaries": "passed",
+    "diffWhitespace": "passed",
+    "tests": [
+      {
+        "command": "forge test --offline --no-match-path 'test/fork/*'",
+        "viaIR": true,
+        "suites": 6,
+        "passed": 40,
+        "failed": 0,
+        "skipped": 0,
+        "log": "artifacts/perps-release-2026-09-10/integration-tests.log",
+        "logSha256": "e62ac6318b3f9f652e92676893ada83582751164f68d4c1fda30bd3d524a6335"
+      },
+      {
+        "command": "FOUNDRY_VIA_IR=false FOUNDRY_OUT=artifacts/perps-release-2026-09-10/out-fast FOUNDRY_CACHE_PATH=artifacts/perps-release-2026-09-10/cache-fast forge test --offline --root packages/perps --match-contract 'MarketCalendarLibTest|PerpOracleBoundaryInvariantTest|CfdEngineLensQuoteTest|ClearinghouseReservationOwnershipTest|MarginClearinghouseReservationReleaseTest|MarginFirstCarryTest|CarryCreditCheckpointTest|CarryProjectionTest' --no-match-test 'RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|test_Runtime_'",
+        "viaIR": false,
+        "suites": 8,
+        "passed": 66,
+        "failed": 0,
+        "skipped": 0,
+        "log": "artifacts/perps-release-2026-09-10/focused-tests.log",
+        "logSha256": "5f75265382e980bc4608d29009710c0506ffa44e0a96ff30258c91445fff7952"
+      },
+      {
+        "command": "FOUNDRY_TEST=packages/perps/test forge test --offline --match-path 'packages/perps/test/perps/AuditFixRegression.t.sol' -vvvv",
+        "viaIR": true,
+        "suites": 2,
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "log": "artifacts/perps-release-2026-09-10/carry-regression-after.log",
+        "logSha256": "29d26040a6e5c34f3b597a10e28559a14f09711d1291790287cec9892e2fb829"
+      },
+      {
+        "command": "FOUNDRY_VIA_IR=false FOUNDRY_OUT=artifacts/perps-release-2026-09-10/out-fast FOUNDRY_CACHE_PATH=artifacts/perps-release-2026-09-10/cache-fast forge test --offline --root packages/perps --match-contract 'AuditFixRegressionTest|Carry|CfdEngineTest|MarginClearinghouseTest|ClearinghouseReservationOwnershipTest|CfdEngineLensQuoteTest|MarketCalendarLibTest|PerpOracleBoundaryInvariantTest|MarginClearinghouseReservationReleaseTest' --no-match-test 'RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|test_Runtime_'",
+        "viaIR": false,
+        "suites": 17,
+        "passed": 299,
+        "failed": 0,
+        "skipped": 0,
+        "log": "artifacts/perps-release-2026-09-10/fixture-regressions.log",
+        "logSha256": "019c76b21d9c2e6f916cf84f0d399d3f3f69aa4a8a4f2873822f0bd0fbfce47c"
+      }
+    ]
+  },
+  "github": {
+    "ci": {
+      "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34460046379",
+      "sourceCommit": "cc694e6d44898fd388bede733eba9bca8a52ab10",
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "Package (perps)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Coverage (perps)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Coverage (core protocol)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (shared)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Coverage (options)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (spot)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (perps)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (shared)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (spot)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (options)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (options)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "build",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    "deep-tests": {
+      "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34460046119",
+      "sourceCommit": "cc694e6d44898fd388bede733eba9bca8a52ab10",
+      "status": "in_progress",
+      "conclusion": null,
+      "jobs": [
+        {
+          "name": "Perps deep shard 4/4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps deep shard 2/4",
+          "status": "completed",
+          "conclusion": "failure"
+        },
+        {
+          "name": "Perps deep shard 3/4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps deep shard 1/4",
+          "status": "in_progress",
+          "conclusion": null
+        }
+      ],
+      "releaseGatePassed": false,
+      "failure": "Shard 2: test_CarryCheckpointsChargeIndexedBorrowBaseAcrossPriceSwing; reproduced on the baseline and corrected locally with cheatcode timestamp reads."
+    }
+  },
+  "remainingGates": [
+    "Merge and review the preparation and fixture correction; pin the final clean origin/master SHA.",
+    "Pass CI and every deep-test shard on the final SHA, regenerate the candidate and ABI evidence.",
+    "Supply release RPC, deployer key, authenticated Hermes API key, and explicit operator/seed inputs.",
+    "Pass authenticated Pyth preflight and no-broadcast RPC simulation; match full creation inputs and capture gas estimates.",
+    "Review old-stack obligations and coordinated consumer cutover.",
+    "Deployment, source verification, seeding, activation, and all on-chain phase verifiers."
+  ]
+}

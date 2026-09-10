@@ -30,10 +30,12 @@
       "address": null,
       "runtimeCodeHash": null
     },
+    "cfdEngineProtocolLens": { "address": null, "runtimeCodeHash": null },
     "seniorVault": { "address": null, "runtimeCodeHash": null },
     "juniorVault": { "address": null, "runtimeCodeHash": null },
     "cfdEngineAccountLens": { "address": null, "runtimeCodeHash": null },
     "cfdEngineLens": { "address": null, "runtimeCodeHash": null },
+    "cfdEngineOpenQuoter": { "address": null, "runtimeCodeHash": null },
     "cfdOrderPolicyEvaluator": { "address": null, "runtimeCodeHash": null },
     "orderRouterV2ExecutionSidecar": { "address": null, "runtimeCodeHash": null },
     "pletherOracle": {

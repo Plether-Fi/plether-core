@@ -362,9 +362,10 @@ contract AuditFixRegressionTest is BasePerpTest {
         _open(checkpointed, CfdTypes.Side.LONG, size, margin, 1e8);
         _open(lazy, CfdTypes.Side.LONG, size, margin, 1e8);
 
-        vm.warp(block.timestamp + 10 days);
+        // Cheatcode time reads prevent via-IR from reusing a timestamp across the two warps.
+        vm.warp(vm.getBlockTimestamp() + 10 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(150_000_000, uint64(vm.getBlockTimestamp()));
 
         uint256 expectedFirst = _expectedIndexedCarryUsdc(checkpointed);
         uint256 poolBeforeCheckpoint = pool.totalAssets();
@@ -373,15 +374,16 @@ contract AuditFixRegressionTest is BasePerpTest {
         assertGt(checkpointedFirstCarry, 0, "first interval should accrue carry");
         assertEq(checkpointedFirstCarry, expectedFirst);
 
-        vm.warp(block.timestamp + 10 days);
+        vm.warp(vm.getBlockTimestamp() + 10 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(50_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(50_000_000, uint64(vm.getBlockTimestamp()));
 
         uint256 expectedSecond = _expectedIndexedCarryUsdc(checkpointed);
         uint256 poolBeforeSecondCheckpoint = pool.totalAssets();
         _fundTrader(checkpointed, 100e6);
         uint256 checkpointedSecondCarry = pool.totalAssets() - poolBeforeSecondCheckpoint;
 
+        assertGt(checkpointedSecondCarry, 0, "second interval should accrue carry");
         assertEq(checkpointedSecondCarry, expectedSecond);
         uint256 expectedLazy = _expectedIndexedCarryUsdc(lazy);
         uint256 poolBeforeLazyCheckpoint = pool.totalAssets();
