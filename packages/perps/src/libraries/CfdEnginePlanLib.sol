@@ -318,7 +318,11 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        if (_applyPendingCarryRealizationToOpenSnapshot(effectiveSnap, delta.pendingCarryUsdc)) {
+        if (
+            effectiveSnap.position.size > 0
+                && _applyPendingCarryRealizationToSnapshot(effectiveSnap, delta.pendingCarryUsdc)
+                    != delta.pendingCarryUsdc
+        ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
             return delta;
         }
@@ -481,43 +485,53 @@ library CfdEnginePlanLib {
             openCostPlan.resultingPositionMarginUsdc - delta.vpiRebateReserveFromPledgeUsdc - reserveIncreaseUsdc;
     }
 
-    /// @notice Projects collectible pending carry into a memory snapshot before open validation.
-    /// @dev Does nothing for zero carry or a zero-size position. Carry is collected exclusively from free settlement;
-    ///      PnL pledge and all reserve buckets remain protected. Any uncovered amount returns `true` without mutation.
-    ///      On full coverage, the helper debits settlement, credits pool assets and cash by the full carry amount, and
-    ///      rebuilds account buckets without changing locked classifications. It does not clear carry fields because this
-    ///      is only a projection. Snapshot consistency must ensure settlement, position-margin, canonical-margin, and
-    ///      aggregate-side subtractions are all valid.
-    /// @param snap Memory snapshot to mutate in place.
-    /// @param pendingCarryUsdc Carry requested for realization.
-    /// @return hasShortfall Whether eligible free settlement plus active margin cannot cover all carry.
-    function _applyPendingCarryRealizationToOpenSnapshot(
-        CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 pendingCarryUsdc
-    ) private pure returns (bool hasShortfall) {
-        if (pendingCarryUsdc == 0 || snap.position.size == 0) {
-            return false;
-        }
-
-        MarginClearinghouseAccountingLib.SettlementConsumption memory consumption =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(snap.accountBuckets, pendingCarryUsdc);
-        if (consumption.uncoveredUsdc > 0) {
+    /// @notice Projects the same size-independent carry collection used by open planning, in place.
+    /// @dev Quote bounds must use this projected depth and pledge. A false result rules out every open size.
+    ///      Callers needing the original snapshot must copy it before calling this function.
+    /// @param snap Canonical snapshot to update with projected carry collection.
+    /// @return fullyCollectible Whether all pending carry can be collected, or there is no live position.
+    function projectOpenCarry(
+        CfdEnginePlanTypes.RawSnapshot memory snap
+    ) internal pure returns (bool fullyCollectible) {
+        if (snap.position.size == 0) {
             return true;
         }
+        uint256 pending = _pendingCarryUsdc(snap);
+        return _applyPendingCarryRealizationToSnapshot(snap, pending) == pending;
+    }
 
-        uint256 settlementBalanceUsdc = snap.accountBuckets.settlementBalanceUsdc - consumption.totalConsumedUsdc;
-        snap.poolAssetsUsdc += pendingCarryUsdc;
-        snap.poolCashUsdc += pendingCarryUsdc;
-
-        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
-            settlementBalanceUsdc,
-            snap.lockedBuckets.positionMarginUsdc,
-            snap.liquidationReserveUsdc,
-            snap.lockedBuckets.committedOrderMarginUsdc,
-            snap.lockedBuckets.reservedSettlementUsdc
-        );
-
-        return false;
+    /// @notice Projects margin-first carry collection before trade validation and terminal settlement.
+    /// @dev Mutates the existing local snapshot in place, including custody, pledge, side margin, borrow base, and
+    ///      pool depth. Uncovered carry remains available for existing terminal recovery/waiver rules.
+    /// @param snap Canonical, internally consistent snapshot to mutate.
+    /// @param pendingCarryUsdc Carry requested for realization.
+    /// @return realizedCarryUsdc Carry covered by active position margin and free settlement.
+    function _applyPendingCarryRealizationToSnapshot(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 pendingCarryUsdc
+    ) private pure returns (uint256 realizedCarryUsdc) {
+        if (pendingCarryUsdc == 0 || snap.position.size == 0) {
+            return 0;
+        }
+        (
+            MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
+            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+        ) = MarginClearinghouseAccountingLib.projectCarryLoss(snap.accountBuckets, pendingCarryUsdc);
+        realizedCarryUsdc = consumption.totalConsumedUsdc;
+        snap.accountBuckets = afterBuckets;
+        snap.position.margin = afterBuckets.activePositionMarginUsdc;
+        snap.lockedBuckets.positionMarginUsdc = afterBuckets.activePositionMarginUsdc;
+        snap.lockedBuckets.totalLockedMarginUsdc = afterBuckets.totalLockedMarginUsdc;
+        CfdEnginePlanTypes.SideSnapshot memory selected = _selectedSide(snap, snap.position.side);
+        selected.totalMargin -= consumption.activeMarginConsumedUsdc;
+        uint256 borrowBaseAfterUsdc =
+            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin);
+        selected.borrowBaseUsdc = selected.borrowBaseUsdc - snap.positionBorrowBaseUsdc + borrowBaseAfterUsdc;
+        snap.positionBorrowBaseUsdc = borrowBaseAfterUsdc;
+        snap.positionLastCarryIndex = selected.carryIndex;
+        snap.unsettledCarryUsdc = consumption.uncoveredUsdc;
+        snap.poolAssetsUsdc += realizedCarryUsdc;
+        snap.poolCashUsdc += realizedCarryUsdc;
     }
 
     /// @notice Builds risk state for the position projected by a successful open-cost plan.
@@ -636,6 +650,7 @@ library CfdEnginePlanLib {
         delta.price = price;
         publishTime;
         delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
+        delta.realizedCarryUsdc = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryUsdc);
 
         CfdTypes.Position memory pos = snap.position;
         delta.side = pos.side;
@@ -798,8 +813,8 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.CloseDelta memory delta,
         CloseAccountingLib.CloseState memory cs
     ) private pure {
-        int256 actionNetUsdc =
-            cs.vpiDeltaUsdc + int256(cs.executionFeeUsdc + cs.frozenSpreadUsdc + delta.pendingCarryUsdc);
+        int256 actionNetUsdc = cs.vpiDeltaUsdc
+            + int256(cs.executionFeeUsdc + cs.frozenSpreadUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc);
         uint256 vpiClawbackWithheldUsdc;
         if (actionNetUsdc > 0) {
             delta.actionChargeAssessedUsdc = uint256(actionNetUsdc);
@@ -1078,8 +1093,8 @@ library CfdEnginePlanLib {
 
     /// @notice Plans eligibility and full settlement for liquidating a snapshot position.
     /// @dev Execution price is capped by `snap.capPrice`. A zero-size position returns a nonliquidatable delta after
-    ///      populating account and price. Otherwise exact price health excludes pending carry and uses only price-risk
-    ///      collateral. Pending carry is projected against eligible free settlement; any uncovered amount is an
+    ///      populating account and price. Otherwise pending carry is projected against active margin first, then free
+    ///      settlement. Exact price health uses the reduced pledge plus same-account claim; any uncovered carry is an
     ///      independent delinquency condition. The liquidation threshold uses FAD margin in
     ///      the FAD window and normal maintenance margin otherwise, with equality liquidatable. A nonliquidatable
     ///      result stops after risk diagnostics; a liquidatable result removes the entire position, plans the split
@@ -1106,6 +1121,9 @@ library CfdEnginePlanLib {
             revert CfdEnginePlanLib__VpiRebateReserveUnderfunded();
         }
 
+        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
+        delta.realizedCarryUsdc = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryUsdc);
+        pos = snap.position;
         delta.side = pos.side;
         delta.posSize = pos.size;
         delta.posMargin = pos.margin;
@@ -1119,9 +1137,6 @@ library CfdEnginePlanLib {
         uint256 settlementReachableUsdc = pos.margin + snap.traderClaimBalanceForAccount + snap.vpiRebateReserveUsdc;
         delta.liquidationReachableCollateralUsdc = settlementReachableUsdc;
         publishTime;
-        delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
-        MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =
-            MarginClearinghouseAccountingLib.planCarryLossConsumption(snap.accountBuckets, delta.pendingCarryUsdc);
 
         delta.riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,
@@ -1132,7 +1147,7 @@ library CfdEnginePlanLib {
             maintMarginBps
         );
 
-        if (!delta.riskState.liquidatable && carryConsumption.uncoveredUsdc == 0) {
+        if (!delta.riskState.liquidatable && delta.pendingCarryUsdc == delta.realizedCarryUsdc) {
             return delta;
         }
         delta.riskState.liquidatable = true;
@@ -1144,7 +1159,7 @@ library CfdEnginePlanLib {
 
     /// @notice Separates full-liquidation price PnL, action charges, and the dedicated liquidation reserve.
     /// @dev Price loss consumes only the same-account claim and PnL pledge; excess is a diagnostic write-off. The
-    ///      keeper/protocol/LP charge is capped by `liquidationReserveUsdc`. Carry and negative lifetime VPI are action
+    ///      keeper/protocol/LP charge is capped by `liquidationReserveUsdc`. Still-unpaid carry and negative lifetime VPI are action
     ///      charges recovered from new price gain first, then action reserve and pre-existing free settlement, with the
     ///      remainder waived. No shortfall becomes protocol bad debt or reaches order/liquidation/PnL buckets.
     /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
@@ -1221,7 +1236,7 @@ library CfdEnginePlanLib {
         return delta;
     }
 
-    /// @notice Allocates liquidation carry and VPI clawback across price gain, reserves, and account cash.
+    /// @notice Allocates still-unpaid liquidation carry and VPI clawback across price gain, reserves, and account cash.
     function _planLiquidationActionSettlement(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Position memory pos,
@@ -1230,7 +1245,7 @@ library CfdEnginePlanLib {
         uint256 vpiClawbackUsdc = _negativeVpiReserveTarget(pos.vpiAccrued);
         delta.vpiRebateReserveBeforeUsdc = snap.vpiRebateReserveUsdc;
         delta.vpiRebateReserveAfterUsdc = 0;
-        delta.actionChargeAssessedUsdc = delta.pendingCarryUsdc + vpiClawbackUsdc;
+        delta.actionChargeAssessedUsdc = delta.pendingCarryUsdc - delta.realizedCarryUsdc + vpiClawbackUsdc;
         delta.actionChargeWithheldUsdc =
             delta.priceGainUsdc < delta.actionChargeAssessedUsdc ? delta.priceGainUsdc : delta.actionChargeAssessedUsdc;
         delta.actionChargeToCollectUsdc = delta.actionChargeAssessedUsdc - delta.actionChargeWithheldUsdc;

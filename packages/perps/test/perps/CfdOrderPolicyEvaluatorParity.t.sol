@@ -41,9 +41,30 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)));
     }
 
+    function test_AssessIncreaseAfterCarryMatchesDirectSidecarSnapshotPlanAndEvaluation() public {
+        _fundTrader(ACCOUNT, 30_000e6);
+        _open(ACCOUNT, CfdTypes.Side.LONG, 100_000e18, 10_000e6, PRICE);
+        vm.warp(block.timestamp + 30 days);
+        CfdTypes.Order memory order = _openOrder();
+        uint256 depth = pool.totalAssets();
+        uint64 publishTime = uint64(block.timestamp);
+        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        CfdEnginePlanTypes.RawSnapshot memory snapshot = _sidecarSnapshot(ACCOUNT, depth);
+        CfdEnginePlanTypes.OpenDelta memory delta = engine.planner().planOpen(snapshot, order, PRICE, publishTime);
+        assertTrue(delta.valid);
+        assertGt(delta.pendingCarryUsdc, 0);
+        OrderV2Types.ExecutionAssessment memory expected = parityEvaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
+        OrderV2Types.ExecutionAssessment memory actual = parityEvaluator.assessOrder(
+            address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, publishTime, bounds, BOUNTY
+        );
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)));
+    }
+
     function test_AssessPartialCloseMatchesDirectSidecarSnapshotPlanAndEvaluation() public {
         _fundTrader(ACCOUNT, 20_000e6);
         _open(ACCOUNT, CfdTypes.Side.LONG, 100_000e18, 10_000e6, PRICE);
+
+        vm.warp(block.timestamp + 30 days);
 
         CfdTypes.Order memory order = _partialCloseOrder();
         uint256 depth = pool.totalAssets();
@@ -53,6 +74,7 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _sidecarSnapshot(ACCOUNT, depth);
         CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snapshot, order, PRICE, publishTime);
         assertTrue(delta.valid);
+        assertGt(delta.pendingCarryUsdc, 0);
 
         OrderV2Types.ExecutionAssessment memory expected =
             parityEvaluator.evaluateClose(snapshot, delta, bounds, BOUNTY);

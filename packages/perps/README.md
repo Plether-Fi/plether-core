@@ -1,5 +1,30 @@
 # Plether Perps
 
+## Next release: unused perps API cleanup
+
+The next deployment removes unused privileged clearinghouse entrypoints: `lockCommittedOrderMargin`,
+`unlockCommittedOrderMargin`, `promoteOrderReservationToPnlPledge`, `consumeOrderReservation`,
+`consumeOrderReservationsById`, `consumeAccountOrderReservations`, `releaseOrderReservation`,
+`releaseOrderReservationIfActive`, `lockActionReserve`, `releaseActionReserve`, `consumeActionReserve`,
+`lockLiquidationReserve`, `reclassifyLiquidationReserveToPnlPledge`, `creditSettlementAndLockMargin`, and
+`consumeCloseLoss`. Regenerate bindings against the next release ABI; these selectors have no compatibility wrappers.
+The maintained action-charge settlement path now rejects an active reservation belonging to another account.
+This is defensive hardening and bytecode cleanup. Existing immutable deployments and historical release artifacts
+are unchanged.
+
+The follow-up cleanup also removes `HousePool.recordProtocolInflow`, its unused `ProtocolInflowAccounted` event,
+and the retired clearinghouse selectors `reserveCloseExecutionBountyFromPositionMargin` and
+`reserveStaleCloseExecutionBountyFromPositionMargin`. Engine and sidecar inflows continue through
+`recordClaimantInflow`; owner-admitted raw donations use `accountExcess`. The two retired bounty selectors previously
+always reverted. Close bounties continue to use the maintained free-settlement path.
+
+Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
+`OrderOraclePolicyLib`. Planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
+the maintained exact-entry-cost math, carry index, settlement snapshot, claimant inflow, and live close/claim paths.
+These removals require new bindings for a future deployment; this source change does not deploy contracts or migrate
+existing state.
+
+
 Plether Perps is a bounded, delayed-order perpetuals engine for synthetic USD-directional exposure.
 
 This package depends only on `shared` and third-party libraries. Build it independently from the repository root with
@@ -129,7 +154,8 @@ In practice, the compact public API is:
   - the read-only `IHousePool` capacity getters exposed by `HousePool`:
     `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
     `areSeniorDepositReservationsWithinLimits()`
-  - `CfdEngineLens.previewOpen(...)` / `previewClose(...)` for trade-ticket simulations using caller-supplied oracle prices
+  - `CfdEngineLens.quoteMaxOpen(...)` / `previewOpen(...)` / `previewClose(...)` for trade-ticket sizing and simulations
+    using caller-supplied oracle prices
 
 The simplified public interfaces live in `packages/perps/src/interfaces/`:
 
@@ -139,7 +165,7 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
 - `IPositionProtectionViews.sol`
 - `PositionProtectionTypes.sol`
 - `IPerpsTraderViews.sol`
-- `ICfdEngineLens.sol` for `previewOpen(...)` / `previewClose(...)` trade-ticket previews
+- `ICfdEngineLens.sol` for `quoteMaxOpen(...)`, `previewOpen(...)`, and `previewClose(...)` trade-ticket views
 - `IPerpsLPActions.sol` for configured-vault-to-pool integration hooks, not direct LP calls
 - `IPerpsLPViews.sol`, including the additive deposit-activation cooldown view
 - `IAsyncTrancheVault.sol` for the base asynchronous LP request, cancellation, estimate, and claim surface
@@ -164,7 +190,23 @@ the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
-Frontends should use `CfdEngineLens.previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime)` to simulate opens and same-side increases before committing an order. The lens is read-only: it uses the caller-supplied `oraclePrice` and `publishTime`, does not fetch Hermes data, does not ingest Pyth updates, and does not mutate engine mark state.
+Frontends can use `CfdEngineLens.quoteMaxOpen(account, side, marginDelta, oraclePrice, publishTime)` to obtain the
+largest quantum-aligned open or same-side increase accepted by the current engine plan. It returns a `MaxOpenQuote`
+containing `maxSizeDelta`, the complete `preview` for that size, and `limitingReason` (the planner rejection at the
+next quantum). `previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime)` remains available for
+simulating a user-selected size. If capacity is zero, the quote's invalid preview and reason describe the minimum
+notional-admissible candidate (one quantum at zero price); `preview.sizeDelta` is that attempted size.
+Both calls are read-only: they use the caller-supplied `oraclePrice` and `publishTime`, do not fetch Hermes data, do not
+ingest Pyth updates, and do not mutate engine mark state. Router timing, queue, slippage, and execution-bounty policy
+remain outside these engine-lens quotes, as do terminal-NAV-book execution bounds.
+
+The maximum search projects carry before deriving buying-power and skew bounds. It visits candidate intervals from
+largest to smallest and discards an interval only when optimistic collateral, reserve, equity, or solvency bounds
+rule out every size within it. This supports disconnected valid ranges around VPI rebates and includes integer
+rounding. Every selected maximum is checked with the canonical planner against the original snapshot.
+The stateless `CfdEngineOpenQuoter` helper is deployed automatically by the lens; the lens constructor arguments are
+unchanged. A search exceeding 512 interval evaluations reverts with `CfdEngineLens__QuoteSearchLimitExceeded()`;
+it never returns a partial maximum. Dependency and unsupported numeric-range reverts follow the preview assumptions.
 
 Preview units match the rest of perps:
 
@@ -743,10 +785,10 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
 ### Reachability domains
 
 - Generic collateral reachability excludes queued committed-order and reserved-settlement buckets.
-- Project and realize pending carry from eligible free settlement before evaluating position health. Carry fully funded
-  there does not reduce the separate exact price-risk health basis. Any uncovered carry blocks trader withdrawal and
-  independently makes the position liquidatable.
-- PnL pledge plus same-account claim backs only exact price risk; neither can offset uncovered carry.
+- Project and realize carry from active position margin first, then free settlement. Price-risk health uses the reduced
+  pledge plus same-account claim. Carry can therefore cause a maintenance breach even when fully collected.
+- Carry left uncovered by both margin and free settlement blocks withdrawal and independently makes the position
+  liquidatable. Trader claims and unrelated locked reserves cannot fund carry collection.
 - Terminal collateral reachability may consume queued/reserved buckets, but only in full-close and liquidation settlement paths that explicitly unlock them.
 
 ### Bootstrap and withdrawal gates
@@ -826,23 +868,33 @@ mechanism.
 ```text
 borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)
 sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)
-positionCarryUsdc = borrowBaseUsdc * (sideCarryIndex - positionLastCarryIndex)
+positionCarryUsdc = unsettledCarryUsdc + floor(borrowBaseUsdc * (sideCarryIndex - positionLastCarryIndex) / 1e18)
 ```
 
 Carry behavior:
+
+- Consumes active position margin first and free settlement second, preserving other locked buckets and claims.
+- Close and liquidation first collect accrued carry, then settle price PnL against the reduced pledge. Only still-unpaid
+  carry enters existing terminal action recovery and waiver.
 
 - Accrues continuously by wall-clock time.
 - Continues accruing even during stale or frozen oracle windows.
 - Is assessed per position on a stored borrow base, not on a checkpoint-time mark price.
 - Both `LONG` and `SHORT` positions can accrue carry at the same time if both sides have nonzero borrow base.
-- Can be checkpointed into `unsettledCarryUsdc` when a basis-changing settlement credit occurs before physical collection is possible.
+- Before claim or bounty credits, collects available margin and free settlement and retains the unpaid remainder in
+  `unsettledCarryUsdc`. The full incoming credit is applied afterward and can pay arrears at a later checkpoint, even
+  at the same timestamp. Claim payouts still require pool cash to cover all outstanding claims after collection; a
+  failure rolls back the whole transaction.
 - Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
 - On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
 - On withdraw, carry is realized before settlement balance is reduced.
 - Flows to LP trading revenue once realized.
-- Is first projected against eligible free settlement for guard and risk checks. Fully funded carry leaves exact
-  price-risk health unchanged; any uncovered remainder blocks withdrawal and independently makes the position
-  liquidatable. PnL pledge and same-account claim cannot cover that remainder.
+- Guard and risk checks project carry against active position margin first, then free settlement. The reduced pledge
+  determines price-risk health. Carry uncovered by both buckets blocks withdrawal and independently makes the position
+  liquidatable; same-account claims cannot pay carry. Stored arrears can coexist with new claim or bounty credits, so
+  health checks project current coverage rather than treating the stored amount alone as delinquency.
+- Reports collection and arrears through `CarryRealized`, including zero collection when backing is exhausted. The
+  legacy `CarryCheckpointed` event remains in the ABI but is no longer emitted.
 
 Close and liquidation use the planner's canonical carry-adjusted settlement/equity outputs; the live executor does not recompute a separate carry-blind loss or liquidation kernel.
 
@@ -1246,8 +1298,8 @@ pending order; then deploy and verify the complete new graph and start its index
 - Router pausing blocks new risk-increasing commits and permanently snapshots the highest existing order id. Opens at
   or below that cutoff are refunded internally when lazily cleaned; closes, liquidations, mark refresh, and other
   protective paths remain available. Unpausing never revives invalidated opens.
-- Router pause and `positionProtectionCommitsEnabled == false` block new protection creation, replacement, and attached
-  opens. They do not strand cancellation, valid triggering, latched retry, linked-attempt execution, terminal cleanup,
+- Router pause blocks new protection creation, replacement, and attached
+  opens. It does not strand cancellation, valid triggering, latched retry, linked-attempt execution, terminal cleanup,
   or liquidation. Risk-off cleanup of an attached parent open also terminally fails its `PendingOpen` protection and
   refunds the unpaid protection bounties.
 - HousePool pausing is entry-only: it blocks new LP deposit requests and deposit activation. Redemption requests,
@@ -1286,7 +1338,7 @@ pending order; then deploy and verify the complete new graph and start its index
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
 | Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
 | Position-protection trigger bounty | 0.20 USDC | Timelocked activation-keeper reserve, capped at 1 USDC |
-| Position-protection commits | disabled | Fresh deployments require a later timelocked enablement |
+| Position-protection commits | available | Fresh deployments need no protection-specific activation; Router pause still applies |
 | Full default protection reserve | 0.40 USDC | Snapshotted trigger plus linked-close bounties, funded from free settlement |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
@@ -1308,8 +1360,8 @@ pending order; then deploy and verify the complete new graph and start its index
 The two senior-capacity rows describe the required post-timelock operating configuration. Fresh deployments initially
 use the neutral constructor sentinels `type(uint256).max` and `10,000` bps, which cannot pass trading activation.
 
-OrderRouter also exposes timelocked admin control over `positionProtectionCommitsEnabled`,
-`positionProtectionTriggerBountyUsdc`, `maxPendingOrders`, `minEngineGas`, and `maxPruneOrdersPerCall`.
+OrderRouter also exposes timelocked admin control over `positionProtectionTriggerBountyUsdc`, `maxPendingOrders`,
+`minEngineGas`, and `maxPruneOrdersPerCall`.
 `maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
 `frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).

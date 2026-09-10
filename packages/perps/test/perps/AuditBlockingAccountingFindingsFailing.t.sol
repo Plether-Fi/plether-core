@@ -9,11 +9,9 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "@plether/perps/CfdEngineAccountLens.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
-import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineProtocolLens} from "@plether/perps/CfdEngineProtocolLens.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
-import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
@@ -25,46 +23,9 @@ import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
-import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
-import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
-import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
-import {CfdEngineSnapshotsLib} from "@plether/perps/libraries/CfdEngineSnapshotsLib.sol";
-import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
-import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
-
-contract AuditBlockingAccountingFindingsFailing is BasePerpTest {
-
-    address alice = address(0xA11CE);
-
-    function test_H1_PlannerAppliedStateMustNotConsumeProtectedResidualMargin() public {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(60e6, 20e6, 30e6, 0);
-
-        MarginClearinghouseAccountingLib.SettlementConsumption memory plan =
-            MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, 20e6, 40e6);
-        MarginClearinghouseAccountingLib.BucketMutation memory mutation =
-            MarginClearinghouseAccountingLib.applyTerminalLossMutation(buckets, 20e6, plan);
-
-        assertEq(plan.freeSettlementConsumedUsdc, 10e6, "Plan should consume free settlement first");
-        assertEq(plan.activeMarginConsumedUsdc, 0, "Protected residual margin must not be attributed as consumed");
-        assertEq(
-            plan.otherLockedMarginConsumedUsdc, 0, "Partial-close view must keep queued committed margin unreachable"
-        );
-        assertEq(
-            mutation.settlementDebitUsdc, 10e6, "Applied settlement debit should stop at reachable free settlement"
-        );
-        assertEq(
-            mutation.otherLockedMarginUnlockedUsdc,
-            0,
-            "Queued committed margin must remain locked in partial-close planning"
-        );
-    }
-
-}
 
 contract CfdEngineSolvencyTimingHarness is CfdEngine {
 
@@ -298,19 +259,6 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         );
     }
 
-    function test_H1_PartialClosePlannerViewKeepsQueuedCommittedMarginUnreachable() public {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(900e6, 100e6, 4000e6, 0);
-
-        assertEq(
-            buckets.settlementBalanceUsdc,
-            0,
-            "Planner partial-close view should exclude queued committed margin from settlement"
-        );
-        assertEq(buckets.freeSettlementUsdc, 0, "Excluded queued committed margin must not reappear as free settlement");
-        assertEq(buckets.otherLockedMarginUsdc, 0, "Partial-close view should treat other locked margin as unreachable");
-    }
-
 }
 
 contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
@@ -351,7 +299,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
@@ -425,7 +373,6 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
             closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
-            positionProtectionCommitsEnabled: router.positionProtectionCommitsEnabled(),
             positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
             maxPendingOrders: router.maxPendingOrders(),
             minEngineGas: router.minEngineGas(),

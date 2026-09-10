@@ -56,18 +56,11 @@ abstract contract OrderCommitHandler is OrderValidation {
         emit OrderCommitted(orderId, account, order.side);
     }
 
-    /// @dev Retained as an override seam for position-protection handlers; delegated commit logic owns the live check.
-    function _requireNoActivePositionProtection(
-        address account
-    ) internal view virtual {
-        account;
-    }
-
     /// @notice Builds the accounting view stored for an order id and returns its live account-queue successor.
     /// @dev Terminal records are deleted. An unknown or terminal id returns a zero-valued view except
     ///      `pending.orderId == orderId`; permanent terminal identity and outcomes live in the lifecycle book.
     /// @param orderId Order id to inspect.
-    /// @return pending Pending core data plus current clearinghouse margin and router bounty reservation.
+    /// @return pending Pending core data plus current clearinghouse margin and bounty reservation.
     /// @return nextAccountOrderId Next live order for the same account, or zero.
     function _getPendingOrderView(
         uint64 orderId

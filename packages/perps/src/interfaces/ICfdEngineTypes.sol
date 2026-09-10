@@ -85,8 +85,14 @@ interface ICfdEngineTypes {
     error CfdEngine__StillInsolvent();
     /// @notice A required dependency, token, account, or recipient address is zero.
     error CfdEngine__ZeroAddress();
-    /// @notice Free settlement and the proportional position-margin slice cannot fully back a close-order bounty.
-    error CfdEngine__InsufficientCloseOrderBountyBacking();
+    /// @notice Free settlement after carry cannot fund the prepaid close-order execution bounty.
+    error CfdEngine__InsufficientCloseOrderBountyBacking(
+        uint256 requiredBountyUsdc, uint256 availableFreeSettlementUsdc, uint256 unpaidCarryUsdc
+    );
+    /// @notice The requested close size is not divisible by the canonical size quantum.
+    error CfdEngine__InvalidCloseSizeQuantum();
+    /// @notice A partial-close commitment would start from a position below maintenance health.
+    error CfdEngine__PartialCloseUnhealthy();
     /// @notice The one-time terminal NAV book has already been configured.
     error CfdEngine__TerminalNavBookAlreadySet();
     /// @notice A terminal NAV book is absent, has no code, or is not bound to this Engine and price domain.
@@ -183,17 +189,20 @@ interface ICfdEngineTypes {
     event BountyCredited(address indexed sourceAccount, address indexed beneficiary, uint256 amountUsdc);
     /// @notice Emitted when the immutable-bound terminal NAV book is configured exactly once.
     event TerminalNavBookSet(address indexed terminalNavBook);
-    /// @notice Emitted when elapsed carry cannot be collected and is added to an account's unsettled carry.
+    /// @notice Legacy checkpoint-only carry event retained for ABI compatibility; no longer emitted.
+    /// @dev CarryRealized reports collection and retained arrears, including zero collection when backing is exhausted.
     /// @param account Position account whose carry was checkpointed.
     /// @param addedUnsettledCarryUsdc Newly added uncovered carry in USDC.
     /// @param totalUnsettledCarryUsdc Account's total unsettled carry after the checkpoint, in USDC.
     event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
-    /// @notice Emitted when carry is collected from an account and routed to the HousePool claimant path.
+    /// @notice Emitted when nonzero carry due is evaluated; collected value follows the HousePool claimant path.
+    /// @dev Collected value may be zero when no backing is available. Claim and bounty credits occur afterward
+    ///      and can cover retained arrears at a later checkpoint.
     /// @param account Position account paying carry.
     /// @param realizedCarryUsdc Total carry collected in USDC.
     /// @param freeSettlementConsumedUsdc Portion collected from free settlement, in USDC.
     /// @param marginConsumedUsdc Portion collected from active position margin, in USDC.
-    /// @param remainingUnsettledCarryUsdc Previously checkpointed carry still unpaid after collection, in USDC.
+    /// @param remainingUnsettledCarryUsdc Total carry still unpaid after collection, in USDC.
     event CarryRealized(
         address indexed account,
         uint256 realizedCarryUsdc,
@@ -308,7 +317,7 @@ interface ICfdEngineTypes {
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
     /// @param immediatePayoutUsdc Portion of the fresh payout paid immediately into clearinghouse settlement.
     /// @param traderClaimBalanceUsdc Projected claim balance after consuming old claims and recording deferred payout.
-    /// @param seizedCollateralUsdc Physical account collateral transferred to the pool on a loss.
+    /// @param seizedCollateralUsdc PnL pledge collected for price loss; excludes carry and action charges.
     /// @param badDebtUsdc Compatibility diagnostic for price loss above the exact collectible cap; V2 does not store it
     ///        as debt or include it in LP NAV.
     /// @param remainingSize Position size after the close.
@@ -373,7 +382,7 @@ interface ICfdEngineTypes {
     /// @param postEntryPrice Projected size-weighted entry price.
     /// @param postVpiAccrued Projected lifetime signed VPI balance.
     /// @param postUnrealizedPnlUsdc Projected signed price PnL at `executionPrice`, excluding carry and VPI.
-    /// @param postEquityUsdc Projected signed P+C price-risk equity at `executionPrice`; carry and VPI are excluded.
+    /// @param postEquityUsdc Projected signed post-carry pledge plus claim and price PnL at `executionPrice`; excludes VPI.
     /// @param postHealthBps Projected equity divided by maintenance requirement, in basis points; zero when undefined.
     /// @param postLiquidatable Whether the projected position meets the active liquidation condition.
     /// @param hasLiquidationPrice Whether a liquidation boundary exists within the capped price domain.
@@ -416,14 +425,14 @@ interface ICfdEngineTypes {
     /// @param liquidatable Whether exact P+C price risk breaches the active requirement or an independent delinquency
     ///        condition applies.
     /// @param oraclePrice Price used by the simulation, with 8 decimals.
-    /// @param equityUsdc Signed P+C price-risk equity after exact price PnL; carry and VPI are excluded.
+    /// @param equityUsdc Signed post-carry pledge plus claim and exact price PnL; excludes VPI.
     /// @param pnlUsdc Signed price PnL before carry and VPI.
     /// @param reachableCollateralUsdc Account settlement reachable by liquidation before the liquidation charge.
     /// @param liquidationChargeUsdc Total liquidation charge collected from the account.
     /// @param keeperBountyUsdc Configured keeper share of the liquidation charge.
     /// @param protocolLiquidationFeeUsdc Configured protocol-treasury share of the liquidation charge.
     /// @param lpLiquidationFeeUsdc Remaining LP share after keeper and protocol allocations.
-    /// @param seizedCollateralUsdc Total settlement value transferred from the account to the pool, including the LP fee.
+    /// @param seizedCollateralUsdc Price-loss pledge plus the LP liquidation fee; excludes carry and action charges.
     /// @param settlementRetainedUsdc Existing account settlement left with the trader toward positive residual equity.
     /// @param freshTraderPayoutUsdc New surplus value owed to the trader after liquidation.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted into liquidation settlement.

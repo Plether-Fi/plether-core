@@ -513,7 +513,6 @@ contract TimelockPauseTest is BasePerpTest {
         config.minOpenOrderExecutionBountyUsdc = 200_000;
         config.maxOpenOrderExecutionBountyUsdc = 300_000;
         config.closeOrderExecutionBountyUsdc = 250_000;
-        config.positionProtectionCommitsEnabled = true;
         config.positionProtectionTriggerBountyUsdc = 300_000;
         config.maxPendingOrders = 7;
         config.minEngineGas = 700_000;
@@ -532,7 +531,6 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(router.minOpenOrderExecutionBountyUsdc(), 200_000);
         assertEq(router.maxOpenOrderExecutionBountyUsdc(), 300_000);
         assertEq(router.closeOrderExecutionBountyUsdc(), 250_000);
-        assertTrue(router.positionProtectionCommitsEnabled());
         assertEq(router.positionProtectionTriggerBountyUsdc(), 300_000);
         assertEq(router.maxPendingOrders(), 7);
         assertEq(router.minEngineGas(), 700_000);
@@ -628,7 +626,6 @@ contract TimelockPauseTest is BasePerpTest {
     }
 
     function test_OrderRouter_PositionProtectionConfig_Defaults() public view {
-        assertFalse(router.positionProtectionCommitsEnabled());
         assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000);
     }
 

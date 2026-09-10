@@ -65,13 +65,4 @@ library HousePoolSeedLifecycleLib {
         return isSeedLifecycleComplete(seniorSeedInitialized, juniorSeedInitialized);
     }
 
-    /// @notice Returns whether unassigned assets remain to be explicitly bootstrapped.
-    /// @param unassignedAssets Quarantined, unassigned pool assets (6 decimals).
-    /// @return Whether a bootstrap assignment remains pending.
-    function hasPendingBootstrap(
-        uint256 unassignedAssets
-    ) internal pure returns (bool) {
-        return unassignedAssets > 0;
-    }
-
 }

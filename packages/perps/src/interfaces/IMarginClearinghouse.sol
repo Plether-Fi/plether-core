@@ -30,8 +30,6 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__ReservationNotActive();
     /// @notice Supplied reservation ids do not cover committed margin that a settlement plan consumes.
     error MarginClearinghouse__IncompleteReservationCoverage();
-    /// @notice Aggregate committed-margin mutation was attempted while per-order reservations remain active.
-    error MarginClearinghouse__ReservationLedgerActive();
     /// @notice The owner attempted to replace the one-time-configured engine.
     error MarginClearinghouse__EngineAlreadySet();
     /// @notice A required engine, recipient, or keeper address is zero.
@@ -305,16 +303,6 @@ interface IMarginClearinghouse {
         uint256 amountUsdc
     ) external;
 
-    /// @notice Locks trader-owned settlement into the committed-order bucket reserved for queued open orders.
-    /// @dev Legacy aggregate path callable only by the engine or settlement sidecar. It checkpoints carry and reverts
-    ///      while the account has active per-order reservations. No tokens move.
-    /// @param account Account whose settlement should be locked
-    /// @param amountUsdc USDC amount to lock
-    function lockCommittedOrderMargin(
-        address account,
-        uint256 amountUsdc
-    ) external;
-
     /// @notice Reserves committed-order margin for a specific order id inside the clearinghouse reservation ledger.
     /// @dev Callable only by the engine or its reported router. Checkpoints carry, requires a unique id and positive
     ///      amount that fits `uint96`, and reclassifies free settlement without moving tokens.
@@ -326,33 +314,6 @@ interface IMarginClearinghouse {
         uint64 orderId,
         uint256 amountUsdc
     ) external;
-
-    /// @notice Unlocks committed-order margin back into free settlement when a queued open order is released.
-    /// @dev Legacy aggregate path callable only by the engine or settlement sidecar. It checkpoints carry and reverts
-    ///      while active per-order reservations exist or when the bucket cannot cover the exact amount.
-    /// @param account Account whose committed-order margin should be unlocked
-    /// @param amountUsdc USDC amount to unlock
-    function unlockCommittedOrderMargin(
-        address account,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Releases any remaining reservation balance for an order back into free settlement.
-    /// @dev Callable only by the engine or settlement sidecar. Checkpoints account carry, marks the reservation
-    ///      `Released`, and changes locked classification without moving tokens or changing settlement balance.
-    /// @param orderId Order reservation id to release
-    /// @return releasedUsdc Entire remaining reservation amount released in USDC
-    function releaseOrderReservation(
-        uint64 orderId
-    ) external returns (uint256 releasedUsdc);
-
-    /// @notice Releases any remaining reservation balance for an order if it is still active.
-    /// @dev Callable only by the engine or reported router. An unknown or terminal id returns zero without mutation.
-    /// @param orderId Order reservation id to release
-    /// @return releasedUsdc Remaining reservation amount released in USDC, or zero when not active
-    function releaseOrderReservationIfActive(
-        uint64 orderId
-    ) external returns (uint256 releasedUsdc);
 
     /// @notice Releases an order reservation during terminal Router cleanup if it remains active.
     /// @dev Callable only by the Engine-reported Router. Unknown and terminal ids return zero. This path deliberately
@@ -388,45 +349,6 @@ interface IMarginClearinghouse {
         uint256 executionBountyUsdc
     ) external;
 
-    /// @notice Consumes a specific amount from an order reservation, capped by its remaining balance.
-    /// @dev Callable only by the engine or settlement sidecar. Decreases committed-order locked classification and
-    ///      reservation aggregates without debiting settlement balance or transferring tokens.
-    /// @param orderId Order reservation id to consume
-    /// @param amountUsdc Requested USDC amount to consume
-    /// @return consumedUsdc Amount consumed in USDC, capped by the reservation remainder
-    function consumeOrderReservation(
-        uint64 orderId,
-        uint256 amountUsdc
-    ) external returns (uint256 consumedUsdc);
-
-    /// @notice Atomically promotes exact pending-order margin into live-position PnL pledge.
-    function promoteOrderReservationToPnlPledge(
-        uint64 orderId,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Consumes active order reservations for an account in FIFO reservation order.
-    /// @dev Callable only by the engine or settlement sidecar. The configured router supplies the id order; inactive
-    ///      records are skipped, no tokens move, and the returned amount can be below the request.
-    /// @param account Account whose active reservations should be consumed
-    /// @param amountUsdc Requested USDC amount to consume
-    /// @return consumedUsdc Aggregate amount consumed in USDC
-    function consumeAccountOrderReservations(
-        address account,
-        uint256 amountUsdc
-    ) external returns (uint256 consumedUsdc);
-
-    /// @notice Consumes the supplied active order reservations in FIFO order until the requested amount is exhausted.
-    /// @dev Callable only by the engine or settlement sidecar. Inactive ids are skipped and ids need not share an
-    ///      account. Locked classification changes, but settlement balances and token custody do not.
-    /// @param orderIds Reservation order ids to consume in supplied order
-    /// @param amountUsdc Requested USDC amount to consume
-    /// @return consumedUsdc Aggregate amount consumed in USDC, which can be below `amountUsdc`
-    function consumeOrderReservationsById(
-        uint64[] calldata orderIds,
-        uint256 amountUsdc
-    ) external returns (uint256 consumedUsdc);
-
     /// @notice Locks settlement into a reserved bucket excluded from generic order/position margin release paths.
     /// @dev Callable only by the engine, its reported router, or the router's immutable position-protection book.
     ///      Checkpoints carry and reclassifies free settlement without moving tokens or changing the total settlement
@@ -459,26 +381,10 @@ interface IMarginClearinghouse {
         int256 amount
     ) external;
 
-    /// @notice Credits settlement USDC and locks the same amount as active margin.
-    /// @dev Callable only by the engine or settlement sidecar. This accounting-only operation does not transfer tokens
-    ///      or checkpoint carry; zero is a no-op.
-    /// @param account Account receiving the settlement credit and position margin lock
-    /// @param amountUsdc USDC amount to credit and lock
-    function creditSettlementAndLockMargin(
-        address account,
-        uint256 amountUsdc
-    ) external;
-
     /// @notice Credits newly arrived settlement and atomically classifies it as PnL pledge.
     /// @dev Used when a live-position trader claim is paid into clearinghouse custody. The caller is responsible for
     ///      ensuring the corresponding settlement tokens have already arrived.
     function creditPnlPledge(
-        address account,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Locks free settlement into the liquidation-charge reserve.
-    function lockLiquidationReserve(
         address account,
         uint256 amountUsdc
     ) external;
@@ -492,31 +398,6 @@ interface IMarginClearinghouse {
     /// @notice Reclassifies existing PnL pledge as liquidation reserve without changing total locked settlement.
     function reclassifyPnlPledgeToLiquidationReserve(
         address account,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Reclassifies liquidation reserve as PnL pledge without changing total locked settlement.
-    function reclassifyLiquidationReserveToPnlPledge(
-        address account,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Locks free settlement into the action-charge reserve.
-    function lockActionReserve(
-        address account,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Releases action reserve back to free settlement without moving tokens.
-    function releaseActionReserve(
-        address account,
-        uint256 amountUsdc
-    ) external;
-
-    /// @notice Transfers action-reserved settlement to a clearinghouse recipient.
-    function consumeActionReserve(
-        address account,
-        address recipient,
         uint256 amountUsdc
     ) external;
 
@@ -590,14 +471,14 @@ interface IMarginClearinghouse {
         uint256 protocolFeeUsdc
     ) external returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc);
 
-    /// @notice Consumes a non-price settlement charge from free settlement only.
+    /// @notice Consumes carry from canonical active position margin first, then free settlement.
     /// @dev Callable only by the engine or settlement sidecar. The legacy `lockedPositionMarginUsdc` argument is
-    ///      ignored. PnL pledge and every reserve bucket remain protected; any uncovered amount is waived.
+    ///      ignored in favor of stored buckets. Other locked buckets and claims are protected; uncovered carry is returned.
     /// @param account Account paying the loss
     /// @param lockedPositionMarginUsdc Deprecated ABI parameter ignored by the implementation
     /// @param lossUsdc Maximum loss to collect in USDC
     /// @param recipient External recipient of collected USDC
-    /// @return marginConsumedUsdc Always zero under PnL-isolated accounting
+    /// @return marginConsumedUsdc Active position margin consumed in six-decimal USDC units
     /// @return freeSettlementConsumedUsdc Free settlement consumed in USDC
     /// @return uncoveredUsdc Requested loss left uncovered in USDC
     function consumeSettlementLoss(
@@ -614,32 +495,6 @@ interface IMarginClearinghouse {
         uint256 priceLossUsdc,
         address recipient
     ) external returns (uint256 consumedUsdc, uint256 shortfallUsdc);
-
-    /// @notice Legacy partial-close entrypoint that collects price loss from PnL pledge only.
-    /// @dev `reservationOrderIds`, `includeOtherLockedMargin`, and `protocolFeeAccount` are ignored. A nonzero protocol
-    ///      fee reverts because action fees must use `consumeActionCharge`. `protectedLockedMarginUsdc` preserves the
-    ///      residual position's pledge, so callers must collect before unlocking unused closed-lot pledge.
-    /// @param account Account paying the close loss
-    /// @param reservationOrderIds Deprecated and ignored
-    /// @param lossUsdc Maximum loss to collect in USDC
-    /// @param protectedLockedMarginUsdc Active position margin that must remain protected, in USDC
-    /// @param includeOtherLockedMargin Deprecated and ignored
-    /// @param recipient External recipient of collected price-loss cash
-    /// @param protocolFeeAccount Deprecated and ignored
-    /// @param protocolFeeUsdc Must be zero
-    /// @return seizedUsdc PnL pledge collected and transferred, in USDC
-    /// @return shortfallUsdc Requested loss left uncovered in USDC
-    /// @return protocolFeeCreditedUsdc Always zero
-    function consumeCloseLoss(
-        address account,
-        uint64[] calldata reservationOrderIds,
-        uint256 lossUsdc,
-        uint256 protectedLockedMarginUsdc,
-        bool includeOtherLockedMargin,
-        address recipient,
-        address protocolFeeAccount,
-        uint256 protocolFeeUsdc
-    ) external returns (uint256 seizedUsdc, uint256 shortfallUsdc, uint256 protocolFeeCreditedUsdc);
 
     /// @notice Applies isolated full-liquidation price-PnL and charge settlement.
     /// @dev Price seizure consumes PnL pledge only. Keeper, protocol, and LP liquidation fees consume liquidation
@@ -695,24 +550,6 @@ interface IMarginClearinghouse {
     /// @param account Account whose free settlement should be reserved
     /// @param amount USDC amount to reserve
     function reserveStaleCloseExecutionBountyFromSettlement(
-        address account,
-        uint256 amount
-    ) external;
-
-    /// @notice Retired position-margin close-bounty selector retained as an explicit reverting tombstone.
-    /// @dev V2 close bounties must be backed exclusively by free settlement; every call reverts.
-    /// @param account Ignored legacy account argument
-    /// @param amount Ignored legacy amount argument
-    function reserveCloseExecutionBountyFromPositionMargin(
-        address account,
-        uint256 amount
-    ) external;
-
-    /// @notice Retired stale position-margin close-bounty selector retained as an explicit reverting tombstone.
-    /// @dev V2 stale close bounties must also be backed exclusively by free settlement; every call reverts.
-    /// @param account Ignored legacy account argument
-    /// @param amount Ignored legacy amount argument
-    function reserveStaleCloseExecutionBountyFromPositionMargin(
         address account,
         uint256 amount
     ) external;

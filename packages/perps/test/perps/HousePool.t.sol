@@ -3,7 +3,6 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
@@ -1398,16 +1397,20 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         assertEq(usdc.balanceOf(treasury), 25_000e6, "Sweep recipient should receive only the quarantined donation");
     }
 
-    function test_RecordProtocolInflow_OnlyEngineCanAccountRawExcess() public {
+    function test_RecordClaimantRevenue_OnlyEngineCanAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
         vm.prank(alice);
         vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
-        pool.recordProtocolInflow(25_000e6);
+        pool.recordClaimantInflow(
+            25_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
 
         vm.prank(address(engine));
-        pool.recordProtocolInflow(25_000e6);
+        pool.recordClaimantInflow(
+            25_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
 
         assertEq(
             pool.totalAssets(),
@@ -1417,25 +1420,29 @@ contract HousePoolTest is HousePoolAsyncTestBase {
         assertEq(pool.excessAssets(), 0, "Engine-accounted inflow should not remain quarantined as excess");
     }
 
-    function test_RecordProtocolInflow_OrderRouterCannotAccountRawExcess() public {
+    function test_RecordClaimantRevenue_OrderRouterCannotAccountRawExcess() public {
         _fundJunior(bob, 500_000e6);
         usdc.mint(address(pool), 25_000e6);
 
         vm.prank(address(router));
         vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
-        pool.recordProtocolInflow(25_000e6);
+        pool.recordClaimantInflow(
+            25_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
 
         assertEq(pool.excessAssets(), 25_000e6, "Router-originated raw excess should remain quarantined");
     }
 
-    function test_RecordProtocolInflow_RestoresCanonicalAssetsAfterRawShortfall() public {
+    function test_RecordClaimantRevenue_RestoresCanonicalAssetsAfterRawShortfall() public {
         _fundJunior(bob, 500_000e6);
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 100_000e6);
         usdc.mint(address(pool), 10_000e6);
 
         vm.prank(address(engine));
-        pool.recordProtocolInflow(10_000e6);
+        pool.recordClaimantInflow(
+            10_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
 
         assertEq(
             pool.totalAssets(),

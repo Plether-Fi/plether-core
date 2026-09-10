@@ -58,8 +58,8 @@ Before trusting a test as a source of truth, ask:
 | `MarginClearinghouse` operator paths | `engine`, `settlementSidecar` | broad settlement mutations only |
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
 | `MarginClearinghouse.releaseInvalidatedOrderReserves` | Engine-reported `orderRouter` only | exact order-margin, order-bounty, and attached-protection-bounty risk-off reclassification; authorization reads the Engine's Router binding, while the transition performs no Engine mutation, carry checkpoint, Terminal NAV synchronization, or token movement |
-| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
-| `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
+| `HousePool.payOut` | `engine`, `settlementSidecar` | payout authority is intentionally narrow |
+| `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` for revenue; `engine` only for recapitalization | claimant-owned revenue/recap routing only |
 | `HousePool.reserveSeniorDeposit` / `releaseSeniorDepositReservation` | configured `seniorVault` only | direct LPs and the Junior vault cannot reserve or release pending Senior-entry capacity; activation happens only through synchronized settlement |
 | `HousePool.reconcile` | either configured tranche vault | retained vault integration hook; end users enter and claim through `TrancheVault` |
 | `OrderRouter.settleLpEpoch(bytes[])` | permissionless | validates one PoolReconcile mark and atomically invokes coordinated LP entry activation and redemption funding |
@@ -162,7 +162,7 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 | VPI rebate reserve | Trader, dedicated to `max(-vpiAccrued, 0)` | protected sub-balance of clearinghouse action reserve | engine/settlement sidecar | matching VPI clawback only; excluded from price-risk collateral, with underfunding treated as independent delinquency | no separate pool asset | no | no |
 | Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | same-account price-risk health and one-time price-loss netting only; never cash/action collateral | yes, as senior liability | yes | yes |
 | Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
-| Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | eligible free settlement only; never PnL pledge or claim | only the remainder uncovered after projected free-settlement collection affects health | no | no |
+| Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | active position margin, then free settlement; never claims or unrelated reserves | projected margin debit reduces price equity; remainder after both sources is independent delinquency | no | no |
 | Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
 | Signed terminal price delta | LP marked ownership adjustment | `TerminalNavBookV2` queried through the authenticated Engine snapshot | Engine-only atomic, state-derived `syncFromEngine(...)` | n/a | not the endpoint admission reserve | cannot fund cash redemption | yes, identically for deposit activation and redemption pricing |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
@@ -180,9 +180,13 @@ Reachability note:
 - Each typed reserve may be consumed only for its matching obligation; bounded liquidation cleanup may separately forfeit abandoned order bounties.
 - Negative lifetime VPI must be fully covered by its dedicated reserve. Underfunding independently blocks withdrawal
   and makes the account liquidatable; overfunding never increases price collateral.
-- Carry checks first project collection from eligible free settlement. A fully covered amount does not worsen exact
-  price-risk health; any uncovered remainder blocks withdrawal and makes the position liquidatable. PnL pledge plus
-  same-account claim cannot offset it.
+- Carry checks project collection from canonical active position margin first, then free settlement. Price-risk health
+  uses the reduced pledge. Any remainder after both sources are exhausted blocks withdrawal and makes the position
+  liquidatable; same-account claims cannot fund carry. Terminal action recovery/waiver applies only to unpaid carry.
+- Claim and bounty credits collect available backing before applying the full incoming credit, retaining unpaid carry.
+  There is no second pass or waiver. Stored arrears can coexist with the new backing until a later checkpoint, so audit
+  health against projected current coverage. Claim liquidity checks follow collection; failed payouts or transfers
+  must restore both accounts, custody, carry bases, pool accounting, and NAV commitments.
 
 ## Liveness vs Safety Choices
 
@@ -330,7 +334,7 @@ Reachability note:
 
 ### Stale-mark close bounty commits
 
-- Liveness problem: a trader with no free settlement may still need to queue a risk-reducing close that sources the fixed router bounty from active margin.
+- Liveness problem: a trader may need to queue a risk-reducing close after the stored mark becomes stale. Carry uses margin first; the fixed router bounty still requires free settlement.
 - Chosen tradeoff: close-bounty reservation may use the latest stored mark price even when it is stale, as long as a mark exists.
 - New risk: commit-time close-bounty reservation may use an older mark than live execution would accept.
 - Protecting invariant: this path only supports risk-reducing close commits and still excludes queued reservations from generic collateral reachability.
@@ -363,7 +367,7 @@ Reachability note:
 2. Router reserves the execution bounty and preserves the residual position path.
 3. Keeper executes.
 4. Planner allocates exact entry cost to the closed lots, nets same-account claim, consumes PnL pledge up to the pre-close cap, and reports any excess price loss as a diagnostic write-off.
-5. Carry, VPI, execution fee, and any frozen spread use the separate action path; an uncollectible action remainder rejects the partial close, but uncollateralized price loss does not.
+5. Margin-first carry is collected before price settlement; only unpaid carry, VPI, execution fee, and any frozen spread use the separate action path; an uncollectible action remainder rejects the partial close, but uncollateralized price loss does not.
 6. Engine retains any PnL pledge required to conserve the residual marked curve and atomically installs the remaining lots, entry cost, and collectible cap.
 7. LPs receive only physically collected price/action inflow; the write-off creates no asset, claim, or deficit.
 
@@ -451,8 +455,10 @@ Reachability note:
 3. Trader-claim seniority: trader claim balances remain senior until settled.
 4. Settlement headroom: every open/increase leaves `E >= L + B`, LP funding reserves `C + L + B`, and `B` never enters
    raw degraded mode, terminal NAV, yield, or custody accounting.
-5. Carry isolation: project pending carry from eligible free settlement first; only an uncovered remainder blocks
-   withdrawal or makes the position liquidatable, and exact price-risk backing cannot offset it.
+5. Carry allocation: charge margin first, free settlement second, and preserve other buckets/claims. Check health
+   against reduced pledge and retain the unpaid-carry safeguard. Reconcile direct collection, residual terminal
+   recovery and waiver without reassessing carried-forward arrears. Authenticate NAV before margin changes, and sync
+   only at the outermost account bracket; downstream reverts must restore trader and keeper accounting.
 6. Bounded queue behavior: cleanup and close-intent projection are account-local.
 7. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
 8. Exact symmetric NAV: deposits and redemptions use the same signed terminal delta; marked trader losses count only to the account cap and never as spendable withdrawal cash.

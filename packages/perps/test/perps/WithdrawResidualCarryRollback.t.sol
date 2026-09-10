@@ -43,7 +43,7 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         ITerminalNavBookV2.BookState terminalBook;
     }
 
-    function test_AccountLens_FullyFreeFundedCarryDoesNotWorsenPriceHealth() public {
+    function test_AccountLens_MarginFundedCarryCanBreachHealthDespiteFreeCash() public {
         address trader = address(0xCA770002);
         address account = trader;
         uint256 executionPrice = 1e8;
@@ -89,8 +89,8 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         );
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
-        assertFalse(snapshot.liquidatable, "fully funded carry must not make the account liquidatable");
-        assertFalse(publicLens.isLiquidatable(account), "public lens must preserve strict carry isolation");
+        assertTrue(snapshot.liquidatable, "margin-funded carry depletes price collateral below maintenance");
+        assertTrue(publicLens.isLiquidatable(account), "public lens must use the same post-carry pledge");
     }
 
     function test_AccountLens_UncoveredCarryIsIndependentDelinquency() public {
@@ -105,7 +105,7 @@ contract WithdrawResidualCarryRollbackTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, withdrawableUsdc);
 
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(block.timestamp + 10 * 365 days);
         uint256 pendingCarryUsdc = _expectedIndexedCarryUsdc(account);
         IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
         MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption =

@@ -59,7 +59,7 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
 
         uint256 committedBefore = router.getAccountReservations(account).committedMarginUsdc;
         assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
-        vm.warp(block.timestamp + 365 days);
+        vm.warp(block.timestamp + 10 * 365 days);
         uint256 depth = pool.totalAssets();
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1e8);
         assertTrue(preview.liquidatable, "Accrued carry should make the position liquidatable");

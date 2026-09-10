@@ -12,14 +12,16 @@ contract MarketCalendarHarness {
         bool tomorrowOverride,
         uint256 fadRunwaySeconds
     ) external pure returns (bool) {
-        return MarketCalendarLib.isFadWindow(timestamp, todayOverride, tomorrowOverride, fadRunwaySeconds);
+        (bool fadWindow,) = MarketCalendarLib.marketStatus(timestamp, todayOverride, tomorrowOverride, fadRunwaySeconds);
+        return fadWindow;
     }
 
     function isOracleFrozen(
         uint256 timestamp,
         bool todayOverride
     ) external pure returns (bool) {
-        return MarketCalendarLib.isOracleFrozen(timestamp, todayOverride);
+        (, bool frozen) = MarketCalendarLib.marketStatus(timestamp, todayOverride, false, 0);
+        return frozen;
     }
 
     function newYorkMarketBoundary(

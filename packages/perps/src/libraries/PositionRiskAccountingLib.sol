@@ -75,35 +75,6 @@ library PositionRiskAccountingLib {
         }
     }
 
-    /// @notice Scales an annualized base carry rate by capped utilization.
-    /// @param baseCarryBps Annualized carry rate at 100% utilization, in basis points.
-    /// @param utilizationBps Utilization in basis points; values above 10,000 are capped.
-    /// @return Utilization-scaled annualized carry rate in basis points, rounded down.
-    function computeUtilizedCarryRateBps(
-        uint256 baseCarryBps,
-        uint256 utilizationBps
-    ) internal pure returns (uint256) {
-        if (utilizationBps > UTILIZATION_BPS) {
-            utilizationBps = UTILIZATION_BPS;
-        }
-        return (baseCarryBps * utilizationBps) / UTILIZATION_BPS;
-    }
-
-    /// @notice Converts an annualized carry rate and elapsed seconds into a 1e18-scaled index increment.
-    /// @dev Uses a 365-day simple-interest year and returns zero when either input is zero. Division rounds down.
-    /// @param carryRateBps Annualized carry rate in basis points.
-    /// @param timeDelta Accrual interval in seconds.
-    /// @return Carry index increment scaled by 1e18.
-    function computeCarryIndexIncrement(
-        uint256 carryRateBps,
-        uint256 timeDelta
-    ) internal pure returns (uint256) {
-        if (carryRateBps == 0 || timeDelta == 0) {
-            return 0;
-        }
-        return (carryRateBps * CARRY_INDEX_SCALE * timeDelta) / (CfdMath.SECONDS_PER_YEAR * 10_000);
-    }
-
     /// @notice Accrues the current carry index using borrow utilization over an elapsed interval.
     /// @dev Returns `storedIndex` unchanged when time does not advance, borrow base is zero, the base rate is zero,
     ///      or computed utilization is zero. Otherwise the implementation performs one combined floor division of
@@ -153,60 +124,6 @@ library PositionRiskAccountingLib {
         return (borrowBaseUsdc * carryIndexDelta) / CARRY_INDEX_SCALE;
     }
 
-    /// @notice Builds position equity and threshold state without a separate pending-carry debit.
-    /// @dev Equity is `reachableCollateral - max(-vpiAccrued, 0) + unrealizedPnl`. Positive lifetime VPI is not
-    ///      added back. PnL uses the cap-aware `CfdMath.calculatePnL`; notional and requirement divisions round down.
-    ///      Canonical USDC inputs must fit `int256`; larger explicit conversions follow fixed-width signed semantics.
-    /// @param pos Position to evaluate.
-    /// @param price Current oracle price, conventionally 8 decimals.
-    /// @param capPrice Protocol price cap passed to PnL calculation.
-    /// @param reachableCollateralUsdc Account collateral eligible for this risk view.
-    /// @param requiredBps Caller-selected liquidation threshold rate in basis points.
-    /// @return state Signed PnL/equity, current notional, requirement, and inclusive liquidation test.
-    function buildPositionRiskState(
-        CfdTypes.Position memory pos,
-        uint256 price,
-        uint256 capPrice,
-        uint256 reachableCollateralUsdc,
-        uint256 requiredBps
-    ) internal pure returns (PositionRiskState memory state) {
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, capPrice);
-        state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        state.equityUsdc =
-            int256(reachableCollateralUsdc) - int256(_vpiClawbackUsdc(pos.vpiAccrued)) + state.unrealizedPnlUsdc;
-        state.currentNotionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
-        state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
-    }
-
-    /// @notice Builds position equity and threshold state after deducting pending carry.
-    /// @dev Equity is `reachableCollateral - pendingCarry - max(-vpiAccrued, 0) + unrealizedPnl`. The result is
-    ///      liquidatable on equality (`equity <= maintenanceMarginUsdc`). PnL is cap-aware and divisions round down.
-    ///      Canonical USDC inputs must fit `int256`; larger explicit conversions follow fixed-width signed semantics.
-    /// @param pos Position to evaluate.
-    /// @param price Current oracle price, conventionally 8 decimals.
-    /// @param capPrice Protocol price cap passed to PnL calculation.
-    /// @param pendingCarryUsdc Carry accrued but not yet removed from collateral.
-    /// @param reachableCollateralUsdc Account collateral eligible for this risk view.
-    /// @param requiredBps Caller-selected liquidation threshold rate in basis points.
-    /// @return state Signed PnL/equity, current notional, requirement, and inclusive liquidation test.
-    function buildPositionRiskStateWithCarry(
-        CfdTypes.Position memory pos,
-        uint256 price,
-        uint256 capPrice,
-        uint256 pendingCarryUsdc,
-        uint256 reachableCollateralUsdc,
-        uint256 requiredBps
-    ) internal pure returns (PositionRiskState memory state) {
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculatePnL(pos, price, capPrice);
-        state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        state.equityUsdc = int256(reachableCollateralUsdc) - int256(pendingCarryUsdc)
-            - int256(_vpiClawbackUsdc(pos.vpiAccrued)) + state.unrealizedPnlUsdc;
-        state.currentNotionalUsdc = (pos.size * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
-        state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
-    }
-
     /// @notice Builds position equity using exact lot-based entry cost and a separate pending-carry debit.
     /// @dev This is the canonical V2 risk path. The legacy builder remains available for read-only compatibility
     ///      surfaces that have not been supplied an exact entry-cost field.
@@ -230,8 +147,8 @@ library PositionRiskAccountingLib {
     }
 
     /// @notice Builds canonical V2 price-risk equity without mixing action charges into PnL backing.
-    /// @dev Equity is exactly `pnlPledge + same-account nettable claim + exact price PnL`. Carry and VPI are action
-    ///      economics settled from their own eligible sources and therefore cannot reduce the terminal collectible cap.
+    /// @dev Equity is exactly `pnlPledge + same-account nettable claim + exact price PnL`. Callers supply pledge after
+    ///      carry collection or projection; carry must not be deducted again here. VPI backing is checked separately.
     function buildExactPriceRiskState(
         CfdTypes.Position memory pos,
         uint256 entryCostUsdcAtoms,

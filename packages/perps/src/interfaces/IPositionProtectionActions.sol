@@ -47,7 +47,7 @@ interface IPositionProtectionActions {
     /// @notice Permissionlessly queues a fresh full-position close for an already-latched protection.
     /// @dev The original trigger is not re-evaluated. Exactly one retained execution bounty moves to the fresh child,
     ///      which receives a new order id, commit clock, expiry, and oracle settlement window at the FIFO tail.
-    ///      This safety action remains available while new protection commits are paused or disabled.
+    ///      This safety action remains available while new protection commits are paused.
     /// @param protectionId Latched protection whose latest close attempt is already terminal.
     /// @return linkedOrderId Newly committed ordinary close-attempt identifier.
     function retryPositionProtectionClose(

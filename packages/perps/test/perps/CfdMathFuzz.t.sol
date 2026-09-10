@@ -45,7 +45,7 @@ contract CfdMathFuzzTest is Test {
         uint256 currentPrice,
         uint8 sideRaw
     ) public pure {
-        size = bound(size, 1e18, 1_000_000e18);
+        size = bound(size, 1, 10_000) * CfdTypes.SIZE_QUANTUM;
         entryPrice = bound(entryPrice, 0.01e8, 1.99e8);
         currentPrice = bound(currentPrice, 0, 3e8);
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
@@ -61,8 +61,16 @@ contract CfdMathFuzzTest is Test {
             vpiAccrued: 0
         });
 
-        (bool isProfit, uint256 pnlUsdc) = CfdMath.calculatePnL(pos, currentPrice, CAP_PRICE);
-        uint256 maxProfit = CfdMath.calculateMaxProfit(size, entryPrice, side, CAP_PRICE);
+        (bool isProfit, uint256 pnlUsdc) = CfdMath.calculateExactPnl(
+            pos.size / CfdTypes.SIZE_QUANTUM,
+            (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
+            pos.side,
+            currentPrice,
+            CAP_PRICE
+        );
+        uint256 maxProfit = CfdMath.calculateExactMaxProfit(
+            (size) / CfdTypes.SIZE_QUANTUM, ((size) / CfdTypes.SIZE_QUANTUM) * (entryPrice), side, CAP_PRICE
+        );
 
         if (isProfit) {
             assertLe(pnlUsdc, maxProfit, "PnL exceeds max profit");
@@ -74,11 +82,13 @@ contract CfdMathFuzzTest is Test {
         uint256 entryPrice,
         uint8 sideRaw
     ) public pure {
-        size = bound(size, 1e18, 1_000_000e18);
+        size = bound(size, 1, 10_000) * CfdTypes.SIZE_QUANTUM;
         entryPrice = bound(entryPrice, 1, CAP_PRICE);
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
 
-        uint256 maxProfit = CfdMath.calculateMaxProfit(size, entryPrice, side, CAP_PRICE);
+        uint256 maxProfit = CfdMath.calculateExactMaxProfit(
+            (size) / CfdTypes.SIZE_QUANTUM, ((size) / CfdTypes.SIZE_QUANTUM) * (entryPrice), side, CAP_PRICE
+        );
 
         assertLe(maxProfit, (size * CAP_PRICE) / USDC_TO_TOKEN_SCALE, "Max profit exceeds upper bound");
     }

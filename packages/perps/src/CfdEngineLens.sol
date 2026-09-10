@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineOpenQuoter} from "@plether/perps/CfdEngineOpenQuoter.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
@@ -24,6 +25,9 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @notice Engine instance permanently inspected by this lens.
     CfdEngine public immutable engineContract;
 
+    /// @notice Stateless search helper, deployed with the lens to isolate its runtime bytecode budget.
+    CfdEngineOpenQuoter internal immutable openQuoter;
+
     /// @notice Binds the lens to one engine instance.
     /// @dev Performs no zero-address, code-size, or interface validation. Invalid bindings can deploy successfully but
     ///      cause later reads to revert.
@@ -32,6 +36,7 @@ contract CfdEngineLens is ICfdEngineLens {
         address engine_
     ) {
         engineContract = CfdEngine(engine_);
+        openQuoter = new CfdEngineOpenQuoter();
     }
 
     /// @notice Returns the engine address inspected by this lens.
@@ -79,6 +84,44 @@ contract CfdEngineLens is ICfdEngineLens {
         uint64 publishTime
     ) external view returns (ICfdEngineTypes.OpenPreview memory preview) {
         preview = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime);
+    }
+
+    /// @notice Quotes the largest open or same-side increase accepted by the current engine plan.
+    /// @dev Uses carry-adjusted interval bounds without assuming monotonic planner validity. Returns the complete
+    ///      preview and next-quantum rejection alongside the maximum. Zero-capacity diagnostics describe the minimum
+    ///      notional-admissible candidate. Search exhaustion explicitly reverts. Router and terminal-book execution
+    ///      gates remain outside the quote; price/time and dependency/numeric assumptions match `previewOpen`.
+    /// @param account Account that would open or increase a position.
+    /// @param side Resulting position side.
+    /// @param marginDelta Margin supplied by the hypothetical order, in 6-decimal USDC units.
+    /// @param oraclePrice Candidate execution price, with 8 decimals.
+    /// @param publishTime Candidate oracle publish timestamp in Unix seconds.
+    /// @return quote Largest planner-valid increase, its economics, and a limiting rejection code.
+    function quoteMaxOpen(
+        address account,
+        CfdTypes.Side side,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) external view returns (MaxOpenQuote memory quote) {
+        CfdEnginePlanTypes.RawSnapshot memory snap =
+            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: 0,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        CfdEnginePlanTypes.OpenDelta memory delta;
+        ICfdEnginePlanner planner = engineContract.planner();
+        (quote.maxSizeDelta, delta, quote.limitingReason) =
+            openQuoter.quote(planner, snap, order, oraclePrice, publishTime);
+        quote.preview = _openPreviewFromPlan(snap, delta, marginDelta, planner);
     }
 
     /// @notice Returns the numeric typed business-rule result for the same plan as `previewOpen`.
@@ -197,26 +240,25 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 oraclePrice,
         uint64 publishTime
     ) internal view returns (ICfdEngineTypes.OpenPreview memory preview) {
-        uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
-        preview.executionPrice = price;
-        preview.sizeDelta = sizeDelta;
-        preview.marginDeltaUsdc = marginDelta;
-
         CfdEnginePlanTypes.RawSnapshot memory snap =
             _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
-        CfdTypes.Order memory order = CfdTypes.Order({
-            account: account,
-            sizeDelta: sizeDelta,
-            marginDelta: marginDelta,
-            targetPrice: 0,
-            commitTime: 0,
-            commitBlock: 0,
-            orderId: 0,
-            side: side,
-            isClose: false
-        });
-        ICfdEnginePlanner planner = engineContract.planner();
-        CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, oraclePrice, publishTime);
+        CfdEnginePlanTypes.OpenDelta memory delta =
+            _planOpen(snap, account, side, sizeDelta, marginDelta, oraclePrice, publishTime);
+
+        return _openPreviewFromPlan(snap, delta, marginDelta, engineContract.planner());
+    }
+
+    /// @notice Builds identical open economics for standalone previews and maximum-size quotes.
+    function _openPreviewFromPlan(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.OpenDelta memory delta,
+        uint256 marginDelta,
+        ICfdEnginePlanner planner
+    ) internal pure returns (ICfdEngineTypes.OpenPreview memory preview) {
+        uint256 price = delta.price;
+        preview.executionPrice = price;
+        preview.sizeDelta = delta.sizeDelta;
+        preview.marginDeltaUsdc = marginDelta;
 
         preview.valid = delta.valid;
         preview.invalidReason = delta.revertCode;
@@ -253,6 +295,30 @@ contract CfdEngineLens is ICfdEngineLens {
         (preview.hasLiquidationPrice, preview.liquidationPrice) = _findLiquidationPrice(
             projected, delta.newPosEntryCostUsdcAtoms, snap.capPrice, reachableCollateralUsdc, maintenanceBps
         );
+    }
+
+    /// @notice Calls the canonical open planner against one already-built snapshot.
+    function _planOpen(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        address account,
+        CfdTypes.Side side,
+        uint256 sizeDelta,
+        uint256 marginDelta,
+        uint256 oraclePrice,
+        uint64 publishTime
+    ) internal view returns (CfdEnginePlanTypes.OpenDelta memory delta) {
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: account,
+            sizeDelta: sizeDelta,
+            marginDelta: marginDelta,
+            targetPrice: 0,
+            commitTime: 0,
+            commitBlock: 0,
+            orderId: 0,
+            side: side,
+            isClose: false
+        });
+        return engineContract.planner().planOpen(snap, order, oraclePrice, publishTime);
     }
 
     /// @notice Builds a close plan against current account state and supplied hypothetical pool depth.
@@ -346,7 +412,7 @@ contract CfdEngineLens is ICfdEngineLens {
     function _frozenSpreadPaidUsdc(
         CfdEnginePlanTypes.CloseDelta memory delta
     ) private pure returns (uint256 paidUsdc) {
-        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc;
+        uint256 priorChargesUsdc = delta.closeState.executionFeeUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc;
         if (delta.closeState.vpiDeltaUsdc > 0) {
             priorChargesUsdc += uint256(delta.closeState.vpiDeltaUsdc);
         }

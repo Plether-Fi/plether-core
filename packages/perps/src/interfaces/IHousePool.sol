@@ -226,11 +226,7 @@ interface IHousePool {
     /// @param recipient Recipient of the excess.
     /// @param amountUsdc Amount swept without changing canonical accounted assets, in USDC.
     event ExcessSwept(address indexed recipient, uint256 amountUsdc);
-    /// @notice Emitted when an authorized integration recognizes a legitimate protocol-owned inflow.
-    /// @param caller Authorized engine or settlement sidecar that recorded the inflow.
-    /// @param amountUsdc Amount added to canonical accounted assets, in USDC.
-    /// @param accountedAssetsUsdc Canonical accounted-asset ledger after the addition, in USDC.
-    event ProtocolInflowAccounted(address indexed caller, uint256 amountUsdc, uint256 accountedAssetsUsdc);
+
     /// @notice Emitted when claimant-owned revenue or recapitalization is routed into pool accounting.
     /// @param caller Authorized engine or settlement sidecar that recorded the inflow.
     /// @param kind Revenue or recapitalization ownership bucket.
@@ -306,17 +302,6 @@ interface IHousePool {
     /// @param amount USDC amount to transfer (6 decimals)
     function payOut(
         address recipient,
-        uint256 amount
-    ) external;
-
-    /// @notice Increases canonical pool assets to recognize a legitimate protocol-owned inflow.
-    /// @dev This is the controlled accounting path for endogenous protocol gains that should
-    ///      increase economic pool depth. It does not require raw excess to be present and may
-    ///      also be used to restore canonical accounting after a raw-balance shortfall has already
-    ///      reduced `totalAssets()` via the `min(rawBalance, accountedAssets)` boundary.
-    ///      Reverts if the caller is unauthorized. A zero amount is a no-op and emits no event.
-    /// @param amount USDC amount to add to canonical accounted assets (6 decimals)
-    function recordProtocolInflow(
         uint256 amount
     ) external;
 

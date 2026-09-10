@@ -81,7 +81,6 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         actions = IPositionProtectionActions(address(router.positionProtectionBook()));
         views = IPositionProtectionViews(address(router.positionProtectionBook()));
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.positionProtectionCommitsEnabled = true;
         config.positionProtectionTriggerBountyUsdc = TRIGGER_BOUNTY;
         config.closeOrderExecutionBountyUsdc = CLOSE_BOUNTY;
         config.minOpenOrderExecutionBountyUsdc = OPEN_BOUNTY;

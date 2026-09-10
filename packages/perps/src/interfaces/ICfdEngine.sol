@@ -52,7 +52,8 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external;
 
     /// @notice Reserves close-order execution bounty exclusively from free settlement.
-    /// @dev Callable only by the router. Carry is realized first; PnL pledge and all locked reserves stay protected.
+    /// @dev Callable only by the router. Realizes margin-first carry, then funds the bounty from free settlement
+    ///      while protecting all locked buckets.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close (18 decimals)
     /// @param amountUsdc Execution bounty amount to reserve in USDC
@@ -73,8 +74,8 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external;
 
     /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
-    /// @dev Callable only by the router. Realizes or checkpoints carry first when the beneficiary has an open position
-    ///      so the credit cannot dilute elapsed carry. A strictly newer mark is capped and cached; zero is a no-op.
+    /// @dev Callable only by the router. Collects available margin and free settlement toward carry before crediting a live
+    ///      position, retaining arrears. The incoming bounty remains untouched until a later checkpoint. A strictly newer mark is capped and cached; zero is a no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit
     /// @param beneficiary Account receiving the clearinghouse settlement credit
     /// @param amountUsdc Reserved USDC amount to reclassify

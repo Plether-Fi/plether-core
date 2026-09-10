@@ -33,6 +33,8 @@ contract PerpAccountingHandler is Test {
     uint8 internal constant REACHABILITY_ACTION_WITHDRAW = 2;
     bytes32 internal constant ACTION_CHARGE_SETTLED_TOPIC =
         keccak256("ActionChargeSettled(address,uint256,uint256,uint256)");
+    bytes32 internal constant CARRY_REALIZED_TOPIC =
+        keccak256("CarryRealized(address,uint256,uint256,uint256,uint256)");
 
     struct ReachabilityTransition {
         uint8 action;
@@ -498,6 +500,15 @@ contract PerpAccountingHandler is Test {
     ) internal view returns (uint256 collectedUsdc) {
         for (uint256 i = 0; i < logs.length; ++i) {
             if (
+                logs[i].emitter == address(engine) && logs[i].topics.length == 2
+                    && logs[i].topics[0] == CARRY_REALIZED_TOPIC
+                    && address(uint160(uint256(logs[i].topics[1]))) == model.account
+            ) {
+                (uint256 realizedUsdc,,,) = abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+                collectedUsdc += realizedUsdc;
+                continue;
+            }
+            if (
                 logs[i].emitter != address(engine.settlementSidecar()) || logs[i].topics.length < 2
                     || logs[i].topics[0] != ACTION_CHARGE_SETTLED_TOPIC
                     || address(uint160(uint256(logs[i].topics[1]))) != model.account
@@ -507,7 +518,7 @@ contract PerpAccountingHandler is Test {
 
             (uint256 assessedUsdc, uint256 recoveredUsdc,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
             uint256 withheldUsdc = model.priceGainUsdc < assessedUsdc ? model.priceGainUsdc : assessedUsdc;
-            return recoveredUsdc - withheldUsdc;
+            collectedUsdc += recoveredUsdc - withheldUsdc;
         }
     }
 

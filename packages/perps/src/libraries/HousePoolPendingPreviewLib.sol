@@ -30,33 +30,6 @@ library HousePoolPendingPreviewLib {
         uint256 juniorSupply;
     }
 
-    /// @notice Applies pending buckets using those same buckets as the full claimant intent.
-    /// @dev Equivalent to the three-argument overload with `claimantIntentBuckets == claimantBuckets` and with
-    ///      revenue continuation disabled. Mutates `state` in place.
-    /// @param state In-memory accounting state to update.
-    /// @param claimantBuckets Settleable recapitalization and revenue amounts to apply.
-    function applyPendingClaimantBucketsPreview(
-        PendingAccountingState memory state,
-        ClaimantPendingBuckets memory claimantBuckets
-    ) internal pure {
-        applyPendingClaimantBucketsPreview(state, claimantBuckets, claimantBuckets);
-    }
-
-    /// @notice Applies settleable pending buckets while preserving a separate full recapitalization target.
-    /// @dev Revenue continuation is disabled: if principal is already claimed after recapitalization, revenue becomes
-    ///      unassigned. Mutates `state` in place.
-    /// @param state In-memory accounting state to update.
-    /// @param claimantBuckets Settleable recapitalization and revenue amounts to apply.
-    /// @param claimantIntentBuckets Full outstanding intent; only `recapitalizationUsdc` is used as the bootstrap
-    ///        senior high-water-mark target.
-    function applyPendingClaimantBucketsPreview(
-        PendingAccountingState memory state,
-        ClaimantPendingBuckets memory claimantBuckets,
-        ClaimantPendingBuckets memory claimantIntentBuckets
-    ) internal pure {
-        applyPendingClaimantBucketsPreview(state, claimantBuckets, claimantIntentBuckets, false);
-    }
-
     /// @notice Applies settleable recapitalization first and settleable revenue second to a memory preview.
     /// @dev Zero buckets are skipped. `claimantIntentBuckets.revenueUsdc` is intentionally unused. Mutates `state` in
     ///      place; it does not decrement either input bucket.
@@ -121,17 +94,6 @@ library HousePoolPendingPreviewLib {
         residualBuckets.revenueUsdc = claimantBuckets.revenueUsdc > settledBuckets.revenueUsdc
             ? claimantBuckets.revenueUsdc - settledBuckets.revenueUsdc
             : 0;
-    }
-
-    /// @notice Applies recapitalization using the amount itself as the bootstrap high-water-mark target.
-    /// @dev Mutates `state` in place.
-    /// @param state In-memory accounting state to update.
-    /// @param amount Recapitalization assets to apply, in 6-decimal USDC.
-    function applyClaimantRecapitalizationIntent(
-        PendingAccountingState memory state,
-        uint256 amount
-    ) internal pure {
-        applyClaimantRecapitalizationIntent(state, amount, amount);
     }
 
     /// @notice Routes recapitalization to senior restoration or to unassigned assets.

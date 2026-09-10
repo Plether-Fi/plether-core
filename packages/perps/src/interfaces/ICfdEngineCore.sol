@@ -89,7 +89,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
     ) external;
 
     /// @notice Reserves the fixed close-order execution bounty exclusively from free settlement.
-    /// @dev Callable only by the configured router. Realizes carry first; PnL pledge and every reserve stay protected.
+    /// @dev Callable only by the configured router. Realizes margin-first carry, then funds the bounty from free
+    ///      settlement while protecting all locked buckets.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close
     /// @param amountUsdc Execution bounty amount to reserve
@@ -111,7 +112,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
 
     /// @notice Credits a reserved execution bounty into the beneficiary's clearinghouse account.
     /// @dev Callable only by the router. For a beneficiary with an open position, carry is checkpointed before the
-    ///      credit changes reachable collateral. A strictly newer mark is capped and cached; zero is a no-op.
+    ///      credit changes reachable collateral: collect available margin and free settlement, then retain arrears.
+    ///      The incoming bounty remains untouched until a later checkpoint. A strictly newer mark is capped and cached; zero is a no-op.
     /// @param sourceAccount Account whose reserved settlement bounty funds the credit
     /// @param beneficiary Account receiving the clearinghouse settlement credit
     /// @param amountUsdc Reserved USDC amount to transfer
@@ -228,7 +230,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
             int256 vpiAccrued
         );
 
-    /// @notice Returns carry checkpointed against an account but not yet fully covered by reachable collateral.
+    /// @notice Returns carry checkpointed against an account but not yet collected.
+    /// @dev A subsequent claim or bounty credit can cover stored arrears at a later checkpoint.
     /// @param account Account whose stored carry obligation should be inspected
     /// @return Unsettled carry in six-decimal USDC units
     function unsettledCarryUsdc(

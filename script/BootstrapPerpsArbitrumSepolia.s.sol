@@ -65,8 +65,8 @@ interface IPositionProtectionBookBootstrapView {
 contract BootstrapPerpsArbitrumSepolia is Script {
 
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
-    uint256 internal constant RELEASE_SENIOR_SEED_USDC = 10_000_000e6;
-    uint256 internal constant RELEASE_JUNIOR_SEED_USDC = 10_000_000e6;
+    uint256 internal constant RELEASE_SENIOR_SEED_USDC = 1e6;
+    uint256 internal constant RELEASE_JUNIOR_SEED_USDC = 1e6;
     uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_USDC = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_USDC = 1000e6;
@@ -160,7 +160,6 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("Junior seed initialized:", housePool.juniorSeedInitialized());
         console.log("HousePool pauser:", housePool.pauser());
         console.log("Router pauser:", routerAdmin.pauser());
-        console.log("Position protection commits enabled:", router.positionProtectionCommitsEnabled());
         console.log("Position protection trigger bounty USDC:", router.positionProtectionTriggerBountyUsdc());
         console.log("Emergency guardian:", emergencyCoordinator.guardian());
         console.log("Risk-off order cutoff:", routerAdmin.riskOffOrderCutoff());

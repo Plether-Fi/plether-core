@@ -235,12 +235,13 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         snapshot.lastMarkTime = engine.lastMarkTime();
         snapshot.riskParams = engine.riskParams();
 
-        snapshot.longSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, poolDepthUsdc, snapshot.riskParams.baseCarryBps);
-        snapshot.shortSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.SHORT, poolDepthUsdc, snapshot.riskParams.baseCarryBps);
-        snapshot.poolAssetsUsdc = poolDepthUsdc;
         snapshot.poolCashUsdc = IHousePool(engine.pool()).totalAssets();
+        snapshot.longSide =
+            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, snapshot.poolCashUsdc, snapshot.riskParams.baseCarryBps);
+        snapshot.shortSide = _sideSnapshot(
+            engine, planner, CfdTypes.Side.SHORT, snapshot.poolCashUsdc, snapshot.riskParams.baseCarryBps
+        );
+        snapshot.poolAssetsUsdc = poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
         snapshot.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
@@ -404,14 +405,16 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         assessment.mode = mode;
         assessment.executionNotionalUsdc = CfdMath.sizeToLots(delta.sizeDelta) * delta.price;
         assessment.grossAccountDebitUsdc = delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc
-            + delta.actionChargeCollectedUsdc + executionBountyUsdc;
-        assessment.actionChargeAssessedUsdc = delta.actionChargeAssessedUsdc;
-        assessment.actionChargeCollectedUsdc = delta.actionChargeCollectedUsdc;
+            + delta.realizedCarryUsdc + delta.actionChargeCollectedUsdc + executionBountyUsdc;
+        assessment.actionChargeAssessedUsdc = _netOpenActionCharge(
+            delta.realizedCarryUsdc, int256(delta.actionChargeAssessedUsdc) - int256(delta.actionRebateUsdc)
+        );
+        assessment.actionChargeCollectedUsdc = delta.realizedCarryUsdc + delta.actionChargeCollectedUsdc;
         assessment.explicitFeesUsdc = delta.closeState.executionFeeUsdc + delta.closeState.frozenSpreadUsdc;
         assessment.preSettlementBalanceUsdc = snapshot.accountBuckets.settlementBalanceUsdc;
 
-        uint256 postSettlementBalanceUsdc =
-            assessment.preSettlementBalanceUsdc - delta.pricePnlPledgeConsumedUsdc - delta.actionChargeCollectedUsdc;
+        uint256 postSettlementBalanceUsdc = assessment.preSettlementBalanceUsdc - delta.realizedCarryUsdc
+            - delta.pricePnlPledgeConsumedUsdc - delta.actionChargeCollectedUsdc;
         if (delta.pricePayoutIsImmediate) {
             postSettlementBalanceUsdc += delta.pricePayoutUsdc;
         }

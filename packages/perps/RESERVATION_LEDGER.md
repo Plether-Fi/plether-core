@@ -9,7 +9,7 @@ balance or committed-margin queue.
 
 Each clearinghouse order reservation holds its amount, terminal status, and previous/next active reservation ids.
 Each account has a packed head/tail/count plus its existing amount aggregate. Creation appends to that account's FIFO;
-full consumption, promotion, or release unlinks immediately, including when settlement consumes a queued order's
+full consumption or release unlinks immediately, including when settlement consumes a queued order's
 margin before that order executes. Partial consumption keeps its position. Zero is the list sentinel and cannot be a
 reservation id. Records remain as terminal receipts and cannot be reused.
 

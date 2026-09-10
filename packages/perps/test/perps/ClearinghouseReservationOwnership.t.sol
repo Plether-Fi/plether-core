@@ -163,7 +163,8 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         vm.prank(address(engine));
         clearinghouse.unlockReservedSettlement(ACCOUNT, 1);
         vm.prank(address(engine));
-        assertEq(clearinghouse.consumeAccountOrderReservations(ACCOUNT, 10e6), 10e6);
+        (uint256 collected,) = clearinghouse.consumeActionCharge(ACCOUNT, 10e6, 0, 10e6, OTHER, address(0), 0);
+        assertEq(collected, 10e6);
         assertEq(clearinghouse.getMarginReservationIds(ACCOUNT).length, 0);
         assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc, 3e6);
     }
@@ -183,7 +184,9 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         assertEq(clearinghouse.getOrderReservation(1).nextOrderId, 3);
         assertEq(clearinghouse.getOrderReservation(3).previousOrderId, 1);
         vm.prank(address(engine));
-        assertEq(clearinghouse.consumeAccountOrderReservations(ACCOUNT, 15e6), 15e6);
+        // The released middle reservation provides 20 USDC of free settlement, consumed before FIFO margin.
+        (uint256 collected,) = clearinghouse.consumeActionCharge(ACCOUNT, 35e6, 0, 15e6, OTHER, address(0), 0);
+        assertEq(collected, 35e6);
         assertEq(clearinghouse.marginReservationHead(ACCOUNT), 3);
         assertEq(clearinghouse.marginReservationTail(ACCOUNT), 3);
         assertEq(clearinghouse.getOrderReservation(3).remainingAmountUsdc, 25e6);

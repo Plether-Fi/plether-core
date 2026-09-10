@@ -20,41 +20,6 @@ library MarketCalendarLib {
     /// @dev New York returns to standard time at 02:00 local daylight time (06:00 UTC).
     uint256 internal constant NEW_YORK_DST_END_UTC = 6 hours;
 
-    /// @notice Returns whether Friday Afternoon Deleverage controls are active at a timestamp.
-    /// @dev The recurring window starts 30 minutes before Friday's 17:00 New York FX close and ends 15 minutes after
-    ///      Sunday's 17:00 New York FX open. A configured override activates FAD for its entire UTC day;
-    ///      `fadRunwaySeconds` may also activate FAD before an overridden following day.
-    /// @param timestamp Timestamp to classify.
-    /// @param todayOverride Whether the timestamp's UTC day is an admin-configured FAD day.
-    /// @param tomorrowOverride Whether the following UTC day is an admin-configured FAD day.
-    /// @param fadRunwaySeconds Lead time before a configured following day, in seconds.
-    /// @return Whether FAD controls are active.
-    function isFadWindow(
-        uint256 timestamp,
-        bool todayOverride,
-        bool tomorrowOverride,
-        uint256 fadRunwaySeconds
-    ) internal pure returns (bool) {
-        (bool fadWindow,) = marketStatus(timestamp, todayOverride, tomorrowOverride, fadRunwaySeconds);
-        return fadWindow;
-    }
-
-    /// @notice Returns whether the calendar permits operation with a frozen oracle at a timestamp.
-    /// @dev The recurring window follows Pyth's FX hours: Friday 17:00 New York time through Sunday 16:59:59 New York
-    ///      time. The UTC boundary is 21:00 during US daylight saving time and 22:00 during US standard time. A
-    ///      configured override freezes the oracle regime for its entire UTC day; unlike FAD, the runway does not
-    ///      extend this window.
-    /// @param timestamp Timestamp to classify.
-    /// @param todayOverride Whether the timestamp's UTC day is an admin-configured frozen-oracle day.
-    /// @return Whether the frozen-oracle regime is active.
-    function isOracleFrozen(
-        uint256 timestamp,
-        bool todayOverride
-    ) internal pure returns (bool) {
-        (, bool oracleFrozen) = marketStatus(timestamp, todayOverride, false, 0);
-        return oracleFrozen;
-    }
-
     /// @notice Returns both recurring market-calendar regimes with one New York boundary calculation.
     /// @param timestamp Timestamp to classify.
     /// @param todayOverride Whether the timestamp's UTC day is an admin-configured FAD and frozen-oracle day.

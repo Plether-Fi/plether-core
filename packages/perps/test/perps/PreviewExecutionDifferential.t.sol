@@ -17,6 +17,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         uint256 settlementBefore;
         uint256 traderClaimBefore;
         uint256 executionBountyUsdc;
+        uint256 carryCollectedUsdc;
     }
 
     function testFuzz_PreviewOpen_MatchesLiveExecution_AfterCarryAndSkew(
@@ -351,6 +352,10 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         checkpoint.settlementBefore = clearinghouse.balanceUsdc(account);
         checkpoint.traderClaimBefore = engine.traderClaimBalanceUsdc(account);
         checkpoint.executionBountyUsdc = executionBountyUsdc;
+        uint256 pendingCarryUsdc = engine.unsettledCarryUsdc(account) + _expectedIndexedCarryUsdc(account);
+        uint256 carryBackingUsdc =
+            checkpoint.bucketsBefore.activePositionMarginUsdc + checkpoint.bucketsBefore.freeSettlementUsdc;
+        checkpoint.carryCollectedUsdc = pendingCarryUsdc < carryBackingUsdc ? pendingCarryUsdc : carryBackingUsdc;
     }
 
     function _assertFullClosePreviewMatchesLive(
@@ -361,14 +366,14 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         uint256 expectedSettlement = checkpoint.settlementBefore + preview.immediatePayoutUsdc
-            - preview.seizedCollateralUsdc - checkpoint.executionBountyUsdc;
+            - preview.seizedCollateralUsdc - checkpoint.executionBountyUsdc - checkpoint.carryCollectedUsdc;
 
         assertEq(sizeAfter, preview.remainingSize, "Close preview remaining size should match live execution");
         assertEq(marginAfter, preview.remainingMargin, "Close preview remaining margin should match live execution");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
             checkpoint.bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - checkpoint.executionBountyUsdc,
+                - checkpoint.executionBountyUsdc - checkpoint.carryCollectedUsdc,
             "Close preview should match the live settlement-balance mutation"
         );
         assertEq(
@@ -693,8 +698,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         IMarginClearinghouse.AccountUsdcBuckets memory bucketsAfter = clearinghouse.getAccountUsdcBuckets(account);
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
+            preview.settlementRetainedUsdc,
             "Previewed immediate payout should match the live settlement mutation"
         );
         assertEq(
