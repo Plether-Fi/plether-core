@@ -1,0 +1,251 @@
+{
+  "sourceCommit": "cc694e6d44898fd388bede733eba9bca8a52ab10",
+  "method": "Compiler creation-code length plus Cast ABI-encoded constructor argument length. Static scalar values are placeholders because they cannot change encoded length. Dynamic values match DeployPerpsArbitrumSepolia: exact Senior/Junior names and symbols, and four arrays of six oracle feeds. This is offline size evidence, not an RPC simulation or a creation-input bytecode match.",
+  "runtimeLimitBytes": 24576,
+  "creationInputLimitBytes": 49152,
+  "contracts": {
+    "mockUsdc": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/MockUSDC.json",
+      "runtimeTemplateBytes": 1697,
+      "runtimeHeadroomBytes": 22879,
+      "creationCodeBytes": 2511,
+      "constructorArgumentBytes": 0,
+      "fullCreationInputBytes": 2511,
+      "creationInputHeadroomBytes": 46641
+    },
+    "marginClearinghouse": {
+      "artifact": "out/MarginClearinghouse.sol/MarginClearinghouse.json",
+      "runtimeTemplateBytes": 17724,
+      "runtimeHeadroomBytes": 6852,
+      "creationCodeBytes": 18024,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 18056,
+      "creationInputHeadroomBytes": 31096
+    },
+    "cfdEngine": {
+      "artifact": "out/CfdEngine.sol/CfdEngine.json",
+      "runtimeTemplateBytes": 24005,
+      "runtimeHeadroomBytes": 571,
+      "creationCodeBytes": 24971,
+      "constructorArgumentBytes": 448,
+      "fullCreationInputBytes": 25419,
+      "creationInputHeadroomBytes": 23733
+    },
+    "terminalNavBookV2": {
+      "artifact": "out/TerminalNavBookV2.sol/TerminalNavBookV2.json",
+      "runtimeTemplateBytes": 9356,
+      "runtimeHeadroomBytes": 15220,
+      "creationCodeBytes": 9645,
+      "constructorArgumentBytes": 64,
+      "fullCreationInputBytes": 9709,
+      "creationInputHeadroomBytes": 39443
+    },
+    "cfdEnginePlanner": {
+      "artifact": "out/CfdEnginePlanner.sol/CfdEnginePlanner.json",
+      "runtimeTemplateBytes": 19756,
+      "runtimeHeadroomBytes": 4820,
+      "creationCodeBytes": 19782,
+      "constructorArgumentBytes": 0,
+      "fullCreationInputBytes": 19782,
+      "creationInputHeadroomBytes": 29370
+    },
+    "cfdEngineSettlementSidecar": {
+      "artifact": "out/CfdEngineSettlementSidecar.sol/CfdEngineSettlementSidecar.json",
+      "runtimeTemplateBytes": 24275,
+      "runtimeHeadroomBytes": 301,
+      "creationCodeBytes": 24644,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 24676,
+      "creationInputHeadroomBytes": 24476
+    },
+    "cfdEngineAdmin": {
+      "artifact": "out/CfdEngineAdmin.sol/CfdEngineAdmin.json",
+      "runtimeTemplateBytes": 4721,
+      "runtimeHeadroomBytes": 19855,
+      "creationCodeBytes": 5032,
+      "constructorArgumentBytes": 64,
+      "fullCreationInputBytes": 5096,
+      "creationInputHeadroomBytes": 44056
+    },
+    "housePoolRedemptionMathSidecar": {
+      "artifact": "out/HousePoolRedemptionMathSidecar.sol/HousePoolRedemptionMathSidecar.json",
+      "runtimeTemplateBytes": 1042,
+      "runtimeHeadroomBytes": 23534,
+      "creationCodeBytes": 1068,
+      "constructorArgumentBytes": 0,
+      "fullCreationInputBytes": 1068,
+      "creationInputHeadroomBytes": 48084
+    },
+    "housePool": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseHousePool.json",
+      "runtimeTemplateBytes": 23848,
+      "runtimeHeadroomBytes": 728,
+      "creationCodeBytes": 29187,
+      "constructorArgumentBytes": 96,
+      "fullCreationInputBytes": 29283,
+      "creationInputHeadroomBytes": 19869
+    },
+    "cfdEngineProtocolLens": {
+      "artifact": "out/CfdEngineProtocolLens.sol/CfdEngineProtocolLens.json",
+      "runtimeTemplateBytes": 4223,
+      "runtimeHeadroomBytes": 20353,
+      "creationCodeBytes": 4376,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 4408,
+      "creationInputHeadroomBytes": 44744
+    },
+    "seniorVault": {
+      "artifact": "out/TrancheVault.sol/TrancheVault.json",
+      "runtimeTemplateBytes": 23879,
+      "runtimeHeadroomBytes": 697,
+      "creationCodeBytes": 26098,
+      "constructorArgumentBytes": 352,
+      "fullCreationInputBytes": 26450,
+      "creationInputHeadroomBytes": 22702
+    },
+    "juniorVault": {
+      "artifact": "out/TrancheVault.sol/TrancheVault.json",
+      "runtimeTemplateBytes": 23879,
+      "runtimeHeadroomBytes": 697,
+      "creationCodeBytes": 26098,
+      "constructorArgumentBytes": 352,
+      "fullCreationInputBytes": 26450,
+      "creationInputHeadroomBytes": 22702
+    },
+    "cfdEngineAccountLens": {
+      "artifact": "out/CfdEngineAccountLens.sol/CfdEngineAccountLens.json",
+      "runtimeTemplateBytes": 10593,
+      "runtimeHeadroomBytes": 13983,
+      "creationCodeBytes": 10873,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 10905,
+      "creationInputHeadroomBytes": 38247
+    },
+    "cfdEngineLens": {
+      "artifact": "out/CfdEngineLens.sol/CfdEngineLens.json",
+      "runtimeTemplateBytes": 21165,
+      "runtimeHeadroomBytes": 3411,
+      "creationCodeBytes": 31912,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 31944,
+      "creationInputHeadroomBytes": 17208
+    },
+    "cfdEngineOpenQuoter": {
+      "artifact": "out/CfdEngineOpenQuoter.sol/CfdEngineOpenQuoter.json",
+      "runtimeTemplateBytes": 10220,
+      "runtimeHeadroomBytes": 14356,
+      "creationCodeBytes": 10246,
+      "constructorArgumentBytes": 0,
+      "fullCreationInputBytes": 10246,
+      "creationInputHeadroomBytes": 38906
+    },
+    "cfdOrderPolicyEvaluator": {
+      "artifact": "out/CfdOrderPolicyEvaluator.sol/CfdOrderPolicyEvaluator.json",
+      "runtimeTemplateBytes": 16286,
+      "runtimeHeadroomBytes": 8290,
+      "creationCodeBytes": 16312,
+      "constructorArgumentBytes": 0,
+      "fullCreationInputBytes": 16312,
+      "creationInputHeadroomBytes": 32840
+    },
+    "orderRouterV2ExecutionSidecar": {
+      "artifact": "out/OrderRouterV2ExecutionSidecar.sol/OrderRouterV2ExecutionSidecar.json",
+      "runtimeTemplateBytes": 24005,
+      "runtimeHeadroomBytes": 571,
+      "creationCodeBytes": 24051,
+      "constructorArgumentBytes": 0,
+      "fullCreationInputBytes": 24051,
+      "creationInputHeadroomBytes": 25101
+    },
+    "pletherOracle": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseOracle.json",
+      "runtimeTemplateBytes": 13388,
+      "runtimeHeadroomBytes": 11188,
+      "creationCodeBytes": 15270,
+      "constructorArgumentBytes": 1120,
+      "fullCreationInputBytes": 16390,
+      "creationInputHeadroomBytes": 32762
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "artifact": "out/OrderRouterLiquidationBatchSidecar.sol/OrderRouterLiquidationBatchSidecar.json",
+      "runtimeTemplateBytes": 21230,
+      "runtimeHeadroomBytes": 3346,
+      "creationCodeBytes": 21396,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 21428,
+      "creationInputHeadroomBytes": 27724
+    },
+    "orderLifecycleBook": {
+      "artifact": "out/OrderLifecycleBook.sol/OrderLifecycleBook.json",
+      "runtimeTemplateBytes": 12284,
+      "runtimeHeadroomBytes": 12292,
+      "creationCodeBytes": 12674,
+      "constructorArgumentBytes": 128,
+      "fullCreationInputBytes": 12802,
+      "creationInputHeadroomBytes": 36350
+    },
+    "orderRouter": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseRouter.json",
+      "runtimeTemplateBytes": 18536,
+      "runtimeHeadroomBytes": 6040,
+      "creationCodeBytes": 44147,
+      "constructorArgumentBytes": 256,
+      "fullCreationInputBytes": 44403,
+      "creationInputHeadroomBytes": 4749
+    },
+    "orderRouterAdmin": {
+      "artifact": "out/OrderRouterAdmin.sol/OrderRouterAdmin.json",
+      "runtimeTemplateBytes": 5309,
+      "runtimeHeadroomBytes": 19267,
+      "creationCodeBytes": 5651,
+      "constructorArgumentBytes": 64,
+      "fullCreationInputBytes": 5715,
+      "creationInputHeadroomBytes": 43437
+    },
+    "positionProtectionBook": {
+      "artifact": "out/PositionProtectionBook.sol/PositionProtectionBook.json",
+      "runtimeTemplateBytes": 17067,
+      "runtimeHeadroomBytes": 7509,
+      "creationCodeBytes": 17448,
+      "constructorArgumentBytes": 64,
+      "fullCreationInputBytes": 17512,
+      "creationInputHeadroomBytes": 31640
+    },
+    "perpsPublicLens": {
+      "artifact": "out/PerpsPublicLens.sol/PerpsPublicLens.json",
+      "runtimeTemplateBytes": 14461,
+      "runtimeHeadroomBytes": 10115,
+      "creationCodeBytes": 14815,
+      "constructorArgumentBytes": 128,
+      "fullCreationInputBytes": 14943,
+      "creationInputHeadroomBytes": 34209
+    },
+    "settlementMonitorLens": {
+      "artifact": "out/SettlementMonitorLens.sol/SettlementMonitorLens.json",
+      "runtimeTemplateBytes": 23339,
+      "runtimeHeadroomBytes": 1237,
+      "creationCodeBytes": 49025,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 49057,
+      "creationInputHeadroomBytes": 95
+    },
+    "settlementMonitorLensSidecar": {
+      "artifact": "out/SettlementMonitorLensSidecar.sol/SettlementMonitorLensSidecar.json",
+      "runtimeTemplateBytes": 19345,
+      "runtimeHeadroomBytes": 5231,
+      "creationCodeBytes": 20719,
+      "constructorArgumentBytes": 32,
+      "fullCreationInputBytes": 20751,
+      "creationInputHeadroomBytes": 28401
+    },
+    "emergencyPauseCoordinator": {
+      "artifact": "out/EmergencyPauseCoordinator.sol/EmergencyPauseCoordinator.json",
+      "runtimeTemplateBytes": 2788,
+      "runtimeHeadroomBytes": 21788,
+      "creationCodeBytes": 3257,
+      "constructorArgumentBytes": 96,
+      "fullCreationInputBytes": 3353,
+      "creationInputHeadroomBytes": 45799
+    }
+  }
+}
