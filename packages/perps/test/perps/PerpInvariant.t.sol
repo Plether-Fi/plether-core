@@ -508,15 +508,24 @@ contract PerpInvariantTest is BasePerpTest {
                 "Live positions must encode exactly one directional side"
             );
 
-            uint256 lots = CfdMath.sizeToLots(size);
-            uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-            assertEq(
-                maxProfitUsdc,
-                CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, side, capPrice),
-                "Stored max profit must match the exact entry-cost payoff envelope"
-            );
-            assertLe(maxProfitUsdc, lots * capPrice, "Live positions must remain bounded by CAP");
+            _assertExactProfitEnvelope(account, size, maxProfitUsdc, side, capPrice);
         }
+    }
+
+    function _assertExactProfitEnvelope(
+        address account,
+        uint256 size,
+        uint256 maxProfitUsdc,
+        CfdTypes.Side side,
+        uint256 capPrice
+    ) internal view {
+        uint256 lots = CfdMath.sizeToLots(size);
+        assertEq(
+            maxProfitUsdc,
+            CfdMath.calculateExactMaxProfit(lots, engine.positionEntryCostUsdcAtoms(account), side, capPrice),
+            "Stored max profit must match the exact entry-cost payoff envelope"
+        );
+        assertLe(maxProfitUsdc, lots * capPrice, "Live positions must remain bounded by CAP");
     }
 
     function _assertInvariant_EntryNotionalsMatchPositions() internal view {
