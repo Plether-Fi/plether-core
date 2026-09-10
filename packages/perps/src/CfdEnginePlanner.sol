@@ -27,22 +27,6 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         return MarketCalendarLib.marketStatus(timestamp, todayOverride, tomorrowOverride, fadRunwaySeconds);
     }
 
-    /// @notice Applies a signed open-cost change to position margin after pending carry.
-    /// @dev Returns `(true, 0)` only when a negative change is strictly greater than available margin. Exact depletion
-    ///      returns `(false, 0)`; the full open plan may reject that result through later risk checks. Meaningful inputs
-    ///      require `marginAfterCarry <= type(int256).max`; larger values reinterpret as negative when cast, and signed
-    ///      addition reverts if the mathematical result is outside the `int256` range.
-    /// @param marginAfterCarry Position margin after pending carry realization, in 6-decimal USDC units.
-    /// @param netMarginChange Signed 6-decimal USDC change; positive adds margin and negative removes it.
-    /// @return drained Whether the signed result would be negative.
-    /// @return marginAfter Resulting nonnegative position margin, or zero when drained.
-    function computeOpenMarginAfter(
-        uint256 marginAfterCarry,
-        int256 netMarginChange
-    ) external pure returns (bool drained, uint256 marginAfter) {
-        return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterCarry, netMarginChange);
-    }
-
     /// @inheritdoc ICfdEnginePlanner
     function computeCurrentCarryIndex(
         uint256 storedIndex,
@@ -63,22 +47,6 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         uint256 carryIndexDelta
     ) external pure returns (uint256 carryUsdc) {
         return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, carryIndexDelta);
-    }
-
-    /// @inheritdoc ICfdEnginePlanner
-    function isExactPositionLiquidatableWithCarry(
-        CfdTypes.Position memory pos,
-        uint256 entryCostUsdcAtoms,
-        uint256 price,
-        uint256 capPrice,
-        uint256 pendingCarryUsdc,
-        uint256 reachableCollateralUsdc,
-        uint256 requiredBps
-    ) external pure returns (bool liquidatable) {
-        return PositionRiskAccountingLib.buildExactPositionRiskStateWithCarry(
-            pos, entryCostUsdcAtoms, price, capPrice, pendingCarryUsdc, reachableCollateralUsdc, requiredBps
-        )
-        .liquidatable;
     }
 
     /// @inheritdoc ICfdEnginePlanner

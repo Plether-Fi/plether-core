@@ -19,10 +19,16 @@ and the retired clearinghouse selectors `reserveCloseExecutionBountyFromPosition
 always reverted. Close bounties continue to use the maintained free-settlement path.
 
 Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
-`OrderOraclePolicyLib`. Planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
+`OrderOraclePolicyLib`. Maintained planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
 the maintained exact-entry-cost math, carry index, settlement snapshot, claimant inflow, and live close/claim paths.
 These removals require new bindings for a future deployment; this source change does not deploy contracts or migrate
 existing state.
+
+The planner also retires `computeOpenMarginAfter` and `isExactPositionLiquidatableWithCarry`, together with their
+exclusive library helpers. These pure selectors had only test callers. Open planning continues through `planOpen`;
+current price-risk checks use `isExactPriceRiskLiquidatable` with post-carry PnL pledge plus same-account claims.
+Uncovered carry and negative-VPI reserve adequacy remain independent health checks. Regenerate planner bindings for
+the next release; the two removed selectors have no compatibility wrappers.
 
 
 Plether Perps is a bounded, delayed-order perpetuals engine for synthetic USD-directional exposure.

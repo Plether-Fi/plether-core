@@ -17,8 +17,7 @@ library PositionRiskAccountingLib {
 
     /// @notice Price-risk state for one position at a supplied collateral and margin policy.
     /// @param unrealizedPnlUsdc Signed capped price PnL; positive values increase trader equity.
-    /// @param equityUsdc Signed collateral equity after the selected builder's carry treatment, negative-VPI clawback,
-    ///        and unrealized PnL.
+    /// @param equityUsdc Signed post-carry PnL pledge plus same-account nettable claim and exact price PnL.
     /// @param currentNotionalUsdc Position notional at the supplied price.
     /// @param maintenanceMarginUsdc Requirement at `requiredBps`; the field may represent maintenance, FAD, or another
     ///        caller-selected threshold despite its historical name.
@@ -29,16 +28,6 @@ library PositionRiskAccountingLib {
         uint256 currentNotionalUsdc;
         uint256 maintenanceMarginUsdc;
         bool liquidatable;
-    }
-
-    /// @notice Returns the amount of negative lifetime VPI treated as a collateral clawback.
-    /// @dev Negating `type(int256).min` reverts.
-    /// @param vpiAccrued Signed lifetime VPI; negative values represent rebates previously received by the trader.
-    /// @return Magnitude of a negative accrual, or zero for a nonnegative accrual.
-    function _vpiClawbackUsdc(
-        int256 vpiAccrued
-    ) private pure returns (uint256) {
-        return vpiAccrued < 0 ? uint256(-vpiAccrued) : 0;
     }
 
     /// @notice Computes the LP-backed maximum-profit amount on which carry accrues.
@@ -122,28 +111,6 @@ library PositionRiskAccountingLib {
             return 0;
         }
         return (borrowBaseUsdc * carryIndexDelta) / CARRY_INDEX_SCALE;
-    }
-
-    /// @notice Builds position equity using exact lot-based entry cost and a separate pending-carry debit.
-    /// @dev This is the canonical V2 risk path. The legacy builder remains available for read-only compatibility
-    ///      surfaces that have not been supplied an exact entry-cost field.
-    function buildExactPositionRiskStateWithCarry(
-        CfdTypes.Position memory pos,
-        uint256 entryCostUsdcAtoms,
-        uint256 price,
-        uint256 capPrice,
-        uint256 pendingCarryUsdc,
-        uint256 reachableCollateralUsdc,
-        uint256 requiredBps
-    ) internal pure returns (PositionRiskState memory state) {
-        uint256 lots = CfdMath.sizeToLots(pos.size);
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(lots, entryCostUsdcAtoms, pos.side, price, capPrice);
-        state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        state.equityUsdc = int256(reachableCollateralUsdc) - int256(pendingCarryUsdc)
-            - int256(_vpiClawbackUsdc(pos.vpiAccrued)) + state.unrealizedPnlUsdc;
-        state.currentNotionalUsdc = lots * (price > capPrice ? capPrice : price);
-        state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
-        state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
     }
 
     /// @notice Builds canonical V2 price-risk equity without mixing action charges into PnL backing.

@@ -56,13 +56,6 @@ contract CfdEnginePlanHarness is CfdEngine {
         snap.poolCashUsdc = pool.totalAssets();
     }
 
-    function computeOpenMarginAfter(
-        uint256 marginAfterCarry,
-        int256 netMarginChange
-    ) external pure returns (bool drained, uint256 marginAfter) {
-        return CfdEnginePlanLib.computeOpenMarginAfter(marginAfterCarry, netMarginChange);
-    }
-
 }
 
 contract CfdEnginePlanRegressionTest is BasePerpTest {
@@ -325,37 +318,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         _open(freshLongAccount, CfdTypes.Side.LONG, 10_000e18, 5000e6, 1e8);
         (uint256 size,,,,,,) = engine.positions(freshLongAccount);
         assertEq(size, 10_000e18, "Live open should succeed for the fresh account");
-    }
-
-    function test_ComputeOpenMarginAfter_PositiveOffsetDoesNotPanic() public view {
-        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
-        (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(200e6, -50e6);
-        assertFalse(drained, "Positive offset path should remain nonnegative");
-        assertEq(marginAfter, 150e6, "Single-frame margin should equal base plus net change");
-    }
-
-    function test_PlannerWrapper_ComputeOpenMarginAfter_UsesExpectedArithmetic() public view {
-        (bool healthyDrained, uint256 healthyMarginAfter) = planner.computeOpenMarginAfter(200e6, -50e6);
-        assertFalse(healthyDrained, "Planner wrapper should keep healthy offsets above zero");
-        assertEq(healthyMarginAfter, 150e6, "Planner wrapper should subtract the negative net change exactly once");
-
-        (bool drained, uint256 drainedMarginAfter) = planner.computeOpenMarginAfter(40e6, -50e6);
-        assertTrue(drained, "Planner wrapper should flag margin exhaustion when costs exceed margin");
-        assertEq(drainedMarginAfter, 0, "Planner wrapper should floor drained margin at zero");
-    }
-
-    function test_ComputeOpenMarginAfter_NegativePathSubtractsOnce() public view {
-        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
-        (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(900e6, -50e6);
-        assertFalse(drained, "Healthy negative-net path should remain above zero");
-        assertEq(marginAfter, 850e6, "Single-frame margin should subtract the negative net change exactly once");
-    }
-
-    function test_ComputeOpenMarginAfter_PositiveBaseCannotDoubleCredit() public view {
-        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
-        (bool drained, uint256 marginAfter) = harness.computeOpenMarginAfter(100e6, -150e6);
-        assertTrue(drained, "Single-frame margin must drain when the negative net change exceeds the base");
-        assertEq(marginAfter, 0, "Drained path should return zero margin");
     }
 
     function test_PlanOpen_TotalMarginAfterOpenMatchesSingleFrameEquation() public {
@@ -834,12 +796,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             borrowBaseUsdc, PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 30 days, 1, 1, 500)
         );
         assertGt(longCarry, shortCarry, "Longer time should report more carry");
-    }
-
-    function test_ComputeOpenMarginAfter_DrainedPathMatchesPlannerRevert() public {
-        CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
-        (bool drained,) = harness.computeOpenMarginAfter(100e6, -150e6);
-        assertTrue(drained, "Canonical helper should signal margin drain when net change exceeds the base");
     }
 
     function test_PlanOpen_RejectsInsufficientPhysicalMargin() public view {
