@@ -8,6 +8,18 @@ The current target network is Arbitrum Sepolia with:
 - Pyth as the router oracle source
 - a separate deploy phase and bootstrap phase
 
+## Reservation-ledger compatibility
+
+The clearinghouse-owned reservation ledger is a breaking release. Deploy the matching stack together using the
+current scripts; do not mix an older Router, protection book, clearinghouse, or settlement/lens implementation with
+this release. Immutable bindings and changed storage layouts prevent treating this as an in-place upgrade.
+
+This change provides no live-state migration tool. An existing deployment needs a separately reviewed drain or
+migration plan covering positions, queued orders, protections, balances, claims, and LP obligations before cutover.
+Regenerate integration ABIs: `getOrderReservation` has a new tuple layout, `syncMarginQueue` is removed, and the
+clearinghouse exposes typed bounty records and an active margin FIFO. Public order/protection view shapes remain
+unchanged. See [Reservation ledger](RESERVATION_LEDGER.md) for the complete ownership and transition rules.
+
 ## Scripts
 
 - Deploy script: `script/DeployPerpsArbitrumSepolia.s.sol`

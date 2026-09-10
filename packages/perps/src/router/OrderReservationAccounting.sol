@@ -10,7 +10,7 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 /// @title OrderReservationAccounting
 /// @notice Router-side pending records and per-account queue links shared by commit, execution, and liquidation.
 /// @dev The clearinghouse is canonical for USDC custody and committed-margin values. This contract stores
-///      order metadata, bounty amounts, and linked-list indexes; it never holds the reserved USDC itself.
+///      order metadata and lifecycle queue indexes; it never holds the reserved USDC itself.
 abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRouterErrors {
 
     /// @notice Ephemeral metadata and linked-list pointers for one pending order.
@@ -18,27 +18,19 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     ///      immutable lifecycle book.
     /// @param core Canonical delayed-order payload.
     /// @param status Current lifecycle status.
-    /// @param executionBountyUsdc Unpaid keeper bounty reserved in the clearinghouse (6-decimal USDC).
     /// @param nextGlobalOrderId Next order in the global FIFO queue, or zero at the tail.
     /// @param prevGlobalOrderId Previous order in the global FIFO queue, or zero at the head.
     /// @param nextAccountOrderId Next live order for the same account, or zero at the tail.
     /// @param prevAccountOrderId Previous live order for the same account, or zero at the head.
-    /// @param nextMarginOrderId Next committed-margin reservation link for the account, or zero at the tail.
-    /// @param prevMarginOrderId Previous committed-margin reservation link for the account, or zero at the head.
     /// @param inAccountQueue Whether the record is currently linked in the account queue.
-    /// @param inMarginQueue Whether the record is currently linked in the committed-margin queue.
     struct OrderRecord {
         CfdTypes.Order core;
         IOrderRouterAccounting.OrderStatus status;
-        uint256 executionBountyUsdc;
         uint64 nextGlobalOrderId;
         uint64 prevGlobalOrderId;
         uint64 nextAccountOrderId;
         uint64 prevAccountOrderId;
-        uint64 nextMarginOrderId;
-        uint64 prevMarginOrderId;
         bool inAccountQueue;
-        bool inMarginQueue;
     }
 
     /// @notice Engine that processes orders, reserves close bounties, and credits keeper bounties.
@@ -54,10 +46,6 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     /// @notice First live pending order id in each account's FIFO queue, or zero when empty.
     mapping(address => uint64) public accountHeadOrderId;
     mapping(address => uint64) internal accountTailOrderId;
-    /// @notice First order id in each account's committed-margin reservation queue, or zero when empty.
-    mapping(address => uint64) public marginHeadOrderId;
-    /// @notice Last order id in each account's committed-margin reservation queue, or zero when empty.
-    mapping(address => uint64) public marginTailOrderId;
 
     /// @notice Binds reservation accounting to an engine and its clearinghouse.
     /// @dev When `_engine` has no code, `clearinghouse` is deliberately set to zero instead of attempting
@@ -72,86 +60,33 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
             : IMarginClearinghouse(ICfdEngineCore(_engine).clearinghouse());
     }
 
-    /// @notice Returns aggregate reservations and live-order count attributed to an account.
-    /// @dev Committed margin comes from the clearinghouse's canonical account summary. Bounty and count are
-    ///      summed by traversing the router's live account queue. Monetary fields use 6-decimal USDC.
-    /// @param account Account to inspect.
-    /// @return reservation Pending-order count plus committed-margin and unpaid execution-bounty totals.
+    /// @notice Combines Router-owned lifecycle counts with clearinghouse-owned reservation balances.
     function getAccountReservations(
         address account
     ) public view override returns (IOrderRouterAccounting.AccountReservationView memory reservation) {
-        // Clearinghouse remains the canonical owner of committed-order margin value; this router component composes the view.
         reservation.committedMarginUsdc =
         clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
-        (reservation.pendingOrderCount, reservation.executionBountyUsdc,,) = _summarizePendingOrders(account);
-        reservation.executionBountyUsdc += _additionalExecutionBountyUsdc(account);
+        reservation.pendingOrderCount = pendingOrderCounts[account];
+        reservation.executionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
     }
 
-    /// @notice Returns unpaid reserved bounty value owned by router features outside the ordinary order queue.
-    /// @dev Derived handlers may override this hook without changing ordinary pending-order counts or queue traversal.
-    /// @param account Account whose additional bounty reservation should be reported.
-    /// @return Additional reserved execution-bounty value, in 6-decimal USDC.
-    function _additionalExecutionBountyUsdc(
-        address account
-    ) internal view virtual returns (uint256) {
-        account;
-        return 0;
-    }
-
-    /// @notice Traverses an account queue and summarizes live orders.
-    /// @param account Account whose linked queue is traversed.
-    /// @return pendingOrderCount Number of linked live orders.
-    /// @return executionBountyUsdc Sum of unpaid reserved bounties (6-decimal USDC).
-    /// @return pendingCloseSize_ Sum of close size deltas (18 decimals).
-    /// @return hasTerminalCloseQueued Whether at least one close order is linked.
-    function _summarizePendingOrders(
-        address account
-    )
-        internal
-        view
-        returns (
-            uint256 pendingOrderCount,
-            uint256 executionBountyUsdc,
-            uint256 pendingCloseSize_,
-            bool hasTerminalCloseQueued
-        )
-    {
-        uint64 orderId = accountHeadOrderId[account];
-        while (orderId != 0) {
-            OrderRecord storage record = orderRecords[orderId];
-            CfdTypes.Order memory order = record.core;
-            pendingOrderCount++;
-            executionBountyUsdc += record.executionBountyUsdc;
-            if (order.isClose) {
-                pendingCloseSize_ += order.sizeDelta;
-                hasTerminalCloseQueued = true;
-            }
-            orderId = record.nextAccountOrderId;
-        }
-    }
-
-    /// @notice Returns the current router-maintained margin-reservation order ids for an account.
-    /// @dev This reports structural traversal order, including links whose clearinghouse value has reached
-    ///      zero but has not yet been pruned. It does not read or return reservation amounts.
-    /// @param account Account to inspect.
-    /// @return orderIds Order ids linked into the account's margin reservation queue in FIFO order.
+    /// @notice Compatibility view over the clearinghouse-owned active reservation FIFO.
     function getMarginReservationIds(
         address account
-    ) public view override returns (uint64[] memory orderIds) {
-        // Router queue links expose reservation traversal order only; remaining reservation value lives in MarginClearinghouse.
-        uint64 cursor = marginHeadOrderId[account];
-        uint256 count;
-        while (cursor != 0) {
-            count++;
-            cursor = orderRecords[cursor].nextMarginOrderId;
-        }
+    ) public view override returns (uint64[] memory) {
+        return clearinghouse.getMarginReservationIds(account);
+    }
 
-        orderIds = new uint64[](count);
-        cursor = marginHeadOrderId[account];
-        for (uint256 i = 0; i < count; i++) {
-            orderIds[i] = cursor;
-            cursor = orderRecords[cursor].nextMarginOrderId;
-        }
+    function marginHeadOrderId(
+        address account
+    ) public view returns (uint64) {
+        return clearinghouse.marginReservationHead(account);
+    }
+
+    function marginTailOrderId(
+        address account
+    ) public view returns (uint64) {
+        return clearinghouse.marginReservationTail(account);
     }
 
     /// @notice Reserves the keeper bounty for a newly assigned order id.
@@ -197,33 +132,6 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
             return;
         }
         clearinghouse.reserveCommittedOrderMargin(account, orderId, marginDelta);
-        _linkMarginOrder(account, orderId);
-    }
-
-    /// @notice Appends an order to an account's doubly linked margin-reservation queue.
-    /// @dev No-ops if the record is already linked.
-    /// @param account Account that owns the reservation.
-    /// @param orderId Order to append.
-    function _linkMarginOrder(
-        address account,
-        uint64 orderId
-    ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        if (record.inMarginQueue) {
-            return;
-        }
-
-        uint64 tailOrderId = marginTailOrderId[account];
-        if (tailOrderId == 0) {
-            marginHeadOrderId[account] = orderId;
-            marginTailOrderId[account] = orderId;
-        } else {
-            orderRecords[tailOrderId].nextMarginOrderId = orderId;
-            record.prevMarginOrderId = tailOrderId;
-            marginTailOrderId[account] = orderId;
-        }
-
-        record.inMarginQueue = true;
     }
 
     /// @notice Appends an order to an account's doubly linked live-order queue.
@@ -289,61 +197,6 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         record.nextAccountOrderId = 0;
         record.prevAccountOrderId = 0;
         record.inAccountQueue = false;
-    }
-
-    /// @notice Removes an order from an account's margin queue and clears its margin pointers.
-    /// @dev No-ops if unlinked and reverts when stored head/tail/pointers prove corrupt.
-    /// @param account Margin queue to mutate.
-    /// @param orderId Order to remove.
-    function _unlinkMarginOrder(
-        address account,
-        uint64 orderId
-    ) internal {
-        OrderRecord storage record = _orderRecord(orderId);
-        if (!record.inMarginQueue) {
-            return;
-        }
-
-        uint64 prevOrderId = record.prevMarginOrderId;
-        uint64 nextOrderId = record.nextMarginOrderId;
-        uint64 headOrderId = marginHeadOrderId[account];
-        uint64 tailOrderId = marginTailOrderId[account];
-
-        if (headOrderId == orderId) {
-            marginHeadOrderId[account] = nextOrderId;
-        } else if (prevOrderId != 0) {
-            orderRecords[prevOrderId].nextMarginOrderId = nextOrderId;
-        } else if (tailOrderId != orderId) {
-            revert OrderRouter__MarginQueueCorrupt();
-        }
-
-        if (tailOrderId == orderId) {
-            marginTailOrderId[account] = prevOrderId;
-        } else if (nextOrderId != 0) {
-            orderRecords[nextOrderId].prevMarginOrderId = prevOrderId;
-        } else if (headOrderId != orderId) {
-            revert OrderRouter__MarginQueueCorrupt();
-        }
-
-        record.nextMarginOrderId = 0;
-        record.prevMarginOrderId = 0;
-        record.inMarginQueue = false;
-    }
-
-    /// @notice Removes every margin-queue link whose clearinghouse reservation has no remaining value.
-    /// @param account Account whose full margin queue is traversed.
-    function _pruneMarginQueue(
-        address account
-    ) internal {
-        uint64 orderId = marginHeadOrderId[account];
-        while (orderId != 0) {
-            uint256 remainingCommittedMarginUsdc = clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
-            uint64 nextOrderId = orderRecords[orderId].nextMarginOrderId;
-            if (remainingCommittedMarginUsdc == 0) {
-                _unlinkMarginOrder(account, orderId);
-            }
-            orderId = nextOrderId;
-        }
     }
 
     /// @notice Returns the storage record for an order id without checking its status or existence.

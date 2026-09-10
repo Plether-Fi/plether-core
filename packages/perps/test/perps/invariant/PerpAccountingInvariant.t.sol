@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {OrderRouterDebugLens} from "../../utils/OrderRouterDebugLens.sol";
+
 import {BasePerpInvariantTest} from "./BasePerpInvariantTest.sol";
 import {PerpGhostLedger} from "./ghost/PerpGhostLedger.sol";
 import {PerpAccountingHandler} from "./handlers/PerpAccountingHandler.sol";
@@ -230,7 +232,9 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             IOrderRouterAccounting.PendingOrderView[] memory pending = _pendingOrders(account);
 
             uint256 pendingCloseSize;
+            uint256 pendingBounties;
             for (uint256 j = 0; j < pending.length; j++) {
+                pendingBounties += pending[j].executionBountyUsdc;
                 if (pending[j].isClose) {
                     pendingCloseSize += pending[j].sizeDelta;
                 }
@@ -246,8 +250,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             );
             assertEq(
                 reservation.executionBountyUsdc,
-                reservation.executionBountyUsdc,
-                "Execution bounty must remain self-consistent"
+                pendingBounties + router.positionProtectionBook().unpaidBounties(account),
+                "Canonical bounty total must equal the sum of order and protection records"
             );
             assertEq(
                 router.pendingCloseSize(account),
@@ -459,7 +463,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
             uint256 traversed;
             for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-                OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+                OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
                 if (
                     record.core.account == account
                         && uint256(record.status) == uint256(IOrderRouterAccounting.OrderStatus.Pending)
@@ -484,7 +488,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             uint64 current = head;
             uint64 previous;
             while (current != 0) {
-                OrderRouter.OrderRecord memory record = _orderRecord(current);
+                OrderRouterDebugLens.OrderRecord memory record = _orderRecord(current);
                 assertEq(record.core.account, account, "Margin queue owner must match traversed account");
                 assertEq(
                     uint256(record.status),
@@ -525,7 +529,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
 
     function _sumPendingExecutionBounties() internal view returns (uint256 totalBounties) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account == address(0) || record.core.sizeDelta == 0) {
                 continue;
             }

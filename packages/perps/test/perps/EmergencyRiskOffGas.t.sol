@@ -43,6 +43,27 @@ contract EmergencyRiskOffGasTest is BasePerpTest {
         _fundTrader(BOB, 100_000e6);
     }
 
+    function test_Gas_ReservationSummaryOneOrder() public {
+        _profileReservationSummary(1);
+    }
+
+    function test_Gas_ReservationSummaryFullAccountQueue() public {
+        _profileReservationSummary(MAX_PENDING_ORDERS_PER_ACCOUNT);
+    }
+
+    function _profileReservationSummary(
+        uint256 orderCount
+    ) internal {
+        for (uint256 i; i < orderCount; ++i) {
+            _commitOpen(ALICE);
+        }
+        uint256 gasBefore = gasleft();
+        uint256 pending = router.getAccountReservations(ALICE).pendingOrderCount;
+        uint256 gasUsed = gasBefore - gasleft();
+        emit log_named_uint(orderCount == 1 ? "reservationSummary_oneOrder" : "reservationSummary_32Orders", gasUsed);
+        assertEq(pending, orderCount);
+    }
+
     function test_Gas_RiskOffSingleTargetCleanupFitsAcceptanceGate() public {
         _commitOpen(ALICE);
         _activateRiskOff();

@@ -413,7 +413,7 @@ contract PerpAccountingHandler is Test {
         uint64 orderId,
         uint256 executionPrice
     ) internal view returns (ModelledOrderPreview memory model) {
-        OrderRouter.OrderRecord memory orderRecord = _orderRecord(orderId);
+        OrderRouterDebugLens.OrderRecord memory orderRecord = _orderRecord(orderId);
         model.account = orderRecord.core.account;
         model.isClose = orderRecord.core.isClose;
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
@@ -475,7 +475,7 @@ contract PerpAccountingHandler is Test {
             vm.recordLogs();
         }
         try router.executeOrder(orderId, priceData) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             executed = uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Executed);
             processed = executed || uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Failed);
 
@@ -719,7 +719,7 @@ contract PerpAccountingHandler is Test {
         address account
     ) public view returns (uint256 totalReservationUsdc) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account != account || record.core.sizeDelta == 0) {
                 continue;
             }
@@ -731,7 +731,7 @@ contract PerpAccountingHandler is Test {
         address account
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account != account || record.core.sizeDelta == 0) {
                 continue;
             }
@@ -855,7 +855,7 @@ contract PerpAccountingHandler is Test {
             return GHOST_ORDER_NONE;
         }
 
-        OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+        OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
         if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
             return GHOST_ORDER_PENDING;
         }
@@ -868,7 +868,7 @@ contract PerpAccountingHandler is Test {
     function ghostOrderRemainingCommittedMargin(
         uint64 orderId
     ) external view returns (uint256) {
-        OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+        OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
         if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
             return _remainingCommittedMargin(orderId);
         }
@@ -1003,7 +1003,7 @@ contract PerpAccountingHandler is Test {
         address account
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (
                 ghostOrderOwner[orderId] == account
                     && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)
@@ -1017,7 +1017,7 @@ contract PerpAccountingHandler is Test {
         address account
     ) external view returns (uint256 count) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (
                 ghostOrderOwner[orderId] == account
                     && uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending) && record.inMarginQueue
@@ -1185,7 +1185,7 @@ contract PerpAccountingHandler is Test {
         uint64 upperBound = endExecuteId == 0 ? router.nextCommitId() : endExecuteId;
         if (upperBound > startExecuteId) {
             for (uint64 orderId = startExecuteId; orderId < upperBound; orderId++) {
-                OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+                OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
                 if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Pending)) {
                     continue;
                 }
@@ -1267,7 +1267,7 @@ contract PerpAccountingHandler is Test {
     function _ghostTerminalStateForOrder(
         uint64 orderId
     ) internal view returns (uint8) {
-        OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+        OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
         if (uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Executed)) {
             return GHOST_ORDER_EXECUTED;
         }
@@ -1300,7 +1300,7 @@ contract PerpAccountingHandler is Test {
         address account
     ) internal view returns (uint64 orderId) {
         for (orderId = 1; orderId < router.nextCommitId(); orderId++) {
-            OrderRouter.OrderRecord memory record = _orderRecord(orderId);
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account == account && record.core.sizeDelta > 0 && record.core.isClose) {
                 return orderId;
             }
@@ -1310,7 +1310,7 @@ contract PerpAccountingHandler is Test {
 
     function _orderRecord(
         uint64 orderId
-    ) internal view returns (OrderRouter.OrderRecord memory record) {
+    ) internal view returns (OrderRouterDebugLens.OrderRecord memory record) {
         return OrderRouterDebugLens.loadOrderRecord(vm, router, orderId);
     }
 

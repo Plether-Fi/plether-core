@@ -44,8 +44,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ///      That liquidation-only value can include buckets released by liquidation; it is distinct from the exact
     ///      terminal price collectible cap, which is the live position's PnL pledge plus same-account claim clipped to
     ///      its maximum endpoint loss. `accountEquityUsdc` is clearinghouse settlement balance rather than mark-to-market
-    ///      equity, while free buying power excludes all locked buckets. This function does not project PnL or carry. If
-    ///      no router is configured, it assumes a zero execution-bounty reserve.
+    ///      equity, while free buying power excludes all locked buckets. This function does not project PnL or carry.
+    ///      The execution-bounty reserve is read directly from the clearinghouse.
     /// @param account Clearinghouse account to inspect.
     /// @return viewData Current custody and claim values; every monetary field uses 6-decimal USDC units.
     function getAccountCollateralView(
@@ -59,12 +59,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
         viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;
         viewData.closeReachableUsdc = buckets.freeSettlementUsdc;
-        uint256 executionBountyReserveUsdc;
-        address orderRouter = engineContract.orderRouter();
-        if (orderRouter != address(0)) {
-            executionBountyReserveUsdc =
-            IOrderRouterAccounting(orderRouter).getAccountReservations(account).executionBountyUsdc;
-        }
+        uint256 executionBountyReserveUsdc = engineContract.clearinghouse().totalBountyReservationsUsdc(account);
         viewData.liquidationReachableSettlementUsdc = buckets.settlementBalanceUsdc > executionBountyReserveUsdc
             ? buckets.settlementBalanceUsdc - executionBountyReserveUsdc
             : 0;

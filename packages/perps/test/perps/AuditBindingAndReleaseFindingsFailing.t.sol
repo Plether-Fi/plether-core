@@ -25,9 +25,6 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         vm.prank(address(engine));
         clearinghouse.consumeActionCharge(aliceAccount, 35_000e6, 0, 35_000e6, address(engine), address(0), 0);
 
-        vm.prank(address(engine));
-        router.syncMarginQueue(aliceAccount);
-
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 700_000e6);
 

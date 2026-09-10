@@ -123,7 +123,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         address account = record.core.account;
         if (account != address(0)) {
             _unlinkAccountOrder(account, orderId);
-            _unlinkMarginOrder(account, orderId);
         }
         _unlinkGlobalOrder(orderId);
         record.status = terminalStatus;

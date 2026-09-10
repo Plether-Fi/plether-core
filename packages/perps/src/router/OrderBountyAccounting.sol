@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 
 /// @title OrderBountyAccounting
@@ -29,14 +30,13 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {
-            OrderRecord storage record = orderRecords[orderId];
-            uint256 executionBountyUsdc = record.executionBountyUsdc;
+            uint256 executionBountyUsdc =
+                clearinghouse.takeBountyReservation(account, IMarginClearinghouse.BountyKind.Order, orderId);
             orderIds[index] = orderId;
             orderBountiesUsdc[index] = executionBountyUsdc;
             ++index;
             if (executionBountyUsdc > 0) {
                 forfeitedUsdc += executionBountyUsdc;
-                record.executionBountyUsdc = 0;
             }
         }
 

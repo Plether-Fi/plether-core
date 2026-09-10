@@ -9,7 +9,6 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
-import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract CfdOrderPolicyEvaluatorTest is Test {
@@ -609,11 +608,11 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         vm.mockCall(CLEARINGHOUSE, abi.encodeWithSignature("actionReserveUsdc(address)", ACCOUNT), abi.encode(BOUNTY));
         vm.mockCall(CLEARINGHOUSE, abi.encodeWithSignature("vpiRebateReserveUsdc(address)", ACCOUNT), abi.encode(0));
 
-        IOrderRouterAccounting.AccountReservationView memory reservation = IOrderRouterAccounting.AccountReservationView({
-            committedMarginUsdc: 0, executionBountyUsdc: BOUNTY, pendingOrderCount: 1
-        });
         vm.mockCall(
-            ROUTER, abi.encodeWithSignature("getAccountReservations(address)", ACCOUNT), abi.encode(reservation)
+            CLEARINGHOUSE, abi.encodeWithSignature("totalBountyReservationsUsdc(address)", ACCOUNT), abi.encode(BOUNTY)
+        );
+        vm.mockCallRevert(
+            ROUTER, abi.encodeWithSignature("getAccountReservations(address)", ACCOUNT), "not an accounting authority"
         );
 
         vm.mockCall(ENGINE, abi.encodeWithSignature("unsettledCarryUsdc(address)", ACCOUNT), abi.encode(0));

@@ -5,18 +5,41 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 library OrderRouterDebugLens {
 
+    // Test projection combines canonical Router lifecycle and clearinghouse reservation state.
+    struct OrderRecord {
+        CfdTypes.Order core;
+        IOrderRouterAccounting.OrderStatus status;
+        uint256 executionBountyUsdc;
+        uint64 nextGlobalOrderId;
+        uint64 prevGlobalOrderId;
+        uint64 nextAccountOrderId;
+        uint64 prevAccountOrderId;
+        uint64 nextMarginOrderId;
+        uint64 prevMarginOrderId;
+        bool inAccountQueue;
+        bool inMarginQueue;
+    }
+
     function loadOrderRecord(
         Vm vm_,
         OrderRouter router,
         uint64 orderId
-    ) internal view returns (OrderRouter.OrderRecord memory record) {
+    ) internal view returns (OrderRecord memory record) {
         record = loadRawOrderRecord(vm_, router, orderId);
         record.status = _legacyCompatibleStatus(router, orderId, record.status);
+        IMarginClearinghouse clearinghouse = IMarginClearinghouse(router.engine().clearinghouse());
+        record.executionBountyUsdc =
+        clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId).amountUsdc;
+        IMarginClearinghouse.OrderReservation memory margin = clearinghouse.getOrderReservation(orderId);
+        record.inMarginQueue = margin.status == IMarginClearinghouse.ReservationStatus.Active;
+        record.nextMarginOrderId = margin.nextOrderId;
+        record.prevMarginOrderId = margin.previousOrderId;
     }
 
     /// @dev Loads Router storage without consulting the lifecycle book. New V2 tests use this to prove terminal
@@ -25,7 +48,7 @@ library OrderRouterDebugLens {
         Vm vm_,
         OrderRouter router,
         uint64 orderId
-    ) internal view returns (OrderRouter.OrderRecord memory record) {
+    ) internal view returns (OrderRecord memory record) {
         uint256 baseSlot = uint256(keccak256(abi.encode(orderId, uint256(0))));
 
         record.core.account = address(uint160(uint256(vm_.load(address(router), bytes32(baseSlot)))));
@@ -40,22 +63,14 @@ library OrderRouterDebugLens {
         record.core.side = CfdTypes.Side(_packedUint8(packedCore, 192));
         record.core.isClose = ((packedCore >> 200) & 0xff) != 0;
 
-        record.status = IOrderRouterAccounting.OrderStatus(
-            SafeCast.toUint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5))))
-        );
-        record.executionBountyUsdc = uint256(vm_.load(address(router), bytes32(baseSlot + 6)));
-
-        uint256 packedLinks = uint256(vm_.load(address(router), bytes32(baseSlot + 7)));
-        record.nextGlobalOrderId = _packedUint64(packedLinks, 0);
-        record.prevGlobalOrderId = _packedUint64(packedLinks, 64);
-        record.nextAccountOrderId = _packedUint64(packedLinks, 128);
-        record.prevAccountOrderId = _packedUint64(packedLinks, 192);
-
-        uint256 packedFlags = uint256(vm_.load(address(router), bytes32(baseSlot + 8)));
-        record.nextMarginOrderId = _packedUint64(packedFlags, 0);
-        record.prevMarginOrderId = _packedUint64(packedFlags, 64);
-        record.inAccountQueue = ((packedFlags >> 128) & 0xff) != 0;
-        record.inMarginQueue = ((packedFlags >> 136) & 0xff) != 0;
+        uint256 packedStatus = uint256(vm_.load(address(router), bytes32(baseSlot + 5)));
+        record.status = IOrderRouterAccounting.OrderStatus(_packedUint8(packedStatus, 0));
+        record.nextGlobalOrderId = _packedUint64(packedStatus, 8);
+        record.prevGlobalOrderId = _packedUint64(packedStatus, 72);
+        record.nextAccountOrderId = _packedUint64(packedStatus, 136);
+        uint256 packedTail = uint256(vm_.load(address(router), bytes32(baseSlot + 6)));
+        record.prevAccountOrderId = _packedUint64(packedTail, 0);
+        record.inAccountQueue = ((packedTail >> 64) & 0xff) != 0;
     }
 
     function loadOrderStatus(
@@ -65,7 +80,7 @@ library OrderRouterDebugLens {
     ) internal view returns (IOrderRouterAccounting.OrderStatus) {
         uint256 baseSlot = uint256(keccak256(abi.encode(orderId, uint256(0))));
         IOrderRouterAccounting.OrderStatus rawStatus = IOrderRouterAccounting.OrderStatus(
-            SafeCast.toUint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5))))
+            _packedUint8(uint256(vm_.load(address(router), bytes32(baseSlot + 5))), 0)
         );
         return _legacyCompatibleStatus(router, orderId, rawStatus);
     }
