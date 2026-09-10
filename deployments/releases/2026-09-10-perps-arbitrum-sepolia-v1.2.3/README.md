@@ -1,7 +1,7 @@
 # v1.2.3 — Arbitrum Sepolia perps deployment
 
 All **27 contracts are deployed and source-verified on Arbiscan**. Both tranches were subsequently seeded with **0.01 mock USDC each** at blocks 307404152–307404154.
-Trading remains inactive and the emergency guardian is disabled. The active deployment record is unchanged.
+Trading remains inactive. The emergency guardian is `0x6b72fE6CC52201a1eb7892A813C6C10cCe62745c`. The active deployment record is unchanged.
 The original manifest, bundle, and deployment validation retain their pre-seeding snapshots;
 `seeding-evidence.json` records the subsequent operation and independent checks at block 307404339.
 
@@ -46,8 +46,11 @@ Index this stack from block `307397196`. Both seed receivers are the deployment 
   1 USDC per tranche. A dedicated fork simulation and independent on-chain checks validated the 0.01-USDC operation;
   the standard seeded-phase verifier was not used. Do not attempt to seed these initialized tranches again.
 
-Before activation, configure the intended guardian and adapt operational validation to the recorded seed amounts.
-Recheck live oracle/pause state and arrange servicing of all old-stack positions, orders, protections, balances,
+Guardian configuration was confirmed at block 307407614; see `guardian-evidence.json` and the
+[guardian transaction](https://sepolia.arbiscan.io/tx/0x95b3c9772963f629ba8aa97cddd38df23412b9a29be5be3c7ec50d0e1c612aa8). Standard bootstrap/verifier defaults remain 1 USDC per tranche;
+the actual initialized seeds remain 0.01 USDC each.
+
+Before activation, verify the live stack against its recorded seed amounts. Recheck live oracle/pause state and arrange servicing of all old-stack positions, orders, protections, balances,
 claims, and LP obligations before coordinated consumer cutover.
 
 ## Contract addresses
@@ -99,7 +102,7 @@ claims, and LP obligations before coordinated consumer cutover.
 
 The release bundle contains **77 ABIs**, ABI hashes, build settings, the live deployment manifest, creation-input
 comparisons and constructor arguments, runtime and explorer verification evidence, validation results, transaction receipts,
-and file checksums. Guardian configuration, trading activation, and consumer cutover remain pending.
+and file checksums. Trading activation and consumer cutover remain pending.
 
 [Deployment runbook](https://github.com/Plether-Fi/plether-core/blob/ffe45937b7f38133133ad292c5435828bf99357d/packages/perps/DEPLOYMENT.md) ·
 [Changes since v1.2.2](https://github.com/Plether-Fi/plether-core/compare/v1.2.2...v1.2.3)

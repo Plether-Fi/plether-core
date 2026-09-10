@@ -1,0 +1,19 @@
+{
+  "release": "v1.2.3",
+  "chainId": 421614,
+  "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+  "recordedAt": "2026-09-10T11:50:15.078532+00:00",
+  "coordinator": "0xc91300b69e3371c6a07799168ae94dda12b98685",
+  "owner": "0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+  "previousGuardian": "0x0000000000000000000000000000000000000000",
+  "guardian": "0x6b72fe6cc52201a1eb7892a813c6c10cce62745c",
+  "transactionHash": "0x95b3c9772963f629ba8aa97cddd38df23412b9a29be5be3c7ec50d0e1c612aa8",
+  "transactionBlock": 307407613,
+  "verificationBlock": 307407614,
+  "passed": true,
+  "coordinatorBindingsAndPauserRolesVerified": true,
+  "tradingActive": false,
+  "seedAmountRawPerTranche": 10000,
+  "standardBootstrapSeedDefaultRaw": 1000000,
+  "explorerUrl": "https://sepolia.arbiscan.io/tx/0x95b3c9772963f629ba8aa97cddd38df23412b9a29be5be3c7ec50d0e1c612aa8"
+}
