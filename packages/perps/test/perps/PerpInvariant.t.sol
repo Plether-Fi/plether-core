@@ -492,7 +492,8 @@ contract PerpInvariantTest is BasePerpTest {
             address account = handler.traders(i);
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView =
                 engineAccountLens.getAccountLedgerSnapshot(account);
-            (uint256 size, uint256 margin, uint256 entryPrice,, CfdTypes.Side side,,) = engine.positions(account);
+            (uint256 size, uint256 margin, uint256 entryPrice, uint256 maxProfitUsdc, CfdTypes.Side side,,) =
+                engine.positions(account);
 
             assertEq(positionView.hasPosition, size > 0, "Position view existence must match stored size");
             if (size == 0) {
@@ -507,19 +508,14 @@ contract PerpInvariantTest is BasePerpTest {
                 "Live positions must encode exactly one directional side"
             );
 
-            uint256 sideBound = side == CfdTypes.Side.LONG
-                ? (size * entryPrice) / 1e20
-                : (size * (capPrice > entryPrice ? capPrice - entryPrice : 0)) / 1e20;
-            assertLe(
-                CfdMath.calculateMaxProfit(size, entryPrice, side, capPrice),
-                sideBound,
-                "Live position max profit must respect the side-specific bounded payoff"
+            uint256 lots = CfdMath.sizeToLots(size);
+            uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
+            assertEq(
+                maxProfitUsdc,
+                CfdMath.calculateExactMaxProfit(lots, entryCostUsdcAtoms, side, capPrice),
+                "Stored max profit must match the exact entry-cost payoff envelope"
             );
-            assertLe(
-                CfdMath.calculateMaxProfit(size, entryPrice, side, capPrice),
-                (size * capPrice) / 1e20,
-                "Live positions must remain bounded by CAP"
-            );
+            assertLe(maxProfitUsdc, lots * capPrice, "Live positions must remain bounded by CAP");
         }
     }
 

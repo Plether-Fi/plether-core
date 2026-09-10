@@ -61,12 +61,6 @@ contract MockInvariantHousePool is IHousePool {
         usdc.safeTransfer(recipient, amount);
     }
 
-    function recordProtocolInflow(
-        uint256
-    ) external view {
-        _requireAuthorized();
-    }
-
     function recordClaimantInflow(
         uint256,
         IHousePool.ClaimantInflowKind,

@@ -23,7 +23,6 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
-import {CfdEngineSettlementLib} from "@plether/perps/libraries/CfdEngineSettlementLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -43,7 +42,7 @@ contract CfdEnginePlanHarness is CfdEngine {
         uint256 executionPrice,
         uint256 poolDepthUsdc
     ) external view returns (CfdEnginePlanTypes.OpenDelta memory delta) {
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(order.account, executionPrice, poolDepthUsdc, 0);
+        CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(order.account, poolDepthUsdc);
         snap.poolCashUsdc = pool.totalAssets();
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice, 0);
     }
@@ -53,7 +52,7 @@ contract CfdEnginePlanHarness is CfdEngine {
         uint256 executionPrice,
         uint256 poolDepthUsdc
     ) external view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        snap = _buildRawSnapshot(account, executionPrice, poolDepthUsdc, 0);
+        snap = settlementSidecar.buildRawSnapshot(account, poolDepthUsdc);
         snap.poolCashUsdc = pool.totalAssets();
     }
 
@@ -199,7 +198,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         uint256 timeDelta
     ) internal pure {
         uint256 carryIndex =
-            PositionRiskAccountingLib.computeCarryIndexIncrement(snap.riskParams.baseCarryBps, timeDelta);
+            PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, timeDelta, 1, 1, snap.riskParams.baseCarryBps);
         snap.positionBorrowBaseUsdc = borrowBaseUsdc;
         snap.positionLastCarryIndex = 0;
         if (side == CfdTypes.Side.LONG) {
@@ -209,59 +208,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             snap.shortSide.borrowBaseUsdc = borrowBaseUsdc;
             snap.shortSide.carryIndex = carryIndex;
         }
-    }
-
-    function test_CloseSettlementResult_FeeOffsetSeparatesRetainedFee() public pure {
-        CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(2e6, 2e6, 10e6, 0);
-
-        assertEq(result.seizedUsdc, 2e6, "Covered net close debit should be seized");
-        assertEq(result.shortfallUsdc, 0, "Covered net close debit should have no shortfall");
-        assertEq(result.collectedExecFeeUsdc, 2e6, "Only seized cash can be cash-collected");
-        assertEq(result.retainedExecFeeUsdc, 8e6, "Profit-offset fee should be marked for pool top-up");
-        assertEq(result.badDebtUsdc, 0, "Fee offset by retained trader profit is not bad debt");
-    }
-
-    function test_CloseSettlementResult_UnderfundedLossKeepsProtocolFeeSenior() public pure {
-        CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(45e6, 50e6, 10e6, 0);
-
-        assertEq(result.seizedUsdc, 45e6, "Available close collateral should be seized");
-        assertEq(result.shortfallUsdc, 5e6, "Uncovered close debit should remain shortfall");
-        assertEq(result.collectedExecFeeUsdc, 10e6, "Protocol fee should be senior in seized cash");
-        assertEq(result.retainedExecFeeUsdc, 0, "Underfunded losses do not create retained-profit fees");
-        assertEq(result.badDebtUsdc, 5e6, "Remaining shortfall should be LP bad debt");
-    }
-
-    function test_CloseSettlementResult_DeepShortfallDoesNotTopUpUnpaidFee() public pure {
-        CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(5e6, 50e6, 10e6, 0);
-
-        assertEq(result.seizedUsdc, 5e6, "Only available close collateral should be seized");
-        assertEq(result.shortfallUsdc, 45e6, "Uncovered close debit should remain shortfall");
-        assertEq(result.collectedExecFeeUsdc, 5e6, "Cash-collected fee should be bounded by seized cash");
-        assertEq(result.retainedExecFeeUsdc, 0, "Missing margin is not retained trader profit");
-        assertEq(result.badDebtUsdc, 40e6, "Only the non-fee shortfall should become LP bad debt");
-    }
-
-    function test_CloseSettlementResult_FrozenSpreadIsJuniorToFeeAndBaseDebt() public pure {
-        CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(45e6, 50e6, 10e6, 8e6);
-
-        assertEq(result.seizedUsdc, 45e6, "Available close collateral should be seized");
-        assertEq(result.shortfallUsdc, 5e6, "Only the junior frozen spread should remain uncollected");
-        assertEq(result.collectedExecFeeUsdc, 10e6, "Protocol fee should be senior");
-        assertEq(result.badDebtUsdc, 0, "Base close debt should be paid before the frozen spread");
-    }
-
-    function test_CloseSettlementResult_RetainedSpreadConservesAssessment() public pure {
-        CfdEngineSettlementLib.CloseSettlementResult memory result =
-            CfdEngineSettlementLib.closeSettlementResult(5e6, 5e6, 10e6, 8e6);
-
-        assertEq(result.retainedExecFeeUsdc, 10e6, "Profit offset should retain the full execution fee");
-        assertEq(result.seizedUsdc, 5e6, "Net close debit should collect the residual spread");
-        assertEq(result.shortfallUsdc, 0, "Retained and cash-collected value should settle the full spread");
-        assertEq(result.badDebtUsdc, 0, "Spread accounting should not create base bad debt");
     }
 
     function test_CloseLoss_FeeOffsetTopUpMatchesRetainedTraderProfit() public {
@@ -869,7 +815,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function test_PendingCarry_IncreasesWithHigherLeverage() public pure {
-        uint256 carryIndexDelta = PositionRiskAccountingLib.computeCarryIndexIncrement(500, 30 days);
+        uint256 carryIndexDelta = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 30 days, 1, 1, 500);
         uint256 lowLeverageCarry = PositionRiskAccountingLib.computeIndexedCarryUsdc(
             PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 50_000e6), carryIndexDelta
         );
@@ -882,10 +828,10 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     function test_PendingCarry_IncreasesWithTime() public pure {
         uint256 borrowBaseUsdc = PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 10_000e6);
         uint256 shortCarry = PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            borrowBaseUsdc, PositionRiskAccountingLib.computeCarryIndexIncrement(500, 1 days)
+            borrowBaseUsdc, PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 1 days, 1, 1, 500)
         );
         uint256 longCarry = PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            borrowBaseUsdc, PositionRiskAccountingLib.computeCarryIndexIncrement(500, 30 days)
+            borrowBaseUsdc, PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 30 days, 1, 1, 500)
         );
         assertGt(longCarry, shortCarry, "Longer time should report more carry");
     }

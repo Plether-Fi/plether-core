@@ -46,15 +46,4 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
         IOrderRouterAccounting.OrderStatus terminalStatus
     ) internal virtual;
 
-    /// @notice Fails protection attached to a risk-off parent and returns its no-checkpoint bounty refund.
-    /// @dev The default keeps the execution layer independent of optional attached-order features.
-    function _failPendingOpenProtectionForRiskOff(
-        uint64 parentOrderId,
-        address account
-    ) internal virtual returns (uint256 refundableProtectionBountyUsdc) {
-        parentOrderId;
-        account;
-        return 0;
-    }
-
 }

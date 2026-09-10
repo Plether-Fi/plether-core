@@ -188,7 +188,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   reclassify PnL pledge without an atomic terminal-curve resynchronization and a new security review.
 - Negative lifetime VPI is protected by a dedicated sub-balance of action reserve. Generic action collection must not
   cross the combined floor of protected execution bounties plus `max(-vpiAccrued, 0)`.
-- `HousePool.payOut(...)` and `HousePool.recordProtocolInflow(...)` trust only `engine` and `settlementSidecar`; unsolicited raw pool cash must be admitted through owner-governed excess accounting, and protocol fees stay in treasury clearinghouse margin.
+- `HousePool.payOut(...)` and `HousePool.recordClaimantInflow(...)` trust only `engine` and `settlementSidecar`; unsolicited raw pool cash must be admitted through owner-governed excess accounting, and protocol fees stay in treasury clearinghouse margin.
 
 ### V2 caller and dependency matrix
 

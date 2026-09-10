@@ -4,7 +4,6 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
@@ -13,14 +12,12 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
-import {Test, console} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 contract MockToken is ERC20 {
 
@@ -131,44 +128,6 @@ contract MarginClearinghouseAccountingHarness {
         int256 tradeCostUsdc
     ) external pure returns (MarginClearinghouseAccountingLib.OpenCostPlan memory) {
         return MarginClearinghouseAccountingLib.planOpenCostApplication(buckets, marginDeltaUsdc, tradeCostUsdc);
-    }
-
-    function buildAccountUsdcBuckets(
-        uint256 settlementBalanceUsdc,
-        uint256 positionMarginUsdc,
-        uint256 committedOrderMarginUsdc,
-        uint256 reservedSettlementUsdc
-    ) external pure returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
-        return MarginClearinghouseAccountingLib.buildAccountUsdcBuckets(
-            settlementBalanceUsdc, positionMarginUsdc, committedOrderMarginUsdc, reservedSettlementUsdc
-        );
-    }
-
-    function buildPartialCloseUsdcBuckets(
-        uint256 settlementBalanceUsdc,
-        uint256 positionMarginUsdc,
-        uint256 committedOrderMarginUsdc,
-        uint256 reservedSettlementUsdc
-    ) external pure returns (IMarginClearinghouse.AccountUsdcBuckets memory) {
-        return MarginClearinghouseAccountingLib.buildPartialCloseUsdcBuckets(
-            settlementBalanceUsdc, positionMarginUsdc, committedOrderMarginUsdc, reservedSettlementUsdc
-        );
-    }
-
-    function planTerminalLossConsumption(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 protectedLockedMarginUsdc,
-        uint256 lossUsdc
-    ) external pure returns (MarginClearinghouseAccountingLib.SettlementConsumption memory) {
-        return
-            MarginClearinghouseAccountingLib.planTerminalLossConsumption(buckets, protectedLockedMarginUsdc, lossUsdc);
-    }
-
-    function planLiquidationResidual(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        int256 residualUsdc
-    ) external pure returns (MarginClearinghouseAccountingLib.LiquidationResidualPlan memory) {
-        return MarginClearinghouseAccountingLib.planLiquidationResidual(buckets, residualUsdc);
     }
 
 }

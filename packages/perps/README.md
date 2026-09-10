@@ -1,6 +1,6 @@
 # Plether Perps
 
-## Next release: clearinghouse ABI cleanup
+## Next release: unused perps API cleanup
 
 The next deployment removes unused privileged clearinghouse entrypoints: `lockCommittedOrderMargin`,
 `unlockCommittedOrderMargin`, `promoteOrderReservationToPnlPledge`, `consumeOrderReservation`,
@@ -11,6 +11,18 @@ The next deployment removes unused privileged clearinghouse entrypoints: `lockCo
 The maintained action-charge settlement path now rejects an active reservation belonging to another account.
 This is defensive hardening and bytecode cleanup. Existing immutable deployments and historical release artifacts
 are unchanged.
+
+The follow-up cleanup also removes `HousePool.recordProtocolInflow`, its unused `ProtocolInflowAccounted` event,
+and the retired clearinghouse selectors `reserveCloseExecutionBountyFromPositionMargin` and
+`reserveStaleCloseExecutionBountyFromPositionMargin`. Engine and sidecar inflows continue through
+`recordClaimantInflow`; owner-admitted raw donations use `accountExcess`. The two retired bounty selectors previously
+always reverted. Close bounties continue to use the maintained free-settlement path.
+
+Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
+`OrderOraclePolicyLib`. Planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
+the maintained exact-entry-cost math, carry index, settlement snapshot, claimant inflow, and live close/claim paths.
+These removals require new bindings for a future deployment; this source change does not deploy contracts or migrate
+existing state.
 
 
 Plether Perps is a bounded, delayed-order perpetuals engine for synthetic USD-directional exposure.

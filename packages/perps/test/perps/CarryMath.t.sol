@@ -19,15 +19,16 @@ contract CarryMathTest is Test {
         assertEq(highLeverageCarryBase, 90_000e6);
     }
 
-    function test_ComputeUtilizedCarryRate_ScalesBySideUtilization() public pure {
+    function test_ComputeCurrentCarryIndex_ScalesBySideUtilization() public pure {
         uint256 utilizationBps = PositionRiskAccountingLib.computeBorrowUtilizationBps(100_000e6, 200_000e6);
-        uint256 utilizedRateBps = PositionRiskAccountingLib.computeUtilizedCarryRateBps(500, utilizationBps);
+        uint256 carryIndex =
+            PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days, 100_000e6, 200_000e6, 500);
         assertEq(utilizationBps, 5000);
-        assertEq(utilizedRateBps, 250);
+        assertEq(carryIndex, 0.025e18);
     }
 
     function test_ComputeIndexedCarry_FullYearAtFivePercent() public pure {
-        uint256 carryIndexDelta = PositionRiskAccountingLib.computeCarryIndexIncrement(500, 365 days);
+        uint256 carryIndexDelta = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 365 days, 1, 1, 500);
         uint256 carryUsdc = PositionRiskAccountingLib.computeIndexedCarryUsdc(90_000e6, carryIndexDelta);
         assertEq(carryIndexDelta, 0.05e18);
         assertEq(carryUsdc, 4500e6);

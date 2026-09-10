@@ -497,24 +497,6 @@ interface IMarginClearinghouse {
         uint256 amount
     ) external;
 
-    /// @notice Retired position-margin close-bounty selector retained as an explicit reverting tombstone.
-    /// @dev V2 close bounties must be backed exclusively by free settlement; every call reverts.
-    /// @param account Ignored legacy account argument
-    /// @param amount Ignored legacy amount argument
-    function reserveCloseExecutionBountyFromPositionMargin(
-        address account,
-        uint256 amount
-    ) external;
-
-    /// @notice Retired stale position-margin close-bounty selector retained as an explicit reverting tombstone.
-    /// @dev V2 stale close bounties must also be backed exclusively by free settlement; every call reverts.
-    /// @param account Ignored legacy account argument
-    /// @param amount Ignored legacy amount argument
-    function reserveStaleCloseExecutionBountyFromPositionMargin(
-        address account,
-        uint256 amount
-    ) external;
-
     /// @notice Returns the explicit USDC bucket split after subtracting typed locked-margin buckets.
     /// @dev This clearinghouse-local view excludes unrealized PnL, trader claims, and engine withdrawal guards.
     /// @param account Account to inspect

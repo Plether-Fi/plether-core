@@ -58,8 +58,8 @@ Before trusting a test as a source of truth, ask:
 | `MarginClearinghouse` operator paths | `engine`, `settlementSidecar` | broad settlement mutations only |
 | `MarginClearinghouse` reservation paths | `engine`, `orderRouter` | router can reserve/release queued margin and execution-bounty buckets, but cannot perform broad settlement |
 | `MarginClearinghouse.releaseInvalidatedOrderReserves` | Engine-reported `orderRouter` only | exact order-margin, order-bounty, and attached-protection-bounty risk-off reclassification; authorization reads the Engine's Router binding, while the transition performs no Engine mutation, carry checkpoint, Terminal NAV synchronization, or token movement |
-| `HousePool.payOut` / `recordProtocolInflow` | `engine`, `settlementSidecar` | payout/inflow authority is intentionally narrow |
-| `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` | claimant-owned revenue/recap routing only |
+| `HousePool.payOut` | `engine`, `settlementSidecar` | payout authority is intentionally narrow |
+| `HousePool.recordClaimantInflow` | `engine`, `settlementSidecar` for revenue; `engine` only for recapitalization | claimant-owned revenue/recap routing only |
 | `HousePool.reserveSeniorDeposit` / `releaseSeniorDepositReservation` | configured `seniorVault` only | direct LPs and the Junior vault cannot reserve or release pending Senior-entry capacity; activation happens only through synchronized settlement |
 | `HousePool.reconcile` | either configured tranche vault | retained vault integration hook; end users enter and claim through `TrancheVault` |
 | `OrderRouter.settleLpEpoch(bytes[])` | permissionless | validates one PoolReconcile mark and atomically invokes coordinated LP entry activation and redemption funding |

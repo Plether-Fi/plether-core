@@ -51,27 +51,6 @@ library OrderValidationLib {
         }
     }
 
-    /// @notice Validates an inclusive global-queue endpoint for batch execution.
-    /// @param maxOrderId Last order identifier the batch may attempt.
-    /// @param nextExecuteId Current global queue-head candidate. It starts at one before the first commit and becomes
-    ///        zero only after a previously populated queue drains.
-    /// @param nextCommitId Next identifier that will be assigned to a newly committed order.
-    function validateBatchBounds(
-        uint64 maxOrderId,
-        uint64 nextExecuteId,
-        uint64 nextCommitId
-    ) internal pure {
-        if (nextExecuteId == 0) {
-            revert IOrderRouterErrors.OrderRouter__NoOrdersToExecute();
-        }
-        if (maxOrderId < nextExecuteId) {
-            revert IOrderRouterErrors.OrderRouter__BatchBeforeQueueHead();
-        }
-        if (maxOrderId >= nextCommitId) {
-            revert IOrderRouterErrors.OrderRouter__BatchOrderNotCommitted();
-        }
-    }
-
     /// @notice Checks execution price against the order's directional target-price boundary.
     /// @dev Production V2 commits require a nonzero target. Close LONG accepts prices at or below the target; close
     ///      SHORT accepts prices at or above it. Open LONG uses the opposite comparison, as does open SHORT.
