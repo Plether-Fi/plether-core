@@ -1,0 +1,110 @@
+{
+  "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+  "recordedAt": "2026-09-10T11:22:52.909770+00:00",
+  "ci": {
+    "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34465522437",
+    "passed": true
+  },
+  "deepTests": {
+    "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+    "recordedAt": "2026-09-10T11:05:15.176280+00:00",
+    "allShardsPassed": true,
+    "githubRunUrl": "https://github.com/Plether-Fi/plether-core/actions/runs/34465522258",
+    "githubWorkflowStatus": "completed",
+    "githubWorkflowConclusion": "cancelled",
+    "profile": {
+      "forgeVersion": "1.5.1-stable",
+      "solc": "0.8.35",
+      "viaIR": true,
+      "optimizerRuns": 200,
+      "evmVersion": "prague",
+      "fuzzRuns": 256,
+      "fuzzSeed": "0xdeadbeef",
+      "invariantRuns": 16,
+      "invariantDepth": 500
+    },
+    "shards": [
+      {
+        "shard": 1,
+        "passed": true,
+        "execution": "local full shard",
+        "evidence": {
+          "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+          "completedAt": "2026-09-10T11:05:15.142949+00:00",
+          "exitCode": 0,
+          "profile": {
+            "forgeVersion": "1.5.1-stable",
+            "solc": "0.8.35",
+            "viaIR": true,
+            "optimizerRuns": 200,
+            "evmVersion": "prague",
+            "fuzzRuns": 256,
+            "fuzzSeed": "0xdeadbeef",
+            "invariantRuns": 16,
+            "invariantDepth": 500
+          },
+          "command": "FOUNDRY_PROFILE=ci FOUNDRY_INVARIANT_RUNS=16 FOUNDRY_INVARIANT_DEPTH=500 FOUNDRY_FUZZ_SEED=0xdeadbeef bash scripts/run-perps-package-tests.sh 0 4",
+          "fuzzAndInvariant": {
+            "suites": 8,
+            "passed": 14,
+            "failed": 0,
+            "skipped": 0
+          },
+          "regularTests": {
+            "suites": 59,
+            "passed": 443,
+            "failed": 0,
+            "skipped": 0
+          },
+          "logSha256": "d0e3c65ce493bf50864e5e6566c0f8307109f9aacf4528ee21eba82ca5596fdf",
+          "logInReleaseBundle": "evidence/deep-shard-1-local.log"
+        },
+        "note": "Same script, production compiler, deterministic seed, 256 fuzz runs and 16x500 invariant parameters. Includes both fuzz/invariant and regular test stages; no tests skipped. The merged-source GitHub shard passed fuzz/invariants but hit its 30-minute limit while compiling regular tests."
+      },
+      {
+        "shard": 2,
+        "passed": true,
+        "execution": "GitHub Actions",
+        "jobId": 102833067104,
+        "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34465522258/job/102833067104"
+      },
+      {
+        "shard": 3,
+        "passed": true,
+        "execution": "GitHub Actions",
+        "jobId": 102833066742,
+        "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34465522258/job/102833066742"
+      },
+      {
+        "shard": 4,
+        "passed": true,
+        "execution": "GitHub Actions",
+        "jobId": 102833066861,
+        "url": "https://github.com/Plether-Fi/plether-core/actions/runs/34465522258/job/102833066861"
+      }
+    ]
+  },
+  "localIntegrationTests": {
+    "passed": 40,
+    "failed": 0,
+    "command": "forge test --offline --no-match-path 'test/fork/*'"
+  },
+  "authenticatedPythPreflight": {
+    "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+    "timestamp": "2026-09-10T11:05:38.670015+00:00",
+    "passed": true,
+    "broadcast": false
+  },
+  "creationInputsMatchedToBuild": 27,
+  "runtimeTemplatesMatchedOutsideImmutableSubstitution": 27,
+  "engineLensImmutableEngineAndQuoterBindingsChecked": true,
+  "sourceVerifiedContracts": 27,
+  "deployedPhase": {
+    "txOrRunId": "Arbitrum Sepolia block 307397477",
+    "blockNumber": 307397477,
+    "passed": true
+  },
+  "tradingActive": false,
+  "seeded": false,
+  "note": "This is a fresh deployed stack. The active deployment manifest is unchanged. Guardian configuration, seeding, activation, and consumer cutover remain separate pending operations."
+}

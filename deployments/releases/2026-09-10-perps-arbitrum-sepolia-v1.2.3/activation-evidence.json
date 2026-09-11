@@ -1,0 +1,73 @@
+{
+  "release": "v1.2.3",
+  "chainId": 421614,
+  "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+  "recordedAt": "2026-09-10T12:01:20.557655+00:00",
+  "passed": true,
+  "verificationBlock": 307410278,
+  "verificationBlockHash": "0x8a03600ff84b4d4db856e559d08d6aae6278e438aadfe6cec7ae74ed32527e9b",
+  "housePool": "0x87622630fb1941fe02731d4a9fcdec0388efd78b",
+  "router": "0x6215d36fcbd610ca1525252eebcbfd8b223a6072",
+  "oracle": "0x9f4d9ae736b94249b18a85a7e14092bfca0688eb",
+  "oracleValidation": {
+    "block": 307410268,
+    "timestamp": 1789041676,
+    "sixFeedHermesUpdate": true,
+    "pythFeeWei": "0",
+    "markPriceRaw": 99322282,
+    "markPublishTime": 1789041674,
+    "orderExecutionPriceRaw": 99322282,
+    "poolReconcilePriceRaw": 99322282,
+    "oracleFrozen": false,
+    "closeOnly": false
+  },
+  "state": {
+    "tradingActive": true,
+    "canIncreaseRisk": true,
+    "housePoolPaused": false,
+    "lpSettlementPaused": false,
+    "routerPaused": false,
+    "guardian": "0x6b72fe6cc52201a1eb7892a813c6c10cce62745c",
+    "seniorPrincipalRaw": 10000,
+    "juniorPrincipalRaw": 10000,
+    "accountedAssetsRaw": 20000
+  },
+  "transactions": [
+    {
+      "operation": "oracle refresh",
+      "hash": "0xff75a9f79d133a7f607893a5d9e47cf5907ae723e5ebbf65d9794c2fd24b7bbc",
+      "block": 307410268,
+      "status": 1,
+      "explorerUrl": "https://sepolia.arbiscan.io/tx/0xff75a9f79d133a7f607893a5d9e47cf5907ae723e5ebbf65d9794c2fd24b7bbc"
+    },
+    {
+      "operation": "activate trading",
+      "hash": "0x9fa11e16aa2d88641aaad71c0db0ddcdc9671b1b688938f91af58ea7470d2d89",
+      "block": 307410278,
+      "status": 1,
+      "explorerUrl": "https://sepolia.arbiscan.io/tx/0x9fa11e16aa2d88641aaad71c0db0ddcdc9671b1b688938f91af58ea7470d2d89"
+    }
+  ],
+  "fullStackVerification": {
+    "seeded": {
+      "phase": "seeded",
+      "passed": true,
+      "block": 307409695,
+      "recordedAt": "2026-09-10T11:59:16.014690+00:00",
+      "verifierSourceSha256": "da2542571368c508287d78d0b0ec989ac28fdc3ef075fc59adf84c0b9053f050",
+      "originalVerifierSourceSha256": "52e58733bbaad4e5c3f1a879ba3b173b528b725a48206bb70d5a6e66e48b1455",
+      "adjustment": "Isolated copy of the full repository verifier with only the contract name and two seed principal constants changed to 10000 raw USDC. All graph, economics, governance, seed receiver, guardian, and phase checks are retained. Repository defaults remain 1 USDC.",
+      "logSha256": "f3b0f98f29eb1108916aed86c17de2faf69ce8b83eb1aac5dc7b668d608c67b9"
+    },
+    "active": {
+      "phase": "active",
+      "passed": true,
+      "block": 307410350,
+      "recordedAt": "2026-09-10T12:01:46.260143+00:00",
+      "verifierSourceSha256": "da2542571368c508287d78d0b0ec989ac28fdc3ef075fc59adf84c0b9053f050",
+      "originalVerifierSourceSha256": "52e58733bbaad4e5c3f1a879ba3b173b528b725a48206bb70d5a6e66e48b1455",
+      "adjustment": "Isolated copy of the full repository verifier with only the contract name and two seed principal constants changed to 10000 raw USDC. All graph, economics, governance, seed receiver, guardian, and phase checks are retained. Repository defaults remain 1 USDC.",
+      "logSha256": "c00dee7b7e5b51e0f6477c4ad621f589c2723ff5bdee171a7e8bdcbca29734ff"
+    }
+  }
+}

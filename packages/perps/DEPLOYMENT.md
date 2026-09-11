@@ -29,7 +29,7 @@ unchanged. See [Reservation ledger](RESERVATION_LEDGER.md) for the complete owne
 - Environment template: `.env.arbitrum-sepolia-perps.example`
 - Manifest template: `deployments/arbitrum-sepolia-perps.template.json`
 - Current preparation record: `deployments/releases/2026-09-10-perps-arbitrum-sepolia/README.md`
-- Latest recorded deployment (inactive, awaiting bootstrap): `deployments/releases/2026-09-06-perps-arbitrum-sepolia/README.md`
+- Latest recorded deployment (v1.2.3, active, seeded with 0.01 USDC per tranche): `deployments/releases/2026-09-10-perps-arbitrum-sepolia-v1.2.3/README.md`
 - Consumer ABI and build-evidence exporter: `scripts/export-perps-release.py`
 
 The deploy script handles contract creation and one-time wiring.
