@@ -16,6 +16,10 @@ interface ICfdOrderPolicyEvaluator {
     /// @notice A planner returned `OK` without producing a valid delta.
     error CfdOrderPolicyEvaluator__InvalidPlannerResult();
 
+    /// @notice Planned settlement cannot back the terminal bounty debit, including self-execution.
+    /// @dev An accounting invariant failure, not a terminal user-policy failure. Routers must leave the order pending.
+    error CfdOrderPolicyEvaluator__InsufficientBountyBacking(uint256 settlementUsdc, uint256 bountyUsdc);
+
     /// @notice Authoritative market state selected a regime outside the order's allowed mode mask.
     /// @param mode Actual execution regime.
     /// @param allowedExecutionModes Caller-authorized LIVE=1, FAD=2, FROZEN=4 mask.
@@ -37,7 +41,8 @@ interface ICfdOrderPolicyEvaluator {
     ///      this evaluator has no storage and performs no writes. Before assessing a pending open, the caller must
     ///      release that order's committed-margin classification through a no-carry path so the planner does not
     ///      require the same `marginDelta` twice. A caller that subsequently asks the Engine to apply the order must
-    ///      preserve the same price, depth, publish time, and protocol state between both calls.
+    ///      preserve the same price, depth, publish time, and protocol state between both calls. The order's bounty
+    ///      must already be reserved. For a prospective close, use CfdClosePreview.previewClose instead.
     function assessOrder(
         address engine,
         CfdTypes.Order calldata order,

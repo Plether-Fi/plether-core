@@ -104,6 +104,17 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
 
     uint256 private constant BPS = 10_000;
 
+    function _settlementAfterBounty(
+        uint256 settlementUsdc,
+        uint256 bountyUsdc,
+        bool bountyReturnsToAccount
+    ) private pure returns (uint256) {
+        if (settlementUsdc < bountyUsdc) {
+            revert CfdOrderPolicyEvaluator__InsufficientBountyBacking(settlementUsdc, bountyUsdc);
+        }
+        return bountyReturnsToAccount ? settlementUsdc : settlementUsdc - bountyUsdc;
+    }
+
     struct AssessmentContext {
         address engineAddress;
         address executor;
@@ -202,7 +213,7 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         OrderV2Types.ExecutionBounds memory bounds,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount
-    ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) internal pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment =
@@ -215,7 +226,7 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         ICfdEnginePlanner planner,
         address account,
         uint256 poolDepthUsdc
-    ) private view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
+    ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
         (
             snapshot.position.size,
             snapshot.position.margin,
@@ -362,10 +373,8 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
         } else if (tradeRebateUsdc > 0) {
             postSettlementBalanceUsdc += tradeRebateUsdc;
         }
-        assessment.postSettlementBalanceUsdc = postSettlementBalanceUsdc - executionBountyUsdc;
-        if (bountyReturnsToAccount) {
-            assessment.postSettlementBalanceUsdc += executionBountyUsdc;
-        }
+        assessment.postSettlementBalanceUsdc =
+            _settlementAfterBounty(postSettlementBalanceUsdc, executionBountyUsdc, bountyReturnsToAccount);
 
         assessment.vpiUsdc = delta.posVpiAccruedDelta;
         assessment.carryUsdc = realizedCarryUsdc;
@@ -419,10 +428,8 @@ contract CfdOrderPolicyEvaluator is ICfdOrderPolicyEvaluator {
             postSettlementBalanceUsdc += delta.pricePayoutUsdc;
         }
         postSettlementBalanceUsdc += delta.actionRebatePaidUsdc;
-        assessment.postSettlementBalanceUsdc = postSettlementBalanceUsdc - executionBountyUsdc;
-        if (bountyReturnsToAccount) {
-            assessment.postSettlementBalanceUsdc += executionBountyUsdc;
-        }
+        assessment.postSettlementBalanceUsdc =
+            _settlementAfterBounty(postSettlementBalanceUsdc, executionBountyUsdc, bountyReturnsToAccount);
 
         assessment.realizedPnlUsdc = delta.realizedPnlUsdc;
         assessment.vpiUsdc = delta.closeState.vpiDeltaUsdc;

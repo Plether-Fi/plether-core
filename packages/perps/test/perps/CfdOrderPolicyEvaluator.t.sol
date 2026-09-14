@@ -11,6 +11,19 @@ import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolic
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {Test} from "forge-std/Test.sol";
 
+contract BountyBackingHarness is CfdOrderPolicyEvaluator {
+
+    function evaluateSelfClose(
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        OrderV2Types.ExecutionBounds memory bounds,
+        uint256 bounty
+    ) external pure returns (OrderV2Types.ExecutionAssessment memory) {
+        return _evaluateClose(snapshot, delta, bounds, bounty, true);
+    }
+
+}
+
 contract CfdOrderPolicyEvaluatorTest is Test {
 
     uint256 private constant PRICE = 1e8;
@@ -27,6 +40,96 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function setUp() public {
         evaluator = new CfdOrderPolicyEvaluator();
         planner = new CfdEnginePlanner();
+    }
+
+    function test_CloseReservationCounterexample() public {
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        uint256 size = 15_927_400e18;
+        uint256 entry = 98_895_064;
+        uint256 price = entry * 999 / 1000;
+        uint256 bounty = 200_000;
+        snap.account = ACCOUNT;
+        snap.capPrice = 2e8;
+        snap.executionFeeBps = 4;
+        snap.poolAssetsUsdc = 1_000_000_000e6;
+        snap.poolCashUsdc = snap.poolAssetsUsdc;
+        snap.position.size = size;
+        snap.position.margin = 10_000e6;
+        snap.position.entryPrice = entry;
+        snap.position.side = CfdTypes.Side.SHORT;
+        snap.position.maxProfitUsdc = size / 1e20 * (snap.capPrice - entry);
+        snap.positionEntryCostUsdcAtoms = size / 1e20 * entry;
+        snap.shortSide.openInterest = size;
+        snap.shortSide.maxProfitUsdc = snap.position.maxProfitUsdc;
+        snap.shortSide.totalMargin = snap.position.margin;
+        snap.shortSide.entryNotional = snap.positionEntryCostUsdcAtoms * 1e12;
+        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+            settlementBalanceUsdc: 10_000e6 + bounty,
+            activePositionMarginUsdc: 10_000e6,
+            totalLockedMarginUsdc: 10_000e6,
+            otherLockedMarginUsdc: 0,
+            freeSettlementUsdc: bounty
+        });
+        snap.lockedBuckets.positionMarginUsdc = 10_000e6;
+        snap.lockedBuckets.totalLockedMarginUsdc = 10_000e6;
+        CfdTypes.Order memory order = CfdTypes.Order(ACCOUNT, size, 0, price, 0, 0, 0, CfdTypes.Side.SHORT, true);
+        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, price, 0);
+        assertTrue(delta.valid);
+        assertEq(delta.pricePnlPledgeConsumedUsdc, 10_000e6);
+        assertEq(delta.actionChargeCollectedUsdc, bounty);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, bounty
+            )
+        );
+        evaluator.evaluateClose(snap, delta, _permissiveBounds(), bounty);
+
+        // Same custody and position, complete classification equivalent to locking and recording the bounty.
+        snap.accountBuckets.freeSettlementUsdc = 0;
+        snap.accountBuckets.otherLockedMarginUsdc = bounty;
+        snap.accountBuckets.totalLockedMarginUsdc += bounty;
+        snap.lockedBuckets.totalLockedMarginUsdc += bounty;
+        snap.lockedBuckets.reservedSettlementUsdc = bounty;
+        snap.actionReserveUsdc = bounty;
+        snap.protectedExecutionBountyUsdc = bounty;
+        delta = planner.planClose(snap, order, price, 0);
+        assertTrue(delta.valid);
+        assertEq(delta.actionChargeCollectedUsdc, 0);
+        OrderV2Types.ExecutionAssessment memory assessment =
+            evaluator.evaluateClose(snap, delta, _permissiveBounds(), bounty);
+        assertEq(assessment.postSettlementBalanceUsdc, 0);
+    }
+
+    function test_OpenBountyUnderfundingHasTypedInvariantError() public {
+        CfdEnginePlanTypes.RawSnapshot memory snap = _baseOpenSnapshot();
+        CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
+        snap.accountBuckets.settlementBalanceUsdc = 2e6;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, BOUNTY
+            )
+        );
+        evaluator.evaluateOpen(snap, delta, _permissiveBounds(), BOUNTY);
+    }
+
+    function test_SelfExecutionRequiresBackingAndKeepsGrossDebit() public {
+        BountyBackingHarness harness = new BountyBackingHarness();
+        CfdEnginePlanTypes.RawSnapshot memory snap;
+        CfdEnginePlanTypes.CloseDelta memory delta;
+        delta.valid = true;
+        delta.deletePosition = true;
+        snap.accountBuckets.settlementBalanceUsdc = BOUNTY - 1;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, BOUNTY - 1, BOUNTY
+            )
+        );
+        harness.evaluateSelfClose(snap, delta, _permissiveBounds(), BOUNTY);
+        snap.accountBuckets.settlementBalanceUsdc = BOUNTY;
+        OrderV2Types.ExecutionAssessment memory assessment =
+            harness.evaluateSelfClose(snap, delta, _permissiveBounds(), BOUNTY);
+        assertEq(assessment.postSettlementBalanceUsdc, BOUNTY);
+        assertEq(assessment.grossAccountDebitUsdc, BOUNTY);
     }
 
     function test_AssessOrderUsesReleasedMarginButKeepsBountyProtectedAndHandlesSelfExecution() public {
