@@ -2,6 +2,8 @@
 
 `CfdClosePreview.previewClose` is the pre-commit close-review API. `CfdOrderPolicyEvaluator.assessOrder` remains the execution-state API: its supplied bounty must already have been reserved by commitment.
 
+For the frontend rollout after deployment, use the [implementation handoff and acceptance checklist](CLOSE_PREVIEW_FRONTEND_HANDOFF.md).
+
 ## Calling the preview
 
 Deploy `CfdClosePreview` as an additive, stateless read-only contract. It has no constructor arguments. Pin its address and runtime bytecode independently from the existing release's engine, router, planner, and execution evaluator. The preview reads the engine's configured router to obtain the close bounty and its configured pool for canonical depth.
@@ -17,7 +19,7 @@ const preview = await publicClient.readContract({
 const assessment = preview.assessment
 ```
 
-Use this call at each reviewed close price (current, midpoint, and adverse slippage limit). Preserve the existing open-review route. Rebuild reviewed bounds from these assessments. Continue to simulate the actual router commitment for queue admission, deadlines, configuration hashes, and other router-level requirements.
+Use this call at each reviewed close price (current, midpoint, and adverse slippage limit). Preserve the existing open-review route. Feed these assessments into the existing bounds construction and validation policy. Continue to simulate the actual router commitment for queue admission, deadlines, configuration hashes, and other router-level requirements.
 
 `preview.commitmentCarryUsdc` is the settlement debit projected at commitment. `assessment.preSettlementBalanceUsdc` starts after that debit. `assessment.grossAccountDebitUsdc` and `assessment.carryUsdc` describe execution from that projected state; do not count commitment carry twice. `preview.executionBountyUsdc` is the new order's configured bounty. The preview always reserves it in addition to all existing reservations, regardless of their aggregate value.
 
