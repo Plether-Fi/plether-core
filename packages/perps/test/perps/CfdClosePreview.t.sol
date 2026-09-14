@@ -9,6 +9,7 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 abstract contract CfdClosePreviewTestBase is BasePerpTest {
@@ -49,8 +50,8 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
             size,
             0,
             side == CfdTypes.Side.LONG ? type(uint256).max : 1,
-            uint64(block.timestamp),
-            uint64(block.number),
+            uint64(vm.getBlockTimestamp()),
+            uint64(vm.getBlockNumber()),
             0,
             side,
             true
@@ -79,7 +80,8 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         uint256 price,
         address executor
     ) internal view returns (CfdClosePreview.ClosePreview memory) {
-        return previewer.previewClose(address(engine), o, executor, price, uint64(block.timestamp), _bounds());
+        // The optimizer can cache block.timestamp across the fixture's vm.warp calls.
+        return previewer.previewClose(address(engine), o, executor, price, uint64(vm.getBlockTimestamp()), _bounds());
     }
 
     function _commitParity(
@@ -116,7 +118,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
             executor,
             price,
             pool.totalAssets(),
-            uint64(block.timestamp),
+            uint64(vm.getBlockTimestamp()),
             _bounds(),
             p.executionBountyUsdc
         );
@@ -407,11 +409,118 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
 
 }
 
+contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
+
+    function test_WrongSideMatchesRouterCommitError() public {
+        _openNormally(CfdTypes.Side.LONG, 20e6);
+        CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SideMismatch.selector);
+        previewer.previewClose(address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds());
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SideMismatch.selector);
+        vm.prank(ACCOUNT);
+        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+
+        vm.mockCall(address(router), abi.encodeWithSignature("closeOrderExecutionBountyUsdc()"), abi.encode(uint256(0)));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SideMismatch.selector);
+        previewer.previewClose(address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds());
+    }
+
+    function test_PartialCloseDustBoundaryMatchesRouterCommit() public {
+        _openNormally(CfdTypes.Side.LONG, 20e6);
+        vm.prank(address(router));
+        engine.updateMarkPrice(101_000_000, uint64(block.timestamp));
+        CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, 9 * CfdTypes.SIZE_QUANTUM);
+        bytes memory err = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
+        vm.expectRevert(err);
+        previewer.previewClose(address(engine), o, KEEPER, 101_000_000, uint64(block.timestamp), _bounds());
+        vm.expectRevert(err);
+        vm.prank(ACCOUNT);
+        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+
+        o.sizeDelta = 10 * CfdTypes.SIZE_QUANTUM;
+        _commitParity(o, 101_000_000, KEEPER);
+    }
+
+    function test_DustChecksUseFallbackAndCappedMarkEvenWithZeroBounty() public {
+        _openNormally(CfdTypes.Side.LONG, 20e6);
+        vm.mockCall(address(router), abi.encodeWithSignature("closeOrderExecutionBountyUsdc()"), abi.encode(uint256(0)));
+        CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, 9 * CfdTypes.SIZE_QUANTUM);
+        bytes memory err = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
+        vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkPrice()"), abi.encode(uint256(0)));
+        vm.expectRevert(err);
+        previewer.previewClose(address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds());
+        vm.expectRevert(err);
+        vm.prank(ACCOUNT);
+        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+
+        vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkPrice()"), abi.encode(uint256(3e8)));
+        o.sizeDelta = 4 * CfdTypes.SIZE_QUANTUM;
+        vm.expectRevert(err);
+        previewer.previewClose(address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds());
+        vm.expectRevert(err);
+        vm.prank(ACCOUNT);
+        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+    }
+
+    function test_FullCloseBelowDustFloorMatchesRouterCommit() public {
+        // Opens must support the minimum liquidation charge; a valid partial close can leave a smaller remainder.
+        _openNormally(CfdTypes.Side.LONG, 20e6);
+        (uint64 id,) = _commitParity(_order(CfdTypes.Side.LONG, SIZE - 9 * CfdTypes.SIZE_QUANTUM), PRICE, KEEPER);
+        bytes[] memory update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        (uint256 size,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(size, 9 * CfdTypes.SIZE_QUANTUM);
+        vm.prank(address(router));
+        engine.updateMarkPrice(101_000_000, uint64(vm.getBlockTimestamp()));
+        _commitParity(_order(CfdTypes.Side.LONG, size), 101_000_000, KEEPER);
+    }
+
+}
+
 contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
         params = super._riskParams();
         params.baseCarryBps = 500;
+    }
+
+    /// @dev Default-risk real-stack regression: the liquidation reserve prevents underflow, but an unreserved
+    ///      assessment spends the bounty backing on fees. The hardened evaluator's guard is not reached here;
+    ///      this successful-path mispricing is shared with the v1.2.3 evaluator.
+    function test_AdverseFullConsumptionRegression() public {
+        _fundTrader(ACCOUNT, 250_400_000);
+        vm.prank(ACCOUNT);
+        uint64 openId = router.commitOrder(CfdTypes.Side.LONG, SIZE, 250e6, PRICE, false);
+        bytes[] memory openUpdate = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV2Types.ExecutionResult memory opened = router.executeOrder(openId, openUpdate);
+        assertEq(uint8(opened.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 200_000);
+        assertGe(clearinghouse.liquidationReserveUsdc(ACCOUNT), 200_000);
+
+        uint256 adversePrice = 1025e5;
+        CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE);
+        OrderV2Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
+            address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
+        );
+        assertEq(unreserved.actionChargeCollectedUsdc, 200_000);
+        (uint64 closeId, CfdClosePreview.ClosePreview memory p) = _commitParity(o, adversePrice, KEEPER);
+        assertEq(p.assessment.actionChargeCollectedUsdc, 0);
+        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc + 200_000);
+
+        bytes[] memory closeUpdate = _mockPythUpdateData(adversePrice);
+        vm.prank(KEEPER);
+        OrderV2Types.ExecutionResult memory closed = router.executeOrder(closeId, closeUpdate);
+        assertEq(uint8(closed.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(ACCOUNT);
+        assertEq(sizeAfter, p.assessment.postPositionSize);
+        // The oracle fixture advances one second, so carry can accrue after the preview.
+        assertApproxEqAbs(marginAfter, p.assessment.postPositionMarginUsdc, 2000);
+        assertApproxEqAbs(clearinghouse.balanceUsdc(ACCOUNT), p.assessment.postSettlementBalanceUsdc, 2000);
+        assertApproxEqAbs(engine.traderClaimBalanceUsdc(ACCOUNT), p.assessment.postTraderClaimUsdc, 2000);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
     }
 
     function test_CommitCarryIsSeparateAndMatchesLiveCheckpoint() public {

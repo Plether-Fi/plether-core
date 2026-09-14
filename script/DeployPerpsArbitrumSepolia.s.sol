@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "@plether/perps/CfdEngineAccountLens.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
@@ -180,6 +181,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         CfdOrderPolicyEvaluator orderPolicyEvaluator;
+        CfdClosePreview closePreview;
         OrderRouterV2ExecutionSidecar orderExecutionSidecar;
         OrderRouter router;
         OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
@@ -274,6 +276,8 @@ contract DeployPerpsArbitrumSepolia is Script {
             )
         );
         deployed.orderPolicyEvaluator = new CfdOrderPolicyEvaluator();
+        deployed.closePreview = new CfdClosePreview();
+        require(address(deployed.closePreview).code.length > 0, "Close preview has no code");
         deployed.orderExecutionSidecar = new OrderRouterV2ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(deployer);
         address expectedRouter = vm.computeCreateAddress(deployer, uint256(routerDependencyNonce) + 2);
@@ -673,6 +677,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineAccountLens:", address(deployed.accountLens));
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));
+        console.log("CfdClosePreview:", address(deployed.closePreview));
         console.log("OrderRouterV2ExecutionSidecar:", address(deployed.orderExecutionSidecar));
         console.log("OrderRouter:", address(deployed.router));
         console.log("MinimumOpenNotionalUsdc:", deployed.router.minOpenNotionalUsdc());

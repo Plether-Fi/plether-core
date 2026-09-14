@@ -37,6 +37,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         _setAddress("PERPS_ACCOUNT_LENS", address(deployed.accountLens));
         _setAddress("PERPS_ENGINE_LENS", address(deployed.engineLens));
         _setAddress("PERPS_ORDER_POLICY_EVALUATOR", address(deployed.orderPolicyEvaluator));
+        _setAddress("PERPS_CLOSE_PREVIEW", address(deployed.closePreview));
         _setAddress("PERPS_ORDER_EXECUTION_SIDECAR", address(deployed.orderExecutionSidecar));
         _setAddress("PERPS_ORDER_ROUTER", address(deployed.router));
         _setAddress("PERPS_LIQUIDATION_BATCH_SIDECAR", address(deployed.liquidationBatchSidecar));
@@ -52,6 +53,14 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
 
         VerifyPerpsArbitrumSepolia verifier = new VerifyPerpsArbitrumSepolia();
         verifier.run();
+
+        assertGt(address(deployed.closePreview).code.length, 0);
+        assertTrue(deployed.router.policyEvaluator() != address(deployed.closePreview));
+        // Even a code-bearing evaluator must not be accepted as the preview's manifest entry.
+        _setAddress("PERPS_CLOSE_PREVIEW", address(deployed.orderPolicyEvaluator));
+        vm.expectRevert(bytes("Close preview must not be the router evaluator"));
+        verifier.run();
+        _setAddress("PERPS_CLOSE_PREVIEW", address(deployed.closePreview));
 
         _setAddress("SENIOR_SEED_RECEIVER", address(0x5151));
         _setAddress("JUNIOR_SEED_RECEIVER", address(0x7171));

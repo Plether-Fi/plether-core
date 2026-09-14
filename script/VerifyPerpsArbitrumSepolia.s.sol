@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAccountLens} from "@plether/perps/CfdEngineAccountLens.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
@@ -64,6 +65,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         CfdEngineAccountLens accountLens;
         CfdEngineLens engineLens;
         CfdOrderPolicyEvaluator orderPolicyEvaluator;
+        CfdClosePreview closePreview;
         OrderRouterV2ExecutionSidecar orderExecutionSidecar;
         OrderRouter router;
         OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
@@ -115,6 +117,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         deployed.accountLens = CfdEngineAccountLens(vm.envAddress("PERPS_ACCOUNT_LENS"));
         deployed.engineLens = CfdEngineLens(vm.envAddress("PERPS_ENGINE_LENS"));
         deployed.orderPolicyEvaluator = CfdOrderPolicyEvaluator(vm.envAddress("PERPS_ORDER_POLICY_EVALUATOR"));
+        deployed.closePreview = CfdClosePreview(vm.envAddress("PERPS_CLOSE_PREVIEW"));
         deployed.orderExecutionSidecar = OrderRouterV2ExecutionSidecar(vm.envAddress("PERPS_ORDER_EXECUTION_SIDECAR"));
         deployed.router = OrderRouter(vm.envAddress("PERPS_ORDER_ROUTER"));
         deployed.liquidationBatchSidecar =
@@ -148,6 +151,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         _requireCode(address(deployed.accountLens), "Account lens has no code");
         _requireCode(address(deployed.engineLens), "Engine lens has no code");
         _requireCode(address(deployed.orderPolicyEvaluator), "Order policy evaluator has no code");
+        _requireCode(address(deployed.closePreview), "Close preview has no code");
         _requireCode(address(deployed.orderExecutionSidecar), "Order execution sidecar has no code");
         _requireCode(address(deployed.router), "Router has no code");
         _requireCode(address(deployed.liquidationBatchSidecar), "Liquidation sidecar has no code");
@@ -210,6 +214,10 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(address(deployed.accountLens.engineContract()) == address(deployed.engine), "Account lens mismatch");
         require(deployed.engineLens.engine() == address(deployed.engine), "Engine lens mismatch");
         require(address(deployed.router.engine()) == address(deployed.engine), "Router engine mismatch");
+        require(
+            deployed.router.policyEvaluator() != address(deployed.closePreview),
+            "Close preview must not be the router evaluator"
+        );
         require(
             deployed.router.policyEvaluator() == address(deployed.orderPolicyEvaluator),
             "Router policy evaluator mismatch"

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdOrderPolicyEvaluator, ICfdOrderPolicyEngineView} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -8,8 +9,10 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
+import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 
 interface ICfdClosePreviewRouter {
 
@@ -33,7 +36,8 @@ contract CfdClosePreview is CfdOrderPolicyEvaluator {
     /// @notice Projects commitment now and close execution at the supplied price, using canonical pool depth.
     /// @dev Always adds a new reservation, even if other orders already reserve bounties for this account. Assessment
     ///      starts AFTER projected commitment; commitmentCarryUsdc is a separate debit. No future carry, oracle update,
-    ///      router queue admission, deadline or config-hash validation is simulated. Re-preview if state changes.
+    ///      router queue admission, deadline or config-hash validation is simulated. Side and dust checks use the live
+    ///      position; pending opens/closes can change the router's queued projection. Re-preview if state changes.
     function previewClose(
         address engineAddress,
         CfdTypes.Order calldata order,
@@ -50,6 +54,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluator {
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, IHousePool(engine.pool()).totalAssets());
         preview.executionBountyUsdc = ICfdClosePreviewRouter(engine.orderRouter()).closeOrderExecutionBountyUsdc();
+        _validateRouterCommit(snapshot, order);
 
         // Match the engine's commitment path, whose zero-bounty branch skips carry and funding validation.
         if (preview.executionBountyUsdc != 0) {
@@ -80,6 +85,32 @@ contract CfdClosePreview is CfdOrderPolicyEvaluator {
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice, publishTime);
         preview.assessment =
             _evaluateClose(snapshot, delta, bounds, preview.executionBountyUsdc, executor == order.account);
+    }
+
+    /// @dev The router checks side and partial-close dust before reserving even a zero bounty. Its queued-position
+    ///      projection is deliberately not reproduced here; callers must still simulate the actual commitment.
+    function _validateRouterCommit(
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        CfdTypes.Order calldata order
+    ) private pure {
+        if (snapshot.position.size != 0 && order.side != snapshot.position.side) {
+            revert IOrderRouterErrors.OrderRouter__SideMismatch();
+        }
+        if (
+            order.sizeDelta == 0 || order.sizeDelta >= snapshot.position.size
+                || order.sizeDelta % CfdTypes.SIZE_QUANTUM != 0
+        ) {
+            return;
+        }
+        uint256 commitPrice = snapshot.lastMarkPrice == 0 ? 1e8 : snapshot.lastMarkPrice;
+        commitPrice = Math.min(commitPrice, snapshot.capPrice);
+        uint256 minNotionalUsdc =
+            Math.mulDiv(snapshot.riskParams.minBountyUsdc, 10_000, snapshot.riskParams.bountyBps, Math.Rounding.Ceil);
+        uint256 minCloseSizeDelta =
+            Math.mulDiv(minNotionalUsdc, DecimalConstants.USDC_TO_TOKEN_SCALE, commitPrice, Math.Rounding.Ceil);
+        if (order.sizeDelta < minCloseSizeDelta) {
+            revert IOrderRouterErrors.OrderRouter__CommitValidation(11);
+        }
     }
 
     function _validateCommit(
