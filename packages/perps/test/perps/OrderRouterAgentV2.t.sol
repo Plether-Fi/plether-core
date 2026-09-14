@@ -407,6 +407,45 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(_countFinalizedReceipts(logs), 0, "retryable dependency failure must emit no terminal receipt");
     }
 
+    function test_BountyInvariantFailureIsRetryableAndPreservesReservations() public {
+        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("bounty-invariant"));
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+
+        OrderV2Types.PendingIntent memory pendingBefore = book.pendingIntent(orderId);
+        uint256 marginBefore = _remainingCommittedMargin(orderId);
+        uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
+        uint256 keeperBefore = _settlementBalance(KEEPER);
+        vm.mockCallRevert(
+            address(policyEvaluator),
+            abi.encodeWithSelector(policyEvaluator.assessOrder.selector),
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, 200_000
+            )
+        );
+
+        bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
+        vm.recordLogs();
+        vm.prank(KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        vm.clearMockedCalls();
+
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.EngineFailure));
+        assertEq(result.receiptHash, bytes32(0));
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(book.outcome(orderId).receiptHash, bytes32(0));
+        assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), keccak256(abi.encode(pendingBefore)));
+        assertEq(_remainingCommittedMargin(orderId), marginBefore, "item rollback must restore committed margin");
+        assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "item rollback must restore bucket classification");
+        assertEq(_settlementBalance(KEEPER), keeperBefore, "retryable failure must pay no bounty");
+        assertEq(router.pendingOrderCounts(ALICE), 1);
+        assertEq(router.nextExecuteId(), orderId);
+        assertEq(_positionSize(ALICE), 0);
+        assertEq(_countFinalizedReceipts(logs), 0, "retryable dependency failure must emit no terminal receipt");
+    }
+
     function test_MalformedEngineSuccessIsRetryableAndPreservesPendingOrder() public {
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("malformed-engine"));
         vm.prank(ALICE);

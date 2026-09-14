@@ -176,6 +176,15 @@ contract OrderRouterV2ExecutionSidecarTest is Test {
         assertFalse(terminal);
     }
 
+    function testBountyAccountingInvariantRemainsRetryable() public view {
+        (bool terminal,,) = sidecar.classify(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, 200_000
+            )
+        );
+        assertFalse(terminal);
+    }
+
     function testWrappedRetryablePendingReasonClassification() public view {
         bytes memory markFailure = abi.encodeWithSelector(
             OrderRouterV2ExecutionSidecar.OrderRouterV2ExecutionSidecar__RetryableFailure.selector,

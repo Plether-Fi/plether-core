@@ -1,5 +1,13 @@
 # Plether Perps
 
+## Close review before commitment
+
+Use `CfdClosePreview.previewClose` to project commitment carry and reserve the prospective close bounty before
+planning. `CfdOrderPolicyEvaluator.assessOrder` expects execution state with that bounty already reserved. See
+[`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) for the API, accounting baseline, error decoding, and additive deployment path.
+The [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) contains the post-deployment configuration packet,
+implementation file map, accounting display rules, and activation checks.
+
 ## Next release: unused perps API cleanup
 
 The next deployment removes unused privileged clearinghouse entrypoints: `lockCommittedOrderMargin`,

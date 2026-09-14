@@ -482,6 +482,17 @@ library CfdEnginePlanLib {
         return _applyPendingCarryRealizationToSnapshot(snap, pending) == pending;
     }
 
+    /// @notice Projects the carry checkpoint performed by close commitment, preserving any unpaid carry.
+    /// @dev Mutates the snapshot in place. Execution planning starts from this post-commit state so collected carry
+    ///      is not charged twice. The live engine checkpoints its index/timestamp even when no carry is due.
+    function projectCloseCommitCarry(
+        CfdEnginePlanTypes.RawSnapshot memory snap
+    ) internal pure returns (uint256 collectedUsdc) {
+        collectedUsdc = _applyPendingCarryRealizationToSnapshot(snap, _pendingCarryUsdc(snap));
+        snap.positionLastCarryIndex = _selectedSide(snap, snap.position.side).carryIndex;
+        snap.position.lastCarryTimestamp = uint64(snap.currentTimestamp);
+    }
+
     /// @notice Projects margin-first carry collection before trade validation and terminal settlement.
     /// @dev Mutates the existing local snapshot in place, including custody, pledge, side margin, borrow base, and
     ///      pool depth. Uncovered carry remains available for existing terminal recovery/waiver rules.
