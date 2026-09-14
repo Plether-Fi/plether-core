@@ -1,14 +1,14 @@
 # Frontend handoff: reservation-aware close review
 
-Status: ready for frontend implementation; activation requires the completed deployment record below.
+Status: lens deployed and source-verified on Arbitrum Sepolia on 2026-09-14. The deployment packet below is complete; frontend implementation and acceptance checks remain pending.
 
-Deploy `CfdClosePreview` alongside perps v1.2.3, then route prospective close/reduce reviews through its `previewClose` method. It projects commitment carry and reserves the new close bounty before assessing execution. This corrects the current frontend's use of unreserved account state with `CfdOrderPolicyEvaluator.assessOrder`.
+`CfdClosePreview` is deployed alongside perps v1.2.3. Route prospective close/reduce reviews through its `previewClose` method. It projects commitment carry and reserves the new close bounty before assessing execution. This corrects the current frontend's use of unreserved account state with `CfdOrderPolicyEvaluator.assessOrder`.
 
 Protocol source: [PR #99](https://github.com/Plether-Fi/plether-core/pull/99), implementation reviewed at `a3828cd191ed0371056dac8d5daca60b89c8deac`. Frontend file map checked against `plether-app` commit `2967aa5ea348c5314ae6adbce5abf4c5bb49c43a`; reconcile paths if that branch has moved. See [accounting and release notes](CLOSE_PREVIEW.md) and [contract source](src/CfdClosePreview.sol).
 
 ## 1. Deployment packet required before activation
 
-The deployment owner should complete and publish this record with the exact deployed artifact. `TBA` values are deliberately unusable as application configuration.
+The [published deployment packet](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md) contains the supplemental manifest, exact ABI, receipt, build metadata and verification evidence.
 
 | Field | Value |
 | --- | --- |
@@ -16,15 +16,15 @@ The deployment owner should complete and publish this record with the exact depl
 | Existing protocol release | `v1.2.3` |
 | Contract | `packages/perps/src/CfdClosePreview.sol:CfdClosePreview` |
 | Constructor arguments | None |
-| New `cfdClosePreview` address | **TBA after deployment** |
-| Creation transaction / deployment block | **TBA after deployment** |
-| Actual deployed source commit | **TBA; record the deployment build revision** |
-| Compiler / optimizer / build settings | **TBA; attach deployment build metadata** |
-| Runtime code hash | **TBA; `keccak256(eth_getCode(address))`, checked against the deployment artifact** |
-| ABI artifact / SHA-256 of delivered ABI file | **TBA; attach ABI from the deployment build** |
-| Verified explorer source URL | **TBA after verification** |
+| New `cfdClosePreview` address | `0x202A2C5156563Ec4fEF7D3997771bBCa90e98117` |
+| Creation transaction / deployment block | [`0x3b5d4b17e4092d00f97787be4df89d05a0b0500103551d18e71904bd4fa2baae`](https://sepolia.arbiscan.io/tx/0x3b5d4b17e4092d00f97787be4df89d05a0b0500103551d18e71904bd4fa2baae) / `308934556` |
+| Actual deployed source commit | `fe00a5f9be09997db7a93405f798d76392af8c7f` |
+| Compiler / optimizer / build settings | Solidity `0.8.35+commit.47b9dedd`, optimizer 200, via-IR, Prague; [metadata](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/compiler-metadata.json) |
+| Runtime code hash | `0x2f8f5cf607ddcd71f3bafd166e3fa3d20980a4077eaa28b8508b2a0ac1c29b16` (exact deployed runtime match) |
+| ABI artifact / SHA-256 of delivered ABI file | [ABI JSON](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/CfdClosePreview.abi.json), SHA-256 `2964608dd3ba3001f86276260a47f233c54cde17218205153bf0725e17d8274c` |
+| Verified explorer source URL | [Verified CfdClosePreview](https://sepolia.arbiscan.io/address/0x202A2C5156563Ec4fEF7D3997771bBCa90e98117#code) |
 
-The existing release is pinned in [the v1.2.3 manifest](../../deployments/releases/2026-09-10-perps-arbitrum-sepolia-v1.2.3/manifest.json). Its engine is `0xafece93321be41aa73474457e2f47cf7b2fb738f`, router is `0x6215d36fcbd610ca1525252eebcbfd8b223a6072`, and execution evaluator is `0x43c93d3028fcd4c1f578a50639750b8fbfdee799`. These are manifest references, not a fresh onchain verification.
+The existing release is pinned in [the v1.2.3 manifest](../../deployments/releases/2026-09-10-perps-arbitrum-sepolia-v1.2.3/manifest.json). Its engine is `0xafece93321be41aa73474457e2f47cf7b2fb738f`, router is `0x6215d36fcbd610ca1525252eebcbfd8b223a6072`, and execution evaluator is `0x43c93d3028fcd4c1f578a50639750b8fbfdee799`. These addresses, their runtime hashes and the engine/router/evaluator bindings were verified during deployment preflight; the bindings were checked again at the live-preview smoke block `308935132`.
 
 For this additive rollout, deploy only the constructor-free preview. The full protocol deployment script creates an entire new deployment and is not the rollout command for the existing v1.2.3 graph. Publish a supplemental lens deployment record; preserve the historical v1.2.3 artifact and its provenance hash.
 
@@ -151,7 +151,7 @@ The core fixture [test_AdverseFullConsumptionRegression](test/perps/CfdClosePrev
 
 ## 7. Activation and completion record
 
-1. Deployment owner supplies the completed packet and verified ABI.
+1. Complete: deployment packet and verified ABI published above; three live read-only preview samples passed. Actual fork commitment/execution parity remains part of frontend acceptance.
 2. Frontend PR implements the route, decoding and UI changes, with all acceptance checks recorded.
 3. Verify a production frontend build points to the supplemental lens and the original v1.2.3 graph; deploy through the frontend repository's existing workflow.
 4. Smoke-test close/reduce reviews on the target chain and check error diagnostics. Record the frontend commit/build and smoke-test block alongside the deployment packet.

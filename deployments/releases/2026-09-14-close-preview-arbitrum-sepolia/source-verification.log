@@ -1,0 +1,14 @@
+Start verifying contract `0x202A2C5156563Ec4fEF7D3997771bBCa90e98117` deployed on arbitrum-sepolia
+
+Submitting verification for [src/CfdClosePreview.sol:CfdClosePreview] 0x202A2C5156563Ec4fEF7D3997771bBCa90e98117.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `mp4jpt3twm7iwnnvadztvykggwmvres3fpzz5tg5tvliztiphz`
+	URL: https://sepolia.arbiscan.io/address/0x202a2c5156563ec4fef7d3997771bbca90e98117
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified

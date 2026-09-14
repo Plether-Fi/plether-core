@@ -7,6 +7,8 @@ planning. `CfdOrderPolicyEvaluator.assessOrder` expects execution state with tha
 [`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) for the API, accounting baseline, error decoding, and additive deployment path.
 The [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) contains the post-deployment configuration packet,
 implementation file map, accounting display rules, and activation checks.
+The standalone lens is [deployed and verified on Arbitrum Sepolia](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md)
+alongside v1.2.3; frontend cutover remains pending.
 
 ## Next release: unused perps API cleanup
 

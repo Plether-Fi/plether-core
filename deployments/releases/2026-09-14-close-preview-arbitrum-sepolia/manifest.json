@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "kind": "additive-read-only-lens",
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "existingProtocol": {
+    "version": "v1.2.3",
+    "manifest": "../2026-09-10-perps-arbitrum-sepolia-v1.2.3/manifest.json",
+    "engine": "0xafece93321be41aa73474457e2f47cf7b2fb738f",
+    "router": "0x6215d36fcbd610ca1525252eebcbfd8b223a6072",
+    "policyEvaluator": "0x43c93d3028fcd4c1f578a50639750b8fbfdee799"
+  },
+  "release": {
+    "date": "2026-09-14",
+    "sourceRepository": "Plether-Fi/plether-core",
+    "sourceCommit": "fe00a5f9be09997db7a93405f798d76392af8c7f",
+    "deployer": "0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+    "deploymentBlock": 308934556,
+    "deploymentBlockHash": "0x5acbb277590c69cfebdc07ee537185c3a52b5c4387d2b8b866d00ab4443a10b9",
+    "forgeVersion": "1.5.1-stable",
+    "compilerVersion": "0.8.35+commit.47b9dedd",
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "viaIR": true,
+    "evmVersion": "prague",
+    "gasUsed": 4410777,
+    "transactionFeeWei": "1147516565874000"
+  },
+  "contracts": {
+    "cfdClosePreview": {
+      "address": "0x202A2C5156563Ec4fEF7D3997771bBCa90e98117",
+      "runtimeCodeHash": "0x2f8f5cf607ddcd71f3bafd166e3fa3d20980a4077eaa28b8508b2a0ac1c29b16",
+      "runtimeBytes": 20081,
+      "artifact": "packages/perps/src/CfdClosePreview.sol:CfdClosePreview",
+      "creationTransactionHash": "0x3b5d4b17e4092d00f97787be4df89d05a0b0500103551d18e71904bd4fa2baae",
+      "creationCodeHash": "0x463f9017fc75a28d65055b948947253346aaa6e6718ac413929765578e68e2a2",
+      "constructorArguments": "0x",
+      "abi": "CfdClosePreview.abi.json",
+      "abiSha256": "2964608dd3ba3001f86276260a47f233c54cde17218205153bf0725e17d8274c",
+      "explorerSourceVerified": true,
+      "explorerUrl": "https://sepolia.arbiscan.io/address/0x202A2C5156563Ec4fEF7D3997771bBCa90e98117#code"
+    }
+  },
+  "validation": {
+    "creationInputExactMatch": true,
+    "runtimeExactMatch": true,
+    "existingCoreRuntimeHashesVerified": true,
+    "engineRouterAndEvaluatorBindingsVerified": true,
+    "livePreviewBlock": 308935132,
+    "livePreviewSamplesPassed": 3,
+    "productionPreviewTestsPassed": 26,
+    "frontendCutover": "pending",
+    "deployedForkCommitExecutionParity": "pending frontend acceptance"
+  }
+}
