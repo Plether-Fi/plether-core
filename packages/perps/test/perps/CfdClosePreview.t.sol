@@ -401,7 +401,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         previewer.previewClose(address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds());
     }
 
-    function test_RuntimeFitsEip170() public view {
+    function test_Runtime_ClosePreviewFitsEip170() public view {
         assertLe(address(previewer).code.length, 24_576);
     }
 
