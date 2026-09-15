@@ -255,7 +255,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
         _batch(r, 200_000);
     }
 
-    function test_ProductionRuntimeFitsEip170() public view {
+    function testProductionRuntimeFitsEip170() public view {
         assertLe(address(previewer).code.length, 24_576);
     }
 

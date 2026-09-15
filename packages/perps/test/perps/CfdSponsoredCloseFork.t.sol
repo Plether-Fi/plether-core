@@ -7,6 +7,8 @@ import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -89,10 +91,38 @@ contract CfdSponsoredCloseForkTest is Test {
         uint256 free = IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         require(free < 200_000, "Fork fixture no longer needs assistance");
         uint256 amount = 200_000 - free;
+        uint256 price = ENGINE.lastMarkPrice();
+        if (isPartial) {
+            price = r.side == CfdTypes.Side.LONG ? price - price / 10 : price + price / 10;
+        }
+        CfdClosePreview.SponsoredClosePreview memory preview =
+            lens.previewSponsoredClose(address(ENGINE), ACCOUNT, r, address(ROUTER), price, uint64(block.timestamp));
+        assertEq(preview.subsidyUsdc, amount);
         address owner = ISponsoredSimpleAccount(ACCOUNT).owner();
         vm.prank(owner);
         ISponsoredSimpleAccount(ACCOUNT).executeBatch(_calls(r, amount));
         assertGt(ROUTER.lifecycleBook().clientIntent(ACCOUNT, r.clientOrderId).orderId, 0);
+        CfdTypes.Order memory order = CfdTypes.Order(
+            ACCOUNT, r.sizeDelta, 0, r.targetPrice, uint64(block.timestamp), uint64(block.number), 0, r.side, true
+        );
+        OrderV2Types.ExecutionAssessment memory actual = ICfdOrderPolicyEvaluator(
+                address(bytes20(hex"43c93d3028fcd4c1f578a50639750b8fbfdee799"))
+            )
+            .assessOrder(
+                address(ENGINE),
+                order,
+                address(ROUTER),
+                price,
+                IHousePool(ENGINE.pool()).totalAssets(),
+                uint64(block.timestamp),
+                r.bounds,
+                200_000
+            );
+        assertEq(
+            keccak256(abi.encode(actual)),
+            keccak256(abi.encode(preview.assessment)),
+            "funded preview equals deployed commitment assessment"
+        );
         uint256 supply = IERC20(TOKEN).totalSupply();
         vm.expectRevert(
             abi.encodeWithSignature(
