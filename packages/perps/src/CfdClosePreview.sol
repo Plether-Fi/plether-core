@@ -103,19 +103,33 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot;
         (snapshot, result.subsidyUsdc, result.depositCarryUsdc) = _sponsoredSnapshot(engine, planner, account);
-        ClosePreview memory close = _previewSnapshot(
-            engine,
-            planner,
+        ClosePreview memory close = _previewSponsoredExecution(
+            engineAddress,
             snapshot,
             _requestOrder(account, request),
+            request.bounds,
             executor,
             executionPrice,
-            publishTime,
-            request.bounds
+            publishTime
         );
         result.commitmentCarryUsdc = close.commitmentCarryUsdc;
         result.executionBountyUsdc = close.executionBountyUsdc;
         result.assessment = close.assessment;
+    }
+
+    function _previewSponsoredExecution(
+        address engineAddress,
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        CfdTypes.Order memory order,
+        OrderV2Types.ExecutionBounds calldata bounds,
+        address executor,
+        uint256 executionPrice,
+        uint64 publishTime
+    ) private view returns (ClosePreview memory) {
+        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
+        return _previewSnapshot(
+            engine, ICfdEnginePlanner(engine.planner()), snapshot, order, executor, executionPrice, publishTime, bounds
+        );
     }
 
     /// @notice First call of the sponsored smart-account batch; a reused intent must never mint another grant.
