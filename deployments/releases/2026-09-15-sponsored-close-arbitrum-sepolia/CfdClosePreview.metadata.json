@@ -1,0 +1,1158 @@
+{
+  "compiler": {
+    "version": "0.8.35+commit.47b9dedd"
+  },
+  "language": "Solidity",
+  "output": {
+    "abi": [
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdClosePreview__NotCloseOrder"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdClosePreview__SponsoredAccountBusy"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdClosePreview__SponsoredDeploymentMismatch"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdClosePreview__SponsoredIntentInvalid"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "expectedUsdc",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "requiredUsdc",
+            "type": "uint256"
+          }
+        ],
+        "type": "error",
+        "name": "CfdClosePreview__SubsidyMismatch"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "unpaidCarryUsdc",
+            "type": "uint256"
+          }
+        ],
+        "type": "error",
+        "name": "CfdClosePreview__UncoveredCarry"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdEngine__CloseSizeExceedsPosition"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "requiredBountyUsdc",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "availableFreeSettlementUsdc",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "unpaidCarryUsdc",
+            "type": "uint256"
+          }
+        ],
+        "type": "error",
+        "name": "CfdEngine__InsufficientCloseOrderBountyBacking"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdEngine__InvalidCloseSizeQuantum"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdEngine__MarkPriceStale"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdEngine__NoOpenPosition"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdEngine__PartialCloseUnhealthy"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "enum CfdEnginePlanTypes.ExecutionFailurePolicyCategory",
+            "name": "failureCategory",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
+            "name": "failureCode",
+            "type": "uint8"
+          },
+          {
+            "internalType": "bool",
+            "name": "isClose",
+            "type": "bool"
+          }
+        ],
+        "type": "error",
+        "name": "CfdEngine__TypedOrderFailure"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdEngine__ZeroAmount"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdMath__InvalidSizeQuantum"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "enum OrderV2Types.ConstraintKind",
+            "name": "constraint",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint256",
+            "name": "actual",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "limit",
+            "type": "uint256"
+          }
+        ],
+        "type": "error",
+        "name": "CfdOrderPolicyEvaluator__ConstraintViolation"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "enum OrderV2Types.ExecutionMode",
+            "name": "mode",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
+            "name": "allowedExecutionModes",
+            "type": "uint8"
+          }
+        ],
+        "type": "error",
+        "name": "CfdOrderPolicyEvaluator__ExecutionModeDisallowed"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint256",
+            "name": "settlementUsdc",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "bountyUsdc",
+            "type": "uint256"
+          }
+        ],
+        "type": "error",
+        "name": "CfdOrderPolicyEvaluator__InsufficientBountyBacking"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "CfdOrderPolicyEvaluator__InvalidPlannerResult"
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "uint8",
+            "name": "code",
+            "type": "uint8"
+          }
+        ],
+        "type": "error",
+        "name": "OrderRouter__CommitValidation"
+      },
+      {
+        "inputs": [],
+        "type": "error",
+        "name": "OrderRouter__SideMismatch"
+      },
+      {
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function",
+        "name": "MAX_CLOSE_SUBSIDY_USDC",
+        "outputs": [
+          {
+            "internalType": "uint256",
+            "name": "",
+            "type": "uint256"
+          }
+        ]
+      },
+      {
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function",
+        "name": "SPONSORED_ENGINE",
+        "outputs": [
+          {
+            "internalType": "address",
+            "name": "",
+            "type": "address"
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "engineAddress",
+            "type": "address"
+          },
+          {
+            "internalType": "struct CfdTypes.Order",
+            "name": "order",
+            "type": "tuple",
+            "components": [
+              {
+                "internalType": "address",
+                "name": "account",
+                "type": "address"
+              },
+              {
+                "internalType": "uint256",
+                "name": "sizeDelta",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "marginDelta",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "targetPrice",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint64",
+                "name": "commitTime",
+                "type": "uint64"
+              },
+              {
+                "internalType": "uint64",
+                "name": "commitBlock",
+                "type": "uint64"
+              },
+              {
+                "internalType": "uint64",
+                "name": "orderId",
+                "type": "uint64"
+              },
+              {
+                "internalType": "enum CfdTypes.Side",
+                "name": "side",
+                "type": "uint8"
+              },
+              {
+                "internalType": "bool",
+                "name": "isClose",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "internalType": "address",
+            "name": "executor",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "executionPrice",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint64",
+            "name": "publishTime",
+            "type": "uint64"
+          },
+          {
+            "internalType": "struct OrderV2Types.ExecutionBounds",
+            "name": "bounds",
+            "type": "tuple",
+            "components": [
+              {
+                "internalType": "uint64",
+                "name": "validUntil",
+                "type": "uint64"
+              },
+              {
+                "internalType": "uint8",
+                "name": "allowedExecutionModes",
+                "type": "uint8"
+              },
+              {
+                "internalType": "bytes32",
+                "name": "expectedConfigHash",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maxExecutionBountyUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maxExecutionNotionalUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maxGrossAccountDebitUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maxActionChargeUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maxExplicitFeesUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "maxPostPositionSize",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "minPostSettlementBalanceUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "minPostPositionEquityUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint32",
+                "name": "maxPostLeverageBps",
+                "type": "uint32"
+              }
+            ]
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function",
+        "name": "previewClose",
+        "outputs": [
+          {
+            "internalType": "struct CfdClosePreview.ClosePreview",
+            "name": "preview",
+            "type": "tuple",
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "commitmentCarryUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "executionBountyUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "struct OrderV2Types.ExecutionAssessment",
+                "name": "assessment",
+                "type": "tuple",
+                "components": [
+                  {
+                    "internalType": "enum OrderV2Types.ExecutionMode",
+                    "name": "mode",
+                    "type": "uint8"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "executionNotionalUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "grossAccountDebitUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "actionChargeAssessedUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "actionChargeCollectedUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "explicitFeesUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "preSettlementBalanceUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postSettlementBalanceUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "int256",
+                    "name": "realizedPnlUsdc",
+                    "type": "int256"
+                  },
+                  {
+                    "internalType": "int256",
+                    "name": "vpiUsdc",
+                    "type": "int256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "carryUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "executionFeeUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "frozenSpreadUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "preTraderClaimUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postTraderClaimUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postPositionSize",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postPositionMarginUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "int256",
+                    "name": "postPositionEquityUsdc",
+                    "type": "int256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postLeverageBps",
+                    "type": "uint256"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "engineAddress",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "account",
+            "type": "address"
+          },
+          {
+            "internalType": "struct OrderV2Types.OrderRequest",
+            "name": "request",
+            "type": "tuple",
+            "components": [
+              {
+                "internalType": "bytes32",
+                "name": "clientOrderId",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "enum CfdTypes.Side",
+                "name": "side",
+                "type": "uint8"
+              },
+              {
+                "internalType": "uint256",
+                "name": "sizeDelta",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "marginDelta",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "targetPrice",
+                "type": "uint256"
+              },
+              {
+                "internalType": "bool",
+                "name": "isClose",
+                "type": "bool"
+              },
+              {
+                "internalType": "struct OrderV2Types.ExecutionBounds",
+                "name": "bounds",
+                "type": "tuple",
+                "components": [
+                  {
+                    "internalType": "uint64",
+                    "name": "validUntil",
+                    "type": "uint64"
+                  },
+                  {
+                    "internalType": "uint8",
+                    "name": "allowedExecutionModes",
+                    "type": "uint8"
+                  },
+                  {
+                    "internalType": "bytes32",
+                    "name": "expectedConfigHash",
+                    "type": "bytes32"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxExecutionBountyUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxExecutionNotionalUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxGrossAccountDebitUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxActionChargeUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxExplicitFeesUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxPostPositionSize",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "minPostSettlementBalanceUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "minPostPositionEquityUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint32",
+                    "name": "maxPostLeverageBps",
+                    "type": "uint32"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "internalType": "address",
+            "name": "executor",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "executionPrice",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint64",
+            "name": "publishTime",
+            "type": "uint64"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function",
+        "name": "previewSponsoredClose",
+        "outputs": [
+          {
+            "internalType": "struct CfdClosePreview.SponsoredClosePreview",
+            "name": "result",
+            "type": "tuple",
+            "components": [
+              {
+                "internalType": "uint256",
+                "name": "subsidyUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "depositCarryUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "commitmentCarryUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "executionBountyUsdc",
+                "type": "uint256"
+              },
+              {
+                "internalType": "struct OrderV2Types.ExecutionAssessment",
+                "name": "assessment",
+                "type": "tuple",
+                "components": [
+                  {
+                    "internalType": "enum OrderV2Types.ExecutionMode",
+                    "name": "mode",
+                    "type": "uint8"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "executionNotionalUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "grossAccountDebitUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "actionChargeAssessedUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "actionChargeCollectedUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "explicitFeesUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "preSettlementBalanceUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postSettlementBalanceUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "int256",
+                    "name": "realizedPnlUsdc",
+                    "type": "int256"
+                  },
+                  {
+                    "internalType": "int256",
+                    "name": "vpiUsdc",
+                    "type": "int256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "carryUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "executionFeeUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "frozenSpreadUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "preTraderClaimUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postTraderClaimUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postPositionSize",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postPositionMarginUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "int256",
+                    "name": "postPositionEquityUsdc",
+                    "type": "int256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "postLeverageBps",
+                    "type": "uint256"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "engineAddress",
+            "type": "address"
+          },
+          {
+            "internalType": "struct OrderV2Types.OrderRequest",
+            "name": "request",
+            "type": "tuple",
+            "components": [
+              {
+                "internalType": "bytes32",
+                "name": "clientOrderId",
+                "type": "bytes32"
+              },
+              {
+                "internalType": "enum CfdTypes.Side",
+                "name": "side",
+                "type": "uint8"
+              },
+              {
+                "internalType": "uint256",
+                "name": "sizeDelta",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "marginDelta",
+                "type": "uint256"
+              },
+              {
+                "internalType": "uint256",
+                "name": "targetPrice",
+                "type": "uint256"
+              },
+              {
+                "internalType": "bool",
+                "name": "isClose",
+                "type": "bool"
+              },
+              {
+                "internalType": "struct OrderV2Types.ExecutionBounds",
+                "name": "bounds",
+                "type": "tuple",
+                "components": [
+                  {
+                    "internalType": "uint64",
+                    "name": "validUntil",
+                    "type": "uint64"
+                  },
+                  {
+                    "internalType": "uint8",
+                    "name": "allowedExecutionModes",
+                    "type": "uint8"
+                  },
+                  {
+                    "internalType": "bytes32",
+                    "name": "expectedConfigHash",
+                    "type": "bytes32"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxExecutionBountyUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxExecutionNotionalUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxGrossAccountDebitUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxActionChargeUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxExplicitFeesUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "maxPostPositionSize",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "minPostSettlementBalanceUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint256",
+                    "name": "minPostPositionEquityUsdc",
+                    "type": "uint256"
+                  },
+                  {
+                    "internalType": "uint32",
+                    "name": "maxPostLeverageBps",
+                    "type": "uint32"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "internalType": "uint256",
+            "name": "expectedSubsidyUsdc",
+            "type": "uint256"
+          }
+        ],
+        "stateMutability": "view",
+        "type": "function",
+        "name": "validateSponsoredClose"
+      }
+    ],
+    "devdoc": {
+      "kind": "dev",
+      "methods": {
+        "previewClose(address,(address,uint256,uint256,uint256,uint64,uint64,uint64,uint8,bool),address,uint256,uint64,(uint64,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32))": {
+          "details": "Always adds a new reservation, even if other orders already reserve bounties for this account. Assessment      starts AFTER projected commitment; commitmentCarryUsdc is a separate debit. No future carry, oracle update,      router queue admission, deadline or config-hash validation is simulated. Side and dust checks use the live      position; pending opens/closes can change the router's queued projection. Re-preview if state changes."
+        },
+        "previewSponsoredClose(address,address,(bytes32,uint8,uint256,uint256,uint256,bool,(uint64,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32)),address,uint256,uint64)": {
+          "details": "Does not simulate queue admission or future execution. The account must execute the guard immediately      before mint/approve/deposit/commit in a reverting batch. There is deliberately no campaign expiry."
+        }
+      },
+      "version": 1
+    },
+    "userdoc": {
+      "kind": "user",
+      "methods": {
+        "previewClose(address,(address,uint256,uint256,uint256,uint64,uint64,uint64,uint8,bool),address,uint256,uint64,(uint64,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32))": {
+          "notice": "Projects commitment now and close execution at the supplied price, using canonical pool depth."
+        },
+        "previewSponsoredClose(address,address,(bytes32,uint8,uint256,uint256,uint256,bool,(uint64,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32)),address,uint256,uint64)": {
+          "notice": "Reviews an exact testnet bounty grant followed by deposit, commitment and execution."
+        },
+        "validateSponsoredClose(address,(bytes32,uint8,uint256,uint256,uint256,bool,(uint64,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32)),uint256)": {
+          "notice": "First call of the sponsored smart-account batch; a reused intent must never mint another grant."
+        }
+      },
+      "version": 1
+    }
+  },
+  "settings": {
+    "remappings": [
+      "@morpho-blue/=../../lib/morpho-blue/src/",
+      "@openzeppelin/contracts/=../../lib/openzeppelin-contracts/contracts/",
+      "@plether/perps/=src/",
+      "@plether/shared/=../shared/src/",
+      "@plether/test-utils/=../shared/test-support/",
+      "forge-std/=../../lib/forge-std/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/CfdClosePreview.sol": "CfdClosePreview"
+    },
+    "evmVersion": "prague",
+    "libraries": {},
+    "viaIR": true
+  },
+  "sources": {
+    "../../lib/openzeppelin-contracts/contracts/utils/Panic.sol": {
+      "keccak256": "0xf7fe324703a64fc51702311dc51562d5cb1497734f074e4f483bfb6717572d7a",
+      "urls": [
+        "bzz-raw://c6a5ff4f9fd8649b7ee20800b7fa387d3465bd77cf20c2d1068cd5c98e1ed57a",
+        "dweb:/ipfs/QmVSaVJf9FXFhdYEYeCEfjMVHrxDh5qL4CGkxdMWpQCrqG"
+      ],
+      "license": "MIT"
+    },
+    "../../lib/openzeppelin-contracts/contracts/utils/math/Math.sol": {
+      "keccak256": "0x09e3f1c72d4c5cbe8e2644ab7313f8f7177533ae2f4c24cdcbbeaf520a73734c",
+      "urls": [
+        "bzz-raw://93208401215d539fa2d81626b207c1f611def7883d0e447b3b5969ebaa7b3c2c",
+        "dweb:/ipfs/QmXPxDnQPx8LAweX5ZJqEcwkvs59kP4c64VVDG1Jjq1mef"
+      ],
+      "license": "MIT"
+    },
+    "../../lib/openzeppelin-contracts/contracts/utils/math/SafeCast.sol": {
+      "keccak256": "0x195533c86d0ef72bcc06456a4f66a9b941f38eb403739b00f21fd7c1abd1ae54",
+      "urls": [
+        "bzz-raw://b1d578337048cad08c1c03041cca5978eff5428aa130c781b271ad9e5566e1f8",
+        "dweb:/ipfs/QmPFKL2r9CBsMwmUqqdcFPfHZB2qcs9g1HDrPxzWSxomvy"
+      ],
+      "license": "MIT"
+    },
+    "../shared/src/libraries/DecimalConstants.sol": {
+      "keccak256": "0xa0dae0a7583a1616dd6d5cf5f775279a6296882f748911c61268e11e24c301e7",
+      "urls": [
+        "bzz-raw://4ecce730993a57f319c10f461f48ad2b9e3cdf7d4c89a19882d4c769e9ce6dff",
+        "dweb:/ipfs/QmRK4QatMDc7ZKUesTdrYqbzXNpxrZpyLc27VkauBwyb5J"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/CfdClosePreview.sol": {
+      "keccak256": "0xe56a727bd632ef2b16be834315027a9e9c640fb65d4b06eac564c42e851f209d",
+      "urls": [
+        "bzz-raw://b0e8a7f0733988307b30d010714f21f50aa18cecb9662f4ae74f962495c69e64",
+        "dweb:/ipfs/QmWLkgzB6kmgyMiXqyRmBnqBNPhraSeDJfQBRCBrY87tsD"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/CfdEnginePlanTypes.sol": {
+      "keccak256": "0x62f7556c66ed9232a5b8edb02cc8855e34264769812d7049e4d6991a79ec38da",
+      "urls": [
+        "bzz-raw://08f3429a5bca4ad9373f240cb71f291ce5e4eabd1abe9624097462aaa10d19a5",
+        "dweb:/ipfs/QmNRG5HjXMp96z1sS7yfBHCTN8S5AER7VctfQ6undKSrMP"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/CfdMath.sol": {
+      "keccak256": "0xc4dab632703c8e7226c7241b7ba025a9282139a717203f9dc2b100e91457f522",
+      "urls": [
+        "bzz-raw://800f450db7e901b6c11084c85573c4a54e2fdb77f564dbb9276a9eab0b217580",
+        "dweb:/ipfs/QmYPQkhEoDP96sxw1azvvqSmv2vuoVurs6cuFkUGeXbMoC"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/CfdOrderPolicyEvaluatorBase.sol": {
+      "keccak256": "0x549287bd1b46c667b70b092b7f89c750ed3a1620743e14932a1b0ad4c1e97a20",
+      "urls": [
+        "bzz-raw://9bb9d0e44d099956ff4b2074a15c8c318d8a2a6b6774c8119601bc67bd1dd07a",
+        "dweb:/ipfs/QmXkt5Xj5p9QyKntbiAPip74rsysbvQgj34GwKhDbLXvSY"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/CfdTypes.sol": {
+      "keccak256": "0xc73adc8b267dfe623340bacf9eb3141dde38a58539a690f5983eaf1c96533c58",
+      "urls": [
+        "bzz-raw://024309b70520a8dd771cb7844d562258bd8ff7d6e181158a182ec5e9ba0e5e2c",
+        "dweb:/ipfs/QmdTtc3dkKFrvhJjRss9t1Gf8nmpxFNiP5zNaqRN9VscgH"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/OrderV2Types.sol": {
+      "keccak256": "0x1e8ab1a34faf319f6c61cc9b94e5672f82782993efecc8ad309be6cd49590ce1",
+      "urls": [
+        "bzz-raw://f808c16fdfa5ab604dc218c1b0301512cc6c80ae1f0001429c34669c34134557",
+        "dweb:/ipfs/QmYti1KFcvBbMnQiCC144QMgo65zJn3hJBpRVAb1GXq64F"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/ICfdEnginePlanner.sol": {
+      "keccak256": "0x80b3958908f01fc805ec2f4854071637ee2d8a6eb68f2633238f1ae71bd5be3b",
+      "urls": [
+        "bzz-raw://1ac8902ddd07d8bc66a6d56806c0eea0b02b1f8f219c060cfee59419fa75949c",
+        "dweb:/ipfs/QmYoHMrvf9hS53niQopopA77zHdscyrg7SWUCuTgAFBwFv"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/ICfdEngineTypes.sol": {
+      "keccak256": "0x75c19c7b6ed89f87f34ddaa4f4125400d2d51aa2ee1abd0bc2ebb4eba52d20cd",
+      "urls": [
+        "bzz-raw://19fbd35e7f87707997d9790caa3dc05b38943697c216ed9c735491138493d4c9",
+        "dweb:/ipfs/Qma3ZSXXmEH3p7J1A6y8Lazt8HQE6uKjMxJJ7PMjtaXaVJ"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/ICfdOrderPolicyEvaluator.sol": {
+      "keccak256": "0x6f8eae4cf9d0071396a5badfc14cfd46528b5a7cf5a32a8c7e4b64a0a45b5975",
+      "urls": [
+        "bzz-raw://916c0b617df2ae7eaabe0a83e35462e90fb1c8cb6a46c363b030c101708ca71b",
+        "dweb:/ipfs/QmQYRWDsiXAFboPrbGw6k82bAkQMiktgJtMYjPknxApKkX"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/IHousePool.sol": {
+      "keccak256": "0xd260b8dc2601457a8124d4329aa690c56cedb3c19b157a643cda15e493bea992",
+      "urls": [
+        "bzz-raw://26a0954439f1c02522ad853d1a95196c0602dd5cbe1ed4a0e8a7671bfa64f6fa",
+        "dweb:/ipfs/QmTE4vypru1HZK6jQ26gKjzBnp9pUNhDpZ6HLf8uCNZEcV"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/IMarginClearinghouse.sol": {
+      "keccak256": "0x312adad2edff07764deaf04ca03630b5a64df45c63c54a3e3df42dc403f34568",
+      "urls": [
+        "bzz-raw://06108c52df31d211d274d3baf857569326ed520aa528a832d80634f59e1cc13b",
+        "dweb:/ipfs/QmQbpGr2XSzqq1ZVLJT12hWZAeApJrC2hZ3LbHFnyTKubq"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/IOrderLifecycleBook.sol": {
+      "keccak256": "0xd0a6ab56fb032de6e9264acc57a60e06e1ab317e9c647ca9561a4e1bd138ae5a",
+      "urls": [
+        "bzz-raw://b328c7d5f1beb1a4166620daeb97134fcb140d9f00dc20c90d67088cb0fdb29f",
+        "dweb:/ipfs/QmVSwDpvgSbDtWuTSL8szjAygrwjX4bHyrsbb3P3tJqoNA"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/IOrderRouterErrors.sol": {
+      "keccak256": "0x908fcc12dfb75e4e884f088df3f83702ed5da05318c77d9a75ed8a65d5bc7c8e",
+      "urls": [
+        "bzz-raw://6fd4f800e757eaafaa2bfaa04a5997802705da91906d694c92ca9e559cd32364",
+        "dweb:/ipfs/Qma8K2kcua583DwBpnxv9SYFhf74yRpsQ19hhZhhfbBf1M"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/interfaces/PositionProtectionTypes.sol": {
+      "keccak256": "0xe0a4052f6e8e99c8ac3cd0236373668c1dfa779ad3dd6847eebb7d3a8612b9b1",
+      "urls": [
+        "bzz-raw://bf6efc1e12abccfba9dc529f2bcedb39f56f9e0ea954014a08bc27d6c2422df0",
+        "dweb:/ipfs/QmST2wEjzXQ6G6BQ6SHoX7vE1qReQuovSBXxCJgeEpTuQU"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/CashPriorityLib.sol": {
+      "keccak256": "0xa752b1c2f809fa11248a5ce0afd42f6d54908c604d51962adcb0baef7994232d",
+      "urls": [
+        "bzz-raw://88504225b2030d45d8a2af9974d178bde9e6fdf71b83dc3568cea189f225d445",
+        "dweb:/ipfs/QmUELCtFncYNFv9y9APQZXz9dTJv89jVzv2RJrTEPKDdMa"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/CfdEnginePlanLib.sol": {
+      "keccak256": "0x7c878a96ff896aa92f0ad5dd42ea57f7484767775a72051d9f35d275fc2b25b4",
+      "urls": [
+        "bzz-raw://4e2c1a28043f0e400818b8b686e2778353fee08229077c63b14e824ea5768efd",
+        "dweb:/ipfs/QmUq96aNLPnjk3jYNLEtqPiEFo5K6zY7Q6evYdyP52JhWM"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/CfdEngineSettlementLib.sol": {
+      "keccak256": "0xd1cd12ea52c6e8e6b203d60052883705207d532ceba0d29e1963a3a21b7d9fcb",
+      "urls": [
+        "bzz-raw://f0ea5f7a0a5091f15c85adad3072d610492e98c2664e8a8ec8608e5452941b07",
+        "dweb:/ipfs/QmSVvxqHUYfzdutMk4cPxWFkGsYbLcc4yLBjhMWa7QVx1B"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/CloseAccountingLib.sol": {
+      "keccak256": "0x5b5124bc4dc76b16557b4a9d5c587f8a3e7b71d47f9b8aacd678e333b78e428b",
+      "urls": [
+        "bzz-raw://26f299f04fb7b019d8a5ffd3360eedbd4b4303ca16978a92b84e0e5323a399d8",
+        "dweb:/ipfs/Qmdqni7zSut8Ty84SfydLcrgoK2VV1AmeivQ2yJeBUVgAr"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/LiquidationAccountingLib.sol": {
+      "keccak256": "0x8e5d778d141b478ac3ef767e989148ab6769dde7678900229d7b994ae64643c7",
+      "urls": [
+        "bzz-raw://728787368af84b6dac315bbd7108405c7a697c5865e529ed8265188a21e1fa74",
+        "dweb:/ipfs/QmQF4PMaKENbhh6dzuK5WddbNgLKqwhKJBYW2bVWb4Sn4m"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/MarginClearinghouseAccountingLib.sol": {
+      "keccak256": "0xd4e893afca9b5cb0fa6742ca0c0242c4ea150187c6abccd1c1f263b74e6d416b",
+      "urls": [
+        "bzz-raw://32cc80d418d6e59814f1aa537eeabbfd7f56e772bb2f59abb5b8cafc8387aee1",
+        "dweb:/ipfs/QmRszZBn9AvQiZnDPMBVKS7NqYU1Vf5fc3P7xMEFNa5Tvr"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/OpenAccountingLib.sol": {
+      "keccak256": "0x76b303a1f26ca5345a1991e02fce33e1c82067f6cc530d1b66508d484626a514",
+      "urls": [
+        "bzz-raw://c03c8e9036ff6c84bd1e28ffc39f8d7bed2b67343c1369535089739ae0e3e2bf",
+        "dweb:/ipfs/QmSfBkHUcy2yugkKd2FgRkrTu37YsfhdzBMr4VVc7P2LEy"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/PositionRiskAccountingLib.sol": {
+      "keccak256": "0xf92d0a1af9b9fc624a9596218a8d7d42aac0a7b0e65c6d1521c7c20fe19e35da",
+      "urls": [
+        "bzz-raw://58217fdd9c66a1859e9dcfa20d1abde25d39faff58745cf83d150a83d3db0d50",
+        "dweb:/ipfs/QmWiFCQwbxi82xmiFCV2V6QKgRaSfoa6WPvN3M9p4F4yTF"
+      ],
+      "license": "AGPL-3.0"
+    },
+    "src/libraries/SolvencyAccountingLib.sol": {
+      "keccak256": "0xabe1653ae68e86cd734059bc8fa74cd71b756417394cd432ca70f8c96be72c31",
+      "urls": [
+        "bzz-raw://05004dae080340ddf3d4e55279c23bf01ce144ffa24b236a13752ad087834772",
+        "dweb:/ipfs/QmW1VSs73hFebmVoMNQdpJ9mkzhwYnP8CHE54nZ9SXpjxH"
+      ],
+      "license": "AGPL-3.0"
+    }
+  },
+  "version": 1
+}
