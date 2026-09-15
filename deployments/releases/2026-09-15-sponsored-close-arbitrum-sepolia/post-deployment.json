@@ -1,0 +1,11 @@
+{
+  "address": "0xC8Ad43019D371DEe7784C06dFa1A2F1538E0D7cf",
+  "transactionHash": "0xe4d1b6fc5ca0ef5a6cf746140f5195ed63be0c16ca10aafd1fa730fb04e58aa3",
+  "blockNumber": 309097440,
+  "blockHash": "0xd0ea7bc1a852e14aaf4f46a7328f3c2dbcce6e812423e2b7fb8df97af5d10883",
+  "runtimeCodeHash": "0x7cb66d1cb8f7c6748bd34150207ad1b8ead01ce8e77002dde384160ba3a1333e",
+  "creationInputMatches": true,
+  "runtimeMatches": true,
+  "gasUsed": 4560783,
+  "effectiveGasPriceWei": "251520000"
+}

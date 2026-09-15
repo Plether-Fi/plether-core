@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "chainId": 421614,
+  "sourceCommit": "fc7d89abdedc7fb42b88467bc5ab9775cc57d98e",
+  "lens": "0xC8Ad43019D371DEe7784C06dFa1A2F1538E0D7cf",
+  "lensCodeHash": "0x7cb66d1cb8f7c6748bd34150207ad1b8ead01ce8e77002dde384160ba3a1333e",
+  "runtimeBytes": 20765,
+  "maximumSubsidyUsdc": "200000",
+  "engine": "0xafece93321be41aa73474457e2f47cf7b2fb738f",
+  "router": "0x6215d36fcbd610ca1525252eebcbfd8b223a6072",
+  "deploymentTransactionHash": "0xe4d1b6fc5ca0ef5a6cf746140f5195ed63be0c16ca10aafd1fa730fb04e58aa3",
+  "deploymentBlock": 309097440,
+  "issuanceDefault": "disabled",
+  "abiSha256": "1ab8aee5e20d98344706f18043473ddbc6846d967ab8123e638861e2c954e440",
+  "protocolVersion": "1.2.3"
+}

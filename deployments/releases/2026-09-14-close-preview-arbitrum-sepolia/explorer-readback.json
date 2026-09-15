@@ -1,0 +1,17 @@
+{
+  "ContractName": "CfdClosePreview",
+  "CompilerVersion": "v0.8.35+commit.47b9dedd",
+  "CompilerType": "solc-j",
+  "OptimizationUsed": "1",
+  "Runs": "200",
+  "ConstructorArguments": "",
+  "EVMVersion": "prague",
+  "Library": "",
+  "ContractFileName": "src/CfdClosePreview.sol",
+  "LicenseType": "",
+  "Proxy": "0",
+  "Implementation": "",
+  "SwarmSource": "",
+  "SimilarMatch": "",
+  "sourceCodeSha256": "eb6bc8bfc62fbcbac1457a400f56b61be666c01546a6cbaf2b1d886107dbda3e"
+}

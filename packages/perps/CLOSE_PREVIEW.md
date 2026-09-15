@@ -37,7 +37,7 @@ Side and partial-close dust validation use the live position. The router instead
 
 ## Release boundaries
 
-The new preview can be deployed alongside the existing v1.2.3 engine. Updating frontend close-review calls to its verified address is required to change the deployed UI's behavior. This source patch does not deploy the contract or update another repository's frontend manifest.
+The new preview was deployed and source-verified alongside the existing v1.2.3 engine on Arbitrum Sepolia on 2026-09-14 at `0x202A2C5156563Ec4fEF7D3997771bBCa90e98117`. See the [deployment packet](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md) for the exact ABI, runtime hash and validation evidence. Updating frontend close-review calls to this verified address is still required to change the deployed UI's behavior.
 
 For a new full protocol deployment, `DeployPerpsArbitrumSepolia` deploys and logs `CfdClosePreview` before the router CREATE-address nonce snapshot. The deployment template records it as `cfdClosePreview`; supply its address as `PERPS_CLOSE_PREVIEW` to the release verifier. For an existing v1.2.3 deployment, deploy only the constructor-free preview contract, record its verified address/runtime hash separately, and update frontend close-review calls; do not run the full protocol deployment script for this additive rollout.
 

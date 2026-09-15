@@ -1,0 +1,24 @@
+{
+  "chainId": 421614,
+  "sourceCommit": "fe00a5f9be09997db7a93405f798d76392af8c7f",
+  "deployer": "0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+  "nonce": 114437,
+  "blockNumber": 308934480,
+  "blockHash": "0x0e1b1495def681e6fd535b2b06fc841bdc179a18d359ac7665f5c3e3fead56a1",
+  "balanceWei": "2825790892728904335",
+  "estimatedGas": 4451309,
+  "gasPriceWei": "259608000",
+  "estimatedFeeWei": "1155595426872000",
+  "creationCodeHash": "0x463f9017fc75a28d65055b948947253346aaa6e6718ac413929765578e68e2a2",
+  "runtimeCodeHash": "0x2f8f5cf607ddcd71f3bafd166e3fa3d20980a4077eaa28b8508b2a0ac1c29b16",
+  "runtimeBytes": 20081,
+  "coreRuntimeHashes": {
+    "cfdEngine": "0xa4ef32f28b3910d745635f4d505e598f800ce88458b5cf782a71fb2d1e196531",
+    "orderRouter": "0x83d90e23e637a5b8bde65cecbec864b66ea2dbfaa685917bbd4bcd8c1b292fcc",
+    "cfdOrderPolicyEvaluator": "0x8f0cd90c7acfb6260356e2540caf39222699ecc993177b9598fe84212d17d0ef",
+    "cfdEnginePlanner": "0xb8e4c5bc9333062b739c958b993fadfee3f4fc7e455e6f10d8a65b44a646fa09",
+    "marginClearinghouse": "0xa1f76d1de6089acb98609339e71c6377df4b43c66b6a04dcc17e0b3aa2070fa0",
+    "housePool": "0x08fc530324fa888adcff39e7f406338abfdc018daad71de67474fc8347337c68"
+  },
+  "bindingsVerified": true
+}
