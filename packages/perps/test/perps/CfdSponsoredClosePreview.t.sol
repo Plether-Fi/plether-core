@@ -6,6 +6,7 @@ import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 
 contract SponsoredPreviewHarness is CfdClosePreview {
 
@@ -128,6 +129,46 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
         router.executeOrder(id, update);
         (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
         assertEq(remaining, SIZE - size);
+    }
+
+    function _maxOpenThenClose(
+        bool isPartial
+    ) internal {
+        _fundTrader(ACCOUNT, 1000e6);
+        // The old Max flow commits all spendable collateral after the opening bounty.
+        uint256 margin = 1000e6 - router.maxOpenOrderExecutionBountyUsdc();
+        ICfdEngineLens.MaxOpenQuote memory quote =
+            engineLens.quoteMaxOpen(ACCOUNT, CfdTypes.Side.LONG, margin, PRICE, uint64(vm.getBlockTimestamp()));
+        assertGt(quote.maxSizeDelta, 0);
+        vm.prank(ACCOUNT);
+        uint64 openId = router.commitOrder(CfdTypes.Side.LONG, quote.maxSizeDelta, margin, PRICE, false);
+        bytes[] memory update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        router.executeOrder(openId, update);
+        (uint256 opened,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(opened, quote.maxSizeDelta, "maximum position actually opened");
+        assertLt(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 200_000);
+        uint256 closeSize = isPartial ? (opened / 2 / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM : opened;
+        OrderV2Types.OrderRequest memory r = _request(closeSize);
+        uint256 closePrice = isPartial ? PRICE - 1_000_000 : PRICE;
+        CfdClosePreview.SponsoredClosePreview memory p = sponsored.previewSponsoredClose(
+            address(engine), ACCOUNT, r, KEEPER, closePrice, uint64(vm.getBlockTimestamp())
+        );
+        _batch(r, p.subsidyUsdc);
+        uint64 closeId = router.lifecycleBook().clientIntent(ACCOUNT, r.clientOrderId).orderId;
+        update = _mockPythUpdateData(closePrice);
+        vm.prank(KEEPER);
+        router.executeOrder(closeId, update);
+        (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(remaining, opened - closeSize);
+    }
+
+    function test_MaxOpenThenSponsoredFullClose() public {
+        _maxOpenThenClose(false);
+    }
+
+    function test_MaxOpenThenSponsoredPartialClose() public {
+        _maxOpenThenClose(true);
     }
 
     function test_FullCloseFromZero() public {
