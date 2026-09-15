@@ -20,7 +20,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
     uint256 internal constant PRICE = 1e8;
     CfdClosePreview internal previewer;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         previewer = new CfdClosePreview();
     }
