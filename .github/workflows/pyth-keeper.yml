@@ -20,6 +20,7 @@ jobs:
 
       - name: Fetch Pyth prices and broadcast
         env:
+          PYTH_API_KEY: ${{ secrets.PYTH_API_KEY }}
           KEEPER_PRIVATE_KEY: ${{ secrets.TEST_PRIVATE_KEY }}
           SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
         run: NETWORK=sepolia ./scripts/pyth-keeper.sh
@@ -38,6 +39,7 @@ jobs:
 
       - name: Fetch Pyth prices and broadcast
         env:
+          PYTH_API_KEY: ${{ secrets.PYTH_API_KEY }}
           KEEPER_PRIVATE_KEY: ${{ secrets.MAINNET_KEEPER_PRIVATE_KEY }}
           MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
         run: NETWORK=mainnet ./scripts/pyth-keeper.sh

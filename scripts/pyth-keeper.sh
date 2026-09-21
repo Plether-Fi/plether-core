@@ -97,7 +97,12 @@ case "$NETWORK" in
     ;;
 esac
 
-HERMES_URL="https://hermes.pyth.network/v2/updates/price/latest"
+HERMES_URL="${HERMES_URL:-https://hermes.pyth.network/v2/updates/price/latest}"
+
+if [ -z "${PYTH_API_KEY:-}" ]; then
+  echo "Missing env var: PYTH_API_KEY. Configure it locally or as a GitHub Actions repository secret." >&2
+  exit 1
+fi
 
 QUERY=""
 for id in "${FEED_IDS[@]}"; do
@@ -106,7 +111,25 @@ done
 QUERY="${QUERY:1}" # strip leading &
 
 echo "[$NETWORK] Fetching Pyth price updates from Hermes (${#FEED_IDS[@]} feeds)..."
-RESPONSE=$(curl -s "${HERMES_URL}?${QUERY}&encoding=hex")
+if ! RESPONSE=$(curl --fail --silent --show-error --globoff \
+  --connect-timeout 10 --max-time 30 --retry 3 --retry-max-time 90 \
+  -H "Authorization: Bearer ${PYTH_API_KEY}" \
+  "${HERMES_URL}?${QUERY}&encoding=hex"); then
+  echo "[$NETWORK] Hermes request failed; check the HTTP error above and PYTH_API_KEY access." >&2
+  exit 1
+fi
+
+# Reject HTTP-success error pages and incomplete payloads before logging prices or preparing a transaction.
+if ! jq -e '
+  type == "object" and
+  .binary.encoding == "hex" and
+  (.binary.data | type == "array" and length > 0 and
+    all(.[]; type == "string" and test("^([0-9a-fA-F]{2})+$"))) and
+  (.parsed | type == "array" and length > 0)
+' >/dev/null 2>&1 <<< "$RESPONSE"; then
+  echo "[$NETWORK] Hermes returned an invalid price-update response; expected JSON with parsed prices and nonempty hex update data." >&2
+  exit 1
+fi
 log_hermes_prices
 
 VAU_DATA=$(echo "$RESPONSE" | jq -r '.binary.data[]')

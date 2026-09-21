@@ -127,6 +127,24 @@ CI keeps package failures isolated:
 
 The workflow is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
+### Pyth keeper authentication
+
+The scheduled [Pyth Keeper workflow](.github/workflows/pyth-keeper.yml) requires a repository Actions secret named
+`PYTH_API_KEY`, in addition to its existing RPC and signer secrets. Both Ethereum mainnet and Sepolia jobs pass this
+key to Hermes as a bearer token. Hermes has required authentication since the
+[August 26, 2026 Pyth Core upgrade](https://docs.pyth.network/price-feeds/core/upgrade/preparing).
+
+For local use, set `PYTH_API_KEY` in the environment or `.env`. Validate fetching and encoding without broadcasting:
+
+```bash
+NETWORK=sepolia DRY_RUN=true bash scripts/pyth-keeper.sh
+```
+
+`HERMES_URL` optionally overrides the full latest-price endpoint. Missing keys, failed HTTP requests, and invalid
+update responses stop before transaction preparation or broadcast. HTTP authentication errors such as 401 identify
+an absent or rejected credential; they should not be treated as JSON parsing or contract deployment failures.
+Run `python3 scripts/test-pyth-keeper.py` for local HTTP regression tests; these use dummy credentials and never broadcast.
+
 ## Documentation
 
 Start with the package that owns the product:
