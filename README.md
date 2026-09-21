@@ -127,23 +127,16 @@ CI keeps package failures isolated:
 
 The workflow is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-### Pyth keeper authentication
+### Oracle maintenance
 
-The scheduled [Pyth Keeper workflow](.github/workflows/pyth-keeper.yml) requires a repository Actions secret named
-`PYTH_API_KEY`, in addition to its existing RPC and signer secrets. Both Ethereum mainnet and Sepolia jobs pass this
-key to Hermes as a bearer token. Hermes has required authentication since the
-[August 26, 2026 Pyth Core upgrade](https://docs.pyth.network/price-feeds/core/upgrade/preparing).
+The Ethereum mainnet and Ethereum Sepolia spot deployments are retired. Their six-hour Pyth keeper workflow and
+standalone update scripts have been removed. See the [spot package guide](packages/spot/README.md) for deployment status.
 
-For local use, set `PYTH_API_KEY` in the environment or `.env`. Validate fetching and encoding without broadcasting:
-
-```bash
-NETWORK=sepolia DRY_RUN=true bash scripts/pyth-keeper.sh
-```
-
-`HERMES_URL` optionally overrides the full latest-price endpoint. Missing keys, failed HTTP requests, and invalid
-update responses stop before transaction preparation or broadcast. HTTP authentication errors such as 401 identify
-an absent or rejected credential; they should not be treated as JSON parsing or contract deployment failures.
-Run `python3 scripts/test-pyth-keeper.py` for local HTTP regression tests; these use dummy credentials and never broadcast.
+Active Arbitrum Sepolia perps oracle maintenance runs through the
+[`plether-app` oracle worker](https://github.com/Plether-Fi/plether-app/blob/master/apps/frontend/scripts/perps-oracle-worker.mjs).
+It reads cached six-feed Pyth payloads and submits `updateMarkPrice` on a configurable 30-second cadence. Its
+[operator setup](https://github.com/Plether-Fi/plether-app/tree/master/apps/backend#7-optional-start-the-on-chain-oracle-updater)
+is maintained in that repository. `PYTH_API_KEY` remains required by the perps release-preparation script.
 
 ## Documentation
 
