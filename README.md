@@ -127,6 +127,17 @@ CI keeps package failures isolated:
 
 The workflow is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
+### Oracle maintenance
+
+The Ethereum mainnet and Ethereum Sepolia spot deployments are retired. Their six-hour Pyth keeper workflow and
+standalone update scripts have been removed. See the [spot package guide](packages/spot/README.md) for deployment status.
+
+Active Arbitrum Sepolia perps oracle maintenance runs through the
+[`plether-app` oracle worker](https://github.com/Plether-Fi/plether-app/blob/master/apps/frontend/scripts/perps-oracle-worker.mjs).
+It reads cached six-feed Pyth payloads and submits `updateMarkPrice` on a configurable 30-second cadence. Its
+[operator setup](https://github.com/Plether-Fi/plether-app/tree/master/apps/backend#7-optional-start-the-on-chain-oracle-updater)
+is maintained in that repository. `PYTH_API_KEY` remains required by the perps release-preparation script.
+
 ## Documentation
 
 Start with the package that owns the product:

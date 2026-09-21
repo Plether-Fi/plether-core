@@ -3,6 +3,11 @@
 The Spot package contains Plether's collateralized synthetic-token protocol and its supporting staking, routing, oracle,
 yield, and savings-vault contracts.
 
+The Ethereum mainnet and Ethereum Sepolia spot deployments are retired. Automated Pyth price maintenance for those
+deployments has been disabled, and the old six-hour keeper workflow and standalone update scripts have been removed.
+Contract source, tests, and deployment artifacts remain available as historical reference. This operational retirement
+does not itself pause or settle deployed contracts.
+
 Spot depends only on the [`shared`](../shared/README.md) workspace package and third-party libraries. Its production code
 and package-owned tests can be built and run without compiling options, perps, or the root integration workspace.
 
