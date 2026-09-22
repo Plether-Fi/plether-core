@@ -6,7 +6,7 @@
   },
   "release": {
     "date": null,
-    "sourceCommit": null,
+    "sourceCommit": "eea28a5c35b043f1d1ae91372bd384e84cb1c745",
     "forgeVersion": "1.5.1-stable",
     "phase": "prepared",
     "deploymentBlock": null,
@@ -16,7 +16,7 @@
     "deploymentTimeProtocolTreasury": null,
     "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B",
     "baselineSourceCommit": "71ba5cdcc3c1842ebe2669e8f7ddd9a31c0dcde8",
-    "note": "Unqualified candidate. No deployment, bootstrap, activation or consumer cutover has occurred."
+    "note": "Unqualified candidate built from the recorded source commit. No deployment, bootstrap, activation or consumer cutover has occurred."
   },
   "contracts": {
     "mockUsdc": {
@@ -210,6 +210,15 @@
       "keeperGasOutcomes",
       "fullCreationInputs",
       "inactiveDeploymentReadback"
-    ]
+    ],
+    "predeploymentEvidence": {
+      "realPythBaselineAndCandidate": true,
+      "deepPerpsShards": true,
+      "coverage": true,
+      "gasOutcomes": true,
+      "productionBuild": true,
+      "fullCreationInputs": true,
+      "ciPackageSmokePending": true
+    }
   }
 }

@@ -1,6 +1,6 @@
 # Atomic oracle synchronization — unqualified candidate
 
-This directory reserves a **separate, inactive** complete-stack release. It does not replace the active deployment manifest. `manifest.json` intentionally has no candidate source SHA, addresses or deployment receipts until an immutable build passes all qualification gates.
+This directory reserves a **separate, inactive** complete-stack release. It does not replace the active deployment manifest. `manifest.json` pins source commit `eea28a5c35b043f1d1ae91372bd384e84cb1c745`. It intentionally has no addresses or deployment receipts until all predeployment qualification gates pass. The local exported bundle contains 82 ABIs plus compiler and size evidence; The signed real-Pyth baseline/candidate regression and full deployment simulation passed; see VALIDATION.md for the remaining phase.
 
 The baseline core commit is `71ba5cdcc3c1842ebe2669e8f7ddd9a31c0dcde8`. Keeper source evidence is pinned in `keeper-evidence.json`; its 30,000,000 cap is source-supported, not a claim about live ECS configuration.
 
