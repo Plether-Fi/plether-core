@@ -505,9 +505,9 @@ contract TimelockPauseTest is BasePerpTest {
     // OrderRouter TIMELOCK TESTS
     // ==========================================
 
-    function test_ProposeMaxOrderAge_TimelockFlow() public {
+    function test_ProposeMaxExecutionWindowSeconds_TimelockFlow() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 600;
+        config.maxExecutionWindowSeconds = 600;
         config.minOpenNotionalUsdc = 150e6;
         config.openOrderExecutionBountyBps = 2;
         config.minOpenOrderExecutionBountyUsdc = 200_000;
@@ -525,7 +525,7 @@ contract TimelockPauseTest is BasePerpTest {
         _warpForward(48 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
-        assertEq(router.maxOrderAge(), 600);
+        assertEq(router.maxExecutionWindowSeconds(), 600);
         assertEq(router.minOpenNotionalUsdc(), 150e6);
         assertEq(router.openOrderExecutionBountyBps(), 2);
         assertEq(router.minOpenOrderExecutionBountyUsdc(), 200_000);
@@ -538,7 +538,7 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(routerAdmin.routerConfigActivationTime(), 0);
     }
 
-    function test_FinalizeMaxOrderAge_NoProposal_Reverts() public {
+    function test_FinalizeMaxExecutionWindowSeconds_NoProposal_Reverts() public {
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__NoProposal.selector);
         routerAdmin.finalizeRouterConfig();
     }
@@ -596,17 +596,17 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
     }
 
-    function test_OrderRouter_InvalidMaxOrderAge_Reverts() public {
+    function test_OrderRouter_InvalidMaxExecutionWindowSeconds_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 0;
+        config.maxExecutionWindowSeconds = 0;
 
-        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidMaxOrderAge.selector);
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidMaxExecutionWindowSeconds.selector);
         routerAdmin.proposeRouterConfig(config);
 
         config = _routerConfig();
-        config.maxOrderAge = 1 hours + 1;
+        config.maxExecutionWindowSeconds = 1 hours + 1;
 
-        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidMaxOrderAge.selector);
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidMaxExecutionWindowSeconds.selector);
         routerAdmin.proposeRouterConfig(config);
     }
 

@@ -22,8 +22,8 @@ import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -258,11 +258,11 @@ contract OrderRouterTest is BasePerpTest {
             uint256(IOrderRouterAccounting.OrderStatus.None),
             "terminal order should be deleted from Router storage"
         );
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
+        OrderV3Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(
             uint8(outcome.reason),
-            uint8(OrderV2Types.TerminalReason.PlannerRejected),
+            uint8(OrderV3Types.TerminalReason.PlannerRejected),
             "increase without action-cost backing should finalize as a typed planner rejection"
         );
     }
@@ -323,7 +323,7 @@ contract OrderRouterTest is BasePerpTest {
 
     function test_ExecuteOrder_SkipsFailedHeadBeforeExpiration() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
@@ -497,9 +497,9 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouterDebugLens.OrderRecord memory record = OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1);
         assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.None));
         assertEq(record.core.orderId, 0, "Terminal Router record should be fully deleted");
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Executed));
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Executed));
+        OrderV3Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Executed));
         assertEq(_remainingCommittedMargin(1), 0, "Executed order should clear committed margin reservation");
         assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty reservation");
         assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
@@ -1299,8 +1299,8 @@ contract OrderRouterTest is BasePerpTest {
             vm.prank(alice);
             router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
-            vm.warp(block.timestamp + router.maxOrderAge() + 1);
-            uint256 historicalPublishTime = block.timestamp - router.maxOrderAge();
+            vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
+            uint256 historicalPublishTime = block.timestamp - router.maxExecutionWindowSeconds();
             baseMockPyth.setAllUniquePrices(
                 _basePythFeedIds(), int64(100_000_000), 0, int32(-8), historicalPublishTime, historicalPublishTime - 1
             );
@@ -1610,10 +1610,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1050);
 
         bytes[] memory empty = _pythUpdateData();
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(1, empty);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, empty);
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
-        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.SameBlock));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.SameBlock));
         assertEq(router.nextExecuteId(), 1, "Order stays in queue when executed in same block");
     }
 
@@ -2094,7 +2094,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_StaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(SETUP_TIMESTAMP);
         routerAdmin.finalizeRouterConfig();
@@ -2159,7 +2159,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_BatchStaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(SETUP_TIMESTAMP);
         routerAdmin.finalizeRouterConfig();
@@ -3082,10 +3082,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        OrderV2Types.BatchResult memory result = router.executeOrderBatch(1, empty);
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch(1, empty);
 
         assertEq(result.nextOrderId, 1);
-        assertEq(uint8(result.stopReason), uint8(OrderV2Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(uint8(result.stopReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
         assertEq(router.nextExecuteId(), 1, "Stale batch price must leave the FIFO head pending");
     }
 
@@ -3162,10 +3162,10 @@ contract OrderRouterPythTest is BasePerpTest {
         vm.warp(1001);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        OrderV2Types.BatchResult memory result = router.executeOrderBatch(1, empty);
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch(1, empty);
 
         assertEq(result.nextOrderId, 1);
-        assertEq(uint8(result.stopReason), uint8(OrderV2Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(uint8(result.stopReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
         assertEq(router.nextExecuteId(), 1, "Weakest-link staleness must leave the FIFO head pending");
     }
 
@@ -3324,7 +3324,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
 
     function obsolete_test_FadWindow_OpenOrderStaysPendingAtExecution() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 7 days;
+        config.maxExecutionWindowSeconds = 7 days;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
@@ -3382,7 +3382,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
 
     function obsolete_test_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 7 days;
+        config.maxExecutionWindowSeconds = 7 days;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
@@ -4108,7 +4108,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function helper_FadWindow_OpenOrderStaysPendingAtExecution() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 7 days;
+        config.maxExecutionWindowSeconds = 7 days;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
@@ -4165,7 +4165,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function helper_FadWindow_BatchOpenOrderStaysPendingAtBlockedHead() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 7 days;
+        config.maxExecutionWindowSeconds = 7 days;
         routerAdmin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours);
         routerAdmin.finalizeRouterConfig();
@@ -4324,7 +4324,7 @@ contract FadStalenessTest is BasePerpTest {
         router.executeOrderBatch(2, empty);
     }
 
-    function test_Weekday_CloseExpiresAfterDefaultMaxOrderAge() public {
+    function test_Weekday_CloseExpiresAfterDefaultMaxExecutionWindowSeconds() public {
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 6);
 
         vm.warp(WEDNESDAY_NOON);
@@ -4343,9 +4343,9 @@ contract FadStalenessTest is BasePerpTest {
             uint256(OrderRouterDebugLens.loadRawOrderRecord(vm, router, 2).status),
             uint256(IOrderRouterAccounting.OrderStatus.None)
         );
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(2);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired));
+        OrderV3Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(2);
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired));
     }
 
     function test_Weekday_OpenOrder_Allowed() public {
@@ -4490,7 +4490,7 @@ contract FadStalenessTest is BasePerpTest {
         uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         vm.warp(fridayFadStart - 48 hours - 1);
         routerAdmin.proposeRouterConfig(config);
         vm.warp(fridayFadStart);
@@ -4775,7 +4775,7 @@ contract OrderRouterAuditTest is BasePerpTest {
         LifecycleBookFault fault
     ) internal {
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
 
         address boundRouter = fault == LifecycleBookFault.Router ? address(0xBAD1) : predictedRouter;
@@ -4846,7 +4846,7 @@ contract OrderRouterAuditTest is BasePerpTest {
 
     function test_Constructor_ZeroPletherOracleReverts() public {
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
@@ -4887,7 +4887,7 @@ contract OrderRouterAuditTest is BasePerpTest {
     // Regression: H-02 — stale order executes via executeOrder
     function test_StaleOrderExecutesViaExecuteOrder() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
         _warpForward(48 hours + 1);
         routerAdmin.finalizeRouterConfig();
@@ -4984,7 +4984,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
         _warpForward(48 hours + 1);
         routerAdmin.finalizeRouterConfig();
@@ -5108,9 +5108,9 @@ contract StaleOrderExpiryTest is BasePerpTest {
     }
 
     // Regression: H-03
-    function test_SetMaxOrderAge_OnlyOwner() public {
+    function test_SetMaxExecutionWindowSeconds_OnlyOwner() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 600;
+        config.maxExecutionWindowSeconds = 600;
         vm.prank(spammer);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, spammer));
         routerAdmin.proposeRouterConfig(config);
@@ -5118,7 +5118,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
         _warpForward(48 hours + 1);
         routerAdmin.finalizeRouterConfig();
-        assertEq(router.maxOrderAge(), 600);
+        assertEq(router.maxExecutionWindowSeconds(), 600);
     }
 
     // Regression: H-01
@@ -5310,7 +5310,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
@@ -5406,7 +5406,7 @@ contract StalenessGriefTest is BasePerpTest {
     // Regression: H-02
     function test_LiveStaleOracleRevertsInsteadOfCancelling() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         OrderRouterAdmin admin = OrderRouterAdmin(router.admin());
         admin.proposeRouterConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
@@ -5538,7 +5538,7 @@ contract VpiImrBypassTest is Test {
             address(engine), address(pool), address(mockPyth), feedIds, weights, basePrices, inversions
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
@@ -5681,9 +5681,9 @@ contract VpiImrBypassTest is Test {
             uint256(IOrderRouterAccounting.OrderStatus.None),
             "terminal order should be deleted from Router storage"
         );
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.PlannerRejected));
+        OrderV3Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.PlannerRejected));
         assertEq(
             usdc.balanceOf(address(router)), 0, "Router should not retain consumed user-invalid bounty reservation"
         );
@@ -5860,7 +5860,7 @@ contract KeeperFeeRefundTest is Test {
             address(engine), address(pool), address(mockPyth), feedIds, weights, basePrices, inversions
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
@@ -5881,7 +5881,7 @@ contract KeeperFeeRefundTest is Test {
 
         _configureBroadSeniorCapacity();
         IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = 300;
+        config.maxExecutionWindowSeconds = 300;
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
@@ -6251,7 +6251,7 @@ contract WeekendArbitrageTest is Test {
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));

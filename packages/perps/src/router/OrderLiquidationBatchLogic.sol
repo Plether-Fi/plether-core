@@ -5,7 +5,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -37,7 +37,7 @@ interface IOrderLiquidationBatchHost {
 
     function nextCommitId() external view returns (uint64);
 
-    function maxOrderAge() external view returns (uint256);
+    function maxExecutionWindowSeconds() external view returns (uint256);
 
     function minEngineGas() external view returns (uint256);
 
@@ -117,8 +117,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     uint256 private constant LIQUIDATION_BATCH_GAS_PER_ORDER = 600_000;
     /// @notice Gas retained by the batch frame for failure classification, events, and a clean return.
     uint256 private constant LIQUIDATION_BATCH_TAIL_GAS = 250_000;
-    /// @notice Bitmask of every execution regime currently defined by the V2 schema.
-    uint8 private constant ALL_V2_EXECUTION_MODES = 1 | 2 | 4;
+    /// @notice Bitmask of every execution regime currently defined by the V3 schema.
+    uint8 private constant ALL_V3_EXECUTION_MODES = 1 | 2 | 4;
 
     /// @notice Returns the only Router address in which this immutable code may execute by delegatecall.
     function _delegatedLogicRouter() internal view virtual returns (address);
@@ -128,7 +128,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ///      bytecode headroom. Lifecycle registration still occurs as the Router, and the final reservation/queue
     ///      mutation crosses an authenticated external self-call back into the Router's canonical storage.
     function commitOrder(
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         return _commitOrder(IOrderLiquidationBatchHost(address(this)), msg.sender, request, true);
@@ -137,7 +137,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     /// @notice Resolves or submits a caller-authored bounded open through the Router's immutable protection Book.
     function commitProtectedOpen(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
@@ -164,11 +164,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         orderId = host.nextCommitId();
-        OrderV2Types.OrderRequest memory request = _protectionCloseRequest(host, side, size);
-        request.clientOrderId = OrderV2Types.protocolClientOrderId(
+        OrderV3Types.OrderRequest memory request = _protectionCloseRequest(host, side, size);
+        request.clientOrderId = OrderV3Types.protocolClientOrderId(
             keccak256(
                 abi.encode(
-                    "PLETHER_POSITION_PROTECTION_RETRY_V2", block.chainid, address(this), account, protectionId, orderId
+                    "PLETHER_POSITION_PROTECTION_RETRY_V3", block.chainid, address(this), account, protectionId, orderId
                 )
             )
         );
@@ -185,17 +185,17 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function _commitOrder(
         IOrderLiquidationBatchHost host,
         address account,
-        OrderV2Types.OrderRequest calldata request,
+        OrderV3Types.OrderRequest calldata request,
         bool enforceProtectionLock
     ) private returns (uint64 orderId) {
         IOrderLifecycleBook book = host.lifecycleBook();
-        (OrderV2Types.ClientIntentResolution resolution, uint64 resolvedOrderId, bytes32 suppliedIntentHash) =
+        (OrderV3Types.ClientIntentResolution resolution, uint64 resolvedOrderId, bytes32 suppliedIntentHash) =
             book.resolveClientIntent(account, request);
-        if (resolution == OrderV2Types.ClientIntentResolution.ExactReplay) {
+        if (resolution == OrderV3Types.ClientIntentResolution.ExactReplay) {
             return resolvedOrderId;
         }
-        if (resolution == OrderV2Types.ClientIntentResolution.Conflict) {
-            OrderV2Types.ClientIntent memory existing = book.clientIntent(account, request.clientOrderId);
+        if (resolution == OrderV3Types.ClientIntentResolution.Conflict) {
+            OrderV3Types.ClientIntent memory existing = book.clientIntent(account, request.clientOrderId);
             revert IOrderLifecycleBook.OrderLifecycleBook__ClientIdConflict(
                 account, request.clientOrderId, existing.intentHash, suppliedIntentHash
             );
@@ -228,7 +228,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function _validateFreshRequest(
         IOrderLiquidationBatchHost host,
         address account,
-        OrderV2Types.OrderRequest calldata request,
+        OrderV3Types.OrderRequest calldata request,
         bool enforceProtectionLock
     ) private view {
         if (request.clientOrderId == bytes32(0)) {
@@ -238,15 +238,15 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__ZeroTargetPrice();
         }
 
-        OrderV2Types.ExecutionBounds calldata bounds = request.bounds;
-        if (
-            uint256(bounds.validUntil) <= block.timestamp
-                || uint256(bounds.validUntil) - block.timestamp > host.maxOrderAge()
-        ) {
-            revert OrderRouter__InvalidValidUntil();
+        OrderV3Types.ExecutionBounds calldata bounds = request.bounds;
+        if (uint256(bounds.submitBy) < block.timestamp) {
+            revert OrderRouter__InvalidSubmitBy();
+        }
+        if (bounds.executionWindowSeconds == 0 || bounds.executionWindowSeconds > host.maxExecutionWindowSeconds()) {
+            revert OrderRouter__InvalidExecutionWindow();
         }
         uint8 executionModes = bounds.allowedExecutionModes;
-        if (executionModes == 0 || (executionModes & ~ALL_V2_EXECUTION_MODES) != 0) {
+        if (executionModes == 0 || (executionModes & ~ALL_V3_EXECUTION_MODES) != 0) {
             revert OrderRouter__InvalidExecutionModeMask();
         }
         bytes32 currentConfigHash = host.lifecycleBook().currentExecutionConfigHash();
@@ -403,7 +403,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IOrderLiquidationBatchHost host,
         address account,
         uint64 orderId,
-        OrderV2Types.OrderRequest calldata request,
+        OrderV3Types.OrderRequest calldata request,
         uint256 executionBountyUsdc
     ) private {
         bytes memory itemCall = abi.encodeWithSelector(
@@ -530,11 +530,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint64 linkedOrderId,
         IPositionProtectionBook.TriggerPlan memory plan
     ) private {
-        OrderV2Types.OrderRequest memory request = _protectionCloseRequest(host, plan.side, plan.size);
-        request.clientOrderId = OrderV2Types.protocolClientOrderId(
+        OrderV3Types.OrderRequest memory request = _protectionCloseRequest(host, plan.side, plan.size);
+        request.clientOrderId = OrderV3Types.protocolClientOrderId(
             keccak256(
                 abi.encode(
-                    "PLETHER_POSITION_PROTECTION_TRIGGER_V2",
+                    "PLETHER_POSITION_PROTECTION_TRIGGER_V3",
                     block.chainid,
                     address(this),
                     plan.account,
@@ -557,13 +557,14 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IOrderLiquidationBatchHost host,
         CfdTypes.Side side,
         uint256 size
-    ) private view returns (OrderV2Types.OrderRequest memory request) {
+    ) private view returns (OrderV3Types.OrderRequest memory request) {
         request.side = side;
         request.sizeDelta = size;
         request.targetPrice = side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
         request.isClose = true;
-        request.bounds.validUntil = uint64(block.timestamp + host.maxOrderAge());
-        request.bounds.allowedExecutionModes = ALL_V2_EXECUTION_MODES;
+        request.bounds.submitBy = uint64(block.timestamp);
+        request.bounds.executionWindowSeconds = uint32(host.maxExecutionWindowSeconds());
+        request.bounds.allowedExecutionModes = ALL_V3_EXECUTION_MODES;
         request.bounds.expectedConfigHash = bytes32(0);
         request.bounds.maxExecutionBountyUsdc = type(uint256).max;
         request.bounds.maxExecutionNotionalUsdc = type(uint256).max;

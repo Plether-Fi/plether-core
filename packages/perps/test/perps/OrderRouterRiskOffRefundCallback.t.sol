@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -94,28 +94,28 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
         routerAdmin.pause();
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
 
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderIds[64], new bytes[](0));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderIds[64], new bytes[](0));
 
         assertEq(result.orderId, orderIds[64], "bounded call must identify the pending capped head");
         assertEq(
-            uint256(result.status), uint256(OrderV2Types.LifecycleStatus.Pending), "the capped head must remain pending"
+            uint256(result.status), uint256(OrderV3Types.LifecycleStatus.Pending), "the capped head must remain pending"
         );
         assertEq(
             uint256(result.pendingReason),
-            uint256(OrderV2Types.PendingReason.CleanupLimit),
+            uint256(OrderV3Types.PendingReason.CleanupLimit),
             "the result must expose the cleanup work cap"
         );
 
         for (uint256 i; i < 64; ++i) {
-            OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(orderIds[i]);
+            OrderV3Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(orderIds[i]);
             assertEq(
                 uint256(outcome.status),
-                uint256(OrderV2Types.LifecycleStatus.Failed),
+                uint256(OrderV3Types.LifecycleStatus.Failed),
                 "exactly the first 64 invalidated opens must become terminal"
             );
             assertEq(
                 uint256(outcome.reason),
-                uint256(OrderV2Types.TerminalReason.RiskOff),
+                uint256(OrderV3Types.TerminalReason.RiskOff),
                 "each completed cleanup must be classified as risk-off"
             );
         }
@@ -123,7 +123,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
         assertEq(router.nextExecuteId(), orderIds[64], "the queue head must remain on order 65");
         assertEq(
             uint256(router.lifecycleBook().lifecycleStatus(orderIds[64])),
-            uint256(OrderV2Types.LifecycleStatus.Pending),
+            uint256(OrderV3Types.LifecycleStatus.Pending),
             "order 65 must remain resumable"
         );
         assertEq(
@@ -171,19 +171,19 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
             "callback pause must advance the inclusive cutoff over the queued open"
         );
 
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(invalidatedOrderId);
+        OrderV3Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(invalidatedOrderId);
         assertEq(
-            uint256(outcome.status), uint256(OrderV2Types.LifecycleStatus.Failed), "invalidated open must be terminal"
+            uint256(outcome.status), uint256(OrderV3Types.LifecycleStatus.Failed), "invalidated open must be terminal"
         );
         assertEq(
             uint256(outcome.reason),
-            uint256(OrderV2Types.TerminalReason.RiskOff),
+            uint256(OrderV3Types.TerminalReason.RiskOff),
             "post-refund cutoff must select risk-off before liquidation forfeiture"
         );
         assertGt(outcome.bountyUsdc, 0, "setup must exercise a nonzero execution bounty");
         assertEq(
             uint256(outcome.bountyDisposition),
-            uint256(OrderV2Types.BountyDisposition.RefundedToAccount),
+            uint256(OrderV3Types.BountyDisposition.RefundedToAccount),
             "invalidated bounty must be refunded rather than forfeited"
         );
         assertEq(outcome.bountyRecipient, ALICE, "risk-off bounty must return to its funding account");

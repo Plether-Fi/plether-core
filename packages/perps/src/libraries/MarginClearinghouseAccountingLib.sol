@@ -42,7 +42,7 @@ library MarginClearinghouseAccountingLib {
     ///        its positive trade cost; rebates never increase pledge and costs never decrease pre-existing pledge.
     /// @param settlementCreditUsdc Rebate credited when trade cost is negative.
     /// @param settlementDebitUsdc Positive trade cost debited from settlement.
-    /// @param positionMarginUnlockedUsdc Retained compatibility field; always zero under V2 pledge isolation.
+    /// @param positionMarginUnlockedUsdc Retained compatibility field; always zero under V3 pledge isolation.
     /// @param positionMarginLockedUsdc Active margin added when net margin change is positive.
     /// @param resultingSettlementBalanceUsdc Settlement balance after rebate or positive-cost debit.
     /// @param resultingPositionMarginUsdc Active-position margin after unlock or lock.
@@ -79,7 +79,7 @@ library MarginClearinghouseAccountingLib {
         BucketMutation mutation;
     }
 
-    /// @notice Classifies settlement under the V2 PnL-isolation bucket model.
+    /// @notice Classifies settlement under the V3 PnL-isolation bucket model.
     /// @dev `pnlPledgeUsdc` is the only active margin reachable by position price-loss paths. Liquidation, order, and
     ///      action reserves are all reported in `otherLockedMarginUsdc` and remain excluded unless a dedicated path
     ///      explicitly consumes them.

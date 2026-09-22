@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "orderInterfaceVersion": 3,
   "network": {
     "name": "arbitrum-sepolia",
     "chainId": 421614
@@ -38,7 +39,7 @@
     "cfdEngineOpenQuoter": { "address": null, "runtimeCodeHash": null },
     "cfdOrderPolicyEvaluator": { "address": null, "runtimeCodeHash": null },
     "cfdClosePreview": { "address": null, "runtimeCodeHash": null },
-    "orderRouterV2ExecutionSidecar": { "address": null, "runtimeCodeHash": null },
+    "orderRouterV3ExecutionSidecar": { "address": null, "runtimeCodeHash": null },
     "pletherOracle": {
       "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
       "address": null,

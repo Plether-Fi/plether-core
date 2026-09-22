@@ -321,9 +321,9 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
     }
 
     function test_H01_KeeperReceivesFullFeeOnExpiredOrder() public {
-        // Set maxOrderAge so orders can expire
+        // Set maxExecutionWindowSeconds so orders can expire
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: 60,
+            maxExecutionWindowSeconds: 60,
             orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
             basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
@@ -351,7 +351,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
-        // Warp past maxOrderAge — order expires
+        // Warp past maxExecutionWindowSeconds — order expires
         _warpForward(61);
 
         // Keeper executes the expired order — it fails softly (OrderFailed "Order expired")
@@ -368,7 +368,7 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         // Demonstrate that both successful and failed processing pay the keeper
         // from the order's reserved USDC fee.
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: 60,
+            maxExecutionWindowSeconds: 60,
             orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
             basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),

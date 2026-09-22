@@ -9,7 +9,7 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -97,10 +97,10 @@ contract AuditLatestValidFindingsFailing_Mev is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, updateData);
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
-        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.SameBlock));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.SameBlock));
         assertEq(router.nextExecuteId(), 1, "Same-block execution must leave the FIFO head pending");
     }
 

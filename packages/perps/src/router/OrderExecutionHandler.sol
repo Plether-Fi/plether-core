@@ -6,7 +6,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
 /// @title OrderExecutionHandler
-/// @notice Handles risk-off cleanup and the ETH refund policy used by V2 execution.
+/// @notice Handles risk-off cleanup and the ETH refund policy used by V3 execution.
 abstract contract OrderExecutionHandler is OrderValidation {
 
     /// @notice Permissionlessly refunds one pending open covered by the persistent risk-off cutoff.

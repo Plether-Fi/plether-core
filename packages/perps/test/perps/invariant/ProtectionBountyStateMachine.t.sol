@@ -3,7 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -85,7 +85,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         config.closeOrderExecutionBountyUsdc = CLOSE_BOUNTY;
         config.minOpenOrderExecutionBountyUsdc = OPEN_BOUNTY;
         config.maxOpenOrderExecutionBountyUsdc = OPEN_BOUNTY;
-        config.orderSettlementWindow = config.maxOrderAge;
+        config.orderSettlementWindow = config.maxExecutionWindowSeconds;
         _setRouterConfig(config);
     }
 
@@ -213,7 +213,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
     ) internal {
         _fundTrader(account, 10_000e6);
         router.updateMarkPrice(_freshData(ENTRY_PRICE, 0));
-        OrderV2Types.OrderRequest memory request = _request();
+        OrderV3Types.OrderRequest memory request = _request();
         uint256 balanceBefore = clearinghouse.balanceUsdc(account);
         vm.prank(account);
         (uint64 orderId, uint64 protectionId) = actions.commitOpenOrderWithProtection(request, _params());
@@ -420,7 +420,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             account,
             protectionId,
             uint64(block.timestamp),
-            uint64(block.timestamp + router.maxOrderAge()),
+            uint64(block.timestamp + router.maxExecutionWindowSeconds()),
             close,
             true,
             close ? CLOSE_BOUNTY : OPEN_BOUNTY
@@ -549,13 +549,15 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         return Protection.PositionProtectionParams(0, STOP_PRICE);
     }
 
-    function _request() internal view returns (OrderV2Types.OrderRequest memory request) {
+    function _request() internal view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = bytes32(uint256(orderIds.length + 1));
         request.side = CfdTypes.Side.LONG;
         request.sizeDelta = SIZE;
         request.marginDelta = MARGIN;
         request.targetPrice = 1;
-        request.bounds.validUntil = uint64(block.timestamp + router.maxOrderAge());
+        request.bounds.submitBy = uint64(block.timestamp + router.maxExecutionWindowSeconds());
+        request.bounds.executionWindowSeconds =
+            uint32(uint256(uint64(block.timestamp + router.maxExecutionWindowSeconds())) - block.timestamp);
         request.bounds.allowedExecutionModes = 7;
         request.bounds.expectedConfigHash = router.lifecycleBook().currentExecutionConfigHash();
         request.bounds.maxExecutionBountyUsdc = type(uint256).max;

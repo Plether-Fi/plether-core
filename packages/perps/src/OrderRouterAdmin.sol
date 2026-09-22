@@ -28,7 +28,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     /// @notice Upper bound for expired orders pruned in one execution call.
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
     /// @notice Upper bound for pending order lifetime.
-    uint256 internal constant MAX_ORDER_AGE_LIMIT = 1 hours;
+    uint256 internal constant MAX_EXECUTION_WINDOW_SECONDS_LIMIT = 1 hours;
     /// @notice Upper bound for the adverse confidence multiplier in basis points (3x).
     uint256 internal constant MAX_CONFIDENCE_MULTIPLIER_BPS = 30_000;
 
@@ -56,7 +56,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     /// @notice Finalization was requested without an active proposal.
     error OrderRouterAdmin__NoProposal();
     /// @notice The proposed maximum order age is zero or exceeds the one-hour limit.
-    error OrderRouterAdmin__InvalidMaxOrderAge();
+    error OrderRouterAdmin__InvalidMaxExecutionWindowSeconds();
     /// @notice A staleness, settlement-window, or component-divergence limit is inconsistent or zero.
     error OrderRouterAdmin__InvalidStalenessLimit();
     /// @notice A confidence ratio or adverse-confidence multiplier exceeds its allowed bound.
@@ -304,7 +304,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     function _validateRouterConfig(
         IOrderRouterAdminHost.RouterConfig memory config
     ) internal pure {
-        _validateOrderAge(config.maxOrderAge);
+        _validateOrderAge(config.maxExecutionWindowSeconds);
         _validateStalenessConfig(config);
         _validateConfidenceConfig(config);
         _validateExecutionBountyConfig(config);
@@ -313,12 +313,12 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     }
 
     /// @notice Validates a nonzero maximum order age no greater than one hour.
-    /// @param maxOrderAge Candidate maximum age in seconds.
+    /// @param maxExecutionWindowSeconds Candidate maximum age in seconds.
     function _validateOrderAge(
-        uint256 maxOrderAge
+        uint256 maxExecutionWindowSeconds
     ) private pure {
-        if (maxOrderAge == 0 || maxOrderAge > MAX_ORDER_AGE_LIMIT) {
-            revert OrderRouterAdmin__InvalidMaxOrderAge();
+        if (maxExecutionWindowSeconds == 0 || maxExecutionWindowSeconds > MAX_EXECUTION_WINDOW_SECONDS_LIMIT) {
+            revert OrderRouterAdmin__InvalidMaxExecutionWindowSeconds();
         }
     }
 
@@ -329,7 +329,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     ) private pure {
         if (
             config.orderExecutionStalenessLimit == 0 || config.liquidationStalenessLimit == 0
-                || config.orderSettlementWindow == 0 || config.orderSettlementWindow > config.maxOrderAge
+                || config.orderSettlementWindow == 0 || config.orderSettlementWindow > config.maxExecutionWindowSeconds
                 || config.maxComponentPublishTimeDivergence == 0
                 || config.maxComponentPublishTimeDivergence > config.orderSettlementWindow
         ) {

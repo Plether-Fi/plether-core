@@ -99,6 +99,9 @@ export async function sendSponsoredAction<TOperation, TGasEstimate, TReceipt>(
       ),
       input.paymasterProfile,
     );
+    if (input.action.submissionDeadline !== undefined && stub.validUntil > input.action.submissionDeadline) {
+      throw new InvalidPerpsActionError("Sponsorship exceeds the order submission deadline.");
+    }
     operation = input.account.applyPaymaster(operation, stub);
 
     status("estimating");
@@ -122,6 +125,9 @@ export async function sendSponsoredAction<TOperation, TGasEstimate, TReceipt>(
       ),
       input.paymasterProfile,
     );
+    if (input.action.submissionDeadline !== undefined && sponsorship.validUntil > input.action.submissionDeadline) {
+      throw new InvalidPerpsActionError("Sponsorship exceeds the order submission deadline.");
+    }
     operation = input.account.applyPaymaster(operation, sponsorship);
 
     status("awaiting-signature");

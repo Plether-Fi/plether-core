@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 /// @notice Keeper-facing order, liquidation, and LP epoch settlement surface for the simplified product API.
 interface IPerpsKeeper {
@@ -15,7 +15,7 @@ interface IPerpsKeeper {
     function executeOrder(
         uint64 orderId,
         bytes[] calldata pythUpdateData
-    ) external payable returns (OrderV2Types.ExecutionResult memory result);
+    ) external payable returns (OrderV3Types.ExecutionResult memory result);
 
     /// @notice Permissionlessly processes consecutive eligible FIFO orders through an inclusive committed id bound.
     /// @dev Each prepared item executes in an independent Router rollback frame. Retryable item/receipt failures stop
@@ -28,7 +28,7 @@ interface IPerpsKeeper {
     function executeOrderBatch(
         uint64 maxOrderId,
         bytes[] calldata pythUpdateData
-    ) external payable returns (OrderV2Types.BatchResult memory result);
+    ) external payable returns (OrderV3Types.BatchResult memory result);
 
     /// @notice Permissionlessly refunds one pending open invalidated by the persistent risk-off cutoff.
     /// @dev This oracle-independent path accepts no ETH, may remove a non-head order, refunds all remaining margin and

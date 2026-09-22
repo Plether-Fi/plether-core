@@ -37,7 +37,7 @@ All perps contracts are non-upgradeable.
 - Core constructor parameters such as `CAP_PRICE` are immutable.
 - `OrderLifecycleBook` is independently predeployed and immutable-bound to the predicted Router and its exact Engine,
   Clearinghouse, and HousePool dependencies. The Router constructor validates all four bindings before accepting it.
-  `CfdOrderPolicyEvaluator` and `OrderRouterV2ExecutionSidecar` are separately deployed stateless code dependencies
+  `CfdOrderPolicyEvaluator` and `OrderRouterV3ExecutionSidecar` are separately deployed stateless code dependencies
   fixed by a fresh Router; none has an upgrade setter.
 - `OrderRouter`'s configured `PletherOracle` address can be rotated only through `OrderRouterAdmin`'s 48-hour timelocked oracle config flow. Feed ids, basket weights, base prices, inversion flags, and the Pyth endpoint are fixed on each `PletherOracle` instance, so changing them requires deploying a new oracle and timelocking the router onto it.
 
@@ -64,7 +64,7 @@ size quantum.
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `maxSeniorExposureUsdc`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
-| `RouterConfig` (`maxOrderAge`, staleness limits, basket confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, basket confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 Each successful Engine/Router finalization therefore changes
@@ -122,8 +122,8 @@ revert. Router self-callbacks remain self-only, so an external caller cannot use
 authorization or reentrancy guards. HousePool remains the canonical settlement-policy boundary, so delegated atomic
 refresh cannot bypass its independent LP-epoch settlement hold.
 
-V2 order execution instead uses the separately deployed reusable
-`OrderRouterV2ExecutionSidecar` fixed by the Router. It records its own deployment address only to reject direct
+V3 order execution instead uses the separately deployed reusable
+`OrderRouterV3ExecutionSidecar` fixed by the Router. It records its own deployment address only to reject direct
 stateful calls; another contract can delegate it into that contract's own context, but cannot thereby impersonate the
 protocol Router. Book, Clearinghouse, and Engine caller checks authenticate the actual Router address. Both sidecars
 have no mutable storage or upgrade setter. V2 item callbacks are Router-self-only and delegate back to the same fixed
@@ -166,7 +166,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 - `PositionProtectionBook` is created by and immutable-bound to the Router and Engine. It owns retained protection
   state, direct actions/views, authenticated clearinghouse retry-bounty transfers, and Router-only lifecycle hooks; it does not carry keeper or
   liquidation orchestration.
-- `OrderRouterV2ExecutionSidecar` is a fixed, stateless Router delegate dependency. It orchestrates Oracle, evaluator,
+- `OrderRouterV3ExecutionSidecar` is a fixed, stateless Router delegate dependency. It orchestrates Oracle, evaluator,
   Engine, Clearinghouse, and lifecycle Book calls under the Router's address, but it cannot be called directly to
   obtain Router authority. Its self-call item boundary and ABI forwarding are security-critical.
 - `CfdOrderPolicyEvaluator` is permissionless and stateless. It is not a custody authority; the Router sidecar pins
@@ -195,7 +195,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 | Surface | Authorized caller/context | Security effect and failure rule |
 |---------|---------------------------|----------------------------------|
 | `OrderLifecycleBook.registerPending(...)` / `finalize(...)` | Immutable Router only | Permanently binds identity or terminal outcome; Book finalization is last and any failure rolls back the whole item |
-| `OrderRouterV2ExecutionSidecar.executeOrder(...)` / `executeOrderBatch(...)` | Productive protocol use is delegatecall from the Router that fixed this sidecar | Runs with the host's storage/address; direct calls are rejected, and a different delegate host does not gain the configured Router's authority |
+| `OrderRouterV3ExecutionSidecar.executeOrder(...)` / `executeOrderBatch(...)` | Productive protocol use is delegatecall from the Router that fixed this sidecar | Runs with the host's storage/address; direct calls are rejected, and a different delegate host does not gain the configured Router's authority |
 | V2 prepared-item callback | Router external self-call only, then delegatecall to the fixed sidecar | Creates one rollback frame per order and preserves earlier batch progress on retryable item failure |
 | Router reservation settlement callbacks | Router external self-call only | Release/refund reservation, pay/refund/forfeit the exact bounty, unlink and delete the live Router record |
 | `CfdOrderPolicyEvaluator.assessOrder(...)` | Permissionless static call from the execution sidecar | Rebuilds Engine state and invokes its configured planner; typed policy failures may be terminal, unknown or malformed behavior may not be classified as terminal |
@@ -208,7 +208,7 @@ reservation, so a classifier cannot strand value between custody buckets.
 
 Practical rule:
 
-- any new external function on `OrderRouter`, `OrderLifecycleBook`, `OrderRouterV2ExecutionSidecar`, or
+- any new external function on `OrderRouter`, `OrderLifecycleBook`, `OrderRouterV3ExecutionSidecar`, or
   `CfdEngineSettlementSidecar`, and any new helper/sidecar that can reach these caller sets, must be treated as
   security-critical and reviewed like a core custody or settlement change.
 
@@ -417,7 +417,7 @@ configuration finalization. The Router retains admin authentication and applies 
 before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
 storage slots by assumed layout.
 
-The attached parent open is a caller-authored public V2 intent and must carry the same nonzero configuration hash and
+The attached parent open is a caller-authored public V3 intent and must carry the same nonzero configuration hash and
 financial bounds as an ordinary open. Only Router-authenticated triggered or retried close attempts may carry
 `expectedConfigHash == bytes32(0)`. Zero is an internal unpinned marker, not a public wildcard: attempt creation runs
 through the exactly Router-bound keeper sidecar or Router-only Book retry hooks plus Router-only registration hooks.
@@ -538,7 +538,7 @@ separate permissionless Book retry appends a new order id at the current FIFO ta
 
 ### Pinned financial policy and configuration
 
-The external V2 request sets inclusive maxima for execution bounty, execution notional, gross account debit, assessed
+The external V3 request sets inclusive maxima for execution bounty, execution notional, gross account debit, assessed
 action charge, explicit fees, and post-position size, plus inclusive minima for post-settlement balance and
 post-position equity and an inclusive maximum post-leverage. Zero is an actual zero allowance, not an unbounded sentinel. A field
 that is separately required nonzero cannot use zero; integrations use the field type's maximum to express no
@@ -559,13 +559,14 @@ finalized policy drift produces terminal `ConfigMismatch` for config-pinned exte
 economics must fit the separately pinned request bounds. The internal TP/SL close-attempt marker skips the
 hash-equality check but still records the observed digest in its terminal receipt.
 
-The request ABI and permanent intent-hash domain remain V2. The receipt type and execution-config schema are V3 in
-the latched-retry stack because authenticated protection-attempt registration and
-`RetainedForProtectionRetry` change terminal receipt meaning. Cross-version digest or receipt-hash equality must never
+The request ABI and permanent intent-hash domain are V3. The receipt and execution-config domains are V4;
+receipts authenticate the original submission limit, execution duration, commitment time, and resolved deadline. Cross-version digest or receipt-hash equality must never
 be used as a compatibility signal.
 
-Deadline equality passes. Expiry begins only when `block.timestamp > validUntil`. A fresh commit must nevertheless
-choose a future deadline no farther away than the currently active `maxOrderAge`.
+Execution deadline equality passes. Expiry begins only when `block.timestamp > executionDeadline`. Fresh commitment
+requires `block.timestamp <= submitBy` and a positive execution duration no greater than `maxExecutionWindowSeconds`.
+The lifecycle Book resolves and retains `executionDeadline = commitTimestamp + executionWindowSeconds` exactly once.
+Exact replay returns the original id and timing even after either deadline; timing changes under that id conflict.
 
 The Book's execution-authority digest is separate from `SettlementMonitorLens.observableConfigDigest()` and its
 observation digests. Monitor digests remain advisory drift evidence and are never accepted by the Router as an order
@@ -1218,7 +1219,7 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `CfdEngine` | Pre-audit reviewed; formal audit pending |
 | `CfdMath` | Pre-audit reviewed as supporting logic; formal audit pending |
 | `OrderRouter` | Pre-audit reviewed before the V2 bounded-intent/lifecycle redesign; V2 formal audit pending |
-| `OrderLifecycleBook`, `CfdOrderPolicyEvaluator`, and `OrderRouterV2ExecutionSidecar` | V2 execution-authority additions; formal audit pending |
+| `OrderLifecycleBook`, `CfdOrderPolicyEvaluator`, and `OrderRouterV3ExecutionSidecar` | V3 execution-authority additions; formal audit pending |
 | `MarginClearinghouse` | Pre-audit reviewed before V2 no-carry reservation-release additions; formal audit pending |
 | `HousePool` and stateless redemption-math sidecar | Settlement-hold and size-split changes require formal review |
 | `TrancheVault` | Pre-audit reviewed before the activation-aged cooldown and direct claim-escrow redemption extension; those changes require formal review |

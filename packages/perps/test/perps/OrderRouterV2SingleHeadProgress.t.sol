@@ -3,7 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 /// @notice Regression coverage for single-target execution after bounded pre-oracle head cleanup.
 contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
@@ -21,7 +21,7 @@ contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
         vm.prank(EXPIRED_TRADER);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, MARK_PRICE, false);
 
-        vm.warp(block.timestamp + router.maxOrderAge() + 1);
+        vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
         uint64 targetOrderId = router.nextCommitId();
         vm.prank(TARGET_TRADER);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, MARK_PRICE, false);
@@ -30,37 +30,37 @@ contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
         uint256 uniqueParsesBefore = baseMockPyth.parseUniqueCallCount();
         bytes[] memory updateData = _freshTargetUpdateData();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(targetOrderId, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(targetOrderId, updateData);
 
         assertEq(result.orderId, targetOrderId, "the return value must describe the requested target");
         assertEq(
             uint256(result.status),
-            uint256(OrderV2Types.LifecycleStatus.Executed),
+            uint256(OrderV3Types.LifecycleStatus.Executed),
             "the target must execute in the cleanup call"
         );
         assertEq(
             uint256(result.terminalReason),
-            uint256(OrderV2Types.TerminalReason.Executed),
+            uint256(OrderV3Types.TerminalReason.Executed),
             "the target result must retain its execution classification"
         );
 
-        OrderV2Types.CompactOutcome memory expiredOutcome = router.lifecycleBook().outcome(expiredOrderId);
+        OrderV3Types.CompactOutcome memory expiredOutcome = router.lifecycleBook().outcome(expiredOrderId);
         assertEq(
             uint256(expiredOutcome.status),
-            uint256(OrderV2Types.LifecycleStatus.Failed),
+            uint256(OrderV3Types.LifecycleStatus.Failed),
             "the earlier head must be terminally cleaned"
         );
         assertEq(
             uint256(expiredOutcome.reason),
-            uint256(OrderV2Types.TerminalReason.Expired),
+            uint256(OrderV3Types.TerminalReason.Expired),
             "the earlier head must retain its pre-oracle expiry reason"
         );
         assertEq(expiredOutcome.executor, KEEPER, "the cleanup receipt must retain the external keeper");
 
-        OrderV2Types.CompactOutcome memory targetOutcome = router.lifecycleBook().outcome(targetOrderId);
+        OrderV3Types.CompactOutcome memory targetOutcome = router.lifecycleBook().outcome(targetOrderId);
         assertEq(
             uint256(targetOutcome.status),
-            uint256(OrderV2Types.LifecycleStatus.Executed),
+            uint256(OrderV3Types.LifecycleStatus.Executed),
             "the target Book outcome must be terminal"
         );
         assertEq(targetOutcome.executor, KEEPER, "the target receipt must retain the same external keeper");

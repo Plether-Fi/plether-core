@@ -5,7 +5,7 @@ import {CfdClosePreviewTestBase} from "./CfdClosePreviewTestBase.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 
 contract SponsoredPreviewHarness is CfdClosePreview {
@@ -14,7 +14,7 @@ contract SponsoredPreviewHarness is CfdClosePreview {
 
     constructor(
         address engine
-    ) {
+    ) CfdClosePreview(engine) {
         fixtureEngine = engine;
     }
 
@@ -58,7 +58,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function _request(
         uint256 size
-    ) internal view returns (OrderV2Types.OrderRequest memory r) {
+    ) internal view returns (OrderV3Types.OrderRequest memory r) {
         r.clientOrderId = keccak256("sponsored-close");
         r.side = CfdTypes.Side.LONG;
         r.sizeDelta = size;
@@ -66,12 +66,14 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
         r.isClose = true;
         r.bounds = _bounds();
         r.bounds.allowedExecutionModes = 1;
-        r.bounds.validUntil = uint64(vm.getBlockTimestamp() + router.maxOrderAge());
+        r.bounds.submitBy = uint64(vm.getBlockTimestamp() + router.maxExecutionWindowSeconds());
+        r.bounds.executionWindowSeconds =
+            uint32(uint256(uint64(vm.getBlockTimestamp() + router.maxExecutionWindowSeconds())) - block.timestamp);
         r.bounds.expectedConfigHash = router.lifecycleBook().currentExecutionConfigHash();
     }
 
     function _fundedPreview(
-        OrderV2Types.OrderRequest memory r
+        OrderV3Types.OrderRequest memory r
     ) internal view returns (CfdClosePreview.SponsoredClosePreview memory) {
         return sponsored.previewSponsoredClose(
             address(engine),
@@ -84,7 +86,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
     }
 
     function _batch(
-        OrderV2Types.OrderRequest memory r,
+        OrderV3Types.OrderRequest memory r,
         uint256 amount
     ) internal {
         address[] memory targets = new address[](5);
@@ -107,11 +109,11 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
         uint256 free
     ) internal {
         _openNormally(CfdTypes.Side.LONG, free);
-        OrderV2Types.OrderRequest memory r = _request(size);
+        OrderV3Types.OrderRequest memory r = _request(size);
         CfdClosePreview.SponsoredClosePreview memory p = _fundedPreview(r);
         assertEq(p.subsidyUsdc, 200_000 - free);
         _batch(r, p.subsidyUsdc);
-        OrderV2Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
+        OrderV3Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
             address(engine),
             _order(r.side, size),
             KEEPER,
@@ -149,7 +151,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
         assertEq(opened, quote.maxSizeDelta, "maximum position actually opened");
         assertLt(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 200_000);
         uint256 closeSize = isPartial ? (opened / 2 / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM : opened;
-        OrderV2Types.OrderRequest memory r = _request(closeSize);
+        OrderV3Types.OrderRequest memory r = _request(closeSize);
         uint256 closePrice = isPartial ? PRICE - 1_000_000 : PRICE;
         CfdClosePreview.SponsoredClosePreview memory p = sponsored.previewSponsoredClose(
             address(engine), ACCOUNT, r, KEEPER, closePrice, uint64(vm.getBlockTimestamp())
@@ -189,7 +191,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_FundedAccountNeedsNoSubsidy() public {
         _openNormally(CfdTypes.Side.LONG, 200_000);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         assertEq(_fundedPreview(r).subsidyUsdc, 0);
         vm.expectRevert(abi.encodeWithSelector(CfdClosePreview.CfdClosePreview__SubsidyMismatch.selector, 1, 0));
         _batch(r, 1);
@@ -197,7 +199,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_ReplayDoesNotMintTwice() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         _batch(r, 200_000);
         uint256 supply = usdc.totalSupply();
         vm.expectRevert(CfdClosePreview.CfdClosePreview__SponsoredIntentInvalid.selector);
@@ -207,7 +209,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_MismatchedSubsidyDoesNotMint() public {
         _openNormally(CfdTypes.Side.LONG, 2000);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         vm.expectRevert(
             abi.encodeWithSelector(CfdClosePreview.CfdClosePreview__SubsidyMismatch.selector, 200_000, 198_000)
         );
@@ -221,7 +223,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_WrongChainFails() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         vm.chainId(1);
         vm.expectRevert(CfdClosePreview.CfdClosePreview__SponsoredDeploymentMismatch.selector);
         _fundedPreview(r);
@@ -229,15 +231,16 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_ExpiredOrderFails() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
-        r.bounds.validUntil = uint64(vm.getBlockTimestamp() - 1);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
+        r.bounds.submitBy = uint64(vm.getBlockTimestamp() - 1);
+        r.bounds.executionWindowSeconds = 1;
         vm.expectRevert(CfdClosePreview.CfdClosePreview__SponsoredIntentInvalid.selector);
         _batch(r, 200_000);
     }
 
     function test_ChangedConfigurationFails() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         r.bounds.expectedConfigHash = bytes32(uint256(1));
         vm.expectRevert(CfdClosePreview.CfdClosePreview__SponsoredIntentInvalid.selector);
         _batch(r, 200_000);
@@ -245,7 +248,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_CommitFailureRollsBackMintAndDeposit() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         vm.mockCallRevert(
             address(router),
             abi.encodeCall(OrderRouter.commitOrder, (r)),
@@ -262,14 +265,14 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_PartialCloseDoesNotWaiveUnfundedTradingCharges() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE / 2);
+        OrderV3Types.OrderRequest memory r = _request(SIZE / 2);
         vm.expectRevert();
         sponsored.previewSponsoredClose(address(engine), ACCOUNT, r, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
     }
 
     function test_PendingOrderRejectsBeforeMint() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         vm.mockCall(address(router), abi.encodeWithSignature("pendingOrderCounts(address)", ACCOUNT), abi.encode(1));
         uint256 supply = usdc.totalSupply();
         vm.expectRevert(CfdClosePreview.CfdClosePreview__SponsoredAccountBusy.selector);
@@ -279,7 +282,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_ActiveProtectionRejectsBeforeMint() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         vm.mockCall(
             address(router.positionProtectionBook()),
             abi.encodeWithSignature("activePositionProtectionId(address)", ACCOUNT),
@@ -291,7 +294,7 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_InvalidPartialDustRejected() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV2Types.OrderRequest memory r = _request(CfdTypes.SIZE_QUANTUM);
+        OrderV3Types.OrderRequest memory r = _request(CfdTypes.SIZE_QUANTUM);
         vm.expectRevert();
         _batch(r, 200_000);
     }
@@ -312,14 +315,14 @@ contract CfdSponsoredCloseCarryTest is CfdSponsoredClosePreviewTest {
     function test_DepositCarryIsCollectedExactlyOnce() public {
         _openNormally(CfdTypes.Side.LONG, 0);
         vm.warp(vm.getBlockTimestamp() + 1 days);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         CfdClosePreview.SponsoredClosePreview memory p = _fundedPreview(r);
         assertGt(p.depositCarryUsdc, 0);
         assertEq(p.commitmentCarryUsdc, 0);
         uint256 beforeBalance = clearinghouse.balanceUsdc(ACCOUNT);
         _batch(r, p.subsidyUsdc);
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), beforeBalance + p.subsidyUsdc - p.depositCarryUsdc);
-        OrderV2Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
+        OrderV3Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
             address(engine),
             _order(r.side, SIZE),
             KEEPER,
@@ -335,7 +338,7 @@ contract CfdSponsoredCloseCarryTest is CfdSponsoredClosePreviewTest {
     function test_UncoveredCarryCannotConsumeGrant() public {
         _openNormally(CfdTypes.Side.LONG, 0);
         vm.warp(vm.getBlockTimestamp() + 365_000 days);
-        OrderV2Types.OrderRequest memory r = _request(SIZE);
+        OrderV3Types.OrderRequest memory r = _request(SIZE);
         vm.expectPartialRevert(CfdClosePreview.CfdClosePreview__UncoveredCarry.selector);
         _fundedPreview(r);
     }

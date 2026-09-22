@@ -15,8 +15,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -169,7 +169,7 @@ contract PythRealUpdateForkTest is Test {
             address(engine), address(pool), REAL_PYTH, _singleFeedIds(), weights, basePrices, new bool[](1)
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
         OrderLifecycleBook lifecycleBook =
@@ -222,8 +222,8 @@ contract PythRealUpdateForkTest is Test {
         CfdTypes.Side side,
         uint256 size,
         uint256 margin
-    ) internal view returns (OrderV2Types.OrderRequest memory request) {
-        request = OrderV2Types.OrderRequest({
+    ) internal view returns (OrderV3Types.OrderRequest memory request) {
+        request = OrderV3Types.OrderRequest({
             clientOrderId: keccak256(
                 abi.encode("PythRealUpdateForkTest", block.chainid, address(router), trader, router.nextCommitId())
             ),
@@ -232,8 +232,11 @@ contract PythRealUpdateForkTest is Test {
             marginDelta: margin,
             targetPrice: side == CfdTypes.Side.LONG ? 1 : type(uint256).max,
             isClose: false,
-            bounds: OrderV2Types.ExecutionBounds({
-                validUntil: uint64(block.timestamp + router.maxOrderAge()),
+            bounds: OrderV3Types.ExecutionBounds({
+                submitBy: uint64(block.timestamp + router.maxExecutionWindowSeconds()),
+                executionWindowSeconds: uint32(
+                    uint256(uint64(block.timestamp + router.maxExecutionWindowSeconds())) - block.timestamp
+                ),
                 allowedExecutionModes: 7,
                 expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
                 maxExecutionBountyUsdc: type(uint256).max,

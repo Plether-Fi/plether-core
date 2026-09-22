@@ -20,7 +20,7 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -237,7 +237,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         bases[1] = 1e8;
 
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         CfdEngineLens testEngineLens = new CfdEngineLens(address(engine));
         PletherOracle testOracle =
             new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);
@@ -274,7 +274,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
 
     function test_F3_StaleOracleCancellationMustNotPayKeeperUsdc() public {
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: 3600,
+            maxExecutionWindowSeconds: 3600,
             orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
             basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),

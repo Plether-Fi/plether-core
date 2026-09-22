@@ -58,6 +58,8 @@ def main():
 
     report = {
         "sourceCommit": git("rev-parse", "HEAD"),
+        "schemaVersion": manifest["schemaVersion"],
+        "orderInterfaceVersion": manifest["orderInterfaceVersion"],
         "submodules": submodules,
         "forgeVersion": forge_version,
         "note": "Runtime sizes are compiler templates before immutable substitution. Creation-code sizes exclude constructor arguments; verify full creation inputs in the RPC simulation. ABI hashes are SHA-256, not on-chain runtime hashes.",

@@ -2,10 +2,10 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterV2ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV2ExecutionHost.sol";
+import {IOrderRouterV3ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV3ExecutionHost.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
 /// @title OrderLiquidationHandler
@@ -115,13 +115,13 @@ abstract contract OrderLiquidationHandler is OrderValidation {
 
             // Solidity zero-initializes fields that are inapplicable to liquidation terminal evidence.
             // slither-disable-next-line uninitialized-local
-            IOrderRouterV2ExecutionHost.SettledTerminalInput memory receiptInput;
+            IOrderRouterV3ExecutionHost.SettledTerminalInput memory receiptInput;
             receiptInput.orderId = orderId;
             receiptInput.executor = keeper;
             receiptInput.observedConfigHash = observedConfigHash;
-            receiptInput.reason = OrderV2Types.TerminalReason.AccountLiquidated;
-            receiptInput.executionMode = OrderV2Types.ExecutionMode.None;
-            receiptInput.priceSource = OrderV2Types.PriceSource.Liquidation;
+            receiptInput.reason = OrderV3Types.TerminalReason.AccountLiquidated;
+            receiptInput.executionMode = OrderV3Types.ExecutionMode.None;
+            receiptInput.priceSource = OrderV3Types.PriceSource.Liquidation;
             receiptInput.executionPrice = executionPrice;
             receiptInput.neutralMarkPrice = neutralMarkPrice;
             receiptInput.poolDepthUsdc = housePoolDepthUsdc;
@@ -130,7 +130,7 @@ abstract contract OrderLiquidationHandler is OrderValidation {
             receiptInput.bountyUsdc = orderBountiesUsdc[i];
             if (orderBountiesUsdc[i] != 0) {
                 receiptInput.bountyRecipient = protocolTreasury;
-                receiptInput.bountyDisposition = OrderV2Types.BountyDisposition.Forfeited;
+                receiptInput.bountyDisposition = OrderV3Types.BountyDisposition.Forfeited;
             }
             _recordSettledTerminalReceipt(receiptInput);
         }

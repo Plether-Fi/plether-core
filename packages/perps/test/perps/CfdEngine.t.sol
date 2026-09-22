@@ -5987,7 +5987,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
         IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = router.maxOrderAge();
+        config.maxExecutionWindowSeconds = router.maxExecutionWindowSeconds();
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();

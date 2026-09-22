@@ -84,7 +84,7 @@ The deploy script creates and wires:
 13. `CfdEngineLens`
 14. `ArbitrumSepoliaReleaseOracle`, a constructor-only `PletherOracle` wrapper with the `2,500`-bps multiplier
 15. `CfdOrderPolicyEvaluator`
-16. `OrderRouterV2ExecutionSidecar`
+16. `OrderRouterV3ExecutionSidecar`
 17. `OrderLifecycleBook`, separately deployed and immutable-bound to the predicted Router, Engine,
     MarginClearinghouse, and HousePool
 18. `OrderRouterLiquidationBatchSidecar`, separately deployed with the same predicted Router address
@@ -148,17 +148,17 @@ Important:
   storage, setter, delegatecall, upgrade path, custody, or settlement authority. The deploy and bootstrap scripts
   require code and `implementationId() == keccak256("Plether.HousePoolRedemptionMathSidecar.v1")`; HousePool stores
   the validated address immutably. Record it as a first-class deployment artifact even though users never call it.
-- This is a fresh V2 stack deployment. Deploy the evaluator and V2 execution sidecar before the Router-bound
+- This is a fresh V3 stack deployment. Deploy the evaluator and V3 execution sidecar before the Router-bound
   three-`CREATE` sequence, and pass their exact addresses together with the predeployed keeper sidecar and lifecycle
   Book to the eight-argument `OrderRouter` constructor. Do not mix any Router, Book, evaluator, sidecar, Engine,
-  clearinghouse, or pool from another deployment generation. There is no V1-to-V2 order or lifecycle migration path.
+  clearinghouse, or pool from another deployment generation. There is no V1-to-V3 order or lifecycle migration path.
 - `OrderLifecycleBook` is independently predeployed and permanently binds the predicted Router, Engine,
   MarginClearinghouse, and HousePool. Deployment must check all four immutable bindings before accepting the Router,
   verify that `router.lifecycleBook()` returns the exact predeployed instance, and confirm
   `currentExecutionConfigHash()` is nonzero after core wiring. The Book is
   the authoritative source for permanent client-intent identity and terminal order outcomes; it has no independent
   owner, setter, or mutable wiring.
-- `CfdOrderPolicyEvaluator` and `OrderRouterV2ExecutionSidecar` are separately deployed contracts whose exact
+- `CfdOrderPolicyEvaluator` and `OrderRouterV3ExecutionSidecar` are separately deployed contracts whose exact
   addresses are pinned immutably in the Router. Deployment must verify code at both addresses and equality with the
   Router's `policyEvaluator()` and `executionSidecar()` getters. The execution sidecar is stateless and rejects direct
   stateful use; keepers call the Router. Record both addresses independently for bytecode verification. Bootstrap
@@ -238,7 +238,7 @@ Important:
   Verify all components from the same source commit and test that direct and foreign-context helper calls fail.
   Neither lifecycle-Book nor keeper-sidecar creation code is embedded in Router initcode; position-protection Book
   creation code remains embedded because the Router constructor deploys it. Verify the creation inputs and EIP-170
-  runtimes of the Router, both Books, the keeper sidecar, and the V2 execution sidecar with explicit safety margin.
+  runtimes of the Router, both Books, the keeper sidecar, and the V3 execution sidecar with explicit safety margin.
 - Position protection is available on a fresh router without a separate activation transaction. Deploy the trigger
   and retry workers, indexer, and product integrations with the stack. Oracle-policy readers use
   `basketMaxConfidenceRatioBps()`.
@@ -429,7 +429,7 @@ including at least:
 - both tranche vaults
 - `PletherOracle`
 - `CfdOrderPolicyEvaluator`
-- `OrderRouterV2ExecutionSidecar`
+- `OrderRouterV3ExecutionSidecar`
 - `OrderRouter`
 - the separately deployed `OrderRouterLiquidationBatchSidecar` returned by
   `OrderRouter.liquidationBatchSidecar()`
@@ -443,7 +443,7 @@ including at least:
 Also record the active V3 execution-config hash, source commit, deployment block, transaction hashes, and
 verified-bytecode status. `MockUSDC`,
 `HousePool`, `HousePoolRedemptionMathSidecar`, `OrderRouter`, and `EmergencyPauseCoordinator` are consumed directly by
-the bootstrap script. Bootstrap derives the RouterAdmin, policy evaluator, V2 execution sidecar, lifecycle Book,
+the bootstrap script. Bootstrap derives the RouterAdmin, policy evaluator, V3 execution sidecar, lifecycle Book,
 stateful protection Book, and stateless keeper sidecar from the Router; it verifies the supplied redemption-math
 sidecar's identity for rerun inspection and verifies that both Books and the keeper sidecar are distinct code-bearing
 contracts with exact immutable bindings. The deploy transaction is
@@ -562,7 +562,7 @@ Position protection has a trigger/attempt/retry keeper model:
 The protocol-operated worker automatically retries only an `Expired` latest attempt. It must first prune an expired
 sole FIFO head in a separate transaction, funded from the operator gas budget, then re-check the Book and receipt. It
 queues a retry only when live Pyth data (or frozen-close execution) is available and projected head-arrival is no more
-than `maxOrderAge - 15 seconds` (45 seconds with the default TTL). `PlannerRejected`, `ConstraintViolation`, and other
+than `maxExecutionWindowSeconds - 15 seconds` (45 seconds with the default TTL). `PlannerRejected`, `ConstraintViolation`, and other
 non-expiry terminal reasons remain latched and page operators with the reason and failure fingerprint; the official
 worker does not hot-loop them before remediation. Permissionless third parties remain free to retry.
 
@@ -573,13 +573,12 @@ trigger call ingests payable Pyth update data. This keeps the trader flow compat
 accounts while retaining an independently verified trigger observation. The nonpayable retry selector remains live
 while new protection commits are paused and while the Engine is degraded or the oracle is frozen.
 
-The protected parent open is a caller-authored bounded V2 request and must pin the active lifecycle-Book digest. Only
+The protected parent open is a caller-authored bounded V3 request and must pin the active lifecycle-Book digest. Only
 Router-authenticated triggered or retried close attempts set `expectedConfigHash == bytes32(0)`, which is an unpinned
 internal marker rather than a public wildcard. Deploy, bootstrap, and integration tests must verify both sides of that
 boundary: external zero-hash commits, including Book-forwarded parents, fail; valid bounded parents and authenticated
-attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request ABI and
-intent hash remain V2, but this release uses the V3 receipt and execution-config domains because registered protection
-attempts may authenticate `RetainedForProtectionRetry` with a zero bounty recipient.
+attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request and intent domain are V3, with V4 receipt and execution-config domains. Registered protection
+attempts still authenticate `RetainedForProtectionRetry` with a zero bounty recipient.
 
 The bounded protected-open selector replaces the former scalar selector without a compatibility overload. Ship it
 only as part of a fresh complete perps-stack deployment, regenerate consumer ABIs from the new
@@ -606,8 +605,8 @@ pending marker.
 Regenerate frontend, keeper, governance, and indexer bindings from this release. The ABI adds the permissionless retry
 action, lifecycle-Book registration/view surface, and close-attempt events. `PositionProtectionStatus.Latched` and
 `BountyDisposition.RetainedForProtectionRetry` are appended, preserving prior numeric ordinals, but old enum decoders
-will not know the new values. The receipt and execution-config hash domains are V3 even though the request/intent ABI
-remains V2; do not compare their hashes with an earlier stack.
+will not know the new values. The receipt and execution-config hash domains are V4 and the request/intent ABI is V3; do not compare their
+hashes with an earlier stack.
 
 Position protection is available immediately on an unpaused fresh Router; no protection-specific governance proposal
 or timelock is required. The trigger bounty remains part of the ordinary 48-hour timelocked
