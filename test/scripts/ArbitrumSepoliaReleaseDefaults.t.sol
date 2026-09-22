@@ -63,7 +63,7 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
         OrderRouter router
     ) external view returns (OrderLifecycleBook lifecycleBook) {
         return
-            _verifyV2OrderStack(engine, clearinghouse, housePool, orderPolicyEvaluator, orderExecutionSidecar, router);
+            _verifyV3OrderStack(engine, clearinghouse, housePool, orderPolicyEvaluator, orderExecutionSidecar, router);
     }
 
 }
@@ -341,7 +341,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         bootstrapScript.verifyRouterWiring(pool, router);
     }
 
-    function test_DeploymentGuardsAcceptCanonicalV2OrderStackAndRejectMixedPolicyModule() public {
+    function test_DeploymentGuardsAcceptCanonicalV3OrderStackAndRejectMixedPolicyModule() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
         MockUSDC usdc = new MockUSDC();
