@@ -153,7 +153,7 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
 
     function test_QueuedOpenIsRevalidatedAndTerminallyFailsAfterBufferIncrease() public {
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
-        routerConfig.maxOrderAge = 1 hours;
+        routerConfig.maxExecutionWindowSeconds = 1 hours;
         _setRouterConfig(routerConfig);
 
         ICfdEngineAdminHost.EngineRiskConfig memory riskConfig = _engineRiskConfig();

@@ -5,7 +5,7 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -16,9 +16,9 @@ contract BountyBackingHarness is CfdOrderPolicyEvaluator {
     function evaluateSelfClose(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.CloseDelta memory delta,
-        OrderV2Types.ExecutionBounds memory bounds,
+        OrderV3Types.ExecutionBounds memory bounds,
         uint256 bounty
-    ) external pure returns (OrderV2Types.ExecutionAssessment memory) {
+    ) external pure returns (OrderV3Types.ExecutionAssessment memory) {
         return _evaluateClose(snapshot, delta, bounds, bounty, true);
     }
 
@@ -95,7 +95,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta = planner.planClose(snap, order, price, 0);
         assertTrue(delta.valid);
         assertEq(delta.actionChargeCollectedUsdc, 0);
-        OrderV2Types.ExecutionAssessment memory assessment =
+        OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateClose(snap, delta, _permissiveBounds(), bounty);
         assertEq(assessment.postSettlementBalanceUsdc, 0);
     }
@@ -126,7 +126,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         );
         harness.evaluateSelfClose(snap, delta, _permissiveBounds(), BOUNTY);
         snap.accountBuckets.settlementBalanceUsdc = BOUNTY;
-        OrderV2Types.ExecutionAssessment memory assessment =
+        OrderV3Types.ExecutionAssessment memory assessment =
             harness.evaluateSelfClose(snap, delta, _permissiveBounds(), BOUNTY);
         assertEq(assessment.postSettlementBalanceUsdc, BOUNTY);
         assertEq(assessment.grossAccountDebitUsdc, BOUNTY);
@@ -145,12 +145,12 @@ contract CfdOrderPolicyEvaluatorTest is Test {
             side: CfdTypes.Side.LONG,
             isClose: false
         });
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
 
-        OrderV2Types.ExecutionAssessment memory externalExecution = evaluator.assessOrder(
+        OrderV3Types.ExecutionAssessment memory externalExecution = evaluator.assessOrder(
             ENGINE, order, address(0xB0B), PRICE, 2_000_000e6, uint64(block.timestamp), bounds, BOUNTY
         );
-        OrderV2Types.ExecutionAssessment memory selfExecution =
+        OrderV3Types.ExecutionAssessment memory selfExecution =
             evaluator.assessOrder(ENGINE, order, ACCOUNT, PRICE, 2_000_000e6, uint64(block.timestamp), bounds, BOUNTY);
 
         assertEq(externalExecution.executionNotionalUsdc, 100_000e6);
@@ -167,7 +167,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_OpenAssessmentNormalizesEconomicsAndInclusiveBoundsPass() public view {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
 
         bounds.maxExecutionBountyUsdc = BOUNTY;
         bounds.maxExecutionNotionalUsdc = 100e6;
@@ -179,9 +179,9 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         bounds.minPostPositionEquityUsdc = 203e6;
         bounds.maxPostLeverageBps = 4927;
 
-        OrderV2Types.ExecutionAssessment memory assessment = evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
+        OrderV3Types.ExecutionAssessment memory assessment = evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
 
-        assertEq(uint8(assessment.mode), uint8(OrderV2Types.ExecutionMode.Live));
+        assertEq(uint8(assessment.mode), uint8(OrderV3Types.ExecutionMode.Live));
         assertEq(assessment.executionNotionalUsdc, 100e6);
         assertEq(assessment.grossAccountDebitUsdc, 2_250_000);
         assertEq(assessment.actionChargeAssessedUsdc, 2e6);
@@ -205,7 +205,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_CloseAssessmentUsesCollectedDebitButAssessedFeesAndSpread() public view {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseCloseSnapshot();
         CfdEnginePlanTypes.CloseDelta memory delta = _baseCloseDelta();
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
         bounds.maxExecutionBountyUsdc = 1e6;
         bounds.maxExecutionNotionalUsdc = 120e6;
@@ -217,9 +217,9 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         bounds.minPostPositionEquityUsdc = 85e6;
         bounds.maxPostLeverageBps = 14_118;
 
-        OrderV2Types.ExecutionAssessment memory assessment = evaluator.evaluateClose(snapshot, delta, bounds, 1e6);
+        OrderV3Types.ExecutionAssessment memory assessment = evaluator.evaluateClose(snapshot, delta, bounds, 1e6);
 
-        assertEq(uint8(assessment.mode), uint8(OrderV2Types.ExecutionMode.Frozen));
+        assertEq(uint8(assessment.mode), uint8(OrderV3Types.ExecutionMode.Frozen));
         assertEq(assessment.executionNotionalUsdc, 120e6);
         assertEq(assessment.grossAccountDebitUsdc, 27e6);
         assertEq(assessment.actionChargeAssessedUsdc, 6e6);
@@ -244,7 +244,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.CloseDelta memory delta = _fullCloseGainDelta(snapshot);
         delta.pricePayoutIsImmediate = true;
 
-        OrderV2Types.ExecutionAssessment memory assessment =
+        OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateClose(snapshot, delta, _permissiveBounds(), 1e6);
 
         assertEq(assessment.preSettlementBalanceUsdc, 500e6);
@@ -260,7 +260,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         // The planner's legacy diagnostic can remain zero on gain paths; assessment derives claim state canonically.
         delta.existingTraderClaimRemainingUsdc = 0;
 
-        OrderV2Types.ExecutionAssessment memory assessment =
+        OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateClose(snapshot, delta, _permissiveBounds(), 1e6);
 
         assertEq(assessment.preSettlementBalanceUsdc, 500e6);
@@ -277,13 +277,13 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.pendingCarryUsdc = 3e6;
         delta.executionFeeUsdc = 9e6;
 
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.maxExplicitFeesUsdc = 9e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.ExplicitFees,
+                OrderV3Types.ConstraintKind.ExplicitFees,
                 9e6,
                 9e6 - 1
             )
@@ -299,14 +299,14 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.closeState.remainingSize = 0;
         delta.actionChargeCollectedUsdc = 0;
 
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
         bounds.maxExplicitFeesUsdc = 3e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.ExplicitFees,
+                OrderV3Types.ConstraintKind.ExplicitFees,
                 3e6,
                 3e6 - 1
             )
@@ -317,14 +317,14 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_ConsumedTraderClaimCannotBypassGrossAccountDebitBound() public {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseCloseSnapshot();
         CfdEnginePlanTypes.CloseDelta memory delta = _baseCloseDelta();
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
         bounds.maxGrossAccountDebitUsdc = 27e6 - 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.GrossAccountDebit,
+                OrderV3Types.ConstraintKind.GrossAccountDebit,
                 27e6,
                 27e6 - 1
             )
@@ -335,7 +335,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_ConstraintPrecedenceStartsWithExecutionBounty() public {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.maxExecutionBountyUsdc = 0;
         bounds.maxExecutionNotionalUsdc = 0;
         bounds.maxGrossAccountDebitUsdc = 0;
@@ -343,7 +343,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.ExecutionBounty,
+                OrderV3Types.ConstraintKind.ExecutionBounty,
                 BOUNTY,
                 0
             )
@@ -354,13 +354,13 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_PostSettlementMinimumFailsByOneAtom() public {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.minPostSettlementBalanceUsdc = 497_750_001;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.PostSettlementBalance,
+                OrderV3Types.ConstraintKind.PostSettlementBalance,
                 497_750_000,
                 497_750_001
             )
@@ -371,13 +371,13 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_PostEquityMinimumFailsByOneAtom() public {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.minPostPositionEquityUsdc = 203e6 + 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.PostPositionEquity,
+                OrderV3Types.ConstraintKind.PostPositionEquity,
                 203e6,
                 203e6 + 1
             )
@@ -391,12 +391,12 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         delta.positionMarginAfterOpen = 30e6;
 
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.maxPostLeverageBps = 33_333;
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.PostLeverage,
+                OrderV3Types.ConstraintKind.PostLeverage,
                 33_334,
                 33_333
             )
@@ -404,7 +404,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
 
         bounds.maxPostLeverageBps = 33_334;
-        OrderV2Types.ExecutionAssessment memory assessment = evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
+        OrderV3Types.ExecutionAssessment memory assessment = evaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
         assertEq(assessment.postLeverageBps, 33_334);
     }
 
@@ -414,13 +414,13 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         delta.positionMarginAfterOpen = 0;
 
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.minPostPositionEquityUsdc = 0;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.PostLeverage,
+                OrderV3Types.ConstraintKind.PostLeverage,
                 type(uint256).max,
                 uint256(type(uint32).max)
             )
@@ -437,13 +437,13 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.newPosEntryPrice = 2 * PRICE;
         delta.newPosEntryCostUsdcAtoms = 2 * PRICE;
 
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.minPostPositionEquityUsdc = 0;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
-                OrderV2Types.ConstraintKind.PostPositionEquity,
+                OrderV3Types.ConstraintKind.PostPositionEquity,
                 0,
                 0
             )
@@ -456,7 +456,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         CfdEnginePlanTypes.OpenDelta memory delta = _baseOpenDelta();
         delta.pendingCarryUsdc = 99e6;
 
-        OrderV2Types.ExecutionAssessment memory assessment =
+        OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateOpen(snapshot, delta, _permissiveBounds(), BOUNTY);
 
         assertEq(assessment.carryUsdc, 0);
@@ -477,7 +477,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.newPosSize = 2 * CfdTypes.SIZE_QUANTUM;
         delta.newPosEntryCostUsdcAtoms = 2 * PRICE;
 
-        OrderV2Types.ExecutionAssessment memory assessment =
+        OrderV3Types.ExecutionAssessment memory assessment =
             evaluator.evaluateOpen(snapshot, delta, _permissiveBounds(), BOUNTY);
 
         assertEq(assessment.carryUsdc, 1e6);
@@ -497,13 +497,13 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.posEntryPriceAfter = 0;
         delta.posEntryCostAfterUsdcAtoms = 0;
 
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 4;
         bounds.maxPostPositionSize = 0;
         bounds.minPostPositionEquityUsdc = type(uint256).max;
         bounds.maxPostLeverageBps = 0;
 
-        OrderV2Types.ExecutionAssessment memory assessment = evaluator.evaluateClose(snapshot, delta, bounds, 1e6);
+        OrderV3Types.ExecutionAssessment memory assessment = evaluator.evaluateClose(snapshot, delta, bounds, 1e6);
         assertEq(assessment.postPositionSize, 0);
         assertEq(assessment.postPositionEquityUsdc, 0);
         assertEq(assessment.postLeverageBps, 0);
@@ -512,13 +512,13 @@ contract CfdOrderPolicyEvaluatorTest is Test {
     function test_DisallowedFadModeHasStableTypedError() public {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _baseOpenSnapshot();
         snapshot.isFadWindow = true;
-        OrderV2Types.ExecutionBounds memory bounds = _permissiveBounds();
+        OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         bounds.allowedExecutionModes = 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ExecutionModeDisallowed.selector,
-                OrderV2Types.ExecutionMode.Fad,
+                OrderV3Types.ExecutionMode.Fad,
                 uint8(1)
             )
         );
@@ -636,7 +636,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         delta.pricePayoutUsdc = 20e6;
     }
 
-    function _permissiveBounds() private pure returns (OrderV2Types.ExecutionBounds memory bounds) {
+    function _permissiveBounds() private pure returns (OrderV3Types.ExecutionBounds memory bounds) {
         bounds.allowedExecutionModes = 7;
         bounds.maxExecutionBountyUsdc = type(uint256).max;
         bounds.maxExecutionNotionalUsdc = type(uint256).max;

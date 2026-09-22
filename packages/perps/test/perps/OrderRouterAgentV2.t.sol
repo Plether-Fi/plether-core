@@ -3,7 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
@@ -32,6 +32,72 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         _fundTrader(BOB, 50_000e6);
     }
 
+    function test_SlowApprovalGetsFullWindowAndExecutesAfterSubmitBy() public {
+        uint256 reviewedAt = vm.getBlockTimestamp();
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("slow-approval"));
+        request.bounds.submitBy = uint64(reviewedAt + 120);
+        request.bounds.executionWindowSeconds = 60;
+        vm.warp(reviewedAt + 110);
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        OrderV3Types.OrderTiming memory timing = book.orderTiming(orderId);
+        assertEq(timing.commitTimestamp, reviewedAt + 110);
+        assertEq(timing.executionDeadline, reviewedAt + 170);
+        // Execution remains eligible after the submission authorization expires.
+        vm.warp(reviewedAt + 121);
+        bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(book.orderTiming(orderId).executionDeadline, reviewedAt + 170);
+        assertEq(book.outcome(orderId).timing.submitBy, reviewedAt + 120);
+    }
+
+    function test_SubmitByInclusiveAndReplayNeverRestartsClock() public {
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("submit-boundary"));
+        request.bounds.submitBy = uint64(block.timestamp + 120);
+        request.bounds.executionWindowSeconds = 60;
+        vm.warp(request.bounds.submitBy);
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        uint64 deadline = book.orderTiming(orderId).executionDeadline;
+        vm.warp(uint256(deadline) + 1);
+        vm.prank(ALICE);
+        assertEq(router.commitOrder(request), orderId);
+        assertEq(book.orderTiming(orderId).executionDeadline, deadline);
+        request.clientOrderId = bytes32("late-fresh");
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidSubmitBy.selector);
+        vm.prank(BOB);
+        router.commitOrder(request);
+    }
+
+    function test_ZeroAndOversizedExecutionWindowsRevert() public {
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bad-window"));
+        request.bounds.executionWindowSeconds = 0;
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector);
+        vm.prank(ALICE);
+        router.commitOrder(request);
+        request.bounds.executionWindowSeconds = uint32(router.maxExecutionWindowSeconds() + 1);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector);
+        vm.prank(ALICE);
+        router.commitOrder(request);
+    }
+
+    function test_TimingChangesConflictWithRegisteredIntent() public {
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("timing-conflict"));
+        vm.prank(ALICE);
+        router.commitOrder(request);
+        request.bounds.submitBy++;
+        vm.expectPartialRevert(IOrderLifecycleBook.OrderLifecycleBook__ClientIdConflict.selector);
+        vm.prank(ALICE);
+        router.commitOrder(request);
+        request.bounds.submitBy--;
+        request.bounds.executionWindowSeconds--;
+        vm.expectPartialRevert(IOrderLifecycleBook.OrderLifecycleBook__ClientIdConflict.selector);
+        vm.prank(ALICE);
+        router.commitOrder(request);
+    }
+
     function test_TransientContainmentDoesNotChangeExecutionConfigHash() public {
         bytes32 expectedHash = book.currentExecutionConfigHash();
 
@@ -53,7 +119,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_FreshCommitAndExactReplayHaveNoSecondSideEffect() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("pending-replay"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("pending-replay"));
 
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -86,16 +152,16 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(
             keccak256(abi.encode(book.pendingIntent(orderId))), pendingHashBefore, "pending policy must be immutable"
         );
-        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
     }
 
     function test_ClientIdConflictRevertsWithoutChangingOriginalIntent() public {
-        OrderV2Types.OrderRequest memory original = _openRequest(bytes32("conflict"));
+        OrderV3Types.OrderRequest memory original = _openRequest(bytes32("conflict"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(original);
 
-        OrderV2Types.ClientIntent memory beforeIntent = book.clientIntent(ALICE, original.clientOrderId);
-        OrderV2Types.OrderRequest memory conflicting = original;
+        OrderV3Types.ClientIntent memory beforeIntent = book.clientIntent(ALICE, original.clientOrderId);
+        OrderV3Types.OrderRequest memory conflicting = original;
         conflicting.bounds.maxExplicitFeesUsdc -= 1;
         bytes32 conflictingHash = book.hashOrderRequest(ALICE, conflicting);
 
@@ -111,7 +177,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         );
         router.commitOrder(conflicting);
 
-        OrderV2Types.ClientIntent memory afterIntent = book.clientIntent(ALICE, original.clientOrderId);
+        OrderV3Types.ClientIntent memory afterIntent = book.clientIntent(ALICE, original.clientOrderId);
         assertEq(afterIntent.orderId, orderId);
         assertEq(afterIntent.intentHash, beforeIntent.intentHash);
         assertEq(router.nextCommitId(), orderId + 1);
@@ -119,15 +185,15 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ClientIdIsNamespacedByAccount() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("shared-id"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("shared-id"));
 
         vm.prank(ALICE);
         uint64 aliceOrderId = router.commitOrder(request);
         vm.prank(BOB);
         uint64 bobOrderId = router.commitOrder(request);
 
-        OrderV2Types.ClientIntent memory aliceIntent = book.clientIntent(ALICE, request.clientOrderId);
-        OrderV2Types.ClientIntent memory bobIntent = book.clientIntent(BOB, request.clientOrderId);
+        OrderV3Types.ClientIntent memory aliceIntent = book.clientIntent(ALICE, request.clientOrderId);
+        OrderV3Types.ClientIntent memory bobIntent = book.clientIntent(BOB, request.clientOrderId);
         assertEq(aliceIntent.orderId, aliceOrderId);
         assertEq(bobIntent.orderId, bobOrderId);
         assertTrue(aliceIntent.intentHash != bobIntent.intentHash, "the account is part of the intent domain");
@@ -136,8 +202,8 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_PublicCommitCannotClaimProtocolClientIdNamespace() public {
-        bytes32 clientOrderId = OrderV2Types.protocolClientOrderId(keccak256("predictable-protection-id"));
-        OrderV2Types.OrderRequest memory request = _openRequest(clientOrderId);
+        bytes32 clientOrderId = OrderV3Types.protocolClientOrderId(keccak256("predictable-protection-id"));
+        OrderV3Types.OrderRequest memory request = _openRequest(clientOrderId);
         uint64 nextCommitIdBefore = router.nextCommitId();
         uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
 
@@ -173,7 +239,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     function test_RevertedFirstAttemptDoesNotConsumeClientIdOrReservation() public {
         uint256 quotedBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(OPEN_SIZE);
         _fundTrader(CAROL, quotedBountyUsdc);
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("retry-after-revert"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("retry-after-revert"));
 
         vm.prank(CAROL);
         vm.expectRevert();
@@ -192,29 +258,30 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
         assertEq(orderId, 1);
         assertEq(book.clientIntent(CAROL, request.clientOrderId).orderId, orderId);
-        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
     }
 
     function test_ExecutionNotionalEqualityAndDeadlineEqualityExecuteWithCanonicalReceipt() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("inclusive-equality"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("inclusive-equality"));
         request.bounds.maxExecutionNotionalUsdc = OPEN_NOTIONAL_USDC;
-        request.bounds.validUntil = uint64(block.timestamp + 1);
+        request.bounds.submitBy = uint64(block.timestamp + 1);
+        request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
 
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
-        OrderV2Types.PendingIntent memory pending = book.pendingIntent(orderId);
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
         uint256 keeperBefore = _settlementBalance(KEEPER);
 
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
-        assertEq(block.timestamp, request.bounds.validUntil, "setup must execute exactly at the inclusive deadline");
+        assertEq(block.timestamp, request.bounds.submitBy, "setup must execute exactly at the inclusive deadline");
         vm.recordLogs();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
-        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.Executed));
-        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.None));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.None));
         assertTrue(result.receiptHash != bytes32(0));
         assertEq(_positionSize(ALICE), OPEN_SIZE, "equality at the notional bound must execute");
         assertEq(_settlementBalance(KEEPER) - keeperBefore, pending.executionBountyUsdc);
@@ -223,15 +290,15 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(_remainingCommittedMargin(orderId), 0);
         assertEq(book.pendingIntent(orderId).account, address(0));
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
+        OrderV3Types.CompactOutcome memory outcome = book.outcome(orderId);
         assertEq(outcome.account, ALICE);
         assertEq(outcome.clientOrderId, request.clientOrderId);
         assertEq(outcome.intentHash, pending.intentHash);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Executed));
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Executed));
-        assertEq(uint8(outcome.executionMode), uint8(OrderV2Types.ExecutionMode.Live));
-        assertEq(uint8(outcome.priceSource), uint8(OrderV2Types.PriceSource.OracleExecution));
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid));
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Executed));
+        assertEq(uint8(outcome.executionMode), uint8(OrderV3Types.ExecutionMode.Live));
+        assertEq(uint8(outcome.priceSource), uint8(OrderV3Types.PriceSource.OracleExecution));
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
         assertEq(outcome.executor, KEEPER);
         assertEq(outcome.bountyRecipient, KEEPER);
         assertEq(outcome.executionPrice, EXECUTION_PRICE);
@@ -242,7 +309,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
             bytes32 eventReceiptHash,
             uint64 terminalBlock,
             uint64 terminalTime,
-            OrderV2Types.OrderReceipt memory receipt
+            OrderV3Types.OrderReceipt memory receipt
         ) = _findFinalizedReceipt(logs, orderId);
         assertEq(eventReceiptHash, result.receiptHash);
         assertEq(receipt.orderId, orderId);
@@ -270,64 +337,65 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ExecutionNotionalOneAtomOverBoundFailsWithoutApplyingPosition() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("notional-one-atom"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("notional-one-atom"));
         request.bounds.maxExecutionNotionalUsdc = OPEN_NOTIONAL_USDC - 1;
 
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
-        OrderV2Types.PendingIntent memory pending = book.pendingIntent(orderId);
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
         uint256 aliceBefore = _settlementBalance(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
 
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.ConstraintViolation));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ConstraintViolation));
         assertEq(_positionSize(ALICE), 0, "constraint failure must not apply the planned position");
         assertEq(aliceBefore - _settlementBalance(ALICE), pending.executionBountyUsdc, "only bounty may leave account");
         assertEq(_settlementBalance(KEEPER) - keeperBefore, pending.executionBountyUsdc);
         assertEq(_remainingCommittedMargin(orderId), 0);
         assertEq(router.pendingOrderCounts(ALICE), 0);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.ConstraintViolation));
-        assertEq(uint8(outcome.failedConstraint), uint8(OrderV2Types.ConstraintKind.ExecutionNotional));
+        OrderV3Types.CompactOutcome memory outcome = book.outcome(orderId);
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.ConstraintViolation));
+        assertEq(uint8(outcome.failedConstraint), uint8(OrderV3Types.ConstraintKind.ExecutionNotional));
         assertEq(
             outcome.failureSelector, ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector
         );
         assertEq(outcome.executor, KEEPER);
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid));
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
         assertEq(outcome.receiptHash, result.receiptHash);
     }
 
     function test_OneSecondPastDeadlineExpiresBeforeOracleWork() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("expired"));
-        request.bounds.validUntil = uint64(block.timestamp + 1);
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("expired"));
+        request.bounds.submitBy = uint64(block.timestamp + 1);
+        request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
 
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
-        OrderV2Types.PendingIntent memory pending = book.pendingIntent(orderId);
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
         uint256 pythUpdatesBefore = baseMockPyth.updatePriceFeedsCallCount();
         uint256 uniqueParsesBefore = baseMockPyth.parseUniqueCallCount();
-        vm.warp(uint256(request.bounds.validUntil) + 1);
+        vm.warp(uint256(request.bounds.submitBy) + 1);
 
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, new bytes[](0));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, new bytes[](0));
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.Expired));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), pythUpdatesBefore, "expiry must precede Pyth update");
         assertEq(baseMockPyth.parseUniqueCallCount(), uniqueParsesBefore, "expiry must precede historical parsing");
         assertEq(_positionSize(ALICE), 0);
         assertEq(_remainingCommittedMargin(orderId), 0);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired));
-        assertEq(uint8(outcome.priceSource), uint8(OrderV2Types.PriceSource.None));
+        OrderV3Types.CompactOutcome memory outcome = book.outcome(orderId);
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired));
+        assertEq(uint8(outcome.priceSource), uint8(OrderV3Types.PriceSource.None));
         assertEq(outcome.executionPrice, 0);
         assertEq(outcome.oraclePublishTime, 0);
         assertEq(outcome.executor, KEEPER);
@@ -340,7 +408,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         uint256 activationTime = engineAdmin.calendarConfigActivationTime();
         vm.warp(activationTime - 1);
 
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("config-drift"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("config-drift"));
         bytes32 expectedConfigHash = request.bounds.expectedConfigHash;
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -353,29 +421,29 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertTrue(observedConfigHash != expectedConfigHash, "finalized version must change the digest");
 
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, new bytes[](0));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, new bytes[](0));
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.ConfigMismatch));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ConfigMismatch));
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), pythUpdatesBefore, "config mismatch must precede Pyth");
         assertEq(baseMockPyth.parseUniqueCallCount(), uniqueParsesBefore, "config mismatch must precede history");
         assertEq(_positionSize(ALICE), 0);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
+        OrderV3Types.CompactOutcome memory outcome = book.outcome(orderId);
         assertEq(outcome.expectedConfigHash, expectedConfigHash);
         assertEq(outcome.observedConfigHash, observedConfigHash);
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.ConfigMismatch));
-        assertEq(uint8(outcome.priceSource), uint8(OrderV2Types.PriceSource.None));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.ConfigMismatch));
+        assertEq(uint8(outcome.priceSource), uint8(OrderV3Types.PriceSource.None));
         assertEq(outcome.executionPrice, 0);
         assertEq(outcome.executor, KEEPER);
     }
 
     function test_UnknownEngineFailureIsRetryableAndPreservesReservations() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("unknown-engine"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("unknown-engine"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
 
-        OrderV2Types.PendingIntent memory pendingBefore = book.pendingIntent(orderId);
+        OrderV3Types.PendingIntent memory pendingBefore = book.pendingIntent(orderId);
         uint256 marginBefore = _remainingCommittedMargin(orderId);
         uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
@@ -388,14 +456,14 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
         vm.recordLogs();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         vm.clearMockedCalls();
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
-        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.EngineFailure));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.EngineFailure));
         assertEq(result.receiptHash, bytes32(0));
-        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
         assertEq(book.outcome(orderId).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), keccak256(abi.encode(pendingBefore)));
         assertEq(_remainingCommittedMargin(orderId), marginBefore, "item rollback must restore committed margin");
@@ -408,11 +476,11 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_BountyInvariantFailureIsRetryableAndPreservesReservations() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("bounty-invariant"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bounty-invariant"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
 
-        OrderV2Types.PendingIntent memory pendingBefore = book.pendingIntent(orderId);
+        OrderV3Types.PendingIntent memory pendingBefore = book.pendingIntent(orderId);
         uint256 marginBefore = _remainingCommittedMargin(orderId);
         uint256 freeSettlementBefore = _freeSettlementUsdc(ALICE);
         uint256 keeperBefore = _settlementBalance(KEEPER);
@@ -427,14 +495,14 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
         vm.recordLogs();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         vm.clearMockedCalls();
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
-        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.EngineFailure));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.EngineFailure));
         assertEq(result.receiptHash, bytes32(0));
-        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
         assertEq(book.outcome(orderId).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), keccak256(abi.encode(pendingBefore)));
         assertEq(_remainingCommittedMargin(orderId), marginBefore, "item rollback must restore committed margin");
@@ -447,7 +515,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_MalformedEngineSuccessIsRetryableAndPreservesPendingOrder() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("malformed-engine"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("malformed-engine"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
         uint256 marginBefore = _remainingCommittedMargin(orderId);
@@ -456,12 +524,12 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         vm.mockCall(address(engine), abi.encodeWithSelector(engine.processOrderTyped.selector), abi.encode(uint256(1)));
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
         vm.clearMockedCalls();
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
-        assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.EngineFailure));
-        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.EngineFailure));
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
         assertEq(book.pendingIntent(orderId).executionBountyUsdc, bountyBefore);
         assertEq(_remainingCommittedMargin(orderId), marginBefore);
         assertEq(router.pendingOrderCounts(ALICE), 1);
@@ -469,7 +537,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ZeroBountyMaximumMeansZeroAllowance() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("zero-bounty-cap"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("zero-bounty-cap"));
         request.bounds.maxExecutionBountyUsdc = 0;
         uint256 quotedBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(OPEN_SIZE);
 
@@ -487,24 +555,24 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_RiskOffReceiptAttributesExternalCleanerAndRefundsBountyToAccount() public {
-        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("risk-off-receipt"));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("risk-off-receipt"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
-        OrderV2Types.PendingIntent memory pending = book.pendingIntent(orderId);
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
         uint256 keeperBefore = _settlementBalance(KEEPER);
 
         routerAdmin.pause();
         vm.prank(KEEPER);
         router.clearRiskOffOrder(orderId);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
-        assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.RiskOff));
+        OrderV3Types.CompactOutcome memory outcome = book.outcome(orderId);
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.RiskOff));
         assertEq(outcome.executor, KEEPER, "receipt must retain the external cleaner");
         assertEq(outcome.bountyUsdc, pending.executionBountyUsdc);
         assertEq(outcome.bountyRecipient, ALICE);
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.RefundedToAccount));
-        assertEq(uint8(outcome.priceSource), uint8(OrderV2Types.PriceSource.None));
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RefundedToAccount));
+        assertEq(uint8(outcome.priceSource), uint8(OrderV3Types.PriceSource.None));
         assertEq(outcome.executionPrice, 0);
         assertEq(_settlementBalance(KEEPER), keeperBefore, "risk-off cleaner must not receive the order bounty");
         assertEq(book.pendingIntent(orderId).account, address(0));
@@ -514,15 +582,18 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
     function _openRequest(
         bytes32 clientOrderId
-    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+    ) internal view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = clientOrderId;
         request.side = CfdTypes.Side.LONG;
         request.sizeDelta = OPEN_SIZE;
         request.marginDelta = OPEN_MARGIN_USDC;
         request.targetPrice = 1;
         request.isClose = false;
-        request.bounds = OrderV2Types.ExecutionBounds({
-            validUntil: uint64(block.timestamp + router.maxOrderAge()),
+        request.bounds = OrderV3Types.ExecutionBounds({
+            submitBy: uint64(block.timestamp + router.maxExecutionWindowSeconds()),
+            executionWindowSeconds: uint32(
+                uint256(uint64(block.timestamp + router.maxExecutionWindowSeconds())) - block.timestamp
+            ),
             allowedExecutionModes: 7,
             expectedConfigHash: book.currentExecutionConfigHash(),
             maxExecutionBountyUsdc: type(uint256).max,
@@ -546,7 +617,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
             bytes32 receiptHash,
             uint64 terminalBlock,
             uint64 terminalTime,
-            OrderV2Types.OrderReceipt memory receipt
+            OrderV3Types.OrderReceipt memory receipt
         )
     {
         for (uint256 i; i < logs.length; ++i) {
@@ -554,7 +625,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
                 logs[i].emitter == address(book) && logs[i].topics.length == 4
                     && uint64(uint256(logs[i].topics[1])) == orderId
             ) {
-                return abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV2Types.OrderReceipt));
+                return abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
             }
         }
         fail("missing canonical OrderFinalized receipt");

@@ -443,7 +443,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         buckets = _buildAccountUsdcBuckets(account);
     }
 
-    /// @notice Returns the canonical V2 PnL-isolated settlement classification.
+    /// @notice Returns the canonical V3 PnL-isolated settlement classification.
     function getPnlIsolationBuckets(
         address account
     ) public view returns (IMarginClearinghouse.PnlIsolationBuckets memory buckets) {

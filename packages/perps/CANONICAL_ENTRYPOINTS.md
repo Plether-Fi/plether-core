@@ -10,14 +10,14 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Ordinary trade action: `OrderRouter.commitOrder(OrderV2Types.OrderRequest request)`
-- Fresh external V2 requests must set `expectedConfigHash` to the current nonzero value returned by
+- Ordinary trade action: `OrderRouter.commitOrder(OrderV3Types.OrderRequest request)`
+- Fresh external V3 requests must set `expectedConfigHash` to the current nonzero value returned by
   `OrderLifecycleBook.currentExecutionConfigHash()`; the public commit path rejects zero for a new intent.
 - Emergency policy note: committed orders remain user-uncancellable. If RouterAdmin enters risk-off, each pre-cutoff
   open is instead terminally invalidated by protocol policy and its remaining reservations are refunded to the
   trader's internal clearinghouse balance.
 - Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
-- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV2Types.OrderRequest,PositionProtectionParams)`
+- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
 - Existing-position protection creation locks both bounties first, then applies the canonical V2 exact-price safety
   gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
@@ -217,7 +217,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
   is immutable-bound to the predicted Router, Engine, Clearinghouse, and HousePool; the Router constructor validates
   all four bindings before accepting it. Only that Router may register or finalize lifecycle state, and the Book owns
   no funds or execution authority.
-- `OrderRouterV2ExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
+- `OrderRouterV3ExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
   execution, failure classification, and receipts. Direct stateful calls are rejected; integrations call the Router.
 - `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, exactly Router-bound stateless
   implementation detail for mark refresh, protection-trigger oracle/orchestration, single and batch liquidation, and

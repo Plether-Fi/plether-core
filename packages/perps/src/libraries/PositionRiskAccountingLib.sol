@@ -113,7 +113,7 @@ library PositionRiskAccountingLib {
         return (borrowBaseUsdc * carryIndexDelta) / CARRY_INDEX_SCALE;
     }
 
-    /// @notice Builds canonical V2 price-risk equity without mixing action charges into PnL backing.
+    /// @notice Builds canonical V3 price-risk equity without mixing action charges into PnL backing.
     /// @dev Equity is exactly `pnlPledge + same-account nettable claim + exact price PnL`. Callers supply pledge after
     ///      carry collection or projection; carry must not be deducted again here. VPI backing is checked separately.
     function buildExactPriceRiskState(

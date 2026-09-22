@@ -257,7 +257,7 @@ contract AdminConfigVersionTest is Test {
     }
 
     function _routerConfig() private pure returns (IOrderRouterAdminHost.RouterConfig memory config) {
-        config.maxOrderAge = 60;
+        config.maxExecutionWindowSeconds = 60;
         config.orderExecutionStalenessLimit = 60;
         config.liquidationStalenessLimit = 60;
         config.basketMaxConfidenceRatioBps = 100;

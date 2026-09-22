@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 /// @notice Canonical custom errors and commit event shared by the delayed-order router stack.
@@ -44,9 +44,9 @@ interface IOrderRouterErrors {
     error OrderRouter__InsufficientPythFee();
     /// @notice The engine-lens dependency is the zero address.
     error OrderRouter__InvalidEngineLens();
-    /// @notice The V2 policy-evaluator dependency is zero or has no deployed code.
+    /// @notice The V3 policy-evaluator dependency is zero or has no deployed code.
     error OrderRouter__InvalidPolicyEvaluator();
-    /// @notice The immutable V2 execution-sidecar dependency is zero or has no deployed code.
+    /// @notice The immutable V3 execution-sidecar dependency is zero or has no deployed code.
     error OrderRouter__InvalidExecutionSidecar();
     /// @notice The supplied lifecycle Book has no code or does not match this Router's immutable protocol bindings.
     error OrderRouter__InvalidLifecycleBook();
@@ -100,17 +100,19 @@ interface IOrderRouterErrors {
     error OrderRouter__InsufficientFreeEquity();
     /// @notice Committing another order would exceed the per-account pending-order limit.
     error OrderRouter__TooManyPendingOrders();
-    /// @notice A fresh V2 request supplied the reserved zero client-order identifier.
+    /// @notice A fresh V3 request supplied the reserved zero client-order identifier.
     error OrderRouter__ZeroClientOrderId();
-    /// @notice A fresh V2 request omitted its mandatory direction-aware target price.
+    /// @notice A fresh V3 request omitted its mandatory direction-aware target price.
     error OrderRouter__ZeroTargetPrice();
-    /// @notice A fresh V2 request supplied an expired deadline or one beyond the active maximum order age.
-    error OrderRouter__InvalidValidUntil();
-    /// @notice A fresh V2 request supplied no execution mode or included an undefined mode bit.
+    /// @notice A fresh V3 request supplied an elapsed submission deadline.
+    error OrderRouter__InvalidSubmitBy();
+    /// @notice The execution duration is zero or exceeds the configured maximum.
+    error OrderRouter__InvalidExecutionWindow();
+    /// @notice A fresh V3 request supplied no execution mode or included an undefined mode bit.
     error OrderRouter__InvalidExecutionModeMask();
-    /// @notice A fresh V2 request did not pin the currently authoritative execution configuration.
+    /// @notice A fresh V3 request did not pin the currently authoritative execution configuration.
     error OrderRouter__ExecutionConfigMismatch(bytes32 expectedConfigHash, bytes32 currentConfigHash);
-    /// @notice A fresh V2 request omitted its mandatory post-position leverage ceiling.
+    /// @notice A fresh V3 request omitted its mandatory post-position leverage ceiling.
     error OrderRouter__ZeroPostLeverageBound();
     /// @notice The quoted execution bounty alone exceeds the request's gross-account-debit ceiling.
     error OrderRouter__ExecutionBountyAboveGrossDebit(uint256 executionBountyUsdc, uint256 maximumGrossDebitUsdc);
@@ -232,7 +234,7 @@ interface IOrderRouterErrors {
         uint64 indexed protectionId,
         address indexed account,
         uint64 indexed linkedOrderId,
-        OrderV2Types.TerminalReason reason,
+        OrderV3Types.TerminalReason reason,
         bool relatched
     );
 

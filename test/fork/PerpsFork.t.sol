@@ -17,8 +17,8 @@ import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -154,7 +154,7 @@ contract PerpsForkTest is Test {
         PletherOracle oracle =
             new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
         OrderLifecycleBook lifecycleBook =
@@ -264,7 +264,7 @@ contract PerpsForkTest is Test {
 
     function _configureLongOrderExpiry() internal {
         IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = 1000;
+        config.maxExecutionWindowSeconds = 1000;
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
@@ -308,13 +308,13 @@ contract PerpsForkTest is Test {
         uint256 margin,
         uint256 targetPrice,
         bool isClose
-    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+    ) internal view returns (OrderV3Types.OrderRequest memory request) {
         if (targetPrice == 0) {
             targetPrice = isClose
                 ? (side == CfdTypes.Side.LONG ? type(uint256).max : 1)
                 : (side == CfdTypes.Side.LONG ? 1 : type(uint256).max);
         }
-        request = OrderV2Types.OrderRequest({
+        request = OrderV3Types.OrderRequest({
             clientOrderId: keccak256(
                 abi.encode("PerpsForkTest", block.chainid, address(router), trader, router.nextCommitId())
             ),
@@ -323,8 +323,11 @@ contract PerpsForkTest is Test {
             marginDelta: margin,
             targetPrice: targetPrice,
             isClose: isClose,
-            bounds: OrderV2Types.ExecutionBounds({
-                validUntil: uint64(block.timestamp + router.maxOrderAge()),
+            bounds: OrderV3Types.ExecutionBounds({
+                submitBy: uint64(block.timestamp + router.maxExecutionWindowSeconds()),
+                executionWindowSeconds: uint32(
+                    uint256(uint64(block.timestamp + router.maxExecutionWindowSeconds())) - block.timestamp
+                ),
                 allowedExecutionModes: 7,
                 expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
                 maxExecutionBountyUsdc: type(uint256).max,
@@ -429,7 +432,7 @@ contract PerpsForkTest is Test {
         PletherOracle realPythOracle =
             new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
         CfdOrderPolicyEvaluator realPythEvaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar realPythExecutionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar realPythExecutionSidecar = new OrderRouterV3ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
         OrderLifecycleBook lifecycleBook =

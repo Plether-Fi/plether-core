@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
-/// @title Immutable V2 order lifecycle book
+/// @title Immutable V3 order lifecycle book
 /// @notice Permanent idempotency records and authenticated terminal receipts for delayed orders.
 interface IOrderLifecycleBook {
 
@@ -47,7 +47,8 @@ interface IOrderLifecycleBook {
         bytes32 indexed clientOrderId,
         bytes32 intentHash,
         uint256 executionBountyUsdc,
-        OrderV2Types.OrderRequest request
+        OrderV3Types.OrderRequest request,
+        OrderV3Types.OrderTiming timing
     );
 
     /// @notice Emitted after the Router authenticates a pending internal intent as a position-protection attempt.
@@ -62,7 +63,7 @@ interface IOrderLifecycleBook {
         bytes32 receiptHash,
         uint64 terminalBlock,
         uint64 terminalTime,
-        OrderV2Types.OrderReceipt receipt
+        OrderV3Types.OrderReceipt receipt
     );
 
     function ROUTER() external view returns (address);
@@ -85,14 +86,14 @@ interface IOrderLifecycleBook {
     /// @notice Computes the canonical account-scoped intent hash.
     function hashOrderRequest(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) external view returns (bytes32 intentHash);
 
     /// @notice Resolves a request before current-state commit validation.
     function resolveClientIntent(
         address account,
-        OrderV2Types.OrderRequest calldata request
-    ) external view returns (OrderV2Types.ClientIntentResolution resolution, uint64 orderId, bytes32 intentHash);
+        OrderV3Types.OrderRequest calldata request
+    ) external view returns (OrderV3Types.ClientIntentResolution resolution, uint64 orderId, bytes32 intentHash);
 
     /// @notice Permanently binds a new client id and stores its pending policy.
     /// @dev Exact replay is a no-op and returns the original order id; conflicting reuse reverts. Fresh requests with
@@ -100,7 +101,7 @@ interface IOrderLifecycleBook {
     function registerPending(
         address account,
         uint64 proposedOrderId,
-        OrderV2Types.OrderRequest calldata request,
+        OrderV3Types.OrderRequest calldata request,
         uint256 executionBountyUsdc
     ) external returns (uint64 resolvedOrderId, bytes32 intentHash, bool replayed);
 
@@ -118,29 +119,34 @@ interface IOrderLifecycleBook {
 
     /// @notice Atomically deletes pending policy, stores a compact outcome, and emits the full receipt.
     function finalize(
-        OrderV2Types.OrderReceipt calldata receipt
+        OrderV3Types.OrderReceipt calldata receipt
     ) external returns (bytes32 receiptHash);
 
     function clientIntent(
         address account,
         bytes32 clientOrderId
-    ) external view returns (OrderV2Types.ClientIntent memory intent);
+    ) external view returns (OrderV3Types.ClientIntent memory intent);
 
     function pendingIntent(
         uint64 orderId
-    ) external view returns (OrderV2Types.PendingIntent memory intent);
+    ) external view returns (OrderV3Types.PendingIntent memory intent);
+
+    /// @notice Timing from the canonical commitment, retained after finalization; zero for an unknown order.
+    function orderTiming(
+        uint64 orderId
+    ) external view returns (OrderV3Types.OrderTiming memory);
 
     function pendingPolicy(
         uint64 orderId
-    ) external view returns (OrderV2Types.ExecutionBounds memory bounds);
+    ) external view returns (OrderV3Types.ExecutionBounds memory bounds);
 
     /// @notice Returns Pending while live, otherwise the permanent terminal status or None for an unknown id.
     function lifecycleStatus(
         uint64 orderId
-    ) external view returns (OrderV2Types.LifecycleStatus status);
+    ) external view returns (OrderV3Types.LifecycleStatus status);
 
     function outcome(
         uint64 orderId
-    ) external view returns (OrderV2Types.CompactOutcome memory terminalOutcome);
+    ) external view returns (OrderV3Types.CompactOutcome memory terminalOutcome);
 
 }

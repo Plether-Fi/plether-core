@@ -20,7 +20,7 @@ import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -59,11 +59,11 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
         MarginClearinghouse clearinghouse,
         HousePool housePool,
         CfdOrderPolicyEvaluator orderPolicyEvaluator,
-        OrderRouterV2ExecutionSidecar orderExecutionSidecar,
+        OrderRouterV3ExecutionSidecar orderExecutionSidecar,
         OrderRouter router
     ) external view returns (OrderLifecycleBook lifecycleBook) {
         return
-            _verifyV2OrderStack(engine, clearinghouse, housePool, orderPolicyEvaluator, orderExecutionSidecar, router);
+            _verifyV3OrderStack(engine, clearinghouse, housePool, orderPolicyEvaluator, orderExecutionSidecar, router);
     }
 
 }
@@ -251,7 +251,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
             address(engine), address(genericPool), address(pyth), feedIds, quantities, basePrices, inversions
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address expectedRouter = vm.computeCreateAddress(address(this), uint256(routerDependencyNonce) + 2);
         OrderLifecycleBook lifecycleBook =
@@ -309,7 +309,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         );
         CfdEngineLens engineLens = new CfdEngineLens(address(engine));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address expectedRouter = vm.computeCreateAddress(address(this), uint256(routerDependencyNonce) + 2);
         OrderLifecycleBook predeployedLifecycleBook =
@@ -341,7 +341,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         bootstrapScript.verifyRouterWiring(pool, router);
     }
 
-    function test_DeploymentGuardsAcceptCanonicalV2OrderStackAndRejectMixedPolicyModule() public {
+    function test_DeploymentGuardsAcceptCanonicalV3OrderStackAndRejectMixedPolicyModule() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
         MockUSDC usdc = new MockUSDC();
@@ -374,7 +374,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         CfdEngineLens engineLens = new CfdEngineLens(address(engine));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address expectedRouter = vm.computeCreateAddress(address(this), uint256(routerDependencyNonce) + 2);
         OrderLifecycleBook predeployedLifecycleBook =
@@ -720,7 +720,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     function _activeRouterConfig(
         OrderRouter router
     ) internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
-        config.maxOrderAge = router.maxOrderAge();
+        config.maxExecutionWindowSeconds = router.maxExecutionWindowSeconds();
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();

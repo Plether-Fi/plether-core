@@ -19,7 +19,7 @@ import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -70,7 +70,7 @@ abstract contract BasePerpInvariantTest is Test {
             address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(housePool));

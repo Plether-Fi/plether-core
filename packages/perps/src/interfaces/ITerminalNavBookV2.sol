@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
-/// @title Exact terminal price-PnL book for the V2 perps engine
+/// @title Exact terminal price-PnL book for the V3 perps engine
 /// @notice Maintains a position-count-independent aggregate of account-local, collateral-capped price PnL.
 /// @dev Prices use 8 decimals. `lots` count exact 100-token position quanta and monetary fields use native
 ///      6-decimal USDC atoms. Positive terminal values are collectible by LPs; negative values are owed to traders.

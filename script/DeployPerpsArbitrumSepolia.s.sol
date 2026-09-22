@@ -20,7 +20,7 @@ import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
+import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
@@ -182,7 +182,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineLens engineLens;
         CfdOrderPolicyEvaluator orderPolicyEvaluator;
         CfdClosePreview closePreview;
-        OrderRouterV2ExecutionSidecar orderExecutionSidecar;
+        OrderRouterV3ExecutionSidecar orderExecutionSidecar;
         OrderRouter router;
         OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
         address positionProtectionBook;
@@ -276,9 +276,9 @@ contract DeployPerpsArbitrumSepolia is Script {
             )
         );
         deployed.orderPolicyEvaluator = new CfdOrderPolicyEvaluator();
-        deployed.closePreview = new CfdClosePreview();
+        deployed.closePreview = new CfdClosePreview(address(deployed.engine));
         require(address(deployed.closePreview).code.length > 0, "Close preview has no code");
-        deployed.orderExecutionSidecar = new OrderRouterV2ExecutionSidecar();
+        deployed.orderExecutionSidecar = new OrderRouterV3ExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(deployer);
         address expectedRouter = vm.computeCreateAddress(deployer, uint256(routerDependencyNonce) + 2);
         deployed.lifecycleBook = new OrderLifecycleBook(
@@ -303,7 +303,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.engine.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
         require(deployed.engine.orderRouter() == address(deployed.router), "Engine OrderRouter mismatch");
-        OrderLifecycleBook verifiedLifecycleBook = _verifyV2OrderStack(
+        OrderLifecycleBook verifiedLifecycleBook = _verifyV3OrderStack(
             deployed.engine,
             deployed.clearinghouse,
             deployed.housePool,
@@ -508,13 +508,13 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(candidate.ENGINE() == address(engine), "PositionProtectionBook engine mismatch");
     }
 
-    /// @dev Verifies the independently deployed V2 policy modules and predeployed authoritative lifecycle book.
-    function _verifyV2OrderStack(
+    /// @dev Verifies the independently deployed V3 policy modules and predeployed authoritative lifecycle book.
+    function _verifyV3OrderStack(
         CfdEngine engine,
         MarginClearinghouse clearinghouse,
         HousePool housePool,
         CfdOrderPolicyEvaluator orderPolicyEvaluator,
-        OrderRouterV2ExecutionSidecar orderExecutionSidecar,
+        OrderRouterV3ExecutionSidecar orderExecutionSidecar,
         OrderRouter router
     ) internal view returns (OrderLifecycleBook lifecycleBook) {
         require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
@@ -678,7 +678,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));
         console.log("CfdClosePreview:", address(deployed.closePreview));
-        console.log("OrderRouterV2ExecutionSidecar:", address(deployed.orderExecutionSidecar));
+        console.log("OrderRouterV3ExecutionSidecar:", address(deployed.orderExecutionSidecar));
         console.log("OrderRouter:", address(deployed.router));
         console.log("MinimumOpenNotionalUsdc:", deployed.router.minOpenNotionalUsdc());
         console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());

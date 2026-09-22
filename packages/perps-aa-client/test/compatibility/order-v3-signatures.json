@@ -1,0 +1,8 @@
+{
+  "commitOrder": "commitOrder((bytes32,uint8,uint256,uint256,uint256,bool,(uint64,uint32,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32)))",
+  "orderTiming": "orderTiming(uint64)",
+  "IntentRegistered": "IntentRegistered(uint64,address,bytes32,bytes32,uint256,(bytes32,uint8,uint256,uint256,uint256,bool,(uint64,uint32,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32)),(uint64,uint32,uint64,uint64))",
+  "OrderFinalized": "OrderFinalized(uint64,address,bytes32,bytes32,uint64,uint64,(uint64,address,bytes32,bytes32,bytes32,bytes32,uint8,uint8,uint8,address,uint8,uint256,uint256,uint256,uint64,bool,uint256,address,uint8,(bytes4,uint8,uint8,uint8,uint256,uint256,bytes32),(uint256,int256,int256,int256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,int256,uint256),(uint64,uint32,uint64,uint64)))",
+  "commitOpenOrderWithProtection": "commitOpenOrderWithProtection((bytes32,uint8,uint256,uint256,uint256,bool,(uint64,uint32,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32)),(uint256,uint256))",
+  "validateSponsoredClose": "validateSponsoredClose(address,(bytes32,uint8,uint256,uint256,uint256,bool,(uint64,uint32,uint8,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint32)),uint256)"
+}

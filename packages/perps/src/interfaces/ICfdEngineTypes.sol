@@ -71,7 +71,7 @@ interface ICfdEngineTypes {
     error CfdEngine__NotAccountOwner();
     /// @notice An operation requiring an existing position was requested for an account without one.
     error CfdEngine__NoOpenPosition();
-    /// @notice Unused legacy selector retained in the shared ABI; V2 has no accumulated-debt repayment path.
+    /// @notice Unused legacy selector retained in the shared ABI; V3 has no accumulated-debt repayment path.
     error CfdEngine__BadDebtTooLarge();
     /// @notice Risk, fee, spread, price-cap, or liquidation-bounty parameters violate engine bounds.
     error CfdEngine__InvalidRiskParams();
@@ -163,7 +163,7 @@ interface ICfdEngineTypes {
     /// @notice Legacy event describing a change to the engine's live cached-mark staleness component.
     /// @param newStaleness New maximum age in seconds.
     event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
-    /// @notice Unused legacy event retained in the shared ABI; V2 does not emit or maintain accumulated debt.
+    /// @notice Unused legacy event retained in the shared ABI; V3 does not emit or maintain accumulated debt.
     /// @param amount Legacy cleared amount in USDC.
     /// @param remaining Legacy remaining amount in USDC.
     event BadDebtCleared(uint256 amount, uint256 remaining);
@@ -318,7 +318,7 @@ interface ICfdEngineTypes {
     /// @param immediatePayoutUsdc Portion of the fresh payout paid immediately into clearinghouse settlement.
     /// @param traderClaimBalanceUsdc Projected claim balance after consuming old claims and recording deferred payout.
     /// @param seizedCollateralUsdc PnL pledge collected for price loss; excludes carry and action charges.
-    /// @param badDebtUsdc Compatibility diagnostic for price loss above the exact collectible cap; V2 does not store it
+    /// @param badDebtUsdc Compatibility diagnostic for price loss above the exact collectible cap; V3 does not store it
     ///        as debt or include it in LP NAV.
     /// @param remainingSize Position size after the close.
     /// @param remainingMargin Active position margin after the close.
@@ -439,7 +439,7 @@ interface ICfdEngineTypes {
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
     /// @param immediatePayoutUsdc Portion of fresh trader payout paid immediately into clearinghouse settlement.
     /// @param traderClaimBalanceUsdc Projected claim balance after netting and any deferred fresh payout.
-    /// @param badDebtUsdc Compatibility diagnostic for price loss above the exact collectible cap; V2 does not store it
+    /// @param badDebtUsdc Compatibility diagnostic for price loss above the exact collectible cap; V3 does not store it
     ///        as debt or include it in LP NAV.
     /// @param triggersDegradedMode Whether liquidation newly reveals adjusted pool insolvency.
     /// @param postOpDegradedMode Projected degraded-mode latch after liquidation.

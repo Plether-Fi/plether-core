@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
@@ -49,15 +49,15 @@ interface IOrderLifecyclePoolConfigView {
 }
 
 /// @title OrderLifecycleBook
-/// @notice Immutable Router-owned registry for V2 idempotency and terminal execution evidence.
+/// @notice Immutable Router-owned registry for V3 idempotency and terminal execution evidence.
 /// @dev This contract holds no funds and intentionally has no owner, upgrade, migration, or arbitrary mutation path.
 /// @custom:security-contact contact@plether.com
 contract OrderLifecycleBook is IOrderLifecycleBook {
 
     /// @inheritdoc IOrderLifecycleBook
     bytes32 public constant override INTENT_TYPEHASH = keccak256(
-        "PletherOrderIntentV2(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,"
-        "uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 validUntil,"
+        "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,"
+        "uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 submitBy,uint32 executionWindowSeconds,"
         "uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,"
         "uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,"
         "uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,"
@@ -66,12 +66,12 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
 
     /// @inheritdoc IOrderLifecycleBook
     bytes32 public constant override RECEIPT_TYPEHASH = keccak256(
-        "PletherOrderReceiptV3(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,"
+        "PletherOrderReceiptV4(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,"
         "OrderReceipt receipt)"
     );
 
     /// @inheritdoc IOrderLifecycleBook
-    bytes32 public constant override CONFIG_SCHEMA_HASH = keccak256("PletherExecutionConfigV3");
+    bytes32 public constant override CONFIG_SCHEMA_HASH = keccak256("PletherExecutionConfigV4");
 
     /// @inheritdoc IOrderLifecycleBook
     address public immutable override ROUTER;
@@ -86,17 +86,17 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     address public immutable override HOUSE_POOL;
 
     /// @notice Permanent account-scoped client id commitments with enforced public and protocol subdomains.
-    mapping(address account => mapping(bytes32 clientOrderId => OrderV2Types.ClientIntent intent)) private
+    mapping(address account => mapping(bytes32 clientOrderId => OrderV3Types.ClientIntent intent)) private
         _clientIntents;
 
     /// @notice Ephemeral policy and identity required to authenticate terminal settlement.
-    mapping(uint64 orderId => OrderV2Types.PendingIntent intent) private _pendingIntents;
+    mapping(uint64 orderId => OrderV3Types.PendingIntent intent) private _pendingIntents;
 
     /// @notice Ephemeral Router-authenticated marker for retryable position-protection child orders.
     mapping(uint64 orderId => bool registered) private _protectionAttempts;
 
     /// @notice Permanent compact terminal outcomes.
-    mapping(uint64 orderId => OrderV2Types.CompactOutcome terminalOutcome) private _outcomes;
+    mapping(uint64 orderId => OrderV3Types.CompactOutcome terminalOutcome) private _outcomes;
 
     modifier onlyRouter() {
         if (msg.sender != ROUTER) {
@@ -105,7 +105,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         _;
     }
 
-    /// @notice Binds the predicted Router and its immutable V2 protocol dependencies.
+    /// @notice Binds the predicted Router and its immutable V3 protocol dependencies.
     /// @dev The Book is deployed immediately before its Router to keep Book creation code out of Router initcode.
     ///      The Router constructor validates every binding before accepting this instance.
     constructor(
@@ -161,41 +161,41 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @inheritdoc IOrderLifecycleBook
     function hashOrderRequest(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) public view override returns (bytes32 intentHash) {
         // OrderRequest and its nested ExecutionBounds contain only static ABI values in the canonical field order.
         // Encoding the tuple directly therefore produces the same flat words named by INTENT_TYPEHASH without keeping
-        // all twenty-two values live on the compiler stack.
+        // all twenty-three values live on the compiler stack.
         return keccak256(abi.encode(INTENT_TYPEHASH, block.chainid, ROUTER, account, request));
     }
 
     /// @inheritdoc IOrderLifecycleBook
     function resolveClientIntent(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     )
         external
         view
         override
-        returns (OrderV2Types.ClientIntentResolution resolution, uint64 orderId, bytes32 intentHash)
+        returns (OrderV3Types.ClientIntentResolution resolution, uint64 orderId, bytes32 intentHash)
     {
         intentHash = hashOrderRequest(account, request);
-        OrderV2Types.ClientIntent memory existing = _clientIntents[account][request.clientOrderId];
+        OrderV3Types.ClientIntent memory existing = _clientIntents[account][request.clientOrderId];
         orderId = existing.orderId;
         if (orderId == 0) {
-            return (OrderV2Types.ClientIntentResolution.Unused, 0, intentHash);
+            return (OrderV3Types.ClientIntentResolution.Unused, 0, intentHash);
         }
         if (existing.intentHash == intentHash) {
-            return (OrderV2Types.ClientIntentResolution.ExactReplay, orderId, intentHash);
+            return (OrderV3Types.ClientIntentResolution.ExactReplay, orderId, intentHash);
         }
-        return (OrderV2Types.ClientIntentResolution.Conflict, orderId, intentHash);
+        return (OrderV3Types.ClientIntentResolution.Conflict, orderId, intentHash);
     }
 
     /// @inheritdoc IOrderLifecycleBook
     function registerPending(
         address account,
         uint64 proposedOrderId,
-        OrderV2Types.OrderRequest calldata request,
+        OrderV3Types.OrderRequest calldata request,
         uint256 executionBountyUsdc
     ) external override onlyRouter returns (uint64 resolvedOrderId, bytes32 intentHash, bool replayed) {
         if (account == address(0)) {
@@ -206,7 +206,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         }
 
         intentHash = hashOrderRequest(account, request);
-        OrderV2Types.ClientIntent memory existing = _clientIntents[account][request.clientOrderId];
+        OrderV3Types.ClientIntent memory existing = _clientIntents[account][request.clientOrderId];
         if (existing.orderId != 0) {
             if (existing.intentHash != intentHash) {
                 revert OrderLifecycleBook__ClientIdConflict(
@@ -217,7 +217,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         }
 
         bool protocolIntent = request.bounds.expectedConfigHash == bytes32(0);
-        if (OrderV2Types.isProtocolClientOrderId(request.clientOrderId) != protocolIntent) {
+        if (OrderV3Types.isProtocolClientOrderId(request.clientOrderId) != protocolIntent) {
             revert OrderLifecycleBook__ClientIdDomainMismatch(request.clientOrderId, protocolIntent);
         }
 
@@ -231,22 +231,35 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         }
         if (
             _pendingIntents[proposedOrderId].account != address(0)
-                || _outcomes[proposedOrderId].status != OrderV2Types.LifecycleStatus.None
+                || _outcomes[proposedOrderId].status != OrderV3Types.LifecycleStatus.None
         ) {
             revert OrderLifecycleBook__OrderIdAlreadyUsed(proposedOrderId);
         }
 
+        uint256 deadline = block.timestamp + uint256(request.bounds.executionWindowSeconds);
+        if (block.timestamp > type(uint64).max || deadline > type(uint64).max) {
+            revert OrderLifecycleBook__TerminalClockOverflow();
+        }
+        OrderV3Types.OrderTiming memory timing = OrderV3Types.OrderTiming({
+            submitBy: request.bounds.submitBy,
+            executionWindowSeconds: request.bounds.executionWindowSeconds,
+            commitTimestamp: uint64(block.timestamp),
+            executionDeadline: uint64(deadline)
+        });
         _clientIntents[account][request.clientOrderId] =
-            OrderV2Types.ClientIntent({orderId: proposedOrderId, intentHash: intentHash});
-        _pendingIntents[proposedOrderId] = OrderV2Types.PendingIntent({
+            OrderV3Types.ClientIntent({orderId: proposedOrderId, intentHash: intentHash});
+        _pendingIntents[proposedOrderId] = OrderV3Types.PendingIntent({
             account: account,
             clientOrderId: request.clientOrderId,
             intentHash: intentHash,
             executionBountyUsdc: executionBountyUsdc,
-            bounds: request.bounds
+            bounds: request.bounds,
+            timing: timing
         });
 
-        emit IntentRegistered(proposedOrderId, account, request.clientOrderId, intentHash, executionBountyUsdc, request);
+        emit IntentRegistered(
+            proposedOrderId, account, request.clientOrderId, intentHash, executionBountyUsdc, request, timing
+        );
         return (proposedOrderId, intentHash, false);
     }
 
@@ -254,7 +267,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function registerProtectionAttempt(
         uint64 orderId
     ) external override onlyRouter {
-        OrderV2Types.PendingIntent storage pending = _pendingIntents[orderId];
+        OrderV3Types.PendingIntent storage pending = _pendingIntents[orderId];
         if (pending.account == address(0) || pending.bounds.expectedConfigHash != bytes32(0)) {
             revert OrderLifecycleBook__InvalidProtectionAttempt(orderId);
         }
@@ -274,9 +287,9 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
 
     /// @inheritdoc IOrderLifecycleBook
     function finalize(
-        OrderV2Types.OrderReceipt calldata receipt
+        OrderV3Types.OrderReceipt calldata receipt
     ) external override onlyRouter returns (bytes32 receiptHash) {
-        OrderV2Types.PendingIntent storage pending = _pendingIntents[receipt.orderId];
+        OrderV3Types.PendingIntent storage pending = _pendingIntents[receipt.orderId];
         if (pending.account == address(0)) {
             revert OrderLifecycleBook__OrderNotPending(receipt.orderId);
         }
@@ -285,6 +298,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
                 || receipt.intentHash != pending.intentHash
                 || receipt.expectedConfigHash != pending.bounds.expectedConfigHash
                 || receipt.bountyUsdc != pending.executionBountyUsdc
+                || keccak256(abi.encode(receipt.timing)) != keccak256(abi.encode(pending.timing))
         ) {
             revert OrderLifecycleBook__ReceiptIdentityMismatch(receipt.orderId);
         }
@@ -299,8 +313,8 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             abi.encode(RECEIPT_TYPEHASH, block.chainid, address(this), ROUTER, terminalBlock, terminalTime, receipt)
         );
 
-        OrderV2Types.FailureDetails calldata failure = receipt.failure;
-        _outcomes[receipt.orderId] = OrderV2Types.CompactOutcome({
+        OrderV3Types.FailureDetails calldata failure = receipt.failure;
+        _outcomes[receipt.orderId] = OrderV3Types.CompactOutcome({
             account: receipt.account,
             clientOrderId: receipt.clientOrderId,
             intentHash: receipt.intentHash,
@@ -323,7 +337,8 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             failureCode: failure.code,
             failedConstraint: failure.constraint,
             revertDataHash: failure.revertDataHash,
-            receiptHash: receiptHash
+            receiptHash: receiptHash,
+            timing: pending.timing
         });
         delete _pendingIntents[receipt.orderId];
         delete _protectionAttempts[receipt.orderId];
@@ -337,30 +352,40 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function clientIntent(
         address account,
         bytes32 clientOrderId
-    ) external view override returns (OrderV2Types.ClientIntent memory intent) {
+    ) external view override returns (OrderV3Types.ClientIntent memory intent) {
         return _clientIntents[account][clientOrderId];
     }
 
     /// @inheritdoc IOrderLifecycleBook
     function pendingIntent(
         uint64 orderId
-    ) external view override returns (OrderV2Types.PendingIntent memory intent) {
+    ) external view override returns (OrderV3Types.PendingIntent memory intent) {
         return _pendingIntents[orderId];
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function orderTiming(
+        uint64 orderId
+    ) external view override returns (OrderV3Types.OrderTiming memory) {
+        if (_pendingIntents[orderId].account != address(0)) {
+            return _pendingIntents[orderId].timing;
+        }
+        return _outcomes[orderId].timing;
     }
 
     /// @inheritdoc IOrderLifecycleBook
     function pendingPolicy(
         uint64 orderId
-    ) external view override returns (OrderV2Types.ExecutionBounds memory bounds) {
+    ) external view override returns (OrderV3Types.ExecutionBounds memory bounds) {
         return _pendingIntents[orderId].bounds;
     }
 
     /// @inheritdoc IOrderLifecycleBook
     function lifecycleStatus(
         uint64 orderId
-    ) external view override returns (OrderV2Types.LifecycleStatus status) {
+    ) external view override returns (OrderV3Types.LifecycleStatus status) {
         if (_pendingIntents[orderId].account != address(0)) {
-            return OrderV2Types.LifecycleStatus.Pending;
+            return OrderV3Types.LifecycleStatus.Pending;
         }
         return _outcomes[orderId].status;
     }
@@ -368,23 +393,23 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     /// @inheritdoc IOrderLifecycleBook
     function outcome(
         uint64 orderId
-    ) external view override returns (OrderV2Types.CompactOutcome memory terminalOutcome) {
+    ) external view override returns (OrderV3Types.CompactOutcome memory terminalOutcome) {
         return _outcomes[orderId];
     }
 
     /// @notice Enforces monotonic and semantically valid terminal transitions.
     function _validateTerminalOutcome(
-        OrderV2Types.OrderReceipt calldata receipt,
-        OrderV2Types.ExecutionBounds storage bounds
+        OrderV3Types.OrderReceipt calldata receipt,
+        OrderV3Types.ExecutionBounds storage bounds
     ) private view {
         if (receipt.executor == address(0)) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
         }
         _validateBountyDisposition(receipt);
 
-        if (receipt.status == OrderV2Types.LifecycleStatus.Executed) {
+        if (receipt.status == OrderV3Types.LifecycleStatus.Executed) {
             if (
-                receipt.reason != OrderV2Types.TerminalReason.Executed || !receipt.priceReachedEngine
+                receipt.reason != OrderV3Types.TerminalReason.Executed || !receipt.priceReachedEngine
                     || !_isEmptyFailure(receipt.failure)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
@@ -393,24 +418,24 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             return;
         }
         if (
-            receipt.status != OrderV2Types.LifecycleStatus.Failed || receipt.reason == OrderV2Types.TerminalReason.None
-                || receipt.reason == OrderV2Types.TerminalReason.Executed
+            receipt.status != OrderV3Types.LifecycleStatus.Failed || receipt.reason == OrderV3Types.TerminalReason.None
+                || receipt.reason == OrderV3Types.TerminalReason.Executed
         ) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
         }
 
-        OrderV2Types.TerminalReason reason = receipt.reason;
-        if (reason == OrderV2Types.TerminalReason.RiskOff) {
+        OrderV3Types.TerminalReason reason = receipt.reason;
+        if (reason == OrderV3Types.TerminalReason.RiskOff) {
             _validateNoPriceEvidence(receipt);
             if (!_isEmptyFailure(receipt.failure)) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
             return;
         }
-        if (reason == OrderV2Types.TerminalReason.AccountLiquidated) {
+        if (reason == OrderV3Types.TerminalReason.AccountLiquidated) {
             if (
-                receipt.executionMode != OrderV2Types.ExecutionMode.None
-                    || receipt.priceSource != OrderV2Types.PriceSource.Liquidation || receipt.executionPrice == 0
+                receipt.executionMode != OrderV3Types.ExecutionMode.None
+                    || receipt.priceSource != OrderV3Types.PriceSource.Liquidation || receipt.executionPrice == 0
                     || receipt.neutralMarkPrice == 0 || receipt.oraclePublishTime == 0 || receipt.priceReachedEngine
                     || !_isEmptyFailure(receipt.failure)
             ) {
@@ -418,11 +443,11 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             }
             return;
         }
-        if (reason == OrderV2Types.TerminalReason.Expired || reason == OrderV2Types.TerminalReason.ConfigMismatch) {
+        if (reason == OrderV3Types.TerminalReason.Expired || reason == OrderV3Types.TerminalReason.ConfigMismatch) {
             _validateNoPriceEvidence(receipt);
             if (
                 !_isEmptyFailure(receipt.failure)
-                    || (reason == OrderV2Types.TerminalReason.ConfigMismatch
+                    || (reason == OrderV3Types.TerminalReason.ConfigMismatch
                         && receipt.expectedConfigHash == receipt.observedConfigHash)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
@@ -431,20 +456,20 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         }
 
         _validateOracleEvidence(receipt);
-        if (reason == OrderV2Types.TerminalReason.Slippage) {
+        if (reason == OrderV3Types.TerminalReason.Slippage) {
             if (receipt.priceReachedEngine || !_isEmptyFailure(receipt.failure)) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
             return;
         }
-        if (reason == OrderV2Types.TerminalReason.ExecutionModeDisallowed) {
-            OrderV2Types.FailureDetails calldata failure = receipt.failure;
+        if (reason == OrderV3Types.TerminalReason.ExecutionModeDisallowed) {
+            OrderV3Types.FailureDetails calldata failure = receipt.failure;
             if (
                 receipt.priceReachedEngine
                     || failure.selector
                         != ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ExecutionModeDisallowed.selector
                     || failure.category != 0 || failure.code != 0
-                    || failure.constraint != OrderV2Types.ConstraintKind.None
+                    || failure.constraint != OrderV3Types.ConstraintKind.None
                     || failure.actual != uint256(receipt.executionMode) || failure.limit != bounds.allowedExecutionModes
                     || failure.revertDataHash == bytes32(0)
             ) {
@@ -452,14 +477,14 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             }
             return;
         }
-        if (reason == OrderV2Types.TerminalReason.ConstraintViolation) {
-            OrderV2Types.FailureDetails calldata failure = receipt.failure;
+        if (reason == OrderV3Types.TerminalReason.ConstraintViolation) {
+            OrderV3Types.FailureDetails calldata failure = receipt.failure;
             if (
                 receipt.priceReachedEngine
                     || failure.selector
                         != ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector
                     || failure.category != 0 || failure.code != 0
-                    || failure.constraint == OrderV2Types.ConstraintKind.None
+                    || failure.constraint == OrderV3Types.ConstraintKind.None
                     || failure.limit != _constraintLimit(bounds, failure.constraint)
                     || failure.revertDataHash == bytes32(0)
             ) {
@@ -467,12 +492,12 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             }
             return;
         }
-        if (reason == OrderV2Types.TerminalReason.PlannerRejected) {
-            OrderV2Types.FailureDetails calldata failure = receipt.failure;
+        if (reason == OrderV3Types.TerminalReason.PlannerRejected) {
+            OrderV3Types.FailureDetails calldata failure = receipt.failure;
             if (
                 failure.selector != ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector || failure.category == 0
                     || failure.category > 2 || failure.code == 0
-                    || failure.constraint != OrderV2Types.ConstraintKind.None || failure.actual != 0
+                    || failure.constraint != OrderV3Types.ConstraintKind.None || failure.actual != 0
                     || failure.limit != 0 || failure.revertDataHash == bytes32(0)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
@@ -483,40 +508,40 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     function _validateBountyDisposition(
-        OrderV2Types.OrderReceipt calldata receipt
+        OrderV3Types.OrderReceipt calldata receipt
     ) private view {
         if (receipt.bountyUsdc == 0) {
             if (
-                receipt.bountyDisposition != OrderV2Types.BountyDisposition.None
+                receipt.bountyDisposition != OrderV3Types.BountyDisposition.None
                     || receipt.bountyRecipient != address(0)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
             return;
         }
-        if (receipt.bountyDisposition == OrderV2Types.BountyDisposition.RetainedForProtectionRetry) {
+        if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
             if (
-                !_protectionAttempts[receipt.orderId] || receipt.status != OrderV2Types.LifecycleStatus.Failed
-                    || receipt.reason == OrderV2Types.TerminalReason.RiskOff
-                    || receipt.reason == OrderV2Types.TerminalReason.AccountLiquidated
+                !_protectionAttempts[receipt.orderId] || receipt.status != OrderV3Types.LifecycleStatus.Failed
+                    || receipt.reason == OrderV3Types.TerminalReason.RiskOff
+                    || receipt.reason == OrderV3Types.TerminalReason.AccountLiquidated
                     || receipt.bountyRecipient != address(0)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
             return;
         }
-        if (receipt.reason == OrderV2Types.TerminalReason.RiskOff) {
+        if (receipt.reason == OrderV3Types.TerminalReason.RiskOff) {
             if (
-                receipt.bountyDisposition != OrderV2Types.BountyDisposition.RefundedToAccount
+                receipt.bountyDisposition != OrderV3Types.BountyDisposition.RefundedToAccount
                     || receipt.bountyRecipient != receipt.account
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
             return;
         }
-        if (receipt.reason == OrderV2Types.TerminalReason.AccountLiquidated) {
+        if (receipt.reason == OrderV3Types.TerminalReason.AccountLiquidated) {
             if (
-                receipt.bountyDisposition != OrderV2Types.BountyDisposition.Forfeited
+                receipt.bountyDisposition != OrderV3Types.BountyDisposition.Forfeited
                     || receipt.bountyRecipient != IOrderLifecycleEngineConfigView(ENGINE).protocolTreasury()
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
@@ -524,7 +549,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             return;
         }
         if (
-            receipt.bountyDisposition != OrderV2Types.BountyDisposition.Paid
+            receipt.bountyDisposition != OrderV3Types.BountyDisposition.Paid
                 || receipt.bountyRecipient != receipt.executor
         ) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
@@ -532,12 +557,12 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     function _validateOracleEvidence(
-        OrderV2Types.OrderReceipt calldata receipt
+        OrderV3Types.OrderReceipt calldata receipt
     ) private pure {
         // A zero expectation is the internal protected-order marker; its receipt still carries the observed digest.
         if (
-            receipt.executionMode == OrderV2Types.ExecutionMode.None
-                || receipt.priceSource != OrderV2Types.PriceSource.OracleExecution || receipt.executionPrice == 0
+            receipt.executionMode == OrderV3Types.ExecutionMode.None
+                || receipt.priceSource != OrderV3Types.PriceSource.OracleExecution || receipt.executionPrice == 0
                 || receipt.neutralMarkPrice == 0 || receipt.oraclePublishTime == 0
                 || (receipt.expectedConfigHash != bytes32(0)
                     && receipt.expectedConfigHash != receipt.observedConfigHash)
@@ -547,11 +572,11 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     function _validateNoPriceEvidence(
-        OrderV2Types.OrderReceipt calldata receipt
+        OrderV3Types.OrderReceipt calldata receipt
     ) private pure {
         if (
-            receipt.executionMode != OrderV2Types.ExecutionMode.None
-                || receipt.priceSource != OrderV2Types.PriceSource.None || receipt.executionPrice != 0
+            receipt.executionMode != OrderV3Types.ExecutionMode.None
+                || receipt.priceSource != OrderV3Types.PriceSource.None || receipt.executionPrice != 0
                 || receipt.oraclePublishTime != 0 || receipt.priceReachedEngine
         ) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
@@ -559,42 +584,42 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     function _isEmptyFailure(
-        OrderV2Types.FailureDetails calldata failure
+        OrderV3Types.FailureDetails calldata failure
     ) private pure returns (bool) {
         return failure.selector == bytes4(0) && failure.category == 0 && failure.code == 0
-            && failure.constraint == OrderV2Types.ConstraintKind.None && failure.actual == 0 && failure.limit == 0
+            && failure.constraint == OrderV3Types.ConstraintKind.None && failure.actual == 0 && failure.limit == 0
             && failure.revertDataHash == bytes32(0);
     }
 
     function _constraintLimit(
-        OrderV2Types.ExecutionBounds storage bounds,
-        OrderV2Types.ConstraintKind constraint
+        OrderV3Types.ExecutionBounds storage bounds,
+        OrderV3Types.ConstraintKind constraint
     ) private view returns (uint256 limit) {
-        if (constraint == OrderV2Types.ConstraintKind.ExecutionBounty) {
+        if (constraint == OrderV3Types.ConstraintKind.ExecutionBounty) {
             return bounds.maxExecutionBountyUsdc;
         }
-        if (constraint == OrderV2Types.ConstraintKind.ExecutionNotional) {
+        if (constraint == OrderV3Types.ConstraintKind.ExecutionNotional) {
             return bounds.maxExecutionNotionalUsdc;
         }
-        if (constraint == OrderV2Types.ConstraintKind.GrossAccountDebit) {
+        if (constraint == OrderV3Types.ConstraintKind.GrossAccountDebit) {
             return bounds.maxGrossAccountDebitUsdc;
         }
-        if (constraint == OrderV2Types.ConstraintKind.ActionCharge) {
+        if (constraint == OrderV3Types.ConstraintKind.ActionCharge) {
             return bounds.maxActionChargeUsdc;
         }
-        if (constraint == OrderV2Types.ConstraintKind.ExplicitFees) {
+        if (constraint == OrderV3Types.ConstraintKind.ExplicitFees) {
             return bounds.maxExplicitFeesUsdc;
         }
-        if (constraint == OrderV2Types.ConstraintKind.PostPositionSize) {
+        if (constraint == OrderV3Types.ConstraintKind.PostPositionSize) {
             return bounds.maxPostPositionSize;
         }
-        if (constraint == OrderV2Types.ConstraintKind.PostSettlementBalance) {
+        if (constraint == OrderV3Types.ConstraintKind.PostSettlementBalance) {
             return bounds.minPostSettlementBalanceUsdc;
         }
-        if (constraint == OrderV2Types.ConstraintKind.PostPositionEquity) {
+        if (constraint == OrderV3Types.ConstraintKind.PostPositionEquity) {
             return bounds.minPostPositionEquityUsdc;
         }
-        if (constraint == OrderV2Types.ConstraintKind.PostLeverage) {
+        if (constraint == OrderV3Types.ConstraintKind.PostLeverage) {
             return bounds.maxPostLeverageBps;
         }
         revert OrderLifecycleBook__InvalidTerminalOutcome();

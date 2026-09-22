@@ -5,7 +5,7 @@ import {CarryNavProbeToken} from "../utils/CarryNavProbeToken.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -280,13 +280,13 @@ contract MarginFirstCarryTest is BasePerpTest {
         router.executeOrder(1, priceData);
         Vm.Log[] memory logs = vm.getRecordedLogs();
         (uint256 realized, uint256 free, uint256 margin) = _carryInLogs(logs, TRADER);
-        OrderV2Types.OrderReceipt memory receipt;
+        OrderV3Types.OrderReceipt memory receipt;
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].emitter == address(router.lifecycleBook()) && logs[i].topics.length == 4) {
-                (,,, receipt) = abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV2Types.OrderReceipt));
+                (,,, receipt) = abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
             }
         }
-        assertEq(uint8(receipt.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        assertEq(uint8(receipt.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         assertEq(receipt.economics.carryUsdc, int256(carry));
         assertEq(receipt.economics.actionChargeCollectedUsdc, carry + (isPartial ? 20e6 : 40e6));
         assertEq(receipt.economics.grossAccountDebitUsdc, carry + (isPartial ? 20e6 : 40e6) + 200_000);

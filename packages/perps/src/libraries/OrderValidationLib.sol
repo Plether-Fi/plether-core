@@ -52,7 +52,7 @@ library OrderValidationLib {
     }
 
     /// @notice Checks execution price against the order's directional target-price boundary.
-    /// @dev Production V2 commits require a nonzero target. Close LONG accepts prices at or below the target; close
+    /// @dev Production V3 commits require a nonzero target. Close LONG accepts prices at or below the target; close
     ///      SHORT accepts prices at or above it. Open LONG uses the opposite comparison, as does open SHORT.
     /// @param order Order whose side, close flag, and target price define the boundary.
     /// @param executionPrice Proposed execution price (8 decimals).

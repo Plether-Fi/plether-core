@@ -25,6 +25,8 @@ export interface SmartAccountCall {
  * and is checked against the smart-account adapter before submission.
  */
 export interface PerpsActionPlan {
+  /** Maximum inclusion timestamp for order-bearing actions. */
+  readonly submissionDeadline?: bigint;
   readonly kind: PerpsActionKind;
   readonly account: Address;
   readonly calls: readonly SmartAccountCall[];

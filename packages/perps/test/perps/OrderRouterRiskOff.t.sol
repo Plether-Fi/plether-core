@@ -3,7 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -122,11 +122,11 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
 
         vm.prank(KEEPER);
-        OrderV2Types.BatchResult memory firstResult = router.executeOrderBatch(orderIds[64], new bytes[](0));
+        OrderV3Types.BatchResult memory firstResult = router.executeOrderBatch(orderIds[64], new bytes[](0));
 
         assertEq(
             uint256(firstResult.stopReason),
-            uint256(OrderV2Types.PendingReason.CleanupLimit),
+            uint256(OrderV3Types.PendingReason.CleanupLimit),
             "the first call must expose the cleanup work cap"
         );
 

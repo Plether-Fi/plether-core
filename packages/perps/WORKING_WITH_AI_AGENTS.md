@@ -30,8 +30,8 @@ not perps directions. Bind the intended market through the Router's verified Ora
 | Requirement | Protocol guarantee | Primary tool |
 |-------------|--------------------|--------------|
 | Authoritative state | Live state comes from the Router, Engine, Clearinghouse, HousePool, and Oracle; permanent order identity and outcomes come from a predeployed immutable lifecycle Book whose exact bindings the Router validates | `IOrderLifecycleBook`, `PerpsPublicLens`, `PletherOracle`, Engine preview lenses |
-| Protocol meaning | Dollar-index direction, requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics have an explicit machine mapping | `CfdTypes.Side`, `OrderV2Types`, `CfdOrderPolicyEvaluator` |
-| Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV2Types.ExecutionBounds`, `IPositionProtectionActions` |
+| Protocol meaning | Dollar-index direction, requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics have an explicit machine mapping | `CfdTypes.Side`, `OrderV3Types`, `CfdOrderPolicyEvaluator` |
+| Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV3Types.ExecutionBounds`, `IPositionProtectionActions` |
 | Financial policy | The evaluator reconstructs authoritative Engine state and checks the registered intent's limits before the Engine applies the transition | `CfdOrderPolicyEvaluator`, configured Engine planner |
 | Composable execution | Bounded-order submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
 | Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.outcome`, `IPositionProtectionViews` |
@@ -86,7 +86,7 @@ Use `IPerpsTraderActions` for the production order entrypoint:
 
 ```solidity
 function commitOrder(
-    OrderV2Types.OrderRequest calldata request
+    OrderV3Types.OrderRequest calldata request
 ) external returns (uint64 orderId);
 ```
 
@@ -184,7 +184,7 @@ terminally resolves the protection as `Failed`.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
-execution sidecar (`OrderRouterV2ExecutionSidecar`) applies oracle, policy, rollback-isolation, and receipt logic.
+execution sidecar (`OrderRouterV3ExecutionSidecar`) applies oracle, policy, rollback-isolation, and receipt logic.
 Integrations must still call the Router or the Router-discovered protection Book. Direct sidecar calls are not
 alternative protocol entrypoints and cannot acquire Router authority.
 
@@ -238,14 +238,15 @@ mandatory fields such as the deadline, expected configuration hash, execution-mo
 leverage cannot be zero.
 
 Fresh commits additionally require a nonzero `clientOrderId`, a nonzero lot-aligned `sizeDelta`,
-`validUntil > block.timestamp`, and `validUntil - block.timestamp <= OrderRouter.maxOrderAge`. Close requests require
+`submitBy >= block.timestamp`, and `0 < executionWindowSeconds <= OrderRouter.maxExecutionWindowSeconds`. Close requests require
 `marginDelta == 0`, the same side as the account's bounded queued-position projection, and a size no larger than that
 projection. Fresh public client ids must not start with `0x504c455448455221`; that prefix is reserved for
 protocol-generated position-protection orders.
 
 | Bound | What it limits |
 |-------|----------------|
-| `validUntil` | Absolute execution deadline; equality is executable and expiry begins one second later |
+| `submitBy` | Latest permitted fresh commitment timestamp; equality is accepted |
+| `executionWindowSeconds` | Positive duration, bounded by `maxExecutionWindowSeconds`; execution expires after commitment time plus this duration |
 | `allowedExecutionModes` | Authorization mask bits: `Live = 1 << 0` (`1`), `Fad = 1 << 1` (`2`), `Frozen = 1 << 2` (`4`) |
 | `expectedConfigHash` | Exact execution-critical configuration accepted by a public intent; zero is internal-only |
 | `maxExecutionBountyUsdc` | Keeper bounty that may be reserved at commit |
@@ -263,7 +264,7 @@ because no position survives.
 
 Router-authenticated triggered and retried protection closes are the only zero-config exception. Those internal requests
 use `expectedConfigHash == bytes32(0)` as an unpinned marker, enable every execution mode, use
-`validUntil = block.timestamp + maxOrderAge`, set upper bounds to their integer maxima and minimum bounds to zero,
+`submitBy = block.timestamp` and `executionWindowSeconds = maxExecutionWindowSeconds`, set upper bounds to their integer maxima and minimum bounds to zero,
 and record the configuration actually observed at execution. They remain subject to ordinary protocol safety policy,
 but they are not a caller-selected financial envelope. This exception is unavailable through public `commitOrder`:
 an agent-supplied fresh request with a zero configuration hash is rejected.
@@ -607,7 +608,7 @@ protocol-synthesized execution envelope.
 - [`CfdTypes.sol`](src/CfdTypes.sol): current perps ABI side encoding and core position types; apply the product-facing
   direction mapping defined above.
 - [`PletherOracle.sol`](src/PletherOracle.sol): authoritative dollar-index pricing configuration and timing policy.
-- [`OrderV2Types.sol`](src/OrderV2Types.sol): request, bounds, lifecycle, failure, economics, and result types.
+- [`OrderV3Types.sol`](src/OrderV3Types.sol): request, bounds, lifecycle, failure, economics, and result types.
 - [`IOrderLifecycleBook.sol`](src/interfaces/IOrderLifecycleBook.sol): authoritative identity, policy, outcome, and
   configuration reads.
 - [`IPerpsTraderActions.sol`](src/interfaces/IPerpsTraderActions.sol): canonical order submission ABI.

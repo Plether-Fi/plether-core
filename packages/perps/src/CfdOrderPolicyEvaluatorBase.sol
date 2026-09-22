@@ -5,7 +5,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
@@ -129,14 +129,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _assessOrder(
         AssessmentContext memory context,
         CfdTypes.Order calldata order,
-        OrderV2Types.ExecutionBounds calldata bounds
-    ) internal view returns (OrderV2Types.ExecutionAssessment memory assessment) {
+        OrderV3Types.ExecutionBounds calldata bounds
+    ) internal view returns (OrderV3Types.ExecutionAssessment memory assessment) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(context.engineAddress);
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc);
         bool bountyReturnsToAccount = context.executor == order.account;
-        OrderV2Types.ExecutionBounds memory boundsCopy = bounds;
+        OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
 
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
@@ -152,10 +152,10 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _evaluateOpen(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.OpenDelta memory delta,
-        OrderV2Types.ExecutionBounds memory bounds,
+        OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount
-    ) internal pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidOpenDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment = _buildOpenAssessment(snapshot, delta, executionBountyUsdc, bountyReturnsToAccount, assessment.mode);
@@ -165,10 +165,10 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _evaluateClose(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.CloseDelta memory delta,
-        OrderV2Types.ExecutionBounds memory bounds,
+        OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount
-    ) internal pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment =
@@ -280,16 +280,16 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _requireAllowedMode(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         uint8 allowedExecutionModes
-    ) private pure returns (OrderV2Types.ExecutionMode mode) {
+    ) private pure returns (OrderV3Types.ExecutionMode mode) {
         if (snapshot.oracleFrozen) {
-            mode = OrderV2Types.ExecutionMode.Frozen;
+            mode = OrderV3Types.ExecutionMode.Frozen;
         } else if (snapshot.isFadWindow) {
-            mode = OrderV2Types.ExecutionMode.Fad;
+            mode = OrderV3Types.ExecutionMode.Fad;
         } else {
-            mode = OrderV2Types.ExecutionMode.Live;
+            mode = OrderV3Types.ExecutionMode.Live;
         }
 
-        uint8 modeBit = mode == OrderV2Types.ExecutionMode.Live ? 1 : mode == OrderV2Types.ExecutionMode.Fad ? 2 : 4;
+        uint8 modeBit = mode == OrderV3Types.ExecutionMode.Live ? 1 : mode == OrderV3Types.ExecutionMode.Fad ? 2 : 4;
         if (allowedExecutionModes & modeBit == 0) {
             revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ExecutionModeDisallowed(
                 mode, allowedExecutionModes
@@ -302,8 +302,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.OpenDelta memory delta,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount,
-        OrderV2Types.ExecutionMode mode
-    ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+        OrderV3Types.ExecutionMode mode
+    ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         uint256 positiveTradeCostUsdc = 0;
         uint256 tradeRebateUsdc = 0;
         if (delta.tradeCostUsdc >= 0) {
@@ -366,8 +366,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.CloseDelta memory delta,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount,
-        OrderV2Types.ExecutionMode mode
-    ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+        OrderV3Types.ExecutionMode mode
+    ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         assessment.mode = mode;
         assessment.executionNotionalUsdc = CfdMath.sizeToLots(delta.sizeDelta) * delta.price;
         assessment.grossAccountDebitUsdc = delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc
@@ -426,33 +426,33 @@ abstract contract CfdOrderPolicyEvaluatorBase {
 
     /// @dev Bound precedence is deliberately identical to the order of `ConstraintKind` values.
     function _enforceBounds(
-        OrderV2Types.ExecutionAssessment memory assessment,
-        OrderV2Types.ExecutionBounds memory bounds,
+        OrderV3Types.ExecutionAssessment memory assessment,
+        OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyUsdc,
         bool fullClose
     ) private pure {
-        _requireMaximum(OrderV2Types.ConstraintKind.ExecutionBounty, executionBountyUsdc, bounds.maxExecutionBountyUsdc);
+        _requireMaximum(OrderV3Types.ConstraintKind.ExecutionBounty, executionBountyUsdc, bounds.maxExecutionBountyUsdc);
         _requireMaximum(
-            OrderV2Types.ConstraintKind.ExecutionNotional,
+            OrderV3Types.ConstraintKind.ExecutionNotional,
             assessment.executionNotionalUsdc,
             bounds.maxExecutionNotionalUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.GrossAccountDebit,
+            OrderV3Types.ConstraintKind.GrossAccountDebit,
             assessment.grossAccountDebitUsdc,
             bounds.maxGrossAccountDebitUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.ActionCharge, assessment.actionChargeAssessedUsdc, bounds.maxActionChargeUsdc
+            OrderV3Types.ConstraintKind.ActionCharge, assessment.actionChargeAssessedUsdc, bounds.maxActionChargeUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.ExplicitFees, assessment.explicitFeesUsdc, bounds.maxExplicitFeesUsdc
+            OrderV3Types.ConstraintKind.ExplicitFees, assessment.explicitFeesUsdc, bounds.maxExplicitFeesUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.PostPositionSize, assessment.postPositionSize, bounds.maxPostPositionSize
+            OrderV3Types.ConstraintKind.PostPositionSize, assessment.postPositionSize, bounds.maxPostPositionSize
         );
         _requireMinimum(
-            OrderV2Types.ConstraintKind.PostSettlementBalance,
+            OrderV3Types.ConstraintKind.PostSettlementBalance,
             assessment.postSettlementBalanceUsdc,
             bounds.minPostSettlementBalanceUsdc
         );
@@ -465,14 +465,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             assessment.postPositionEquityUsdc > 0 ? uint256(assessment.postPositionEquityUsdc) : 0;
         if (assessment.postPositionEquityUsdc < 0 || normalizedEquityUsdc < bounds.minPostPositionEquityUsdc) {
             revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation(
-                OrderV2Types.ConstraintKind.PostPositionEquity, normalizedEquityUsdc, bounds.minPostPositionEquityUsdc
+                OrderV3Types.ConstraintKind.PostPositionEquity, normalizedEquityUsdc, bounds.minPostPositionEquityUsdc
             );
         }
-        _requireMaximum(OrderV2Types.ConstraintKind.PostLeverage, assessment.postLeverageBps, bounds.maxPostLeverageBps);
+        _requireMaximum(OrderV3Types.ConstraintKind.PostLeverage, assessment.postLeverageBps, bounds.maxPostLeverageBps);
     }
 
     function _requireMaximum(
-        OrderV2Types.ConstraintKind constraint,
+        OrderV3Types.ConstraintKind constraint,
         uint256 actual,
         uint256 limit
     ) private pure {
@@ -482,7 +482,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     }
 
     function _requireMinimum(
-        OrderV2Types.ConstraintKind constraint,
+        OrderV3Types.ConstraintKind constraint,
         uint256 actual,
         uint256 limit
     ) private pure {

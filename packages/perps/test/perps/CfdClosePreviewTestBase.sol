@@ -5,7 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -22,7 +22,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
 
     function setUp() public virtual override {
         super.setUp();
-        previewer = new CfdClosePreview();
+        previewer = new CfdClosePreview(address(engine));
     }
 
     function _riskParams() internal pure virtual override returns (CfdTypes.RiskParams memory params) {
@@ -30,7 +30,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         params.baseCarryBps = 0;
     }
 
-    function _bounds() internal pure returns (OrderV2Types.ExecutionBounds memory b) {
+    function _bounds() internal pure returns (OrderV3Types.ExecutionBounds memory b) {
         b.allowedExecutionModes = 7;
         b.maxExecutionBountyUsdc = type(uint256).max;
         b.maxExecutionNotionalUsdc = type(uint256).max;
@@ -112,7 +112,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         vm.prank(ACCOUNT);
         id = router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
         assertEq(settlementBefore - clearinghouse.balanceUsdc(ACCOUNT), p.commitmentCarryUsdc);
-        OrderV2Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
+        OrderV3Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
             address(engine),
             o,
             executor,
@@ -130,15 +130,15 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
     function _assertReceipt(
         Vm.Log[] memory logs,
         uint64 id,
-        OrderV2Types.ExecutionAssessment memory predicted
+        OrderV3Types.ExecutionAssessment memory predicted
     ) internal {
         for (uint256 i; i < logs.length; ++i) {
             if (
                 logs[i].emitter == address(router.lifecycleBook()) && logs[i].topics.length == 4
                     && uint64(uint256(logs[i].topics[1])) == id
             ) {
-                (,,, OrderV2Types.OrderReceipt memory receipt) =
-                    abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV2Types.OrderReceipt));
+                (,,, OrderV3Types.OrderReceipt memory receipt) =
+                    abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
                 assertEq(receipt.economics.postSettlementBalanceUsdc, clearinghouse.balanceUsdc(ACCOUNT));
                 assertEq(receipt.economics.grossAccountDebitUsdc, predicted.grossAccountDebitUsdc);
                 assertEq(receipt.economics.actionChargeCollectedUsdc, predicted.actionChargeCollectedUsdc);
@@ -163,8 +163,8 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         bytes[] memory update = _mockPythUpdateData(price);
         vm.recordLogs();
         vm.prank(executor);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(id, update);
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         _assertReceipt(vm.getRecordedLogs(), id, p.assessment);
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), p.assessment.postSettlementBalanceUsdc);
         assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), p.assessment.postTraderClaimUsdc);

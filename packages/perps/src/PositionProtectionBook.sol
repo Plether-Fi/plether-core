@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -96,7 +96,7 @@ interface IPositionProtectionOrderCommitHost {
 
     function commitProtectedOpen(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) external returns (uint64 orderId);
 
 }
@@ -395,7 +395,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     /// @inheritdoc IPositionProtectionActions
     function commitOpenOrderWithProtection(
-        OrderV2Types.OrderRequest calldata request,
+        OrderV3Types.OrderRequest calldata request,
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external nonReentrant returns (uint64 parentOrderId, uint64 protectionId) {
         (uint256 triggerBountyUsdc, uint256 executionBountyUsdc) = _configuredBounties();
@@ -622,7 +622,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     function handleFailedProtectionAttempt(
         uint64 orderId,
         address account,
-        OrderV2Types.TerminalReason reason,
+        OrderV3Types.TerminalReason reason,
         uint256 executionBountyUsdc
     ) external onlyRouter returns (bool retained) {
         uint64 protectionId = _attemptProtectionIds[orderId];
@@ -789,7 +789,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     function _commitOpen(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) private returns (uint64 parentOrderId) {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
         parentOrderId = router.nextCommitId();
@@ -986,10 +986,10 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     }
 
     function _isFailedProtectionAttemptReason(
-        OrderV2Types.TerminalReason reason
+        OrderV3Types.TerminalReason reason
     ) private pure returns (bool) {
-        return reason != OrderV2Types.TerminalReason.None && reason != OrderV2Types.TerminalReason.Executed
-            && reason != OrderV2Types.TerminalReason.RiskOff && reason != OrderV2Types.TerminalReason.AccountLiquidated;
+        return reason != OrderV3Types.TerminalReason.None && reason != OrderV3Types.TerminalReason.Executed
+            && reason != OrderV3Types.TerminalReason.RiskOff && reason != OrderV3Types.TerminalReason.AccountLiquidated;
     }
 
     function _triggeredLeg(

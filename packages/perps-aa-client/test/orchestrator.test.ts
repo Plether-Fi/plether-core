@@ -152,6 +152,22 @@ describe("sponsored UserOperation orchestration", () => {
     expect(statuses.at(-1)).toBe("confirmed");
   });
 
+  it.each(["stub", "final"])("rejects %s sponsorship beyond submitBy before signing", async stage => {
+    let signatures = 0;
+    await expect(sendSponsoredAction({
+      chainId: 421614, paymasterProfile,
+      action: { kind: "place-order", account: accountAddress, calls: [], submissionDeadline: 1000n },
+      account: { accountAddress, entryPoint, buildUserOperation: async () => ({ marker: "operation" }),
+        applyPaymaster: (operation: Operation) => operation, applyGasEstimate: (operation: Operation) => operation,
+        signUserOperation: async (operation: Operation) => { signatures++; return operation; } },
+      sponsor: { getPaymasterStubData: async () => packedResponse(stage === "stub" ? 1001n : 1000n),
+        getPaymasterData: async () => packedResponse(1001n) },
+      bundler: { estimateUserOperationGas: async () => ({}), sendUserOperation: async () => operationHash },
+      journalSignedUserOperation: async () => operationHash,
+    })).rejects.toThrow("submission deadline");
+    expect(signatures).toBe(0);
+  });
+
   it("blocks execution when a plan is bound to a different smart account", async () => {
     const wrong = "0x9999999999999999999999999999999999999999" as Address;
     const inert = {} as never;
