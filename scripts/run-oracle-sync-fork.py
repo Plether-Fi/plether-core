@@ -30,6 +30,9 @@ def main():
         parser.error('Baseline must be an immutable full commit')
     if not os.environ.get('ARB_SEPOLIA_RPC_URL'):
         parser.error('ARB_SEPOLIA_RPC_URL is required; no skip fallback')
+    if subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).strip():
+        parser.error('Commit the candidate and signed fixture before replay; dirty source cannot qualify a release')
+    candidate_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
     if args.output.exists():
         parser.error('Evidence output already exists')
     args.output.mkdir(parents=True)
@@ -57,7 +60,8 @@ def main():
                 parser.error('Reserved run.json fixture already exists')
             local_fixture.write_text(json.dumps(fixture))
             try:
-                env = dict(os.environ, ORACLE_SYNC_FIXTURE=str(local_fixture), ORACLE_SYNC_EXPECT_FIXED=str(fixed).lower())
+                env = dict(os.environ, FOUNDRY_PROFILE='ci', FOUNDRY_VIA_IR='true',
+                           ORACLE_SYNC_FIXTURE=str(local_fixture), ORACLE_SYNC_EXPECT_FIXED=str(fixed).lower())
                 command = ['forge', 'test', '--offline', '--match-path', str(test), '--match-test', 'test_RealPythBaselineVersusAtomicSynchronization', '-vv']
                 result = subprocess.run(command, cwd=checkout, env=env, capture_output=True, text=True)
                 output = result.stdout + result.stderr
@@ -75,7 +79,8 @@ def main():
                 local_fixture.unlink()
         passed = all(r['passed'] for r in results.values()) and bool(results['baseline']['prices']) and results['baseline']['prices'] == results['candidate']['prices']
         dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).strip())
-        candidate_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        current_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        passed = passed and not dirty and current_commit == candidate_commit
         report = dict(passed=passed, baselineSourceCommit=baseline, candidateSourceCommit=None if dirty else candidate_commit,
                       candidateHasUncommittedChanges=dirty, payloadSha256=digest, forkBlockHash=fixture['forkBlockHash'], results=results)
         (args.output / 'result.json').write_text(json.dumps(report, indent=2) + '\n')

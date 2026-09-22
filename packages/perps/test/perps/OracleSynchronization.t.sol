@@ -5,6 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
@@ -53,6 +54,21 @@ contract OracleSynchronizationTest is BasePerpTest {
 
     function setUp() public override {
         super.setUp();
+        bytes32[] memory ids = _synchronizationFeedIds();
+        uint256[] memory weights = new uint256[](6);
+        uint256[] memory bases = new uint256[](6);
+        for (uint256 i; i < 6; ++i) {
+            weights[i] = i == 5 ? 0.5e18 : 0.1e18;
+            bases[i] = 1e8;
+        }
+        baseMockPyth.setAllPrices(ids, 100_000_000, -8, SETUP_TIMESTAMP);
+        pletherOracle = new PletherOracle(
+            address(engine), address(pool), address(baseMockPyth), ids, weights, bases, new bool[](6)
+        );
+        routerAdmin.proposeOracleConfig(IOrderRouterAdminHost.OracleConfig(address(pletherOracle)));
+        vm.warp(routerAdmin.oracleConfigActivationTime());
+        routerAdmin.finalizeOracleConfig();
+        baseMockPyth.setAllPrices(ids, 100_000_000, -8, block.timestamp);
         baseMockPyth.setSynchronizeLegacyUniquePrices(false);
         baseMockPyth.setFee(FEE);
         vm.deal(address(this), 100 ether);
@@ -60,11 +76,18 @@ contract OracleSynchronizationTest is BasePerpTest {
         _fundTrader(BOB, 10_000e6);
     }
 
+    function _synchronizationFeedIds() internal pure returns (bytes32[] memory ids) {
+        ids = new bytes32[](6);
+        for (uint256 i; i < 6; ++i) {
+            ids[i] = bytes32(i + 1);
+        }
+    }
+
     function _payload(
         uint64 tick,
         uint64 previous
     ) internal pure returns (bytes[] memory data) {
-        bytes32[] memory ids = _basePythFeedIds();
+        bytes32[] memory ids = _synchronizationFeedIds();
         MockPyth.FeedUpdate[] memory updates = new MockPyth.FeedUpdate[](ids.length);
         for (uint256 i; i < ids.length; ++i) {
             updates[i] = MockPyth.FeedUpdate(ids[i], MockPyth.MockPrice(100_000_000, 100_000, -8, tick, previous));
@@ -98,7 +121,7 @@ contract OracleSynchronizationTest is BasePerpTest {
     function _assertCoverage(
         uint256 required
     ) internal view {
-        bytes32[] memory ids = _basePythFeedIds();
+        bytes32[] memory ids = _synchronizationFeedIds();
         for (uint256 i; i < ids.length; ++i) {
             assertGe(baseMockPyth.getPriceUnsafe(ids[i]).publishTime, required);
         }
@@ -109,11 +132,13 @@ contract OracleSynchronizationTest is BasePerpTest {
         uint64 id = _commit(ALICE, 0);
         uint64 tick = commit + 1;
         _advance(tick);
-        assertLt(baseMockPyth.getPriceUnsafe(_basePythFeedIds()[0]).publishTime, tick);
+        assertLt(baseMockPyth.getPriceUnsafe(_synchronizationFeedIds()[0]).publishTime, tick);
         uint256 beforeBalance = address(this).balance;
         uint256 beforeUpdates = baseMockPyth.updatePriceFeedsCallCount();
-        OrderV2Types.ExecutionResult memory result =
-            router.executeOrder{value: 3 * FEE, gas: KEEPER_GAS_CAP}(id, _payload(tick, commit));
+        bytes[] memory data = _payload(tick, commit);
+        uint256 beforeGas = gasleft();
+        OrderV2Types.ExecutionResult memory result = router.executeOrder{value: 3 * FEE, gas: KEEPER_GAS_CAP}(id, data);
+        emit log_named_uint("new historical execution call gas", beforeGas - gasleft());
         assertEq(uint256(result.status), uint256(OrderV2Types.LifecycleStatus.Executed));
         assertEq(beforeBalance - address(this).balance, 2 * FEE);
         assertEq(address(baseMockPyth).balance, 2 * FEE);
@@ -136,8 +161,11 @@ contract OracleSynchronizationTest is BasePerpTest {
         uint256 updates = baseMockPyth.updatePriceFeedsCallCount();
         uint256 parses = baseMockPyth.parseUniqueCallCount();
         uint256 beforeBalance = address(this).balance;
+        bytes[] memory data = _payload(commit + 1, commit);
+        uint256 beforeGas = gasleft();
         OrderV2Types.BatchResult memory result =
-            router.executeOrderBatch{value: 5 * FEE, gas: KEEPER_GAS_CAP}(last, _payload(commit + 1, commit));
+            router.executeOrderBatch{value: 5 * FEE, gas: KEEPER_GAS_CAP}(last, data);
+        emit log_named_uint("shared basket batch call gas", beforeGas - gasleft());
         assertEq(result.terminalCount, 2);
         assertEq(result.nextOrderId, 0);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates + 1);
@@ -154,8 +182,10 @@ contract OracleSynchronizationTest is BasePerpTest {
         uint64 commit = uint64(block.timestamp);
         uint64 id = _commit(ALICE, 110_000_000);
         _advance(commit + 1);
-        OrderV2Types.ExecutionResult memory result =
-            router.executeOrder{value: 2 * FEE, gas: KEEPER_GAS_CAP}(id, _payload(commit + 1, commit));
+        bytes[] memory data = _payload(commit + 1, commit);
+        uint256 beforeGas = gasleft();
+        OrderV2Types.ExecutionResult memory result = router.executeOrder{value: 2 * FEE, gas: KEEPER_GAS_CAP}(id, data);
+        emit log_named_uint("failed item execution call gas", beforeGas - gasleft());
         assertEq(uint256(result.status), uint256(OrderV2Types.LifecycleStatus.Failed));
         assertEq(engine.lastMarkTime(), commit + 1);
         _assertCoverage(engine.lastMarkTime());
@@ -186,7 +216,9 @@ contract OracleSynchronizationTest is BasePerpTest {
         bytes[] memory data = _mixedBatch();
         uint256 updates = baseMockPyth.updatePriceFeedsCallCount();
         uint256 beforeBalance = address(this).balance;
+        uint256 beforeGas = gasleft();
         OrderV2Types.BatchResult memory result = router.executeOrderBatch{value: 6 * FEE, gas: KEEPER_GAS_CAP}(2, data);
+        emit log_named_uint("mixed basket batch call gas", beforeGas - gasleft());
         assertEq(result.terminalCount, 2);
         assertEq(result.nextOrderId, 0);
         assertEq(baseMockPyth.parseUniqueCallCount(), 2);
@@ -279,7 +311,7 @@ contract OracleSynchronizationTest is BasePerpTest {
     function test_NewerStorageNeverChangesHistoricalFillOrMovesBackwards() public {
         uint64 commit = uint64(block.timestamp);
         _advance(commit + 3);
-        baseMockPyth.setAllPrices(_basePythFeedIds(), 120_000_000, -8, commit + 2);
+        baseMockPyth.setAllPrices(_synchronizationFeedIds(), 120_000_000, -8, commit + 2);
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) = pletherOracle.updateOrderExecutionPrice{
             value: 2 * FEE
         }(
@@ -289,8 +321,30 @@ contract OracleSynchronizationTest is BasePerpTest {
         assertEq(snapshot.price, 99_980_000);
         assertEq(snapshot.markPrice, 100_000_000);
         assertEq(snapshot.publishTime, commit + 1);
-        assertEq(baseMockPyth.getPriceUnsafe(_basePythFeedIds()[0]).publishTime, commit + 2);
-        assertEq(baseMockPyth.getPriceUnsafe(_basePythFeedIds()[0]).price, 120_000_000);
+        assertEq(baseMockPyth.getPriceUnsafe(_synchronizationFeedIds()[0]).publishTime, commit + 2);
+        assertEq(baseMockPyth.getPriceUnsafe(_synchronizationFeedIds()[0]).price, 120_000_000);
+    }
+
+    function test_HistoricalSettlementDoesNotAcquireLiveConfidenceOrFreshnessGuards() public {
+        uint64 commit = uint64(block.timestamp);
+        _advance(commit + 3);
+        bytes[] memory data = _payload(commit + 1, commit);
+        baseMockPyth.setAllPrices(_synchronizationFeedIds(), 100_000_000, 10_000_000, -8, commit + 2);
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            pletherOracle.updateOrderExecutionPrice{value: 2 * FEE}(address(this), data, _request(commit, true));
+        assertTrue(ok);
+        assertEq(snapshot.price, 99_980_000);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
+        pletherOracle.getLatestPrice();
+
+        baseMockPyth.setAllPrices(_synchronizationFeedIds(), 100_000_000, -8, commit + 2);
+        _advance(commit + 3600);
+        (ok, snapshot) =
+            pletherOracle.updateOrderExecutionPrice{value: 2 * FEE}(address(this), data, _request(commit, true));
+        assertTrue(ok);
+        assertEq(snapshot.price, 99_980_000);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        pletherOracle.getLatestPrice();
     }
 
     function test_EqualAndOlderHistoricalMarksKeepOrdering() public {
@@ -355,6 +409,47 @@ contract OracleSynchronizationTest is BasePerpTest {
         assertTrue(recipient.reentryRejected());
         assertEq(pletherOracle.claimableEth(address(recipient)), 0);
         assertEq(address(recipient).balance, 2 * FEE);
+        vm.prank(address(recipient));
+        routerAdmin.claimBalance(true);
+        assertEq(address(recipient).balance, 5 * FEE);
+        assertEq(routerAdmin.claimableEth(address(recipient)), 0);
+        assertEq(address(routerAdmin).balance, 0);
+        assertEq(address(pletherOracle).balance, 0);
+        vm.expectRevert();
+        recipient.claim();
+        vm.prank(address(recipient));
+        vm.expectRevert();
+        routerAdmin.claimBalance(true);
+        assertEq(address(recipient).balance, 5 * FEE);
+    }
+
+    function test_CallerSuppliedCacheCannotEnterRouterExecution() public {
+        uint64 commit = uint64(block.timestamp);
+        uint64 id = _commit(ALICE, 0);
+        _advance(commit + 1);
+        baseMockPyth.setAllPrices(_synchronizationFeedIds(), 100_000_000, -8, commit + 1);
+        IPletherOracle.BatchOrderPriceCache memory forged = IPletherOracle.BatchOrderPriceCache({
+            hasHistoricalBasket: true,
+            minReusableCommitTime: commit,
+            price: 150_000_000,
+            confidence: 0,
+            publishTime: commit + 1
+        });
+        uint64 beforeMark = engine.lastMarkTime();
+        (, IPletherOracle.PriceSnapshot memory supplied,) =
+            pletherOracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), _request(commit, false), forged);
+        assertEq(supplied.markPrice, forged.price, "helper deliberately does not authenticate supplied prices");
+        assertEq(engine.lastMarkTime(), beforeMark, "helper cannot install a protocol mark");
+        bytes memory callData = bytes.concat(
+            abi.encodeCall(IPerpsKeeper.executeOrderBatch, (id, _payload(commit + 1, commit))), abi.encode(forged)
+        );
+        (bool success, bytes memory returned) = address(router).call{value: 2 * FEE}(callData);
+        assertTrue(success);
+        OrderV2Types.BatchResult memory result = abi.decode(returned, (OrderV2Types.BatchResult));
+        assertEq(result.terminalCount, 1);
+        assertEq(baseMockPyth.parseUniqueCallCount(), 1, "Router starts with an empty internal cache");
+        assertEq(engine.lastMarkPrice(), 100_000_000, "appended cache cannot change the signed price");
+        _assertCoverage(engine.lastMarkTime());
     }
 
     function test_CacheReuseRequiresCoverageAndDoesNotRepair() public {
@@ -369,7 +464,7 @@ contract OracleSynchronizationTest is BasePerpTest {
             pletherOracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), _request(commit, false), cache);
         assertEq(reused.updateFee, 0);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
-        bytes32 lagging = _basePythFeedIds()[_basePythFeedIds().length - 1];
+        bytes32 lagging = _synchronizationFeedIds()[_synchronizationFeedIds().length - 1];
         baseMockPyth.setPrice(lagging, 100_000_000, -8, commit);
         vm.expectRevert(
             abi.encodeWithSelector(IPletherOracle.PletherOracle__StoredFeedBehind.selector, lagging, commit, commit + 1)
@@ -389,8 +484,11 @@ contract OracleSynchronizationTest is BasePerpTest {
         _advance(commit + 2);
         uint256 beforeBalance = address(this).balance;
         uint256 parses = baseMockPyth.parseUniqueCallCount();
+        bytes[] memory data = _payload(commit + 2, commit + 1);
+        uint256 beforeGas = gasleft();
         OrderV2Types.ExecutionResult memory result =
-            router.executeOrder{value: 3 * FEE, gas: KEEPER_GAS_CAP}(close, _payload(commit + 2, commit + 1));
+            router.executeOrder{value: 3 * FEE, gas: KEEPER_GAS_CAP}(close, data);
+        emit log_named_uint("frozen close execution call gas", beforeGas - gasleft());
         assertEq(uint256(result.status), uint256(OrderV2Types.LifecycleStatus.Executed));
         assertEq(beforeBalance - address(this).balance, FEE);
         assertEq(baseMockPyth.parseUniqueCallCount(), parses);
