@@ -27,7 +27,7 @@ via_ir = true
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 
 # File system permissions for scripts
-fs_permissions = [{ access = "read", path = "script/bytecode/" }]
+fs_permissions = [{ access = "read", path = "script/bytecode/" }, { access = "read", path = "test/fixtures/" }]
 
 [fuzz]
 seed = "0xdeadbeef"

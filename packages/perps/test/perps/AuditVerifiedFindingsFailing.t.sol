@@ -204,6 +204,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
     function setUp() public {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 50);

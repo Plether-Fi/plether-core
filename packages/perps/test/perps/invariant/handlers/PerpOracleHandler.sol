@@ -175,7 +175,7 @@ contract PerpOracleHandler is Test {
         );
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = abi.encode(uint256(1e8));
-        router.executeOrder{value: mockPyth.mockFee()}(orderId, updateData);
+        router.executeOrder{value: router.pletherOracle().getOrderExecutionFee(updateData)}(orderId, updateData);
     }
 
 }
