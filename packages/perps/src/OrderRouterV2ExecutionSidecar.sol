@@ -82,7 +82,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         uint64 riskOffCutoff;
         uint256 riskOffRefunds;
         uint256 terminalPrunes;
-        uint256 pythFeeTotal;
+        uint256 oracleFundingTotal;
         IPletherOracle.BatchOrderPriceCache oracleCache;
     }
 
@@ -287,7 +287,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
                 IPletherOracle.BatchOrderPriceCache memory nextCache
             ) = _prepareBatchOracle(host, orderView.order, pythUpdateData, state);
             state.oracleCache = nextCache;
-            state.pythFeeTotal += oracleResult.fee;
+            state.oracleFundingTotal += oracleResult.fee;
             if (!oracleResolved) {
                 batchResult.stopReason = OrderV2Types.PendingReason.HistoricalPriceUnavailable;
                 break;
@@ -315,7 +315,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         }
 
         batchResult.nextOrderId = host.nextExecuteId();
-        _refundEth(host, state.executor, msg.value - state.pythFeeTotal);
+        _refundEth(host, state.executor, msg.value - state.oracleFundingTotal);
     }
 
     /// @notice Executes or terminally settles one order inside a Router self-call rollback frame.
@@ -990,7 +990,7 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         bytes[] calldata pythUpdateData
     ) private returns (OracleResult memory result) {
         IPletherOracle oracle = IPletherOracle(host.pletherOracle());
-        result.fee = oracle.getUpdateFee(pythUpdateData);
+        result.fee = oracle.getOrderExecutionFee(pythUpdateData);
         if (msg.value < result.fee) {
             revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, result.fee);
         }
@@ -1012,12 +1012,12 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
         IPletherOracle oracle = IPletherOracle(host.pletherOracle());
         uint256 fee = 0;
         if (!_canReuseHistoricalBatchBasket(oracle, order, state.oracleCache)) {
-            fee = oracle.getUpdateFee(pythUpdateData);
-            // The outer FIFO loop passes a monotonic spent total; this guard prevents aggregate Pyth overspending.
+            fee = oracle.getOrderExecutionFee(pythUpdateData);
+            // Track forwarded funding, including allocations refunded by the Oracle on unavailable history.
             // slither-disable-next-line msg-value-loop
             uint256 suppliedValue = msg.value;
-            if (suppliedValue < state.pythFeeTotal + fee) {
-                revert IPletherOracle.PletherOracle__InsufficientFee(suppliedValue, state.pythFeeTotal + fee);
+            if (suppliedValue < state.oracleFundingTotal + fee) {
+                revert IPletherOracle.PletherOracle__InsufficientFee(suppliedValue, state.oracleFundingTotal + fee);
             }
         }
         IPletherOracle.PriceSnapshot memory snapshot;

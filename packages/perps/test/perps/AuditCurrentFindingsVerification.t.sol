@@ -184,6 +184,7 @@ contract AuditCurrentFindingsVerifiedInvalid_Mev is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());

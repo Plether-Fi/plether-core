@@ -28,7 +28,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @param price Weighted basket price in 8-decimal units
     /// @param confidence Sum of weighted component confidence contributions in 8-decimal price units
     /// @param publishTime Earliest component publish time as a Unix timestamp
-    /// @param pythFee ETH fee paid to Pyth in wei, or zero when no Pyth call was required
+    /// @param pythFee Funding allocated to Pyth operations; refunded on unavailable history, zero for cache reuse
     struct BasketPrice {
         uint256 price;
         uint256 confidence;
@@ -175,12 +175,14 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @notice Resolves and returns the price used for one delayed order execution.
     /// @dev In live and FAD-only markets, pays for Pyth's unique historical parse over
     ///      `(request.commitTime, request.commitTime + orderSettlementWindow]`, capped at `block.timestamp`. During an
-    ///      oracle-frozen window, pays for a normal Pyth update and uses the validated current basket instead. The base
+    ///      oracle-frozen window, pays for a normal Pyth update and uses the validated current basket instead. History
+    ///      additionally pays for a stored-feed update of the same payload, then verifies component coverage. The base
     ///      basket is capped and then shifted against the requested side using aggregate confidence, except that a
     ///      frozen-oracle voluntary close is left unshifted. This function reports `closeOnly` but does not enforce it,
-    ///      and does not use `request.targetPrice`; the router enforces policy and slippage. Send exactly the quoted Pyth
-    ///      fee: successful execution does not refund overpayment. If historical parsing fails and
-    ///      `revertOnHistoricalUnavailable` is false, the Pyth-fee amount is refunded or deferred and `ok` is false.
+    ///      and does not use `request.targetPrice`; the router enforces policy and slippage. Send exactly
+    ///      `getOrderExecutionFee`: successful execution does not refund overpayment. If historical parsing fails and
+    ///      `revertOnHistoricalUnavailable` is false, the full execution funding is refunded or deferred and `ok` is false.
+    ///      Synchronization failures revert and are never treated as unavailable history.
     /// @param refundRecipient Recipient of the Pyth-fee refund when a nonreverting historical parse is unavailable
     /// @param pythUpdateData Nonempty Pyth update or unique historical-parse payloads
     /// @param request Commit timestamp, caller-enforced target, side, close flag, and unavailable-history behavior
@@ -197,11 +199,12 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @notice Resolves one delayed-order price and optionally reuses a proven historical basket from the batch cache.
     /// @dev Cache reuse is available only outside oracle-frozen policy when the cached tick is after this commit, not in
     ///      the future, within this commit's settlement window, and covered by the cache's minimum commit time. A reused
-    ///      basket pays no Pyth fee and leaves the supplied cache unchanged; any ETH sent with a reused cache remains
+    ///      basket first verifies all stored feeds cover its timestamp, pays no Pyth fee, and leaves the cache unchanged;
+    ///      caller-supplied cache prices are not authenticated. Any ETH sent with a reused cache remains
     ///      in this contract and is not refunded or credited. Otherwise this follows
     ///      `updateOrderExecutionPrice`, including its confidence shift, exact-fee expectation, caller-enforced
-    ///      close-only/slippage policy, and unavailable-history refund behavior. A new historical parse extends the
-    ///      returned cache; frozen baskets are never cached.
+    ///      close-only/slippage policy, and unavailable-history refund behavior. A new historical parse and
+    ///      successful stored-feed synchronization extend the returned cache; frozen baskets are never cached.
     /// @param refundRecipient Recipient of the Pyth-fee refund when a nonreverting historical parse is unavailable
     /// @param pythUpdateData Pyth payloads, which may be unused when `cache` is reusable
     /// @param request Commit timestamp, caller-enforced target, side, close flag, and unavailable-history behavior
@@ -227,6 +230,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         BasketPrice memory basket;
         bool reusedBasket;
         if (!policy.oracleFrozen && _canReuseHistoricalBatchBasket(request.commitTime, cache)) {
+            // Cache contents are caller-supplied; independently prove storage coverage, not price authenticity.
+            for (uint256 i; i < pythFeedIds.length; ++i) {
+                _requireStoredFeedCoverage(pythFeedIds[i], cache.publishTime);
+            }
             basket = BasketPrice({
                 price: cache.price, confidence: cache.confidence, publishTime: cache.publishTime, pythFee: 0
             });
@@ -404,6 +411,14 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return pyth.getUpdateFee(pythUpdateData);
     }
 
+    /// @inheritdoc IPletherOracle
+    function getOrderExecutionFee(
+        bytes[] calldata pythUpdateData
+    ) public view override returns (uint256) {
+        uint256 fee = getUpdateFee(pythUpdateData);
+        return isOracleFrozen() ? fee : 2 * fee;
+    }
+
     /// @notice Returns whether the market calendar currently enables frozen-oracle policy.
     /// @dev Delegates to the engine's canonical calendar status. The normal frozen interval follows Pyth FX hours from
     ///      Friday 17:00 New York time until Sunday 17:00 New York time (exclusive), including US daylight-saving
@@ -504,8 +519,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         OrderExecutionRequest calldata request
     ) internal returns (BasketPrice memory basket, bool ok) {
         uint256 pythFee = getUpdateFee(pythUpdateData);
-        if (msg.value < pythFee) {
-            revert PletherOracle__InsufficientFee(msg.value, pythFee);
+        uint256 executionFunding = 2 * pythFee;
+        if (msg.value < executionFunding) {
+            revert PletherOracle__InsufficientFee(msg.value, executionFunding);
         }
 
         uint64 minPublishTime = request.commitTime + 1;
@@ -519,7 +535,13 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             basket = _computeBasketPriceFromFeeds(
                 PriceMode.OrderExecution, parsedFeeds, maxComponentPublishTimeDivergence
             );
-            basket.pythFee = pythFee;
+            // Reverts in the success body are NOT caught by the historical-parse catch below.
+            // Keep the parsed basket as the pricing source even if storage already contains newer prices.
+            pyth.updatePriceFeeds{value: pythFee}(pythUpdateData);
+            for (uint256 i; i < parsedFeeds.length; ++i) {
+                _requireStoredFeedCoverage(parsedFeeds[i].id, parsedFeeds[i].price.publishTime);
+            }
+            basket.pythFee = executionFunding;
             ok = true;
         } catch {
             if (request.revertOnHistoricalUnavailable) {
@@ -527,8 +549,20 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
                     PriceMode.OrderExecution, bytes32(0), maxPublishTime, orderExecutionStalenessLimit, block.timestamp
                 );
             }
-            basket.pythFee = pythFee;
-            _refundValue(payable(refundRecipient), pythFee);
+            // The reverted parser consumed no ETH; the storage update was never attempted.
+            // Report forwarded funding so the Router does not refund this allocation a second time.
+            basket.pythFee = executionFunding;
+            _refundValue(payable(refundRecipient), executionFunding);
+        }
+    }
+
+    function _requireStoredFeedCoverage(
+        bytes32 feedId,
+        uint256 requiredPublishTime
+    ) internal view {
+        uint256 storedPublishTime = pyth.getPriceUnsafe(feedId).publishTime;
+        if (storedPublishTime < requiredPublishTime) {
+            revert PletherOracle__StoredFeedBehind(feedId, storedPublishTime, requiredPublishTime);
         }
     }
 

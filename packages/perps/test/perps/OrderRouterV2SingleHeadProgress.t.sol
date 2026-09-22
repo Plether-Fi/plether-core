@@ -74,8 +74,8 @@ contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
         );
         assertEq(
             baseMockPyth.updatePriceFeedsCallCount(),
-            pythUpdatesBefore,
-            "live historical execution must not perform a normal Pyth update"
+            pythUpdatesBefore + 1,
+            "historical target must synchronize stored Pyth feeds exactly once"
         );
     }
 

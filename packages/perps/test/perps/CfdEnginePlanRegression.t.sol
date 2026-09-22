@@ -116,6 +116,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         engine.setTerminalNavBook(address(terminalNavBook));
 
         mockPyth = new MockPyth();
+
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), uint64(block.timestamp));
         bytes32[] memory feedIds = new bytes32[](1);
         feedIds[0] = bytes32(uint256(1));

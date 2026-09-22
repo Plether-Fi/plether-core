@@ -133,6 +133,7 @@ abstract contract BasePerpTest is Test {
         housePoolRedemptionMathSidecar = new HousePoolRedemptionMathSidecar();
         pool = new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
         baseMockPyth = new MockPyth();
+        baseMockPyth.setSynchronizeLegacyUniquePrices(true);
         bytes32[] memory baseFeedIds = _basePythFeedIds();
         baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 

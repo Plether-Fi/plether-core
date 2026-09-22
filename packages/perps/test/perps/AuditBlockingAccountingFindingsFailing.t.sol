@@ -101,6 +101,7 @@ contract AuditBlockingAccountingFindingsFailing_SolvencyTiming is BasePerpTest {
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
         pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
         baseMockPyth = new MockPyth();
+        baseMockPyth.setSynchronizeLegacyUniquePrices(true);
         bytes32[] memory baseFeedIds = _basePythFeedIds();
         baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 

@@ -1487,6 +1487,7 @@ contract OrderRouterPythTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -2255,6 +2256,7 @@ contract OrderRouterPythTest is BasePerpTest {
 
     function test_OracleConfigTimelock_RotatesPythBasket() public {
         MockPyth newPyth = new MockPyth();
+        newPyth.setSynchronizeLegacyUniquePrices(true);
         bytes32[] memory newFeedIds = new bytes32[](2);
         uint256[] memory newWeights = new uint256[](2);
         uint256[] memory newBases = new uint256[](2);
@@ -3033,11 +3035,11 @@ contract OrderRouterPythTest is BasePerpTest {
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
 
-        vm.deal(address(this), 1 ether);
+        vm.deal(address(this), 2 ether);
         vm.warp(1050);
         vm.roll(block.number + 1);
         uint256 callsBefore = mockPyth.parseUniqueCallCount();
-        router.executeOrderBatch{value: 1 ether}(2, _pythUpdateData());
+        router.executeOrderBatch{value: 2 ether}(2, _pythUpdateData());
 
         assertEq(
             mockPyth.parseUniqueCallCount() - callsBefore,
@@ -3264,6 +3266,7 @@ contract OrderRouterBlockedExecutionTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -3974,6 +3977,7 @@ contract FadStalenessTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -4690,6 +4694,7 @@ contract InversionTest is Test {
 
     function setUp() public {
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         vm.warp(1001);
     }
 
@@ -5255,6 +5260,8 @@ contract MarkPriceStalenessTest is BasePerpTest {
         engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
+
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
         weights.push(0.5e18);
@@ -5380,6 +5387,8 @@ contract StalenessGriefTest is BasePerpTest {
         engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
+
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
         weights.push(0.5e18);
@@ -5523,6 +5532,8 @@ contract VpiImrBypassTest is Test {
         engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
+
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         feedIds.push(bytes32(uint256(1)));
         feedIds.push(bytes32(uint256(2)));
         weights.push(0.5e18);
@@ -5845,6 +5856,8 @@ contract KeeperFeeRefundTest is Test {
         engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
+
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         feedIds.push(bytes32(uint256(1)));
         feedIds.push(bytes32(uint256(2)));
         weights.push(0.5e18);
@@ -6211,6 +6224,7 @@ contract WeekendArbitrageTest is Test {
         vm.warp(1_709_100_000);
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0,

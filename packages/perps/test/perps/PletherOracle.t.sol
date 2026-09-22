@@ -145,6 +145,7 @@ contract PletherOracleTest is Test {
 
     function setUp() public {
         pyth = new MockPyth();
+        pyth.setSynchronizeLegacyUniquePrices(true);
         engine = new PletherOracleEngineMock();
         vault = new PletherOracleVaultMock();
         engine.setOrderRouter(address(this));
