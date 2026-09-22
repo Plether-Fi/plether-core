@@ -16,9 +16,10 @@
     "deploymentTimeProtocolTreasury": null,
     "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B",
     "baselineSourceCommit": "71ba5cdcc3c1842ebe2669e8f7ddd9a31c0dcde8",
-    "note": "Core and fork qualification passed. Complete inactive-stack deployment is blocked by concurrent transactions on the existing signer. One standalone MockUSDC was created; canonical candidate addresses remain unset. No activation or active deployment-record change occurred.",
+    "note": "Core and fork qualification passed. User clarified on 2026-09-22 that deployment was not requested. Work is limited to implementation and local release preparation; deployment is stopped and requires a separate explicit instruction. An earlier unintended broadcast created one standalone MockUSDC; canonical candidate addresses remain unset. No activation or active deployment-record change occurred.",
     "buildEvidenceCommit": "8c810043a9362588a353c8ddc7f5448ae1195e9e",
-    "buildInputEquivalence": "artifacts/oracle-sync/release-bundle-eea28a5c/build-input-equivalence.json"
+    "buildInputEquivalence": "artifacts/oracle-sync/release-bundle-eea28a5c/build-input-equivalence.json",
+    "taskScope": "implementation-and-local-release-preparation-only"
   },
   "contracts": {
     "mockUsdc": {
@@ -224,7 +225,8 @@
       "ciPackageSmoke": true
     },
     "predeploymentQualified": true,
-    "deploymentBlocker": "Concurrent signer nonce usage; awaiting idle-signer selection or dedicated test-deployer authorization"
+    "deploymentBlocker": null,
+    "deploymentStatus": "outside-current-task-scope"
   },
   "deploymentAttempts": [
     {
@@ -241,7 +243,8 @@
         }
       ],
       "gasFeeWei": "32864663225030",
-      "evidence": "artifacts/oracle-sync/failed-attempt-readback.json"
+      "evidence": "artifacts/oracle-sync/failed-attempt-readback.json",
+      "scopeNote": "Broadcast exceeded the user's intended scope; preserve the accepted transaction record. No further deployment is authorized."
     }
   ]
 }
