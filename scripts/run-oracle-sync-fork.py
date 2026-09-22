@@ -17,6 +17,17 @@ def main():
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
+    # Generated shard directories and deployment evidence do not feed this root-level fork build.
+    # Check every Solidity/build/test input, including untracked additions, rather than those outputs.
+    input_paths = ['foundry.toml', 'foundry.lock', 'lib', 'script', 'test', 'integration',
+                   'scripts/run-oracle-sync-fork.py', 'scripts/capture-oracle-sync-fixture.py']
+    input_paths += [str(path.relative_to(root)) for package in (root / 'packages').iterdir()
+                    for name in ['src', 'test', 'test-support', 'foundry.toml']
+                    if (path := package / name).exists()]
+
+    def dirty_inputs():
+        return bool(subprocess.check_output(
+            ['git', 'status', '--porcelain', '--', *input_paths], cwd=root, text=True).strip())
     if not args.fixture.is_file():
         parser.error('Signed fixture is required; real-Pyth release gate remains blocked')
     fixture = json.loads(args.fixture.read_text())
@@ -30,7 +41,7 @@ def main():
         parser.error('Baseline must be an immutable full commit')
     if not os.environ.get('ARB_SEPOLIA_RPC_URL'):
         parser.error('ARB_SEPOLIA_RPC_URL is required; no skip fallback')
-    if subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).strip():
+    if dirty_inputs():
         parser.error('Commit the candidate and signed fixture before replay; dirty source cannot qualify a release')
     candidate_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
     if args.output.exists():
@@ -78,7 +89,7 @@ def main():
             finally:
                 local_fixture.unlink()
         passed = all(r['passed'] for r in results.values()) and bool(results['baseline']['prices']) and results['baseline']['prices'] == results['candidate']['prices']
-        dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=root, text=True).strip())
+        dirty = dirty_inputs()
         current_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         passed = passed and not dirty and current_commit == candidate_commit
         report = dict(passed=passed, baselineSourceCommit=baseline, candidateSourceCommit=None if dirty else candidate_commit,

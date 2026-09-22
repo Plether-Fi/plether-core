@@ -41,12 +41,15 @@ contract OracleSynchronizationForkTest is BasePerpTest {
         assertGt(data.length, 0);
         commitTime = uint64(vm.parseJsonUint(fixture, ".commitTimestamp"));
         executionTime = uint64(vm.parseJsonUint(fixture, ".executionTimestamp"));
+        assertLe(block.timestamp, commitTime, "fork state must precede the order commit");
+        assertGt(executionTime, commitTime);
         uint256[] memory stored = vm.parseJsonUintArray(fixture, ".initialStoredPublishTimes");
         for (uint256 i; i < ids.length; ++i) {
             assertEq(IPyth(realPyth).getPriceUnsafe(ids[i]).publishTime, stored[i]);
         }
 
         // Deploy/fund only local test contracts. Super setup never calls the real Pyth deployment.
+        vm.warp(SETUP_TIMESTAMP);
         super.setUp();
         pletherOracle = new ArbitrumSepoliaReleaseOracle(
             address(engine),
@@ -58,7 +61,8 @@ contract OracleSynchronizationForkTest is BasePerpTest {
             abi.decode(vm.parseJson(fixture, ".inversions"), (bool[]))
         );
         routerAdmin.proposeOracleConfig(IOrderRouterAdminHost.OracleConfig(address(pletherOracle)));
-        vm.warp(routerAdmin.oracleConfigActivationTime());
+        vm.warp(vm.parseJsonUint(fixture, ".forkTimestamp"));
+        assertGe(block.timestamp, routerAdmin.oracleConfigActivationTime());
         routerAdmin.finalizeOracleConfig();
         vm.warp(commitTime);
         vm.roll(forkNumber);
@@ -115,8 +119,10 @@ contract OracleSynchronizationForkTest is BasePerpTest {
         );
         assertTrue(vm.revertToState(beforeResolution));
         uint256 beforeBalance = realPyth.balance;
+        uint256 beforeGas = gasleft();
         OrderV2Types.ExecutionResult memory result =
             router.executeOrder{value: executionFunding, gas: 30_000_000}(id, data);
+        emit log_named_uint("real Pyth execution call gas", beforeGas - gasleft());
         assertEq(
             uint256(result.status), uint256(OrderV2Types.LifecycleStatus.Executed), "must execute, not merely return"
         );
