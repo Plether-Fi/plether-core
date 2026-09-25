@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -57,6 +58,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
     uint256 internal constant OVERPAYMENT = 0.25 ether;
 
     function test_SingleLiquidationHonorsCutoffAdvancedDuringOracleRefund() public {
+        _startRecordingLogs();
         (uint64 invalidatedOrderId, PauseOnOracleRefundKeeper keeper) = _setupCallbackLiquidation();
         bytes[] memory updateData = _mockPythUpdateData(UNSAFE_LONG_PRICE);
 
@@ -68,6 +70,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
     }
 
     function test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund() public {
+        _startRecordingLogs();
         (uint64 invalidatedOrderId, PauseOnOracleRefundKeeper keeper) = _setupCallbackLiquidation();
         bytes[] memory updateData = _mockPythUpdateData(UNSAFE_LONG_PRICE);
         address[] memory accounts = new address[](1);
@@ -82,6 +85,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
     }
 
     function test_SingleExecutionStopsAt64RiskOffRefundsBeforeOracleWork() public {
+        _startRecordingLogs();
         uint64[] memory orderIds = new uint64[](65);
         for (uint256 i; i < orderIds.length; ++i) {
             address account = address(uint160(0xC000 + i));
@@ -107,7 +111,8 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
         );
 
         for (uint256 i; i < 64; ++i) {
-            OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(orderIds[i]);
+            OrderV2Types.CompactOutcome memory outcome =
+                _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), orderIds[i]);
             assertEq(
                 uint256(outcome.status),
                 uint256(OrderV2Types.LifecycleStatus.Failed),
@@ -162,7 +167,7 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
     function _assertCallbackRiskOffOutcome(
         uint64 invalidatedOrderId,
         PauseOnOracleRefundKeeper keeper
-    ) internal view {
+    ) internal {
         assertEq(address(keeper).balance, OVERPAYMENT, "oracle must complete the bounded excess-ETH callback");
         assertFalse(routerAdmin.paused(), "the test-only cutoff change must not rely on a production pause write");
         assertGe(
@@ -171,7 +176,8 @@ contract OrderRouterRiskOffRefundCallbackTest is BasePerpTest {
             "callback pause must advance the inclusive cutoff over the queued open"
         );
 
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(invalidatedOrderId);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), invalidatedOrderId);
         assertEq(
             uint256(outcome.status), uint256(OrderV2Types.LifecycleStatus.Failed), "invalidated open must be terminal"
         );

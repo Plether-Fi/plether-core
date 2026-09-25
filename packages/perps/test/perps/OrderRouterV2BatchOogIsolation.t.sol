@@ -75,6 +75,7 @@ contract OrderRouterV2BatchOogIsolationTest is BasePerpTest {
     uint256 internal constant REFUND_AMOUNT = 0.25 ether;
 
     function test_BatchItemOogAndRefundGasBurnCannotRollbackCompletedPrefix() public {
+        _startRecordingLogs();
         _fundTrader(FIRST_TRADER, 2000e6);
         _fundTrader(SECOND_TRADER, 2000e6);
 
@@ -103,7 +104,8 @@ contract OrderRouterV2BatchOogIsolationTest is BasePerpTest {
         );
         assertEq(router.nextExecuteId(), secondOrderId, "the global cursor must preserve the retryable item");
 
-        OrderV2Types.CompactOutcome memory firstOutcome = router.lifecycleBook().outcome(firstOrderId);
+        OrderV2Types.CompactOutcome memory firstOutcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), firstOrderId);
         assertEq(
             uint256(firstOutcome.status),
             uint256(OrderV2Types.LifecycleStatus.Failed),

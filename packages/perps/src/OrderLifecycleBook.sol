@@ -134,33 +134,6 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         StoredExecutionBounds bounds;
     }
 
-    /// @dev Fills the unused bytes beside the three addresses; the public outcome and receipt hash remain canonical.
-    struct StoredCompactOutcome {
-        address account;
-        uint64 terminalBlock;
-        OrderV2Types.LifecycleStatus status;
-        OrderV2Types.TerminalReason reason;
-        OrderV2Types.ExecutionMode executionMode;
-        OrderV2Types.PriceSource priceSource;
-        address executor;
-        uint64 terminalTime;
-        OrderV2Types.BountyDisposition bountyDisposition;
-        uint8 failureCategory;
-        uint8 failureCode;
-        OrderV2Types.ConstraintKind failedConstraint;
-        address bountyRecipient;
-        uint64 oraclePublishTime;
-        bytes4 failureSelector;
-        bytes32 clientOrderId;
-        bytes32 intentHash;
-        bytes32 expectedConfigHash;
-        bytes32 observedConfigHash;
-        uint256 executionPrice;
-        uint256 bountyUsdc;
-        bytes32 revertDataHash;
-        bytes32 receiptHash;
-    }
-
     /// @notice Ephemeral policy and identity required to authenticate terminal settlement.
     mapping(uint64 orderId => StoredPendingIntent intent) private _pendingIntents;
 
@@ -168,7 +141,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     mapping(uint64 orderId => bool registered) private _protectionAttempts;
 
     /// @notice Permanent compact terminal outcomes.
-    mapping(uint64 orderId => StoredCompactOutcome terminalOutcome) private _outcomes;
+    mapping(uint64 orderId => OrderV2Types.TerminalOutcome terminalOutcome) private _outcomes;
 
     modifier onlyRouter() {
         if (msg.sender != ROUTER) {
@@ -435,30 +408,11 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             abi.encode(RECEIPT_TYPEHASH, block.chainid, address(this), ROUTER, terminalBlock, terminalTime, receipt)
         );
 
-        OrderV2Types.FailureDetails calldata failure = receipt.failure;
-        _outcomes[receipt.orderId] = StoredCompactOutcome({
+        _outcomes[receipt.orderId] = OrderV2Types.TerminalOutcome({
             account: receipt.account,
-            clientOrderId: receipt.clientOrderId,
-            intentHash: receipt.intentHash,
-            expectedConfigHash: receipt.expectedConfigHash,
-            observedConfigHash: receipt.observedConfigHash,
+            terminalBlock: terminalBlock,
             status: receipt.status,
             reason: receipt.reason,
-            executionMode: receipt.executionMode,
-            priceSource: receipt.priceSource,
-            bountyDisposition: receipt.bountyDisposition,
-            terminalBlock: terminalBlock,
-            terminalTime: terminalTime,
-            oraclePublishTime: receipt.oraclePublishTime,
-            executor: receipt.executor,
-            bountyRecipient: receipt.bountyRecipient,
-            executionPrice: receipt.executionPrice,
-            bountyUsdc: receipt.bountyUsdc,
-            failureSelector: failure.selector,
-            failureCategory: failure.category,
-            failureCode: failure.code,
-            failedConstraint: failure.constraint,
-            revertDataHash: failure.revertDataHash,
             receiptHash: receiptHash
         });
         if (
@@ -549,33 +503,27 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     /// @inheritdoc IOrderLifecycleBook
-    function outcome(
+    function terminalOutcome(
         uint64 orderId
-    ) external view override returns (OrderV2Types.CompactOutcome memory terminalOutcome) {
-        StoredCompactOutcome storage stored = _outcomes[orderId];
-        terminalOutcome.account = stored.account;
-        terminalOutcome.clientOrderId = stored.clientOrderId;
-        terminalOutcome.intentHash = stored.intentHash;
-        terminalOutcome.expectedConfigHash = stored.expectedConfigHash;
-        terminalOutcome.observedConfigHash = stored.observedConfigHash;
-        terminalOutcome.status = stored.status;
-        terminalOutcome.reason = stored.reason;
-        terminalOutcome.executionMode = stored.executionMode;
-        terminalOutcome.priceSource = stored.priceSource;
-        terminalOutcome.bountyDisposition = stored.bountyDisposition;
-        terminalOutcome.terminalBlock = stored.terminalBlock;
-        terminalOutcome.terminalTime = stored.terminalTime;
-        terminalOutcome.oraclePublishTime = stored.oraclePublishTime;
-        terminalOutcome.executor = stored.executor;
-        terminalOutcome.bountyRecipient = stored.bountyRecipient;
-        terminalOutcome.executionPrice = stored.executionPrice;
-        terminalOutcome.bountyUsdc = stored.bountyUsdc;
-        terminalOutcome.failureSelector = stored.failureSelector;
-        terminalOutcome.failureCategory = stored.failureCategory;
-        terminalOutcome.failureCode = stored.failureCode;
-        terminalOutcome.failedConstraint = stored.failedConstraint;
-        terminalOutcome.revertDataHash = stored.revertDataHash;
-        terminalOutcome.receiptHash = stored.receiptHash;
+    ) external view override returns (OrderV2Types.TerminalOutcome memory) {
+        return _outcomes[orderId];
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function verifyReceipt(
+        OrderV2Types.OrderReceipt calldata receipt,
+        uint64 terminalTime
+    ) external view override returns (bool) {
+        OrderV2Types.TerminalOutcome storage stored = _outcomes[receipt.orderId];
+        if (stored.status == OrderV2Types.LifecycleStatus.None || stored.account != receipt.account) {
+            return false;
+        }
+        bytes32 suppliedHash = keccak256(
+            abi.encode(
+                RECEIPT_TYPEHASH, block.chainid, address(this), ROUTER, stored.terminalBlock, terminalTime, receipt
+            )
+        );
+        return stored.receiptHash == suppliedHash;
     }
 
     /// @notice Enforces monotonic and semantically valid terminal transitions.

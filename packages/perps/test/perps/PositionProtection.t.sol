@@ -82,6 +82,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ZeroBountyProtectionExpiryAndRetryUsesExplicitReservation() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.closeOrderExecutionBountyUsdc = 0;
         _setRouterConfig(config);
@@ -89,6 +90,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Constructor_RejectsZeroRouterOrEngine() public {
+        _startRecordingLogs();
         vm.expectRevert(PositionProtectionBook.PositionProtectionBook__ZeroAddress.selector);
         new PositionProtectionBook(address(0), address(engine));
 
@@ -97,6 +99,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CreatePositionProtection_RejectsNoPositionAndDegradedMode() public {
+        _startRecordingLogs();
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
@@ -116,6 +119,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CreatePositionProtection_RejectsEmptyOrAboveCapThresholds() public {
+        _startRecordingLogs();
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
 
         vm.prank(ALICE);
@@ -135,6 +139,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CreatePositionProtection_ValidatesLongGeometryAndArmsOffQueue() public {
+        _startRecordingLogs();
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
 
         vm.prank(ALICE);
@@ -179,6 +184,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CreatePositionProtection_ValidatesShortGeometry() public {
+        _startRecordingLogs();
         _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
 
         vm.prank(ALICE);
@@ -203,6 +209,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_LongTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         _expectTriggerNotMet(protectionId, LONG_TAKE_PROFIT + 2);
@@ -217,6 +224,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_LongStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
 
         _expectTriggerNotMet(protectionId, LONG_STOP_LOSS - 1);
@@ -228,6 +236,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ShortTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, SHORT_TAKE_PROFIT, 0);
 
         _expectTriggerNotMet(protectionId, SHORT_TAKE_PROFIT - 1);
@@ -247,6 +256,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ShortStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, 0, SHORT_STOP_LOSS);
 
         _expectTriggerNotMet(protectionId, SHORT_STOP_LOSS + 2);
@@ -258,6 +268,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggeredProtection_RejectsReplacementAndCancellation() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
 
@@ -284,6 +295,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggerPositionProtection_RejectsSameBlockAndOldPublishTime() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         PositionProtectionTypes.PositionProtectionView memory armed =
             protectionViews.getPositionProtection(protectionId);
@@ -319,6 +331,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggeredClose_AppendsToGlobalFifoAndExecutesThroughOrdinaryPath() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         vm.prank(BOB);
@@ -390,6 +403,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggeredClose_ExecutesInDegradedModeBelowSettlementBufferWhileRawSolvent() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         uint256 maxLiabilityUsdc = _maxLiability();
@@ -427,6 +441,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ExpiredProtectionAttempt_RelatchesRetainsBountyAndPaysNoCleaner() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
@@ -466,7 +481,8 @@ contract PositionProtectionTest is BasePerpTest {
             "expiry should not change the underlying action reserve"
         );
 
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(linkedOrderId);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired), "receipt expiry reason");
         assertEq(
             uint8(outcome.bountyDisposition),
@@ -479,6 +495,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RetryPositionProtectionClose_IsPermissionlessFreshAndAppendsFifoTail() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         CfdTypes.Order memory firstOrder = _orderRecord(firstOrderId).core;
@@ -549,6 +566,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RetryPositionProtectionClose_StaleOldAttemptCallbacksCannotMutateReplacement() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 oldOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
@@ -586,6 +604,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RetryPositionProtectionClose_OracleWindowStartsStrictlyAfterFreshCommit() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 oldOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         CfdTypes.Order memory oldOrder = _orderRecord(oldOrderId).core;
@@ -631,6 +650,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RetryPositionProtectionClose_OracleWindowIncludesFreshDeadlineButNotLaterTicks() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 oldOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         _expireProtectionAttempt(oldOrderId, EXECUTION_KEEPER);
@@ -667,6 +687,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RetryPositionProtectionClose_PriceRecoveryDoesNotCancelLatchedIntent() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
@@ -704,7 +725,8 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "success should clear bounty reserve");
         assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "success should consume the action reserve");
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(retryOrderId);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Executed), "successful retry receipt");
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "paid disposition");
         assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "receipt bounty recipient");
@@ -715,6 +737,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_FailedProtectionAttempt_PositionMismatchFailsAndPaysCleanerExactlyOnce() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
@@ -756,7 +779,8 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "mismatch should clear reserve view");
         assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "mismatch payout should consume the action reserve");
 
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(linkedOrderId);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired), "mismatch receipt reason");
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "paid receipt");
         assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "cleaner receipt recipient");
@@ -765,6 +789,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RetryPositionProtectionClose_ReusesSnapshotAfterBountyConfigChangeWithoutFreshFunds() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         _withdrawAllFreeSettlement(ALICE);
         uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
@@ -803,6 +828,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Batch_ExpiredProtectionHeadRelatchesAndLaterOrderExecutes() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         uint64 linkedValidUntil = router.lifecycleBook().pendingPolicy(linkedOrderId).validUntil;
@@ -837,14 +863,15 @@ contract PositionProtectionTest is BasePerpTest {
             router.closeOrderExecutionBountyUsdc(),
             "batch cleanup should retain protection bounty"
         );
-        OrderV2Types.CompactOutcome memory protectionOutcome = router.lifecycleBook().outcome(linkedOrderId);
+        OrderV2Types.CompactOutcome memory protectionOutcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(
             uint8(protectionOutcome.bountyDisposition),
             uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
             "batch head receipt should retain bounty"
         );
         assertEq(
-            uint8(router.lifecycleBook().outcome(bobOrderId).status),
+            uint8(_verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), bobOrderId).status),
             uint8(OrderV2Types.LifecycleStatus.Executed),
             "later target should execute in the same batch"
         );
@@ -854,6 +881,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RepeatedProtectionAttemptExpiryRetry_ConservesSingleBounty() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 attemptOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
@@ -907,6 +935,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_RetryPositionProtectionClose_RemainsAvailableAcrossSafetyModes() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
@@ -934,7 +963,8 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(retryOrderId, _priceData(MARK_PRICE));
 
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(retryOrderId);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
         assertEq(uint8(outcome.executionMode), uint8(OrderV2Types.ExecutionMode.Frozen), "frozen execution mode");
         assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "frozen payout");
         assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "frozen executor should receive bounty");
@@ -948,6 +978,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_CancelPositionProtection_RefundsExactReserveAndClearsTradeLock() public {
+        _startRecordingLogs();
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
 
@@ -973,6 +1004,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroUsdcAboveBoundary() public {
+        _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
         RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
 
@@ -1006,6 +1038,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_FreeSettlementCannotCureExactPriceRisk() public {
+        _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
         RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
         uint256 surplusFreeSettlementUsdc = 5000e6;
@@ -1035,6 +1068,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_SameAccountClaimProvidesOneAtomOfExactPriceCollateral() public {
+        _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
         RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
 
@@ -1059,6 +1093,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_UsesStricterFadBoundary() public {
+        _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
         riskParams.baseCarryBps = 0;
         _setRiskParams(riskParams);
@@ -1103,6 +1138,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_RejectsUnderfundedNegativeVpiReserveIndependently() public {
+        _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
         riskParams.vpiFactor = 0.05e18;
         riskParams.baseCarryBps = 0;
@@ -1133,6 +1169,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_RejectsCarryLeftUncoveredByLockCheckpoint() public {
+        _startRecordingLogs();
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         _withdrawAllFreeSettlement(ALICE);
 
@@ -1161,6 +1198,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Pause_BlocksNewAndReplacementButAllowsCancelAndTrigger() public {
+        _startRecordingLogs();
         uint64 cancelledProtectionId = _createProtectionFor(
             ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT, LONG_STOP_LOSS
         );
@@ -1193,6 +1231,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_DefaultDeployment_AllowsProtectionWithoutRouterConfigProposal() public {
+        _startRecordingLogs();
         assertEq(routerAdmin.activeConfigVersion(), 1, "fresh Router must use its constructor configuration");
         assertEq(routerAdmin.routerConfigActivationTime(), 0, "protection must not require an activation proposal");
         uint64 cancelledProtectionId = _createProtectionFor(
@@ -1236,6 +1275,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ReplacePositionProtection_RemainsAvailableInDegradedMode() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
@@ -1263,6 +1303,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ProtectionBook_NonTriggerActionsRejectEthAndNeverCustodyIt() public {
+        _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
@@ -1284,6 +1325,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ProtectionBook_LifecycleHooksRejectNonRouterCallers() public {
+        _startRecordingLogs();
         uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
@@ -1306,6 +1348,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ProtectionBook_FailedAttemptHookValidatesAttemptAccountReasonAndBounty() public {
+        _startRecordingLogs();
         uint256 executionBountyUsdc = router.closeOrderExecutionBountyUsdc();
 
         vm.prank(address(router));
@@ -1348,6 +1391,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Router_RejectsUntrustedProtectionHostMetadata() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory protectedOpenRequest;
         vm.prank(BOB);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
@@ -1369,6 +1413,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_TriggerPositionProtection_RefundsUnusedEthAndLeavesBookBalanceZero() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         bytes[] memory updateData = _mockPythUpdateData(LONG_TAKE_PROFIT);
         vm.deal(TRIGGER_KEEPER, 1 ether);
@@ -1388,6 +1433,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ActiveProtection_BlocksDiscretionaryOrdersButAllowsAddMargin() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         vm.prank(ALICE);
@@ -1407,6 +1453,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_ActiveProtection_BlocksAttachedOpenWithCanonicalSelector() public {
+        _startRecordingLogs();
         _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
         OrderV2Types.OrderRequest memory request =
@@ -1417,6 +1464,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Liquidation_ArmedProtectionForfeitsBothBountiesAndTerminalizes() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
         _withdrawAllFreeSettlement(ALICE);
 
@@ -1445,6 +1493,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Liquidation_TriggeredProtectionForfeitsLinkedCloseBountyExactlyOnce() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
         _withdrawAllFreeSettlement(ALICE);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
@@ -1480,6 +1529,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Liquidation_LatchedProtectionForfeitsRetainedBountyExactlyOnce() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
         _withdrawAllFreeSettlement(ALICE);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
@@ -1518,7 +1568,8 @@ contract PositionProtectionTest is BasePerpTest {
             router.closeOrderExecutionBountyUsdc(),
             "retained bounty should be forfeited exactly once"
         );
-        OrderV2Types.CompactOutcome memory expiredOutcome = router.lifecycleBook().outcome(linkedOrderId);
+        OrderV2Types.CompactOutcome memory expiredOutcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(
             uint8(expiredOutcome.bountyDisposition),
             uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
@@ -1529,6 +1580,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Liquidation_LiveRetriedChildCleansLatestLinkageAndBountyExactlyOnce() public {
+        _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, 0, LONG_STOP_LOSS);
         _withdrawAllFreeSettlement(ALICE);
         uint64 firstOrderId = _triggerAt(protectionId, LONG_STOP_LOSS);
@@ -1571,7 +1623,8 @@ contract PositionProtectionTest is BasePerpTest {
             "live retry bounty should be forfeited exactly once"
         );
 
-        OrderV2Types.CompactOutcome memory retryOutcome = router.lifecycleBook().outcome(retryOrderId);
+        OrderV2Types.CompactOutcome memory retryOutcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
         assertEq(
             uint8(retryOutcome.reason),
             uint8(OrderV2Types.TerminalReason.AccountLiquidated),
@@ -1587,6 +1640,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_InheritsSettlementBufferAdmissionAtCommit() public {
+        _startRecordingLogs();
         uint256 size = 100_000e18;
         uint256 marginUsdc = 5000e6;
         _open(BOB, CfdTypes.Side.SHORT, size, marginUsdc, MARK_PRICE);
@@ -1633,6 +1687,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_PostCommitBufferInvalidationRefundsAndUnlocksProtection() public {
+        _startRecordingLogs();
         uint256 size = 100_000e18;
         uint256 marginUsdc = 5000e6;
         _open(BOB, CfdTypes.Side.SHORT, size, marginUsdc, MARK_PRICE);
@@ -1705,6 +1760,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_SuccessArmsProtectionAtomically() public {
+        _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
         vm.startPrank(ALICE);
@@ -1768,6 +1824,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_RetainsCallerBoundedRequestAndPublicIdentity() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         request.clientOrderId = keccak256("bounded-protected-parent");
@@ -1800,6 +1857,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_RejectsMalformedOrUnboundedParentAndRollsBack() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         bytes32 currentConfigHash = request.bounds.expectedConfigHash;
@@ -1847,6 +1905,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_RejectsStaleConfigAtCommitAndRollsBack() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         bytes32 staleConfigHash = request.bounds.expectedConfigHash;
@@ -1865,6 +1924,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_ConfigDriftTerminallyFailsParentAndProtection() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         routerAdmin.proposeRouterConfig(config);
         uint256 activationTime = routerAdmin.routerConfigActivationTime();
@@ -1895,6 +1955,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_DisallowedExecutionModeFailsParentAndProtection() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         request.bounds.allowedExecutionModes = 2;
@@ -1919,6 +1980,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_FinancialBoundFailureFailsParentAndProtection() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         uint256 executionNotionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
@@ -1938,7 +2000,9 @@ contract PositionProtectionTest is BasePerpTest {
             "parent failure reason"
         );
         assertEq(
-            uint8(router.lifecycleBook().outcome(parentOrderId).failedConstraint),
+            uint8(
+                _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), parentOrderId).failedConstraint
+            ),
             uint8(OrderV2Types.ConstraintKind.ExecutionNotional),
             "failed bound"
         );
@@ -1946,6 +2010,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_ExactReplayAndClientIdConflictAreRejectedWithoutMutation() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
@@ -1995,6 +2060,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_LegacyScalarSelectorIsUnavailable() public {
+        _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         bytes4 legacySelector =
             bytes4(keccak256("commitOpenOrderWithProtection(uint8,uint256,uint256,uint256,(uint256,uint256))"));
@@ -2014,6 +2080,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_Trigger_PublicRawIdPreclaimCannotPoisonProtocolClose() public {
+        _startRecordingLogs();
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
 
         uint64 protectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
@@ -2063,6 +2130,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_ThresholdCrossedBeforeFillArmsThenTriggersOnLaterTick() public {
+        _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
 
         vm.startPrank(ALICE);
@@ -2095,6 +2163,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_SlippageFailureRefundsProtectionBounties() public {
+        _startRecordingLogs();
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
@@ -2131,6 +2200,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_RiskOffRefundFailsProtectionAndReleasesAllReservesExactlyOnce() public {
+        _startRecordingLogs();
         RiskOffRefundFixture memory fixture;
         fixture.freeBefore = _freeSettlementUsdc(ALICE);
         fixture.settlementBefore = _settlementBalance(ALICE);
@@ -2182,11 +2252,11 @@ contract PositionProtectionTest is BasePerpTest {
             abi.encodeCall(ICfdEngineCore.realizeCarryBeforeMarginChange, (ALICE)),
             bytes("risk-off must not checkpoint carry")
         );
-        vm.recordLogs();
+        _startRecordingLogs();
         vm.prank(CAROL);
         router.clearRiskOffOrder(fixture.parentOrderId);
         {
-            Vm.Log[] memory riskOffLogs = vm.getRecordedLogs();
+            Vm.Log[] memory riskOffLogs = _takeRecordedLogs();
             vm.clearMockedCalls();
             _assertSingleRiskOffRefund(
                 riskOffLogs, ALICE, fixture.parentMarginUsdc, fixture.parentBountyUsdc + fixture.protectionBountiesUsdc
@@ -2272,6 +2342,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_RiskOffClearinghouseFailureRollsBackProtectionAndRouter() public {
+        _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
@@ -2328,6 +2399,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_AttachedOpen_ParentExpiryBatchFailsProtectionsAndRefundsTheirBounties() public {
+        _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
 
         vm.startPrank(ALICE);

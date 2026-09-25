@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {RecordedOrderReceipts} from "../utils/RecordedOrderReceipts.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
@@ -7,7 +8,7 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {Test} from "forge-std/Test.sol";
 
-contract OrderLifecycleBookUnpinnedConfigTest is Test {
+contract OrderLifecycleBookUnpinnedConfigTest is RecordedOrderReceipts {
 
     address private constant ACCOUNT = address(0xA11CE);
     address private constant EXECUTOR = address(0xE7EC);
@@ -20,19 +21,21 @@ contract OrderLifecycleBookUnpinnedConfigTest is Test {
     }
 
     function test_UnpinnedInternalIntentAcceptsOracleReceiptAndRecordsObservedConfig() public {
+        _startRecordingLogs();
         bytes32 clientOrderId = OrderV2Types.protocolClientOrderId(keccak256("protected-child"));
         OrderV2Types.OrderRequest memory request = _request(clientOrderId, bytes32(0));
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, 0);
 
         book.finalize(_executedReceipt(1, request, intentHash, OBSERVED_CONFIG_HASH));
 
-        OrderV2Types.CompactOutcome memory terminalOutcome = book.outcome(1);
+        OrderV2Types.CompactOutcome memory terminalOutcome = _verifiedOutcome(IOrderLifecycleBook(address(book)), 1);
         assertEq(terminalOutcome.expectedConfigHash, bytes32(0));
         assertEq(terminalOutcome.observedConfigHash, OBSERVED_CONFIG_HASH);
         assertEq(uint8(terminalOutcome.status), uint8(OrderV2Types.LifecycleStatus.Executed));
     }
 
     function test_PinnedIntentStillRejectsMismatchedOracleReceipt() public {
+        _startRecordingLogs();
         bytes32 expectedConfigHash = keccak256("expected-config");
         OrderV2Types.OrderRequest memory request = _request(bytes32("pinned"), expectedConfigHash);
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 2, request, 0);

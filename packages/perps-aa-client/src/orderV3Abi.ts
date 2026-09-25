@@ -1557,7 +1557,7 @@ export const committedOrderV3Abi = [
   }
 ] as const;
 
-export const orderLifecycleV4Abi = [
+export const orderLifecycleV5Abi = [
   {
     "type": "function",
     "name": "CONFIG_SCHEMA_HASH",
@@ -1612,7 +1612,7 @@ export const orderLifecycleV4Abi = [
   },
   {
     "type": "function",
-    "name": "outcome",
+    "name": "lifecycleStatus",
     "inputs": [
       {
         "name": "orderId",
@@ -1622,126 +1622,9 @@ export const orderLifecycleV4Abi = [
     ],
     "outputs": [
       {
-        "name": "terminalOutcome",
-        "type": "tuple",
-        "internalType": "struct OrderV2Types.CompactOutcome",
-        "components": [
-          {
-            "name": "account",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "clientOrderId",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "intentHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "expectedConfigHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "observedConfigHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "status",
-            "type": "uint8",
-            "internalType": "enum OrderV2Types.LifecycleStatus"
-          },
-          {
-            "name": "reason",
-            "type": "uint8",
-            "internalType": "enum OrderV2Types.TerminalReason"
-          },
-          {
-            "name": "executionMode",
-            "type": "uint8",
-            "internalType": "enum OrderV2Types.ExecutionMode"
-          },
-          {
-            "name": "priceSource",
-            "type": "uint8",
-            "internalType": "enum OrderV2Types.PriceSource"
-          },
-          {
-            "name": "bountyDisposition",
-            "type": "uint8",
-            "internalType": "enum OrderV2Types.BountyDisposition"
-          },
-          {
-            "name": "terminalBlock",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "terminalTime",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "oraclePublishTime",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "executor",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "bountyRecipient",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "executionPrice",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "bountyUsdc",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "failureSelector",
-            "type": "bytes4",
-            "internalType": "bytes4"
-          },
-          {
-            "name": "failureCategory",
-            "type": "uint8",
-            "internalType": "uint8"
-          },
-          {
-            "name": "failureCode",
-            "type": "uint8",
-            "internalType": "uint8"
-          },
-          {
-            "name": "failedConstraint",
-            "type": "uint8",
-            "internalType": "enum OrderV2Types.ConstraintKind"
-          },
-          {
-            "name": "revertDataHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "receiptHash",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          }
-        ]
+        "name": "status",
+        "type": "uint8",
+        "internalType": "enum OrderV2Types.LifecycleStatus"
       }
     ],
     "stateMutability": "view"
@@ -1912,6 +1795,448 @@ export const orderLifecycleV4Abi = [
             ]
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "terminalOutcome",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct OrderV2Types.TerminalOutcome",
+        "components": [
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "terminalBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.LifecycleStatus"
+          },
+          {
+            "name": "reason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.TerminalReason"
+          },
+          {
+            "name": "receiptHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "verifyReceipt",
+    "inputs": [
+      {
+        "name": "receipt",
+        "type": "tuple",
+        "internalType": "struct OrderV2Types.OrderReceipt",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "clientOrderId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "intentHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "expectedConfigHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "observedConfigHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.LifecycleStatus"
+          },
+          {
+            "name": "reason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.TerminalReason"
+          },
+          {
+            "name": "executionMode",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.ExecutionMode"
+          },
+          {
+            "name": "executor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "priceSource",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.PriceSource"
+          },
+          {
+            "name": "executionPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "neutralMarkPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolDepthUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "oraclePublishTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "priceReachedEngine",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "bountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bountyRecipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "bountyDisposition",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.BountyDisposition"
+          },
+          {
+            "name": "failure",
+            "type": "tuple",
+            "internalType": "struct OrderV2Types.FailureDetails",
+            "components": [
+              {
+                "name": "selector",
+                "type": "bytes4",
+                "internalType": "bytes4"
+              },
+              {
+                "name": "category",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "code",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "constraint",
+                "type": "uint8",
+                "internalType": "enum OrderV2Types.ConstraintKind"
+              },
+              {
+                "name": "actual",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "limit",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "revertDataHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              }
+            ]
+          },
+          {
+            "name": "economics",
+            "type": "tuple",
+            "internalType": "struct OrderV2Types.OrderEconomics",
+            "components": [
+              {
+                "name": "executionNotionalUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "realizedPnlUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "vpiUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "carryUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "executionFeeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "frozenSpreadUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "actionChargeAssessedUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "actionChargeCollectedUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "grossAccountDebitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "preSettlementBalanceUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postSettlementBalanceUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "preTraderClaimBalanceUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postTraderClaimBalanceUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postPositionSize",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postPositionMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postPositionEquityUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "postLeverageBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "close",
+                "type": "tuple",
+                "internalType": "struct OrderV2Types.CloseEconomics",
+                "components": [
+                  {
+                    "name": "postFreeSettlementUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "safeMarginReleaseUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "actionChargeFromReleasedMarginUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "netReleasedMarginUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "priceLossUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "pricePnlClaimConsumedUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "pricePnlPledgeConsumedUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "priceLossWrittenOffUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "actionChargeWithheldUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "actionChargeWaivedUsdc",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "closeMode",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.CloseMode"
+          },
+          {
+            "name": "commitment",
+            "type": "tuple",
+            "internalType": "struct CfdEnginePlanTypes.CloseCommitment",
+            "components": [
+              {
+                "name": "carryCollectedUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "carryOutstandingUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyFromFreeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyFromPledgeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "settlementBeforeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "settlementAfterUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "freeSettlementAfterUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "bounty",
+            "type": "tuple",
+            "internalType": "struct OrderV2Types.BountyAccounting",
+            "components": [
+              {
+                "name": "bountyEntitlementUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyPaidUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyRefundedUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyRetainedUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyForfeitedUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "discrepancy",
+                "type": "uint8",
+                "internalType": "enum OrderV2Types.ReservationDiscrepancy"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "terminalTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"

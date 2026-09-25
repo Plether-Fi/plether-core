@@ -135,7 +135,7 @@ interface IOrderLifecycleBook {
         uint64 orderId
     ) external view returns (bool registered);
 
-    /// @notice Atomically deletes pending policy, stores a compact outcome, and emits the full receipt.
+    /// @notice Atomically deletes pending policy, stores a terminal summary, and emits the full receipt.
     function finalize(
         OrderV2Types.OrderReceipt calldata receipt
     ) external returns (bytes32 receiptHash);
@@ -158,8 +158,16 @@ interface IOrderLifecycleBook {
         uint64 orderId
     ) external view returns (OrderV2Types.LifecycleStatus status);
 
-    function outcome(
+    /// @notice Durable summary only. Detailed fields remain in OrderFinalized, authenticated by receiptHash.
+    function terminalOutcome(
         uint64 orderId
-    ) external view returns (OrderV2Types.CompactOutcome memory terminalOutcome);
+    ) external view returns (OrderV2Types.TerminalOutcome memory);
+
+    /// @notice Verifies a supplied full receipt using its stored terminal block and caller-supplied event timestamp.
+    /// @dev Returns false for unknown/pending orders or any altered receipt, timestamp, chain or Book domain.
+    function verifyReceipt(
+        OrderV2Types.OrderReceipt calldata receipt,
+        uint64 terminalTime
+    ) external view returns (bool);
 
 }

@@ -269,7 +269,16 @@ library OrderV2Types {
         BountyAccounting bounty;
     }
 
-    /// @notice Compact permanent terminal state; full economics remain available from the canonical event.
+    /// @notice Two-slot durable terminal summary. Full history is carried by the authenticated receipt event.
+    struct TerminalOutcome {
+        address account;
+        uint64 terminalBlock;
+        LifecycleStatus status;
+        TerminalReason reason;
+        bytes32 receiptHash;
+    }
+
+    /// @notice Historical full outcome projection; consumers reconstruct this from a verified receipt event.
     struct CompactOutcome {
         address account;
         bytes32 clientOrderId;

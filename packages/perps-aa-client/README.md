@@ -128,3 +128,47 @@ encodings and hashes; `RELEASING.md` describes the artifact compatibility gate.
 ## UI errors and fallback
 
 Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and contract failures into stable codes and user-safe messages. Do not silently fall back to an EOA transaction: it would create protocol state under a different `msg.sender` and split the user's account. If sponsorship is unavailable, show a retry/support state unless the product has explicitly implemented and disclosed user-paid smart-account gas.
+
+## Terminal history on the new stack (0.2.0)
+
+The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
+`terminalOutcome(orderId)`: account, terminal block, status, reason and receipt
+hash. Full details come from the unchanged V4 `OrderFinalized` event. Use the
+trusted deployment's chain, Book and Router addresses; do not take those or the
+summary from an untrusted indexer.
+
+```ts
+import { decodeVerifiedOrderFinalized, orderLifecycleV5Abi } from "@plether-fi/perps-aa-client";
+
+const summary = await publicClient.readContract({
+  address: book, abi: orderLifecycleV5Abi, functionName: "terminalOutcome", args: [orderId],
+});
+// None/Pending has no terminal history. Wait for finality before caching.
+if (summary.status === 2 || summary.status === 3) {
+  const logs = await publicClient.getLogs({
+    address: book,
+    fromBlock: summary.terminalBlock,
+    toBlock: summary.terminalBlock,
+  });
+  // Select the OrderFinalized log for orderId (or retrieve it from an indexer).
+  // The helper rejects unrelated logs, wrong indexed identity and modified data.
+  const verified = decodeVerifiedOrderFinalized({
+    chainId: BigInt(chainId), book, router, summary, log: matchingFinalizedLog,
+  });
+  displayReceipt(verified.receipt);
+}
+```
+
+`matchingFinalizedLog` includes its emitter address, data, and nonempty topics.
+The helper authenticates the event, clocks and full receipt against the summary;
+`hashOrderReceiptV4` exposes the same digest separately. Solidity consumers can
+call `verifyReceipt(receipt, terminalTime)` on the Book. The V4 receipt and V3
+intent domains are unchanged; V5 is the read API version.
+
+Cache history by chain/Book/order ID and invalidate it on reorg. If a log cannot
+be retrieved, report history as unavailable instead of assuming zero fees or
+bounty. Verification proves authenticity, not availability. Detailed on-chain
+reads now require a supplied full receipt. The archived `orderLifecycleV4Abi`
+export and old-stack action/assistance bindings remain available; choose ABI by
+deployment, and migrate external app/keeper reads before new-stack activation.
+Commitment history remains stored and does not require an event join.

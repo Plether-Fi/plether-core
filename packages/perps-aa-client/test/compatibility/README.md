@@ -15,3 +15,9 @@ The independent `0xd9204249…` sponsorship vector remains checked by both Solid
 and TypeScript tests, and by plether-app's Haskell paymaster tests. Protection
 actions also verify signature → durable journal → submission ordering and that
 journal failure prevents submission.
+
+Version 0.2.0 intentionally adds `orderLifecycleV5Abi`, `hashOrderReceiptV4` and
+`decodeVerifiedOrderFinalized` to the reviewed export list. This update changes no
+baseline action bytes, sponsorship hashes, historical Book ABI, or old-stack
+bindings. `terminalHistory.test.ts` independently checks that V4 events remain
+identical and shares a golden hash vector with the Solidity lifecycle tests.

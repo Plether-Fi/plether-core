@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {RecordedOrderReceipts} from "../utils/RecordedOrderReceipts.sol";
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 
 import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
@@ -131,6 +133,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_UnbrickableQueue_OnEngineRevert() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
 
@@ -156,6 +159,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_WithdrawalFirewall() public {
+        _startRecordingLogs();
         vm.warp(block.timestamp + 1 hours);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8, false);
@@ -198,12 +202,14 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CommitOrder_OpenRejectsNonLotSize() public {
+        _startRecordingLogs();
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidSizeQuantum.selector);
         router.commitOrder(CfdTypes.Side.LONG, 99e18, 2e6, 1e8, false);
     }
 
     function test_CommitOrder_AlignedOpenStillRejectsBelowMinimumNotional() public {
+        _startRecordingLogs();
         vm.prank(address(router));
         engine.updateMarkPrice(50_000_000, uint64(block.timestamp));
 
@@ -213,6 +219,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_IncreaseOrder_DoesNotUsePnlPledgeToPayTradeCost() public {
+        _startRecordingLogs();
         address trader = address(0xC444);
         address account = trader;
         uint256 sizeDelta = 3400e18;
@@ -258,7 +265,8 @@ contract OrderRouterTest is BasePerpTest {
             uint256(IOrderRouterAccounting.OrderStatus.None),
             "terminal order should be deleted from Router storage"
         );
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), 1);
         assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
         assertEq(
             uint8(outcome.reason),
@@ -268,12 +276,14 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ZeroSizeCommit_Reverts() public {
+        _startRecordingLogs();
         vm.prank(alice);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ZeroSize.selector);
         router.commitOrder(CfdTypes.Side.LONG, 0, 500 * 1e6, 1e8, false);
     }
 
     function test_NonLotPartialCloseCommit_RevertsBeforeQueueMutation() public {
+        _startRecordingLogs();
         _fundTrader(alice, 2000e6);
         _open(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
@@ -286,6 +296,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_DustFullResidualCloseCommit_Allowed() public {
+        _startRecordingLogs();
         uint256 minCloseSize = 1000e18;
 
         _fundTrader(alice, 2000e6);
@@ -309,6 +320,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ExecuteNonPendingOrder_Reverts() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
@@ -322,6 +334,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ExecuteOrder_SkipsFailedHeadBeforeExpiration() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 300;
         routerAdmin.proposeRouterConfig(config);
@@ -375,6 +388,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_StrictFIFO_OutOfOrder_Reverts() public {
+        _startRecordingLogs();
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -387,6 +401,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_MultiPendingOrders_DoNotCorruptLockedMarginOnFail() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -440,6 +455,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsWhenPendingOrderCountHitsCap() public {
+        _startRecordingLogs();
         uint256 limit = 5;
 
         vm.startPrank(alice);
@@ -452,6 +468,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_AccountReservationView_TracksPendingOrders() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -472,6 +489,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_OrderRecord_UnifiesPendingState() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
@@ -487,6 +505,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_OrderRecord_DeletesExecutedStateAndBookPreservesLifecycle() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
 
@@ -497,7 +516,8 @@ contract OrderRouterTest is BasePerpTest {
         OrderRouterDebugLens.OrderRecord memory record = OrderRouterDebugLens.loadRawOrderRecord(vm, router, 1);
         assertEq(uint256(record.status), uint256(IOrderRouterAccounting.OrderStatus.None));
         assertEq(record.core.orderId, 0, "Terminal Router record should be fully deleted");
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), 1);
         assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Executed));
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Executed));
         assertEq(_remainingCommittedMargin(1), 0, "Executed order should clear committed margin reservation");
@@ -506,6 +526,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_GetPendingOrdersAndReservation_ReturnAggregateOrderState() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -523,6 +544,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CloseCommit_ReservesPrefundedKeeperBounty() public {
+        _startRecordingLogs();
         address trader = address(0x333);
         address account = trader;
 
@@ -536,6 +558,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CloseCommit_AcceptsPositionMarginBackedBountyWhenFullyUtilized() public {
+        _startRecordingLogs();
         address trader = address(0x334);
         address account = trader;
         address counterparty = address(0x335);
@@ -564,6 +587,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CloseCommit_StaleMarkStillAllowsPositionMarginBackedBounty() public {
+        _startRecordingLogs();
         address trader = address(0x3341);
         address account = trader;
         address counterparty = address(0x3351);
@@ -597,6 +621,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CloseCommit_StaleFallbackDoesNotRevertWhenFreeSettlementExists() public {
+        _startRecordingLogs();
         address trader = address(0x3342);
         address account = trader;
         usdc.mint(trader, 251_500_000);
@@ -636,6 +661,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CloseCommit_FreshCarryCheckpointUsesPositionMargin() public {
+        _startRecordingLogs();
         address trader = address(0x3343);
         address account = trader;
         usdc.mint(trader, 252_000_000);
@@ -687,6 +713,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ReserveCloseOrderExecutionBounty_RejectsUnhealthyExposedPosition() public {
+        _startRecordingLogs();
         address trader = address(0x336);
         address account = trader;
         address counterparty = address(0x337);
@@ -708,6 +735,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_EligibleSmallRemainderCanReserveBountyFromPledge() public {
+        _startRecordingLogs();
         address trader = address(0x338);
         address account = trader;
         address counterparty = address(0x339);
@@ -739,6 +767,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_AlignedPartialClose_FreeBackedBountyPaysKeeper() public {
+        _startRecordingLogs();
         address trader = address(0x340);
         address account = trader;
         address counterparty = address(0x341);
@@ -787,6 +816,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_GetPendingOrdersForAccount_ReturnsQueuedOrderDetails() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -806,6 +836,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_PendingOrderPointers_LinkPerAccountInFIFOOrder() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
 
         _fundTrader(bob, 10_000 * 1e6);
@@ -826,6 +857,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_MarginQueue_CloseIntentBehindPendingOpenIsRejected() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -844,6 +876,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_NoteCommittedMarginConsumed_PartialConsumePreservesMarginQueueMembership() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.prank(alice);
@@ -868,6 +901,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_NoteCommittedMarginConsumed_DrainsHeadExposureWithRejectedCloseIntent() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -915,6 +949,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ConsumePnlPledgeLoss_DoesNotConsumeCommittedOrderMargin() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -957,6 +992,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_CommitOrder_DualWritesReservationAndRouterCommittedMarginState() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.prank(alice);
@@ -987,6 +1023,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ReleaseCommittedMargin_NoopsWhenReservationAlreadyConsumed() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -1014,6 +1051,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ExecuteOrder_UnlinksMarginQueueHeadAndPreservesResidualTail() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -1040,6 +1078,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_ExecuteOrder_UnlinksAccountHeadWithoutAffectingForeignQueuePointers() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
 
         _fundTrader(bob, 10_000 * 1e6);
@@ -1063,6 +1102,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BatchExecution_AllSucceed() public {
+        _startRecordingLogs();
         address carol = address(0x333);
         usdc.mint(carol, 10_000 * 1e6);
         vm.deal(carol, 10 ether);
@@ -1107,6 +1147,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BatchExecution_SuccessfulOrdersEndExecuted() public {
+        _startRecordingLogs();
         address carol = address(0x334);
         usdc.mint(carol, 10_000 * 1e6);
         vm.deal(carol, 10 ether);
@@ -1135,6 +1176,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BatchExecution_MixedResults() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
@@ -1157,6 +1199,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BatchExecution_NoOrders_Reverts() public {
+        _startRecordingLogs();
         bytes[] memory empty;
         vm.expectRevert(IOrderRouterErrors.OrderRouter__BatchBeforeQueueHead.selector);
         vm.roll(block.number + 1);
@@ -1164,6 +1207,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BatchExecution_EmptyQueueAfterDrain_RevertsBeforeOracleWork() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
@@ -1177,6 +1221,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BatchExecution_UncommittedMaxId_Reverts() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
@@ -1187,6 +1232,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BatchExecution_SingleETHTransfer() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.prank(alice);
@@ -1208,6 +1254,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BoundedQueue_BatchClearsFailedOrdersAndExecutesTail() public {
+        _startRecordingLogs();
         address spammer = address(0x444);
         address carol = address(0x555);
         address carolAccount = carol;
@@ -1248,6 +1295,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_PoisonedHead_CloseSlippageFailsAndLetsTailExecute() public {
+        _startRecordingLogs();
         address carol = address(0x556);
         address aliceAccount = alice;
         address carolAccount = carol;
@@ -1287,6 +1335,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_HistoricalFailedReservations_DoNotBrickLaterHeadCleanup() public {
+        _startRecordingLogs();
         address carol = address(0x559);
         address aliceAccount = alice;
         address carolAccount = carol;
@@ -1344,6 +1393,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive() public {
+        _startRecordingLogs();
         address spammer = address(0x557);
         address aliceAccount = alice;
 
@@ -1388,6 +1438,7 @@ contract OrderRouterTest is BasePerpTest {
     }
 
     function test_QueueEconomics_MixedHeadOrdersPayExecutorAcrossCloseFailuresAndSuccesses() public {
+        _startRecordingLogs();
         address carol = address(0x558);
         address carolAccount = carol;
 
@@ -1569,6 +1620,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PublishTimeBeforeCommit_Reverts() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1588,6 +1640,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_FuturePublishTime_Reverts() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1606,6 +1659,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_SameBlockExecution_ReturnsPending() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1623,6 +1677,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderExecution_UsesRouterExecutionStalenessLimit_NotPoolMarkLimit() public {
+        _startRecordingLogs();
         IHousePool.PoolConfig memory poolConfig = _currentPoolConfig();
         poolConfig.markStalenessLimit = 300;
         pool.proposePoolConfig(poolConfig);
@@ -1653,6 +1708,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderRefund_DoesNotRevertWhenRouterLimitExceedsEngineHelperLimit() public {
+        _startRecordingLogs();
         ICfdEngineAdminHost.EngineFreshnessConfig memory freshnessConfig = _engineFreshnessConfig();
         freshnessConfig.engineMarkStalenessLimit = 60;
         engineAdmin.proposeFreshnessConfig(freshnessConfig);
@@ -1689,6 +1745,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BasketConfidenceTooWide_RevertsExecution() public {
+        _startRecordingLogs();
         vm.warp(SETUP_TIMESTAMP);
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
@@ -1717,6 +1774,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BasketConfidenceWithinThreshold_AllowsExecution() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1738,6 +1796,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_Slippage_CancelsGracefully() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -1776,6 +1835,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PostCommitDegradedModePaysClearerBounty() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
 
@@ -1806,6 +1866,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PostCommitDegradedModePaysClearerAndDoesNotBrickHead() public {
+        _startRecordingLogs();
         _fundTrader(bob, 10_000e6);
         address aliceAccount = alice;
 
@@ -1839,6 +1900,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictableInsufficientInitialMargin() public {
+        _startRecordingLogs();
         address eve = address(0xE111);
         _fundTrader(eve, 1000e6);
 
@@ -1851,6 +1913,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictableMustCloseOpposing() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
@@ -1865,6 +1928,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictablePositionTooSmall() public {
+        _startRecordingLogs();
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
@@ -1874,6 +1938,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_DoesNotUseStaleCachedMarkForPredictableOpenPrefilter() public {
+        _startRecordingLogs();
         address eve = address(0xE112);
         address eveAccount = eve;
         _fundTrader(eve, 1000e6);
@@ -1889,6 +1954,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictableSkewInvalidation() public {
+        _startRecordingLogs();
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), 800_000e6);
 
@@ -1943,6 +2009,7 @@ contract OrderRouterPythTest is BasePerpTest {
     /// @dev Bucket: spec. Source: ACCOUNTING_SPEC "Open projection" permits above-cap recovery only while the order
     ///      side remains lighter; crossing balance may reach the cap but must not rebuild an above-cap imbalance.
     function test_AboveCapSkewReduction_PreviewCommitAndExecutionSucceed() public {
+        _startRecordingLogs();
         address longTrader = address(0xB011);
         address healingShortTrader = address(0xBEA1);
         address crossingShortTrader = address(0xBEA2);
@@ -1988,6 +2055,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CommitOrder_RevertsOnPredictableSolvencyInvalidation() public {
+        _startRecordingLogs();
         address shortTrader = address(0xC333);
         address shortAccount = shortTrader;
 
@@ -2004,6 +2072,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PostCommitSkewInvalidationPaysClearerBounty() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
 
@@ -2034,6 +2103,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PostCommitSolvencyInvalidationPaysClearerBounty() public {
+        _startRecordingLogs();
         address shortTrader = address(0xC333);
         address shortAccount = shortTrader;
         address aliceAccount = alice;
@@ -2071,6 +2141,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PostCommitMarginDrainInvalidationPaysClearerBounty() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
@@ -2098,6 +2169,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_StaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 300;
         routerAdmin.proposeRouterConfig(config);
@@ -2134,6 +2206,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchPostCommitMarginDrainInvalidationPaysClearerBounty() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
 
@@ -2163,6 +2236,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchStaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 300;
         routerAdmin.proposeRouterConfig(config);
@@ -2203,6 +2277,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchExecution_UsesOrderExecutionPublishTimeDivergenceLimit() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderSettlementWindow = 60;
         config.maxComponentPublishTimeDivergence = 60;
@@ -2232,6 +2307,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_FrozenCloseExecution_AllowsFeedPublishDivergenceWithinFadStaleness() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderExecutionStalenessLimit = 2 hours;
         _setRouterConfig(config);
@@ -2259,6 +2335,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OracleConfigTimelock_RotatesPythBasket() public {
+        _startRecordingLogs();
         MockPyth newPyth = new MockPyth();
         bytes32[] memory newFeedIds = new bytes32[](2);
         uint256[] memory newWeights = new uint256[](2);
@@ -2295,6 +2372,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OracleConfigTimelock_RejectsOracleForDifferentEngine() public {
+        _startRecordingLogs();
         PletherOracle wrongEngineOracle = new PletherOracle(
             address(0xE111), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
@@ -2309,6 +2387,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OracleConfigTimelock_RejectsOracleForDifferentPool() public {
+        _startRecordingLogs();
         PletherOracle wrongPoolOracle = new PletherOracle(
             address(engine), address(0xB001), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
@@ -2323,6 +2402,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchPostCommitSkewInvalidationPaysClearerBounty() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
 
@@ -2353,6 +2433,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
 
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -2389,6 +2470,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_ExitedAccount_InvalidCloseOrderPaysReservedBounty() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
 
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -2421,6 +2503,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_AlignedPartialClose_OpenPositionFreeBackedBountyPaysKeeper() public {
+        _startRecordingLogs();
         address trader = address(0x340);
         address account = trader;
         address counterparty = address(0x341);
@@ -2471,6 +2554,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CloseCommit_RevertsWhenPendingCloseSizeWouldExceedPosition() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
 
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -2489,6 +2573,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_CloseCommit_BehindPendingOpenIsRejected() public {
+        _startRecordingLogs();
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         vm.expectRevert();
@@ -2499,6 +2584,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.startPrank(alice);
@@ -2533,6 +2619,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_StateMachine_BatchClearsSlippageFailedHeadAndContinues() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -2565,6 +2652,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_TraderClaim_CloseBehindPendingOpenIsRejected() public {
+        _startRecordingLogs();
         address account = alice;
 
         vm.startPrank(alice);
@@ -2604,6 +2692,7 @@ contract OrderRouterPythTest is BasePerpTest {
     function testFuzz_StaleOracleRevertPreservesReservationAndQueue(
         uint64 age
     ) public {
+        _startRecordingLogs();
         age = uint64(bound(age, 61, 600));
         vm.warp(2000);
 
@@ -2636,6 +2725,7 @@ contract OrderRouterPythTest is BasePerpTest {
     function testFuzz_SlippageFailureClearsReservationAndOrder(
         uint256 adverseTarget
     ) public {
+        _startRecordingLogs();
         adverseTarget = bound(adverseTarget, 1, 99_999_999);
         vm.warp(3000);
 
@@ -2658,6 +2748,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_SingleExecute_EmptyQueueRevertsNoOrders() public {
+        _startRecordingLogs();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
@@ -2674,6 +2765,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_SlippageFailedCloseOrderForfeitsReservedBountyToProtocol() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
 
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8);
@@ -2706,6 +2798,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_InsufficientPythFee_Reverts() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setFee(1 ether);
 
@@ -2722,6 +2815,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_LiquidationStaleness_IsStricterThanOrderExecution() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
@@ -2753,6 +2847,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_LiquidationStaleness_UsesRouterLiquidationLimit_NotPoolMarkLimit() public {
+        _startRecordingLogs();
         IHousePool.PoolConfig memory poolConfig = _currentPoolConfig();
         poolConfig.markStalenessLimit = 300;
         pool.proposePoolConfig(poolConfig);
@@ -2851,6 +2946,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_Slippage_CloseOrders_Protected() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
@@ -2881,6 +2977,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchExecution_MEVCheckPerOrder() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1008);
 
@@ -2906,6 +3003,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_C1_PublishTimeBeforeCommit_Reverts() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
 
@@ -2926,6 +3024,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_FreshPublishAfterCommit_Executes() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -2942,6 +3041,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_PublishTimeEqualToCommit_Reverts() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -2958,6 +3058,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderExecution_UsesPostCommitHistoricalPrice_NotLiveRevealPrice() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -2976,6 +3077,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OlderHistoricalExecutionAfterMarkRefresh_ClearsOrderAndPaysBounty() public {
+        _startRecordingLogs();
         vm.warp(1000);
         vm.roll(100);
 
@@ -3012,6 +3114,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_OrderExecution_RejectsSkippedHistoricalTick() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         vm.prank(alice);
@@ -3028,6 +3131,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchExecution_ReusesHistoricalTickForClusteredOrders() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setFee(1 ether);
 
@@ -3056,6 +3160,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchExecution_DoesNotReuseTickAtCommitTimestamp() public {
+        _startRecordingLogs();
         vm.warp(1000);
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
@@ -3078,6 +3183,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BatchExecution_StalePrice_ReturnsUnavailableAndLeavesPending() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 900);
 
@@ -3095,6 +3201,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BasketMath_WeightedAverage() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(110_000_000), int32(-8), 1006);
@@ -3114,6 +3221,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BasketMath_UnequalWeights() public {
+        _startRecordingLogs();
         vm.warp(1001);
 
         bytes32[] memory ids = new bytes32[](2);
@@ -3138,6 +3246,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_WeakestLink_Timestamp_TriggersMev() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
@@ -3156,6 +3265,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_WeakestLink_StalenessReturnsUnavailableAndLeavesPending() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1001);
@@ -3175,6 +3285,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_BasketPrice_RevertsWhenFeedPublishTimesDivergeTooFar() public {
+        _startRecordingLogs();
         vm.warp(1000);
 
         mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
@@ -3186,6 +3297,7 @@ contract OrderRouterPythTest is BasePerpTest {
     }
 
     function test_Slippage_ClampedBeforeCheck_LongClose() public {
+        _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 1006);
 
@@ -3569,7 +3681,7 @@ contract NormalizePythHarness {
 
 }
 
-contract NormalizePythFuzzTest is Test {
+contract NormalizePythFuzzTest is RecordedOrderReceipts {
 
     NormalizePythHarness harness;
 
@@ -3580,7 +3692,8 @@ contract NormalizePythFuzzTest is Test {
     function testFuzz_NormalizePythPrice(
         int64 rawPrice,
         int32 expo
-    ) public view {
+    ) public {
+        _startRecordingLogs();
         vm.assume(rawPrice > 0);
         expo = int32(bound(int256(expo), -18, 18));
 
@@ -3617,6 +3730,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_CreditsImmediateKeeperBountyToClearinghouse() public {
+        _startRecordingLogs();
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3642,6 +3756,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_CreditsKeeperBountyEvenWhenPoolPayoutFails() public {
+        _startRecordingLogs();
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3671,6 +3786,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_ForfeitsReservedOpenBountiesWithoutCreditingTraderSettlement() public {
+        _startRecordingLogs();
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3733,6 +3849,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_ForfeitedReservationFeedsTreasuryMarginWithoutChangingPoolDepth() public {
+        _startRecordingLogs();
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3777,6 +3894,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_ForfeitsReservedCloseBountiesBeforeClearingOrders() public {
+        _startRecordingLogs();
         address account = trader;
         _fundTrader(trader, 350e6);
 
@@ -3836,6 +3954,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_PreventsPostLiquidationReservationRecovery() public {
+        _startRecordingLogs();
         address account = trader;
         _fundTrader(trader, 900e6);
 
@@ -3874,6 +3993,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_ExecuteLiquidation_ClearsOnlyLiquidatedAccountsPendingOrders() public {
+        _startRecordingLogs();
         address traderAccount = trader;
         address otherTrader = address(0xC10B);
         address otherAccount = otherTrader;
@@ -3915,6 +4035,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
     }
 
     function test_CommitClose_UsesOnlyAccountLocalQueuedPositionProjection() public {
+        _startRecordingLogs();
         address traderAccount = trader;
         address otherTrader = address(0xC10C);
 
@@ -4085,6 +4206,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_CloseOrder_AllowedDuringFrozenWithPreFreezeCommit() public {
+        _startRecordingLogs();
         uint256 fridayClose = FRIDAY_18UTC + 4 hours;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
 
@@ -4104,6 +4226,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_OpenOrder_BlockedDuringFrozen() public {
+        _startRecordingLogs();
         vm.warp(SATURDAY_NOON);
 
         vm.prank(alice);
@@ -4220,6 +4343,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_MevCheckDisabledDuringFrozen() public {
+        _startRecordingLogs();
         uint256 fridayClose = FRIDAY_18UTC + 4 hours;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
 
@@ -4239,6 +4363,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_ExcessStaleness_CloseGracefullyCancelled() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -4253,6 +4378,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
+        _startRecordingLogs();
         address aliceAccount = alice;
         uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
         vm.prank(address(router));
@@ -4273,6 +4399,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_MarkRefresh_AcceptsStaleFridayPrice() public {
+        _startRecordingLogs();
         bytes[] memory empty = _pythUpdateData();
         uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
 
@@ -4286,6 +4413,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadWindow_Liquidation_ExcessStaleness_Reverts() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -4297,6 +4425,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadBatch_CloseAllowedDuringFrozenWithPreFreezeCommit() public {
+        _startRecordingLogs();
         uint256 fridayClose = FRIDAY_18UTC + 4 hours;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayClose);
 
@@ -4316,6 +4445,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FadBatch_ExcessStaleness_FrozenReverts() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -4330,6 +4460,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Weekday_CloseExpiresAfterDefaultMaxOrderAge() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), WEDNESDAY_NOON + 6);
 
         vm.warp(WEDNESDAY_NOON);
@@ -4348,12 +4479,14 @@ contract FadStalenessTest is BasePerpTest {
             uint256(OrderRouterDebugLens.loadRawOrderRecord(vm, router, 2).status),
             uint256(IOrderRouterAccounting.OrderStatus.None)
         );
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(2);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), 2);
         assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired));
     }
 
     function test_Weekday_OpenOrder_Allowed() public {
+        _startRecordingLogs();
         address carol = address(0x333);
         usdc.mint(carol, 10_000 * 1e6);
         vm.startPrank(carol);
@@ -4378,6 +4511,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Admin_AddFadDay() public {
+        _startRecordingLogs();
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
         _addFadDays(timestamps);
@@ -4387,6 +4521,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Admin_RemoveFadDay() public {
+        _startRecordingLogs();
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
         _addFadDays(timestamps);
@@ -4401,12 +4536,14 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Admin_SetFadMaxStaleness() public {
+        _startRecordingLogs();
         assertEq(engine.fadMaxStaleness(), 3 days);
         _setFadMaxStaleness(5 days);
         assertEq(engine.fadMaxStaleness(), 5 days);
     }
 
     function test_Admin_SetFadMaxStaleness_ZeroReverts() public {
+        _startRecordingLogs();
         ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
         config.fadMaxStaleness = 0;
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__ZeroStaleness.selector);
@@ -4414,6 +4551,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Admin_AddFadDays_NonOwner_Reverts() public {
+        _startRecordingLogs();
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
 
@@ -4425,6 +4563,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Admin_EmptyDays_Reverts() public {
+        _startRecordingLogs();
         ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
         config.fadDayTimestamps = new uint256[](0);
         _setCalendarConfig(config);
@@ -4432,6 +4571,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_AdminFadDay_BlockedDuringFrozen() public {
+        _startRecordingLogs();
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = MONDAY_NOON;
         _addFadDays(timestamps);
@@ -4444,6 +4584,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FridayFadOnly_MevCheckStillActive() public {
+        _startRecordingLogs();
         uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
         uint256 publishTime = fridayFadStart - 30 minutes;
@@ -4462,6 +4603,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FridayFadOnly_FreshPriceStillWorks() public {
+        _startRecordingLogs();
         uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), fridayFadStart + 6);
@@ -4482,6 +4624,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FridayFadOnly_OpenStillBlocked() public {
+        _startRecordingLogs();
         uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
         vm.warp(fridayFadStart);
@@ -4492,6 +4635,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_FridayFadOnly_HistoricalSettlementWindowAllowsDelayedReveal() public {
+        _startRecordingLogs();
         uint256 fridayFadStart = FRIDAY_18UTC + 3 hours + 30 minutes;
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
@@ -4531,6 +4675,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_SundayDst_OracleUnfrozenAt21() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SUNDAY_21UTC + 6);
 
         vm.warp(SUNDAY_21UTC);
@@ -4549,6 +4694,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_SundayDst_MevEnforcedAt21() public {
+        _startRecordingLogs();
         uint256 publishTime = SUNDAY_21UTC - 30 minutes;
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), publishTime);
 
@@ -4565,6 +4711,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_SundayDst_StillFadAt21() public {
+        _startRecordingLogs();
         vm.warp(SUNDAY_21UTC);
 
         vm.prank(alice);
@@ -4573,6 +4720,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_SundayDst_PreOpenStalenessRejects() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 12 hours);
 
         vm.warp(SUNDAY_21UTC);
@@ -4588,6 +4736,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Runway_FadActivatesBeforeHoliday() public {
+        _startRecordingLogs();
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
         _addFadDays(timestamps);
@@ -4608,6 +4757,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Runway_OracleFrozenOnlyOnHolidayDay() public {
+        _startRecordingLogs();
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
         _addFadDays(timestamps);
@@ -4637,6 +4787,7 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Runway_MevStillEnforcedDuringRunway() public {
+        _startRecordingLogs();
         uint256[] memory timestamps = new uint256[](1);
         timestamps[0] = WEDNESDAY_NOON;
         _addFadDays(timestamps);
@@ -4658,12 +4809,14 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function test_Runway_SetFadRunway() public {
+        _startRecordingLogs();
         assertEq(engine.fadRunwaySeconds(), 1 hours);
         _setFadRunway(6 hours);
         assertEq(engine.fadRunwaySeconds(), 6 hours);
     }
 
     function test_Runway_TooLong_Reverts() public {
+        _startRecordingLogs();
         ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
         config.fadRunwaySeconds = 25 hours;
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__RunwayTooLong.selector);
@@ -4687,7 +4840,7 @@ contract FadStalenessTest is BasePerpTest {
 
 }
 
-contract InversionTest is Test {
+contract InversionTest is RecordedOrderReceipts {
 
     MockPyth mockPyth;
     bytes32 constant FEED_JPY = bytes32(uint256(0xAA));
@@ -4699,6 +4852,7 @@ contract InversionTest is Test {
     }
 
     function test_H03_InvertedFeedUsesCorrectPrice() public {
+        _startRecordingLogs();
         bytes32[] memory ids = new bytes32[](1);
         ids[0] = FEED_JPY;
         uint256[] memory w = new uint256[](1);
@@ -4720,6 +4874,7 @@ contract InversionTest is Test {
     }
 
     function test_H03_InversionsLengthMismatchReverts() public {
+        _startRecordingLogs();
         bytes32[] memory ids = new bytes32[](2);
         ids[0] = FEED_JPY;
         ids[1] = FEED_EUR;
@@ -4736,6 +4891,7 @@ contract InversionTest is Test {
     }
 
     function test_H03_MixedInversionsComputeCorrectBasket() public {
+        _startRecordingLogs();
         bytes32[] memory ids = new bytes32[](2);
         ids[0] = FEED_EUR;
         ids[1] = FEED_JPY;
@@ -4827,6 +4983,7 @@ contract OrderRouterAuditTest is BasePerpTest {
 
     // Regression: Finding-5 — close orders bypass slippage
     function test_CloseBypassesSlippage() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(carol, 50_000 * 1e6);
 
@@ -4850,6 +5007,7 @@ contract OrderRouterAuditTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroPletherOracleReverts() public {
+        _startRecordingLogs();
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
         OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
@@ -4870,27 +5028,33 @@ contract OrderRouterAuditTest is BasePerpTest {
     }
 
     function test_Constructor_LifecycleBookWithoutCodeReverts() public {
+        _startRecordingLogs();
         _expectInvalidLifecycleBook(LifecycleBookFault.NoCode);
     }
 
     function test_Constructor_LifecycleBookRouterMismatchReverts() public {
+        _startRecordingLogs();
         _expectInvalidLifecycleBook(LifecycleBookFault.Router);
     }
 
     function test_Constructor_LifecycleBookEngineMismatchReverts() public {
+        _startRecordingLogs();
         _expectInvalidLifecycleBook(LifecycleBookFault.Engine);
     }
 
     function test_Constructor_LifecycleBookClearinghouseMismatchReverts() public {
+        _startRecordingLogs();
         _expectInvalidLifecycleBook(LifecycleBookFault.Clearinghouse);
     }
 
     function test_Constructor_LifecycleBookPoolMismatchReverts() public {
+        _startRecordingLogs();
         _expectInvalidLifecycleBook(LifecycleBookFault.Pool);
     }
 
     // Regression: H-02 — stale order executes via executeOrder
     function test_StaleOrderExecutesViaExecuteOrder() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 300;
         routerAdmin.proposeRouterConfig(config);
@@ -4916,6 +5080,7 @@ contract OrderRouterAuditTest is BasePerpTest {
 
     // Regression: order commits should not require ETH
     function test_ZeroEthCommitAllowed() public {
+        _startRecordingLogs();
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);
@@ -4926,6 +5091,7 @@ contract OrderRouterAuditTest is BasePerpTest {
 
     // Regression: H-03 — close order allowed while paused
     function test_CloseOrderAllowedWhilePaused() public {
+        _startRecordingLogs();
         _fundJunior(bob, 500_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
 
@@ -4997,6 +5163,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: H-03
     function test_StaleSpamOrdersAutoSkipped() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
         _fundTrader(spammer, 10_000 * 1e6);
@@ -5021,6 +5188,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: H-03
     function test_FreshOrdersNotSkipped() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
 
@@ -5036,6 +5204,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: H-03
     function test_SpammerFeeConfiscatedOnExpiry() public {
+        _startRecordingLogs();
         vm.deal(spammer, 1 ether);
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(spammer, 10_000 * 1e6);
@@ -5058,6 +5227,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: H-03
     function test_BatchSkipsStaleOrders() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 50_000 * 1e6);
         _fundTrader(spammer, 10_000 * 1e6);
@@ -5081,6 +5251,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: queue liveness hardening
     function test_BatchExecution_PrunesExpiredOrdersInBoundedSlices() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000 * 1e6);
 
         uint256 traderCount = 13;
@@ -5114,6 +5285,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: H-03
     function test_SetMaxOrderAge_OnlyOwner() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 600;
         vm.prank(spammer);
@@ -5128,6 +5300,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
 
     // Regression: H-01
     function test_ExpiredOrderFeeRefundedToUser_ViaSkip() public {
+        _startRecordingLogs();
         vm.deal(spammer, 1 ether);
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(spammer, 10_000e6);
@@ -5149,6 +5322,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     }
 
     function test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper() public {
+        _startRecordingLogs();
         address localKeeper = address(0x999);
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(spammer, 10_000e6);
@@ -5180,6 +5354,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
     }
 
     function test_ExpiredOpenOrder_ClearerMustBePaidOrTraderMustForfeitPartOfBounty() public {
+        _startRecordingLogs();
         address localKeeper = address(0x998);
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(spammer, 10_000e6);
@@ -5279,6 +5454,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_UpdateMarkPrice_RevertsOnStaleOracle() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 120);
 
         bytes[] memory updateData = new bytes[](1);
@@ -5289,6 +5465,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_UpdateMarkPrice_RevertsOnFutureOracle() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp + 1);
 
         bytes[] memory updateData = new bytes[](1);
@@ -5301,6 +5478,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_UpdateMarkPrice_AcceptsFreshOracle() public {
+        _startRecordingLogs();
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 30);
 
         bytes[] memory updateData = new bytes[](1);
@@ -5311,6 +5489,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroEngineLensReverts() public {
+        _startRecordingLogs();
         PletherOracle testOracle = new PletherOracle(
             address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
@@ -5410,6 +5589,7 @@ contract StalenessGriefTest is BasePerpTest {
 
     // Regression: H-02
     function test_LiveStaleOracleRevertsInsteadOfCancelling() public {
+        _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxOrderAge = 300;
         OrderRouterAdmin admin = OrderRouterAdmin(router.admin());
@@ -5441,7 +5621,7 @@ contract StalenessGriefTest is BasePerpTest {
 }
 
 // Regression: C-05
-contract VpiImrBypassTest is Test {
+contract VpiImrBypassTest is RecordedOrderReceipts {
 
     MockUSDC usdc;
     CfdEngine engine;
@@ -5634,6 +5814,7 @@ contract VpiImrBypassTest is Test {
     // Rebate-aware open validation should allow commits when a skew-reducing rebate
     // supplies the missing reachable collateral for IMR.
     function test_VpiRebateCanSatisfyReachableCollateralProjection() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000e6);
 
         _fundTrader(carol, 50_000e6);
@@ -5662,6 +5843,7 @@ contract VpiImrBypassTest is Test {
     }
 
     function test_TypedUserInvalidOpenPaysClearer() public {
+        _startRecordingLogs();
         address eve = address(0xE223);
         address eveAccount = eve;
 
@@ -5686,7 +5868,8 @@ contract VpiImrBypassTest is Test {
             uint256(IOrderRouterAccounting.OrderStatus.None),
             "terminal order should be deleted from Router storage"
         );
-        OrderV2Types.CompactOutcome memory outcome = router.lifecycleBook().outcome(1);
+        OrderV2Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), 1);
         assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.PlannerRejected));
         assertEq(
@@ -5697,7 +5880,7 @@ contract VpiImrBypassTest is Test {
 }
 
 // Regression: H-01
-contract KeeperFeeRefundTest is Test {
+contract KeeperFeeRefundTest is RecordedOrderReceipts {
 
     // Policy matrix coverage in this contract/file:
     // - expired open -> trader refunded: test_ExpiredOrderFeeRefundedToUser, test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper
@@ -5913,6 +6096,7 @@ contract KeeperFeeRefundTest is Test {
 
     // Regression: H-01 — fee refunded to user on failure
     function test_ExpiredOrderFeeRefundedToUser() public {
+        _startRecordingLogs();
         vm.deal(alice, 1 ether);
         address account = alice;
         usdc.mint(alice, 50_000e6);
@@ -5936,6 +6120,7 @@ contract KeeperFeeRefundTest is Test {
     }
 
     function test_ExpiredHeadOrderPrunesWithoutHistoricalOracle() public {
+        _startRecordingLogs();
         address account = alice;
         usdc.mint(alice, 50_000e6);
         vm.startPrank(alice);
@@ -5967,6 +6152,7 @@ contract KeeperFeeRefundTest is Test {
     }
 
     function test_BatchExpiredHeadOrdersPruneWithoutHistoricalOracle() public {
+        _startRecordingLogs();
         address account = alice;
         usdc.mint(alice, 50_000e6);
         vm.startPrank(alice);
@@ -5998,6 +6184,7 @@ contract KeeperFeeRefundTest is Test {
 
     // Regression: H-01 — open slippage failure forfeits the bounty instead of refunding it.
     function test_OpenSlippageFailForfeitsBountyToProtocol() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000e6);
 
         address account = alice;
@@ -6026,6 +6213,7 @@ contract KeeperFeeRefundTest is Test {
     }
 
     function test_FIFOCleanupImpossibleHeadOrderHasEconomicCleanupIncentive() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000e6);
 
         address account = alice;
@@ -6060,6 +6248,7 @@ contract KeeperFeeRefundTest is Test {
     }
 
     function test_CloseSlippageFailPaysFreeBackedBountyToKeeper() public {
+        _startRecordingLogs();
         address account = alice;
         usdc.mint(alice, 251_500_000);
         vm.startPrank(alice);
@@ -6103,6 +6292,7 @@ contract KeeperFeeRefundTest is Test {
 
     // Regression: H-01
     function test_BatchExpiredFeeRefundedToUser() public {
+        _startRecordingLogs();
         vm.deal(alice, 1 ether);
         address account = alice;
         usdc.mint(alice, 50_000e6);
@@ -6127,7 +6317,7 @@ contract KeeperFeeRefundTest is Test {
 }
 
 // Regression: H-02
-contract WeekendArbitrageTest is Test {
+contract WeekendArbitrageTest is RecordedOrderReceipts {
 
     MockUSDC usdc;
     CfdEngine engine;
@@ -6280,6 +6470,7 @@ contract WeekendArbitrageTest is Test {
     }
 
     function test_CloseOrderCommittedDuringFrozenCanUseStaleFridayPrice() public {
+        _startRecordingLogs();
         _fundJunior(bob, 1_000_000e6);
         _fundTrader(alice, 50_000e6);
 
