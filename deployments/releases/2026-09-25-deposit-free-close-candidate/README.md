@@ -26,7 +26,7 @@ Engine runtime remains 24,430 bytes, settlement sidecar 23,436, and lifecycle Bo
 
 - Production lifecycle/close/agent/gas suites: **144 passed**, with 256 cases per fuzz test. Includes independent Solidity/TypeScript receipt hash vectors, altered history/domain/time rejection, full historical-field reconstruction and replay.
 - Fresh deployment, seeding, activation, runtime and limiting constructor-inclusive initcode: **1 passed**, entirely in the local test VM.
-- Broad perps execution/fuzz/invariant run: see the final counts and log hash in `verification.json`; invariant settings remain 16 runs × 500 depth.
+- Broad perps execution/fuzz/invariant run: **1,818 passed, zero failed, three archive-dependent tests skipped across 238 suites**; invariant settings remain 16 runs × 500 depth.
 - SDK typecheck/build and **36 tests passed**, retaining all old action and sponsorship vectors and the complete historical V4 ABI. The export-list fixture adds only the three new reviewed exports; package version advances to 0.2.0.
 - Full production build and refreshed 83-ABI export enforce the existing size gates. Engine EIP-170 headroom remains 146 bytes (9 bytes below the tighter repository budget); monitor constructor-inclusive initcode headroom remains 95 bytes.
 
