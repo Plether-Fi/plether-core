@@ -610,8 +610,9 @@ Rules:
 - on withdraw, carry is realized before settlement balance is reduced,
 - close and liquidation planners project this same allocation before calculating price-loss caps, residual margin,
   action charges, and pool solvency. Live settlement invokes the shared collector before applying the remaining plan,
-- only still-unpaid carry enters the subsequent action settlement. Existing terminal recovery from eligible action
-  sources or withheld new gains, partial-close rejection, and full-close/liquidation waiver rules remain unchanged,
+- only still-unpaid carry enters the subsequent action settlement, using eligible action sources or withheld new gains.
+  Full closes also collect from released surplus as specified below; partial-close rejection and liquidation waiver
+  rules remain unchanged,
 - realized carry is booked as LP trading revenue once. Receipts and financial bounds include the direct collection once,
   in addition to the residual action settlement; carried-forward arrears are not counted as newly accrued carry,
 - margin-consuming collection opens a terminal-curve mutation before custody changes and closes it after margin,
@@ -790,12 +791,20 @@ When a close realizes a loss:
    or protocol debt and does not by itself block a partial close,
 4. handle still-unpaid carry, VPI, fees, spreads, and liquidation charges through their separate settlement paths; those distinct
    charges retain their explicit partial-close collection policy,
-5. if this is a full close, waive any still-uncollectible frozen-close spread without creating a protocol liability,
+5. on a full close, release the unused post-carry, post-price-loss pledge and liquidation reserve into free settlement
+   before collecting action charges; waive only the shortfall after all eligible funds are exhausted,
 6. atomically replace or remove the account's terminal curve, including the residual position's updated collectible
    cap, before the transition completes.
 
 Required properties:
 
+- full closes withhold new price gains and settle dedicated VPI backing first, then collect generic action charges
+  from spendable action reserve, free settlement (including released collateral and unused VPI backing), and finally
+  committed-order margin in FIFO order. Protected execution bounties and existing trader claims cannot pay action
+  charges. A waiver at the engine settlement boundary implies no eligible cash remains; later router bounty credits
+  and protected-reservation refunds are separate transitions,
+- partial closes do not make released pledge or liquidation reserve eligible for action charges, and still reject an
+  action-charge shortfall. Liquidation's separate charge and bounty allocation is unchanged,
 - a partial close remains live when its price loss exceeds the collectible cap; LP accounting never recognized the
   excess as a receivable,
 - a price gain on a partial close is either paid from unreserved pool cash directly into the surviving position's PnL

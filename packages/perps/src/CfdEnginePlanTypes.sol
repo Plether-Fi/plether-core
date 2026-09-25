@@ -283,7 +283,7 @@ library CfdEnginePlanTypes {
     /// @param sideOiDecrease Reduction in aggregate side open interest, with 18 decimals.
     /// @param sideEntryNotionalReduction Reduction in raw side `size * entryPrice`, with 26 decimals.
     /// @param sideMaxProfitReduction Reduction in aggregate side maximum-profit envelope, in 6-decimal USDC.
-    /// @param unlockMarginUsdc Proportional position margin unlocked before settlement collection.
+    /// @param unlockMarginUsdc Unused pledge released before action collection on full closes, afterward on partial closes.
     /// @param settlementType Sign of carry-adjusted net settlement.
     /// @param lossUsdc Magnitude to collect when `settlementType` is `LOSS`; otherwise zero.
     /// @param freshTraderPayoutUsdc New trader value created by a `GAIN`; zero for other settlement types.

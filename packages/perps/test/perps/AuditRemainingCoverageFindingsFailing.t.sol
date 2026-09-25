@@ -25,7 +25,8 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
 
         uint256 committedBefore = router.getAccountReservations(account).committedMarginUsdc;
         assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
-        vm.warp(block.timestamp + 365 days);
+        // Exhaust pledge and released liquidation reserve so committed margin is genuinely needed.
+        vm.warp(block.timestamp + 10 * 365 days);
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
         assertTrue(preview.valid, "Full close should collect terminal carry from queued committed margin");
         assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action charges from price PnL");

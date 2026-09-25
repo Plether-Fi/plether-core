@@ -427,7 +427,8 @@ interface IMarginClearinghouse {
     ) external;
 
     /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
-    /// @dev PnL pledge, liquidation reserve, negative-VPI backing, and pending execution bounties are never reachable.
+    /// @dev Locked PnL pledge, liquidation reserve, negative-VPI backing, and pending execution bounties are never
+    ///      reachable here. Full closes release surplus pledge and liquidation reserve into free settlement first.
     ///      Both expected-source arguments must exactly match the split implied by current state; this makes a stale or
     ///      incorrect settlement plan revert. Committed margin is consumed through the router-reported FIFO reservation
     ///      ledger. Collection is capped by eligible value, so callers may treat the remainder as waived.
@@ -438,7 +439,7 @@ interface IMarginClearinghouse {
     /// @param recipient External recipient of the non-protocol portion
     /// @param protocolTreasury Clearinghouse account credited with the protocol portion; zero disables the credit
     /// @param protocolFeeUsdc Requested protocol portion, capped by the amount collected
-    /// @return collectedUsdc Action reserve plus free settlement actually collected
+    /// @return collectedUsdc Spendable action reserve, free settlement, and committed margin actually collected
     /// @return protocolFeeCreditedUsdc Collected amount credited internally to `protocolTreasury`
     function consumeActionCharge(
         address account,

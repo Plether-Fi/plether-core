@@ -833,6 +833,11 @@ library CfdEnginePlanLib {
             uint256 releasedVpiReserveUsdc =
                 delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
             uint256 collectibleFreeSettlementUsdc = snap.accountBuckets.freeSettlementUsdc + releasedVpiReserveUsdc;
+            if (cs.remainingSize == 0) {
+                // Full exits release only the surplus left after carry and capped price-loss settlement.
+                // Collect it as free settlement before reaching unrelated pending-order margin.
+                collectibleFreeSettlementUsdc += delta.unlockMarginUsdc + delta.liquidationReserveReleaseUsdc;
+            }
             uint256 freeConsumedUsdc = actionChargeAfterReserveUsdc < collectibleFreeSettlementUsdc
                 ? actionChargeAfterReserveUsdc
                 : collectibleFreeSettlementUsdc;
