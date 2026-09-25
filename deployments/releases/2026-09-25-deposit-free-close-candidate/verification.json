@@ -1,39 +1,29 @@
 {
-  "sourceCommit": "e9df1ed80025d65b9f33e82b871e4fe0bcdfbcc5",
-  "status": "candidate; activation blocked pending archive evidence and external consumer rollout",
+  "sourceCommit": "7fa1fdd1f6f72a60032907243dd0d65d3d985ef8",
+  "status": "candidate; activation blocked pending archive evidence, review and external consumer rollout",
   "checks": [
     {
       "check": "broad_fast_suite",
-      "summary": "Ran 237 test suites in 800.79s (2336.84s CPU time): 1789 tests passed, 4 failed, 3 skipped (1796 total tests)",
-      "logSha256": "1f3336d6decece75fe625574fc7d466b776903ba42b5404f6f88d9af4197d85b"
-    },
-    {
-      "check": "corrected_value_invariants",
-      "summary": "Ran 1 test suite in 29.92s (29.92s CPU time): 2 tests passed, 0 failed, 0 skipped (2 total tests)",
-      "logSha256": "72e68f7c627dee37f2c598aec09237f2fc9c221fcb7d401c480154cb3538ba37"
-    },
-    {
-      "check": "corrected_preview_invariants",
-      "summary": "Ran 1 test suite in 43.09s (43.09s CPU time): 3 tests passed, 0 failed, 0 skipped (3 total tests)",
-      "logSha256": "2e59c5d5030089cd1c44ec40ce9774383dd4c76d51d1824dd02363f6984a4757"
-    },
-    {
-      "check": "expanded_close_regressions",
-      "summary": "Ran 12 test suites in 33.34s (43.22s CPU time): 129 tests passed, 0 failed, 3 skipped (132 total tests)",
-      "logSha256": "fc0c585b4f50f09cb1d6b9e827bcd32fa1194742cae7f7581b3b6921f06febe8"
+      "summary": "Ran 237 test suites in 778.17s (2406.93s CPU time): 1802 tests passed, 0 failed, 3 skipped (1805 total tests)",
+      "logSha256": "37d2ae7f0adf7f3d65faa2d95a99c0f16402d48b863a44a59689e0de3fb65abe"
     },
     {
       "check": "production_acceptance_and_gas",
-      "summary": "Ran 5 test suites in 4.45s (8.36s CPU time): 91 tests passed, 0 failed, 0 skipped (91 total tests)",
-      "logSha256": "5f66f51e4de617f8fe6439d5e310ae169eb8a136cd96612e1c90b17ddcf2737f"
+      "summary": "Ran 6 test suites in 2.37s (5.85s CPU time): 146 tests passed, 0 failed, 0 skipped (146 total tests)",
+      "logSha256": "a73949052eea6de0fa1f872ca9641d2eb7f8a3f219624a392d23268bca559678"
+    },
+    {
+      "check": "final_assessment_regressions",
+      "summary": "Ran 4 test suites in 2.15s (4.40s CPU time): 100 tests passed, 0 failed, 0 skipped (100 total tests)",
+      "logSha256": "c39cc1ce7e1e6c86ca65ce9ec704d151e4d74c6fdda7dc3f6c960a88f503d721"
     },
     {
       "check": "production_deployment_and_size_simulation",
-      "summary": "Ran 1 test suite in 204.61ms (19.29ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)",
-      "logSha256": "806bbe9249d7740f58188936031da54ea905d81bd006655f82a7318ea2bf269d"
+      "summary": "Ran 1 test suite in 204.69ms (16.69ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)",
+      "logSha256": "695898adbbf4232ac5454d58e70fe5c7fd0520f00b045b2a3305d4cf7916d09f"
     }
   ],
-  "explanation": "The broad run found four outdated invariant assertions. Two suites were corrected for authenticated bounty payment and typed partial-health/funding rejection, then passed at the same 16 runs x 500 depth. No failing invariant remains in the targeted reruns. The later production run includes five additional recovery/bounds tests. Counts overlap and must not be summed.",
+  "explanation": "Counts overlap and must not be summed. Production tests use unchanged solc 0.8.35, via IR, optimizer 200 and Prague settings. The broad run includes the compact storage, minimal commitment snapshot, fixed call buffer and carry-loop changes; the final canonical pool-cash read reuse is covered by the 100 targeted assessment tests and 146 production tests. Deployment simulation predates only that internal view-read reuse; the final full production build and exported sizes passed.",
   "sdk": {
     "typecheck": "passed",
     "testsPassed": 31,
@@ -61,6 +51,43 @@
     "limitingInitcodeBytesIncludingArguments": {
       "ArbitrumSepoliaReleaseRouter": 47159,
       "SettlementMonitorLens": 49057
+    },
+    "runtimeBytes": {
+      "CfdEngine": 24430,
+      "CfdEngineSettlementSidecar": 23596
+    },
+    "repositoryEngineRuntimeBudgetBytes": 24439
+  },
+  "gas": {
+    "measurement": "Operation gas from identical production GasProfile fixtures; not total Arbitrum transaction fees.",
+    "originalCommit": "8c555544",
+    "initialImplementationCommit": "e9df1ed80025d65b9f33e82b871e4fe0bcdfbcc5",
+    "optimizedCommit": "7fa1fdd1f6f72a60032907243dd0d65d3d985ef8",
+    "operations": {
+      "closeCommit": {
+        "original": 858206,
+        "initialImplementation": 1086923,
+        "optimized": 980673
+      },
+      "fullCloseExecution": {
+        "original": 961649,
+        "initialImplementation": 1047317,
+        "optimized": 1045621
+      },
+      "partialCloseExecution": {
+        "original": 1156801,
+        "initialImplementation": 1251822,
+        "optimized": 1250126
+      },
+      "enginePreview": {
+        "original": 146185,
+        "initialImplementation": 148113,
+        "optimized": 148113
+      }
     }
+  },
+  "ci": {
+    "status": "in progress at optimization evidence preparation; not claimed green",
+    "outstanding": "Aggregate Slither check reports findings requiring triage; individual Slither (perps) job passes."
   }
 }

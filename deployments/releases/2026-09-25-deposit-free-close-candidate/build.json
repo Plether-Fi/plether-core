@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "e9df1ed80025d65b9f33e82b871e4fe0bcdfbcc5",
+  "sourceCommit": "7fa1fdd1f6f72a60032907243dd0d65d3d985ef8",
   "submodules": [
     "f5495c9b993bfc6e79dd52adfdcb7dac0a1da918 lib/forge-std (v1.15.0-7-gf5495c9)",
     " 55d2d99304fb3fb930c688462ae2ccabb1d533ad lib/morpho-blue (v1.0.0)",
@@ -86,8 +86,8 @@
     "CfdEngine": {
       "artifact": "out/CfdEngine.sol/CfdEngine.json",
       "abiSha256": "ff4d3b7278ffc5025fe61e823051e453abfd812f5a45d7704649608f19c3e58f",
-      "runtimeBytes": 24566,
-      "creationCodeBytes": 25539,
+      "runtimeBytes": 24430,
+      "creationCodeBytes": 25403,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -155,9 +155,9 @@
     },
     "CfdEnginePlanner": {
       "artifact": "out/CfdEnginePlanner.sol/CfdEnginePlanner.json",
-      "abiSha256": "aeff903fae4fbcb25bb84bacecff7752b692542f99031c50cea143592046117f",
-      "runtimeBytes": 22902,
-      "creationCodeBytes": 22928,
+      "abiSha256": "8bf1cb53a0f38078ee95afe192c44e21c37d648da227b50e7031f1d1f9d20965",
+      "runtimeBytes": 21752,
+      "creationCodeBytes": 21778,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -191,8 +191,8 @@
     "CfdEngineSettlementSidecar": {
       "artifact": "out/CfdEngineSettlementSidecar.sol/CfdEngineSettlementSidecar.json",
       "abiSha256": "7356b43f4595930f2fab027c0be27b94f15965828ab0878d39a20eff3df9bcc7",
-      "runtimeBytes": 24510,
-      "creationCodeBytes": 24690,
+      "runtimeBytes": 23596,
+      "creationCodeBytes": 23775,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -506,8 +506,8 @@
     "CfdOrderPolicyEvaluator": {
       "artifact": "out/CfdOrderPolicyEvaluator.sol/CfdOrderPolicyEvaluator.json",
       "abiSha256": "c2e80270e79bb7b2fa937f823d8f7cc083aac4f7591f3d6fb94012ca17ebad45",
-      "runtimeBytes": 20291,
-      "creationCodeBytes": 20317,
+      "runtimeBytes": 20024,
+      "creationCodeBytes": 20050,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -541,8 +541,8 @@
     "CfdClosePreview": {
       "artifact": "out/CfdClosePreview.sol/CfdClosePreview.json",
       "abiSha256": "c6fd9f560f87a8cfe46642a1aa03e1ab7e43b3f81be25c3d9c09f934a2f612bd",
-      "runtimeBytes": 22643,
-      "creationCodeBytes": 22669,
+      "runtimeBytes": 22662,
+      "creationCodeBytes": 22688,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -715,9 +715,9 @@
     },
     "OrderLifecycleBook": {
       "artifact": "out/OrderLifecycleBook.sol/OrderLifecycleBook.json",
-      "abiSha256": "4897173317403e2087266b8a6a47f5e9669bec1d6f1865d987a6cc5f4ed50a77",
-      "runtimeBytes": 14468,
-      "creationCodeBytes": 14865,
+      "abiSha256": "f822988d07da191451bdfb2f515ee79e4fa2647c545ddef583d3dfe4928c0acc",
+      "runtimeBytes": 14784,
+      "creationCodeBytes": 15181,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -1415,7 +1415,7 @@
     },
     "ICfdEnginePlanner": {
       "artifact": "out/ICfdEnginePlanner.sol/ICfdEnginePlanner.json",
-      "abiSha256": "27f2b2f547a65155d83d4ccc07b3631a25e59759b6c393e10a23548f1e44b4e5",
+      "abiSha256": "4123fc291f8aef871c1b8abf351acf9a37f995e65b5864ad56db990f68fd395f",
       "runtimeBytes": 0,
       "creationCodeBytes": 0,
       "compiler": {
@@ -1905,7 +1905,7 @@
     },
     "IOrderLifecycleBook": {
       "artifact": "out/IOrderLifecycleBook.sol/IOrderLifecycleBook.json",
-      "abiSha256": "ddf5ea27f170086aaf494b076d6d06a3e917f46fccc8b85996b0aca356005004",
+      "abiSha256": "483a19afb382c466b01db1976dd1bf3ab5984c439045262861e1470b6c43f213",
       "runtimeBytes": 0,
       "creationCodeBytes": 0,
       "compiler": {

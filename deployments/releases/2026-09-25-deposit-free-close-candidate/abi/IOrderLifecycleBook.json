@@ -2133,6 +2133,11 @@
   },
   {
     "type": "error",
+    "name": "OrderLifecycleBook__InvalidCommitmentEffects",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderLifecycleBook__InvalidProtectionAttempt",
     "inputs": [
       {
