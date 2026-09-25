@@ -52,28 +52,20 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkPrice()"), abi.encode(entry));
         vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkTime()"), abi.encode(uint64(block.timestamp)));
         vm.mockCall(address(pool), abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(1_000_000_000e6)));
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = IMarginClearinghouse.AccountUsdcBuckets({
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = IMarginClearinghouse.PnlIsolationBuckets({
             settlementBalanceUsdc: 10_000_200_000,
-            totalLockedMarginUsdc: 10_000e6,
-            activePositionMarginUsdc: 10_000e6,
-            otherLockedMarginUsdc: 0,
+            pnlPledgeUsdc: 10_000e6,
+            liquidationReserveUsdc: 0,
+            orderMarginUsdc: 0,
+            actionReserveUsdc: 0,
+            vpiRebateReserveUsdc: 0,
+            totalLockedUsdc: 10_000e6,
             freeSettlementUsdc: 200_000
         });
-        IMarginClearinghouse.LockedMarginBuckets memory locked = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 10_000e6,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 10_000e6
-        });
         vm.mockCall(
             address(clearinghouse),
-            abi.encodeWithSignature("getAccountUsdcBuckets(address)", ACCOUNT),
+            abi.encodeWithSignature("getPnlIsolationBuckets(address)", ACCOUNT),
             abi.encode(buckets)
-        );
-        vm.mockCall(
-            address(clearinghouse),
-            abi.encodeWithSignature("getLockedMarginBuckets(address)", ACCOUNT),
-            abi.encode(locked)
         );
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, size);
         uint256 adversePrice = entry * 999 / 1000;

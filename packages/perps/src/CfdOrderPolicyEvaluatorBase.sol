@@ -11,6 +11,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -233,14 +234,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.poolAssetsUsdc = poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
-        snapshot.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
-        snapshot.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snapshot.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
-        snapshot.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
-        snapshot.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        snapshot.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
-        // The clearinghouse bucket is the canonical active-margin source even if the Engine tuple was stale.
-        snapshot.position.margin = snapshot.lockedBuckets.positionMarginUsdc;
+        CfdEngineCollateralSnapshotLib.load(snapshot, clearinghouse, account, false);
 
         snapshot.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
         snapshot.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();

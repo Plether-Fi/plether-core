@@ -8,6 +8,7 @@ import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Production-stack integration coverage for the agent-facing V2 order lifecycle.
@@ -370,6 +371,46 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(outcome.executor, KEEPER);
     }
 
+    /// @dev Synthetic oracle callback: a matured owner action changes configuration during oracle work.
+    ///      The execution item must observe the post-oracle digest and never execute under the earlier policy.
+    function test_ConfigObservationIsRefreshedAfterOracleCallback() public {
+        engineAdmin.proposeCalendarConfig(_engineCalendarConfig());
+        uint256 activationTime = engineAdmin.calendarConfigActivationTime();
+        vm.warp(activationTime - 10);
+        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("oracle-config-drift"));
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        vm.warp(activationTime);
+        vm.roll(block.number + 2);
+
+        ConfigFinalizingOracleCallback callback = new ConfigFinalizingOracleCallback(this);
+        vm.mockFunction(
+            address(pletherOracle),
+            address(callback),
+            abi.encodeWithSelector(IPletherOracle.updateOrderExecutionPrice.selector)
+        );
+        vm.prank(KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, _mockPythUpdateData(EXECUTION_PRICE));
+        assertTrue(result.status != OrderV2Types.LifecycleStatus.Executed, "post-oracle policy must be checked");
+        assertEq(_positionSize(ALICE), 0, "configuration drift cannot reach position settlement");
+        bytes32 observed = book.currentExecutionConfigHash();
+        assertTrue(observed != request.bounds.expectedConfigHash, "callback must actually finalize a new version");
+
+        // A retryable receipt failure still preserves a binding order; its next pre-oracle cleanup is canonical.
+        if (result.status == OrderV2Types.LifecycleStatus.Pending) {
+            vm.prank(KEEPER);
+            result = router.executeOrder(orderId, new bytes[](0));
+        }
+        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.ConfigMismatch));
+        assertEq(book.outcome(orderId).observedConfigHash, observed);
+        assertEq(router.pendingOrderCounts(ALICE), 0);
+    }
+
+    function finalizeConfigFromOracleCallback() external {
+        require(msg.sender == address(pletherOracle), "only synthetic oracle callback");
+        engineAdmin.finalizeCalendarConfig();
+    }
+
     function test_UnknownEngineFailureIsRetryableAndPreservesReservations() public {
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("unknown-engine"));
         vm.prank(ALICE);
@@ -574,6 +615,31 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         address account
     ) internal view returns (uint256 size) {
         (size,,,,,,) = engine.positions(account);
+    }
+
+}
+
+/// @dev Test-only replacement for one oracle method; all other oracle policy/fee calls stay real.
+contract ConfigFinalizingOracleCallback {
+
+    OrderRouterAgentV2Test private immutable fixture;
+
+    constructor(
+        OrderRouterAgentV2Test fixture_
+    ) {
+        fixture = fixture_;
+    }
+
+    function updateOrderExecutionPrice(
+        address,
+        bytes[] calldata,
+        IPletherOracle.OrderExecutionRequest calldata
+    ) external payable returns (bool, IPletherOracle.PriceSnapshot memory snapshot) {
+        fixture.finalizeConfigFromOracleCallback();
+        snapshot.price = 1e8;
+        snapshot.markPrice = 1e8;
+        snapshot.publishTime = uint64(block.timestamp);
+        return (true, snapshot);
     }
 
 }

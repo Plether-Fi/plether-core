@@ -409,7 +409,14 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
                 );
             }
         }
-        bytes32 observedConfigHash = book.currentExecutionConfigHash();
+        // Execute requests carry the digest read after oracle/mark updates by _executionItem. Only static
+        // dependency reads and Router self-calls occur between that observation and this check. Reuse it inside
+        // this authenticated item; public committed assessment still validates configuration independently.
+        // Cleanup requests may originate without an observation (for example permissionless expiry).
+        bytes32 observedConfigHash = request.action == IOrderRouterV2ExecutionHost.ItemAction.Execute
+            && request.observedConfigHash != bytes32(0)
+            ? request.observedConfigHash
+            : book.currentExecutionConfigHash();
         bytes32 expectedConfigHash = pending.bounds.expectedConfigHash;
         // Zero is reserved for Router-created trigger closes whose intent is deliberately unpinned.
         if (expectedConfigHash != bytes32(0) && observedConfigHash != expectedConfigHash) {

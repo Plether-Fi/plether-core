@@ -104,6 +104,22 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         uint256 freeSettlementAfterUsdc;
     }
 
+    /// @dev Reorders the three narrow policy fields into one slot without narrowing any public bound.
+    struct StoredExecutionBounds {
+        uint64 validUntil;
+        uint8 allowedExecutionModes;
+        uint32 maxPostLeverageBps;
+        bytes32 expectedConfigHash;
+        uint256 maxExecutionBountyUsdc;
+        uint256 maxExecutionNotionalUsdc;
+        uint256 maxGrossAccountDebitUsdc;
+        uint256 maxActionChargeUsdc;
+        uint256 maxExplicitFeesUsdc;
+        uint256 maxPostPositionSize;
+        uint256 minPostSettlementBalanceUsdc;
+        uint256 minPostPositionEquityUsdc;
+    }
+
     /// @dev Internal representation only; the public PendingIntent tuple remains unchanged.
     struct StoredPendingIntent {
         address account;
@@ -115,7 +131,34 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         uint256 executionBountyUsdc;
         uint256 positionSize;
         StoredCommitment commitment;
-        OrderV2Types.ExecutionBounds bounds;
+        StoredExecutionBounds bounds;
+    }
+
+    /// @dev Fills the unused bytes beside the three addresses; the public outcome and receipt hash remain canonical.
+    struct StoredCompactOutcome {
+        address account;
+        uint64 terminalBlock;
+        OrderV2Types.LifecycleStatus status;
+        OrderV2Types.TerminalReason reason;
+        OrderV2Types.ExecutionMode executionMode;
+        OrderV2Types.PriceSource priceSource;
+        address executor;
+        uint64 terminalTime;
+        OrderV2Types.BountyDisposition bountyDisposition;
+        uint8 failureCategory;
+        uint8 failureCode;
+        OrderV2Types.ConstraintKind failedConstraint;
+        address bountyRecipient;
+        uint64 oraclePublishTime;
+        bytes4 failureSelector;
+        bytes32 clientOrderId;
+        bytes32 intentHash;
+        bytes32 expectedConfigHash;
+        bytes32 observedConfigHash;
+        uint256 executionPrice;
+        uint256 bountyUsdc;
+        bytes32 revertDataHash;
+        bytes32 receiptHash;
     }
 
     /// @notice Ephemeral policy and identity required to authenticate terminal settlement.
@@ -125,7 +168,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     mapping(uint64 orderId => bool registered) private _protectionAttempts;
 
     /// @notice Permanent compact terminal outcomes.
-    mapping(uint64 orderId => OrderV2Types.CompactOutcome terminalOutcome) private _outcomes;
+    mapping(uint64 orderId => StoredCompactOutcome terminalOutcome) private _outcomes;
 
     modifier onlyRouter() {
         if (msg.sender != ROUTER) {
@@ -276,7 +319,20 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         if (request.closeMode == OrderV2Types.CloseMode.CallerPaidFullExit) {
             pendingTerminalExitId[account] = proposedOrderId;
         }
-        pending.bounds = request.bounds;
+        pending.bounds = StoredExecutionBounds({
+            validUntil: request.bounds.validUntil,
+            allowedExecutionModes: request.bounds.allowedExecutionModes,
+            maxPostLeverageBps: request.bounds.maxPostLeverageBps,
+            expectedConfigHash: request.bounds.expectedConfigHash,
+            maxExecutionBountyUsdc: request.bounds.maxExecutionBountyUsdc,
+            maxExecutionNotionalUsdc: request.bounds.maxExecutionNotionalUsdc,
+            maxGrossAccountDebitUsdc: request.bounds.maxGrossAccountDebitUsdc,
+            maxActionChargeUsdc: request.bounds.maxActionChargeUsdc,
+            maxExplicitFeesUsdc: request.bounds.maxExplicitFeesUsdc,
+            maxPostPositionSize: request.bounds.maxPostPositionSize,
+            minPostSettlementBalanceUsdc: request.bounds.minPostSettlementBalanceUsdc,
+            minPostPositionEquityUsdc: request.bounds.minPostPositionEquityUsdc
+        });
 
         emit IntentRegistered(proposedOrderId, account, request.clientOrderId, intentHash, executionBountyUsdc, request);
         return (proposedOrderId, intentHash, false);
@@ -380,7 +436,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         );
 
         OrderV2Types.FailureDetails calldata failure = receipt.failure;
-        _outcomes[receipt.orderId] = OrderV2Types.CompactOutcome({
+        _outcomes[receipt.orderId] = StoredCompactOutcome({
             account: receipt.account,
             clientOrderId: receipt.clientOrderId,
             intentHash: receipt.intentHash,
@@ -443,7 +499,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             intent.positionSize = stored.positionSize;
         }
         intent.commitment = _expandCommitment(stored.commitment);
-        intent.bounds = stored.bounds;
+        intent.bounds = _expandBounds(stored.bounds);
     }
 
     function _expandCommitment(
@@ -462,7 +518,24 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function pendingPolicy(
         uint64 orderId
     ) external view override returns (OrderV2Types.ExecutionBounds memory bounds) {
-        return _pendingIntents[orderId].bounds;
+        return _expandBounds(_pendingIntents[orderId].bounds);
+    }
+
+    function _expandBounds(
+        StoredExecutionBounds storage stored
+    ) private view returns (OrderV2Types.ExecutionBounds memory bounds) {
+        bounds.validUntil = stored.validUntil;
+        bounds.allowedExecutionModes = stored.allowedExecutionModes;
+        bounds.expectedConfigHash = stored.expectedConfigHash;
+        bounds.maxExecutionBountyUsdc = stored.maxExecutionBountyUsdc;
+        bounds.maxExecutionNotionalUsdc = stored.maxExecutionNotionalUsdc;
+        bounds.maxGrossAccountDebitUsdc = stored.maxGrossAccountDebitUsdc;
+        bounds.maxActionChargeUsdc = stored.maxActionChargeUsdc;
+        bounds.maxExplicitFeesUsdc = stored.maxExplicitFeesUsdc;
+        bounds.maxPostPositionSize = stored.maxPostPositionSize;
+        bounds.minPostSettlementBalanceUsdc = stored.minPostSettlementBalanceUsdc;
+        bounds.minPostPositionEquityUsdc = stored.minPostPositionEquityUsdc;
+        bounds.maxPostLeverageBps = stored.maxPostLeverageBps;
     }
 
     /// @inheritdoc IOrderLifecycleBook
@@ -479,13 +552,36 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function outcome(
         uint64 orderId
     ) external view override returns (OrderV2Types.CompactOutcome memory terminalOutcome) {
-        return _outcomes[orderId];
+        StoredCompactOutcome storage stored = _outcomes[orderId];
+        terminalOutcome.account = stored.account;
+        terminalOutcome.clientOrderId = stored.clientOrderId;
+        terminalOutcome.intentHash = stored.intentHash;
+        terminalOutcome.expectedConfigHash = stored.expectedConfigHash;
+        terminalOutcome.observedConfigHash = stored.observedConfigHash;
+        terminalOutcome.status = stored.status;
+        terminalOutcome.reason = stored.reason;
+        terminalOutcome.executionMode = stored.executionMode;
+        terminalOutcome.priceSource = stored.priceSource;
+        terminalOutcome.bountyDisposition = stored.bountyDisposition;
+        terminalOutcome.terminalBlock = stored.terminalBlock;
+        terminalOutcome.terminalTime = stored.terminalTime;
+        terminalOutcome.oraclePublishTime = stored.oraclePublishTime;
+        terminalOutcome.executor = stored.executor;
+        terminalOutcome.bountyRecipient = stored.bountyRecipient;
+        terminalOutcome.executionPrice = stored.executionPrice;
+        terminalOutcome.bountyUsdc = stored.bountyUsdc;
+        terminalOutcome.failureSelector = stored.failureSelector;
+        terminalOutcome.failureCategory = stored.failureCategory;
+        terminalOutcome.failureCode = stored.failureCode;
+        terminalOutcome.failedConstraint = stored.failedConstraint;
+        terminalOutcome.revertDataHash = stored.revertDataHash;
+        terminalOutcome.receiptHash = stored.receiptHash;
     }
 
     /// @notice Enforces monotonic and semantically valid terminal transitions.
     function _validateTerminalOutcome(
         OrderV2Types.OrderReceipt calldata receipt,
-        OrderV2Types.ExecutionBounds storage bounds
+        StoredExecutionBounds storage bounds
     ) private view {
         if (receipt.executor == address(0)) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
@@ -720,7 +816,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     function _constraintLimit(
-        OrderV2Types.ExecutionBounds storage bounds,
+        StoredExecutionBounds storage bounds,
         OrderV2Types.ConstraintKind constraint
     ) private view returns (uint256 limit) {
         if (constraint == OrderV2Types.ConstraintKind.ExecutionBounty) {

@@ -90,17 +90,46 @@ Both carry-side checkpoints share one pool-cash read because index updates do no
 
 The engine's fixed-shape sidecar call shares one buffer for its 100-byte input and 224-byte output. It checks the exact response length, bubbles revert bytes, and returns through Solidity so terminal/borrow synchronization and the reentrancy modifier's cleanup always run. Regression tests cover malformed return data, rollback, subsequent successful execution, full-width commitment round trips, and invalid reconstruction identities.
 
+## Second optimization pass
+
+Lifecycle bounds now use a private 10-slot representation instead of 11 slots, and permanent outcomes use 11 slots instead of 13. The compiler-confirmed layouts preserve every public field and accepted numeric domain, with explicit expansion into the existing ABI tuples. Receipt and request hashes remain unchanged, and the pending entitlement remains at slot offset 3. No outcome fields were moved exclusively to events.
+
+`CfdEngineCollateralSnapshotLib` expands a single canonical clearinghouse isolation observation into the planner's account and locked-margin buckets. Execution and assessment add a separate protected-bounty read; commitment keeps execution-only output fields zero. This replaces six overlapping execution getters with two and four commitment getters with one. Parity tests retain the exact checked arithmetic and zero-floor behavior, including labeled synthetic corruption cases.
+
+Normal execution reuses the configuration digest already read after oracle/mark updates while entering the authenticated Router item. Only static dependency reads and Router self-calls intervene before comparison. Pre-oracle cleanup and public committed assessment still validate configuration independently; cleanup without an observation reads a fresh digest. An oracle-callback regression verifies that a finalized configuration change cannot execute under the earlier policy.
+
+`DirectCloseGas.t.sol` measures production Router request calls for standard full, standard partial and caller-paid full exits at zero free settlement. Requests and oracle data are prepared outside the measured section; execution commitments run in fixture setup, and protocol access state is explicitly cooled. These figures complement the unchanged legacy-adapter comparison below. They measure call-level EVM gas before refunds and exclude intrinsic/calldata gas, L1 publication cost and oracle service fees.
+
+## Single-plan execution evaluation
+
+Single-plan execution remains a feasible subsequent architectural change; this pass retains independent Engine planning. The recommended boundary is an Engine-owned, `onlyRouter`/`nonReentrant` committed-close entrypoint that builds one canonical snapshot and plan, invokes an Engine-authenticated policy helper to validate that exact plan against the pending order and reservation, then applies the same delta and returns the fixed-shape assessment. Public committed assessment must retain its standalone authentication. Router post-state/bounty checks and clearinghouse settlement-source checks remain independent.
+
+Do not turn an evaluator-returned delta into an authoritative ledger mutation. A combined entrypoint also needs exact failure-phase evidence (`priceReachedEngine`), malformed-return/typed-error decoding, gas-envelope changes, batch rollback coverage, and new interface exports. The Engine currently has only nine bytes under its existing repository runtime budget, so the refactor must demonstrate code extraction or other savings before adding entrypoint plumbing. These architectural changes are evaluated here, not implemented or included in the measured savings.
+
 ## Measured production costs
 
-Compiler: Solidity 0.8.35, optimizer 200, via IR, Prague; Forge 1.5.1-stable. Identical `GasProfile` operation fixtures compare original checkout `8c555544`, initial implementation `e9df1ed8`, and the optimized candidate:
+Compiler: Solidity 0.8.35, optimizer 200, via IR, Prague; Forge 1.5.1-stable. Identical `GasProfile` operation fixtures compare original checkout `8c555544`, initial implementation `e9df1ed8`, the first optimization at `7fa1fdd1`, and the second pass:
 
-| Operation | Original checkout | Initial implementation | Optimized | Optimized vs original |
-| --- | ---: | ---: | ---: | ---: |
-| Close commitment | 858,206 | 1,086,923 | 980,673 | +14.27% |
-| Full-close execution | 961,649 | 1,047,317 | 1,045,621 | +8.73% |
-| Partial-close execution | 1,156,801 | 1,251,822 | 1,250,126 | +8.07% |
-| Engine close preview | 146,185 | 148,113 | 148,113 | +1.32% |
+| Operation | Original checkout | Initial implementation | First pass | Second pass | Second pass vs original |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Close commitment | 858,206 | 1,086,923 | 980,673 | 951,586 | +10.88% |
+| Full-close execution | 961,649 | 1,047,317 | 1,045,621 | 986,901 | +2.63% |
+| Partial-close execution | 1,156,801 | 1,251,822 | 1,250,126 | 1,191,406 | +2.99% |
+| Engine close preview | 146,185 | 148,113 | 148,113 | 148,113 | +1.32% |
 
-Optimization saves **106,250 gas (9.78%) per commitment** versus the initial implementation. Full and partial executions each save **1,696 gas** (0.16% and 0.14%). This removes about 46% of the added commitment overhead; it does not eliminate the remaining cost of the new accounting and lifecycle guarantees. These are operation gas measurements from the same fixture conditions, not a quote for an Arbitrum transaction's combined execution/data fee.
+The second pass saves **29,087 gas (2.97%) per commitment** and **58,720 gas per execution** (5.62% full and 4.70% partial) relative to the first pass. These are unchanged operation-fixture comparisons, including the test-only legacy adapter for commitment; they are not quotes for complete Arbitrum transaction fees.
 
-Engine runtime is **24,430 bytes**, below both EIP-170 (24,576) and the existing repository budget (24,439); the budget was not relaxed. Its settlement sidecar is **23,596 bytes**, down 914 bytes. The release router's constructor-inclusive initcode is **47,159 bytes**; the settlement monitor's remains **49,057 bytes**, leaving 95 bytes below EIP-3860. Repeat compiler and size gates after every source change. The release packet records all contract template sizes, while deployment simulation checks instantiated runtime sizes and the limiting constructor paths.
+The independent direct production-request fixtures compare frozen checkout `c6607419` with the second pass. Every case starts at zero free settlement. No test adapter is deployed, protocol access state is cold, and execution commitments are already persisted in fixture setup:
+
+| Direct production call | First-pass baseline | Second pass | Reduction |
+| --- | ---: | ---: | ---: |
+| Standard full commitment | 1,438,107 | 1,409,016 | 2.02% |
+| Standard partial commitment | 1,459,443 | 1,430,352 | 1.99% |
+| Caller-paid full commitment | 1,276,767 | 1,247,367 | 2.30% |
+| Standard full execution | 1,479,917 | 1,416,433 | 4.29% |
+| Standard partial execution | 1,527,599 | 1,464,115 | 4.16% |
+| Caller-paid full execution | 1,430,149 | 1,386,566 | 3.05% |
+
+The two tables use different fixtures and access conditions, so compare columns within a table. Direct figures exclude transaction refunds, intrinsic/calldata gas, L1 publication and oracle service fees. Each fixture also asserts successful lifecycle and accounting outcomes.
+
+Engine runtime is **24,430 bytes**, below both EIP-170 (24,576) and the existing repository budget (24,439); the budget was not relaxed. Its settlement sidecar is **23,436 bytes**, down another 160 bytes. The lifecycle book grows by 56 bytes to 14,840; all deployment limits remain enforced. The release router's constructor-inclusive initcode is **47,159 bytes**; the settlement monitor's remains **49,057 bytes**, leaving 95 bytes below EIP-3860. Repeat compiler and size gates after every source change. The release packet records all contract template sizes, while deployment simulation checks instantiated runtime sizes and the limiting constructor paths.

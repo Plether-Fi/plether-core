@@ -12,6 +12,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
+import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 
 /// @dev Engine read surface used by account-action methods externalized from the bytecode-constrained host.
@@ -189,15 +190,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.poolAssetsUsdc = closeCommit ? snap.poolCashUsdc : poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
-        snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snap.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
-        snap.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
-        if (!closeCommit) {
-            snap.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-            snap.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
-        }
-        snap.position.margin = snap.lockedBuckets.positionMarginUsdc;
+        CfdEngineCollateralSnapshotLib.load(snap, clearinghouse, account, closeCommit);
 
         snap.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
         snap.traderClaimBalanceForAccount = engine.traderClaimBalanceUsdc(account);
