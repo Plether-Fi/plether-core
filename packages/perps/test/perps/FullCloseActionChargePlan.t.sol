@@ -27,6 +27,21 @@ contract FullCloseActionChargePlanTest is Test {
         uint256 committed,
         uint256 action
     ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+        snap = _positionSnapshot(pledge);
+        snap.liquidationReserveUsdc = liquidationReserve;
+        snap.actionReserveUsdc = action;
+        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
+            pledge + liquidationReserve + free + committed + action, pledge, liquidationReserve, committed, action
+        );
+        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets(
+            pledge, committed, action, snap.accountBuckets.totalLockedMarginUsdc
+        );
+    }
+
+    // Keep position construction separate from bucket inputs for minimally optimized coverage builds.
+    function _positionSnapshot(
+        uint256 pledge
+    ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         snap.account = address(0xA11CE);
         snap.capPrice = 2e8;
         snap.position = CfdTypes.Position(SIZE, pledge, PRICE, 10_000e6, CfdTypes.Side.LONG, 1, 1, 0);
@@ -42,14 +57,6 @@ contract FullCloseActionChargePlanTest is Test {
         );
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = snap.poolAssetsUsdc;
-        snap.liquidationReserveUsdc = liquidationReserve;
-        snap.actionReserveUsdc = action;
-        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
-            pledge + liquidationReserve + free + committed + action, pledge, liquidationReserve, committed, action
-        );
-        snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets(
-            pledge, committed, action, snap.accountBuckets.totalLockedMarginUsdc
-        );
         snap.executionFeeBps = 10;
         snap.riskParams.minBountyUsdc = 1e6;
         snap.riskParams.bountyBps = 10;
