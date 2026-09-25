@@ -26,6 +26,8 @@ abstract contract OrderCommitHandler is OrderValidation {
         address account = order.account;
         CfdEnginePlanTypes.CloseCommitment memory effects =
             _reserveExecutionBounty(account, order.sizeDelta, executionBountyUsdc, order.isClose);
+        // Zero pledge funding has no position provenance; a funded pledge records its exact live epoch.
+        // slither-disable-next-line incorrect-equality
         clearinghouse.recordFundedBountyReservation(
             account,
             IMarginClearinghouse.BountyKind.Order,

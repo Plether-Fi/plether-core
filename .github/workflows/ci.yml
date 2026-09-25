@@ -263,7 +263,7 @@ jobs:
           version: v1.5.1
 
       - name: Install Slither
-        run: pip3 install slither-analyzer
+        run: pip3 install slither-analyzer==0.11.6
 
       - name: Run Slither
         env:
@@ -271,7 +271,7 @@ jobs:
           FOUNDRY_TEST: integration/src
           FOUNDRY_SCRIPT: integration/src
         run: |
-          slither . --config-file slither.config.json --sarif results-${{ matrix.package }}.sarif || true
+          slither . --config-file slither.config.json --sarif results-${{ matrix.package }}.sarif --fail-none
           test -s results-${{ matrix.package }}.sarif
 
       - name: Upload SARIF file

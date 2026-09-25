@@ -395,6 +395,8 @@ contract OrderRouterV2ExecutionSidecar is IOrderRouterErrors {
                 engine_.positionEpoch(pending.account) != pending.positionEpoch || size != pending.positionSize
                     || side != pending.positionSide
             ) {
+                // Zero oracle/execution fields are intentional: a changed terminal position is never executed.
+                // slither-disable-next-line uninitialized-local
                 IOrderRouterV2ExecutionHost.ItemRequest memory terminalRequest;
                 terminalRequest.orderId = request.orderId;
                 terminalRequest.executor = request.executor;

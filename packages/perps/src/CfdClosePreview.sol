@@ -379,7 +379,9 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         if (snapshot.position.size != 0 && order.side != snapshot.position.side) {
             revert IOrderRouterErrors.OrderRouter__SideMismatch();
         }
+        // Deterministic lot alignment, not entropy: modulo only selects the size-validation path.
         if (
+            // slither-disable-next-line weak-prng
             order.sizeDelta == 0 || order.sizeDelta >= snapshot.position.size
                 || order.sizeDelta % CfdTypes.SIZE_QUANTUM != 0
         ) {
@@ -409,6 +411,8 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         if (size > snapshot.position.size) {
             revert ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition();
         }
+        // Deterministic SIZE_QUANTUM divisibility check; no random selection or payout depends on entropy.
+        // slither-disable-next-line weak-prng
         if (size % CfdTypes.SIZE_QUANTUM != 0) {
             revert ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum();
         }

@@ -181,9 +181,13 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
         // Historical carry uses live pool assets, even when trade planning receives a different batch depth.
         snap.poolCashUsdc = IHousePool(host.pool()).totalAssets();
+        // Exact enum dispatch selects the exposed side; this is not a target token-balance equality.
+        // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
             snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
         }
+        // The other exact enum value selects the SHORT borrow-base snapshot.
+        // slither-disable-next-line incorrect-equality
         if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
             snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
         }

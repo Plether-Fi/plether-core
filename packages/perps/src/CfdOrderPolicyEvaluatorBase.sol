@@ -473,6 +473,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         assessment.actionChargeAssessedUsdc += effects.carryCollectedUsdc;
         assessment.actionChargeCollectedUsdc += effects.carryCollectedUsdc;
         assessment.carryUsdc += effects.carryCollectedUsdc;
+        // Zero residual size identifies a full close; strict partial bounds apply to every positive remainder.
+        // slither-disable-next-line incorrect-equality
         _enforceBounds(assessment, bounds, bounty, assessment.postPositionSize == 0);
     }
 

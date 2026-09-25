@@ -48,6 +48,8 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         if (block.timestamp <= pending.bounds.validUntil) {
             revert OrderRouter__OrderNotExpired();
         }
+        // Solidity zero-initializes this memory struct; oracle/execution fields are intentionally absent for expiry.
+        // slither-disable-next-line uninitialized-local
         IOrderRouterV2ExecutionHost.ItemRequest memory request;
         request.orderId = orderId;
         request.action = IOrderRouterV2ExecutionHost.ItemAction.Expire;

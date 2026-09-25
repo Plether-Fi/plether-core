@@ -391,6 +391,8 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
 
+        // Typed failure-code dispatch must use exact equality; balances do not select this enum value.
+        // slither-disable-next-line incorrect-equality
         if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNHEALTHY) {
             preview.invalidReason = CfdTypes.CloseInvalidReason.PartialCloseUnhealthy;
             return preview;

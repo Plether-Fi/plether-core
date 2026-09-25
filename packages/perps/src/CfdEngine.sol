@@ -83,6 +83,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @dev Each entry contains the sum of maximum-profit envelopes, synthetic open interest, raw entry notional, and
     ///      active position margin for that side. Maximum profit and margin use 6-decimal USDC, open interest uses
     ///      18 decimals, and raw `size * entryPrice` entry notional uses 26 decimals.
+    // Zero is the initial aggregate; _sideState returns a storage alias written by the authenticated sidecar.
+    // slither-disable-next-line uninitialized-state
     SideState[2] public sides;
     /// @notice Most recently accepted cached mark price, with 8 decimals and bounded by `CAP_PRICE` on router paths.
     uint256 public lastMarkPrice;
