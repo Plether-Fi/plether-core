@@ -166,7 +166,7 @@ In practice, the compact public API is:
     `currentExecutionConfigHash()`,
     `resolveClientIntent(...)`, `clientIntent(...)`, `pendingIntent(...)`, `pendingPolicy(...)`,
     `isProtectionAttempt(...)`,
-    `lifecycleStatus(...)`, and `outcome(...)`
+    `lifecycleStatus(...)`, and `terminalOutcome(...)`
   - the read-only `IHousePool` capacity getters exposed by `HousePool`:
     `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
     `areSeniorDepositReservationsWithinLimits()`
@@ -1078,7 +1078,7 @@ authorizes settlement.
 - `pendingIntent(orderId)` and `pendingPolicy(orderId)` expose the identity, actual reserved bounty, and caller bounds
   while the order is live.
 - `lifecycleStatus(orderId)` returns `None`, `Pending`, `Executed`, or `Failed`.
-- `outcome(orderId)` keeps the compact permanent terminal result and the hash of the complete receipt.
+- `terminalOutcome(orderId)` keeps account, terminal block, status, reason, and the hash of the complete receipt in two storage slots. Detailed history requires the `OrderFinalized` event. `verifyReceipt(receipt, terminalTime)` verifies a supplied receipt against stored authority.
 - `OrderFinalized` emits the complete fixed-shape receipt. Its hash also commits to the chain, Book, Router, terminal
   block, and terminal time.
 

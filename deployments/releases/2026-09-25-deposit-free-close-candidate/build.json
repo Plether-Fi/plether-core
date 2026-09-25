@@ -1,0 +1,2922 @@
+{
+  "sourceCommit": "f7e8714c20f3f6d449d4d6ef87d0e4b852562389",
+  "submodules": [
+    "f5495c9b993bfc6e79dd52adfdcb7dac0a1da918 lib/forge-std (v1.15.0-7-gf5495c9)",
+    " 55d2d99304fb3fb930c688462ae2ccabb1d533ad lib/morpho-blue (v1.0.0)",
+    " 2f112697506eab12d433a65fdc31a639548fe365 lib/morpho-blue/lib/forge-std (v1.7.3)",
+    " e282159d5170298eb2455a6c05280ab5a73a4ef0 lib/morpho-blue/lib/forge-std/lib/ds-test (heads/master)",
+    " fcbae5394ae8ad52d8e580a3477db99814b9d565 lib/openzeppelin-contracts (v4.8.0-1034-gfcbae539)",
+    " 232ff9ba8194e406967f52ecc5cb52ed764209e9 lib/openzeppelin-contracts/lib/erc4626-tests (v0.1.1)",
+    " 3b20d60d14b343ee4f908cb8079495c07f5e8981 lib/openzeppelin-contracts/lib/forge-std (v1.9.6)",
+    " 7328abe100445fc53885c21d0e713b95293cf14c lib/openzeppelin-contracts/lib/halmos-cheatcodes (7328abe)"
+  ],
+  "forgeVersion": "forge Version: 1.5.1-stable",
+  "note": "Runtime sizes are compiler templates before immutable substitution. Creation-code sizes exclude constructor arguments; verify full creation inputs in the RPC simulation. ABI hashes are SHA-256, not on-chain runtime hashes.",
+  "contracts": {
+    "MockUSDC": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/MockUSDC.json",
+      "abiSha256": "251c2cbdec5249fc89e8bd7f4f5202feeb0271ce801b2d2886a7aab11db74bbf",
+      "runtimeBytes": 1697,
+      "creationCodeBytes": 2511,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "script/DeployPerpsArbitrumSepolia.s.sol": "MockUSDC"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "MarginClearinghouse": {
+      "artifact": "out/MarginClearinghouse.sol/MarginClearinghouse.json",
+      "abiSha256": "335df227a785f1d1f13c4bb7e6a415a3218f265e8f7147c42dd14951cead04d1",
+      "runtimeBytes": 21242,
+      "creationCodeBytes": 21542,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/MarginClearinghouse.sol": "MarginClearinghouse"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngine": {
+      "artifact": "out/CfdEngine.sol/CfdEngine.json",
+      "abiSha256": "ff4d3b7278ffc5025fe61e823051e453abfd812f5a45d7704649608f19c3e58f",
+      "runtimeBytes": 24430,
+      "creationCodeBytes": 25403,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEngine.sol": "CfdEngine"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "TerminalNavBookV2": {
+      "artifact": "out/TerminalNavBookV2.sol/TerminalNavBookV2.json",
+      "abiSha256": "1e065366ae8dcc2e92ce23884f4f0c276cc780aef5f9eddbe962f0659ada2fea",
+      "runtimeBytes": 9356,
+      "creationCodeBytes": 9645,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/TerminalNavBookV2.sol": "TerminalNavBookV2"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEnginePlanner": {
+      "artifact": "out/CfdEnginePlanner.sol/CfdEnginePlanner.json",
+      "abiSha256": "8bf1cb53a0f38078ee95afe192c44e21c37d648da227b50e7031f1d1f9d20965",
+      "runtimeBytes": 21752,
+      "creationCodeBytes": 21778,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEnginePlanner.sol": "CfdEnginePlanner"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngineSettlementSidecar": {
+      "artifact": "out/CfdEngineSettlementSidecar.sol/CfdEngineSettlementSidecar.json",
+      "abiSha256": "7356b43f4595930f2fab027c0be27b94f15965828ab0878d39a20eff3df9bcc7",
+      "runtimeBytes": 23436,
+      "creationCodeBytes": 23615,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEngineSettlementSidecar.sol": "CfdEngineSettlementSidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngineAdmin": {
+      "artifact": "out/CfdEngineAdmin.sol/CfdEngineAdmin.json",
+      "abiSha256": "5990a397e63027e98520e6ba1a74f5830e602031857ec2db20f6eaa0a2c11715",
+      "runtimeBytes": 4721,
+      "creationCodeBytes": 5032,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEngineAdmin.sol": "CfdEngineAdmin"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "HousePoolRedemptionMathSidecar": {
+      "artifact": "out/HousePoolRedemptionMathSidecar.sol/HousePoolRedemptionMathSidecar.json",
+      "abiSha256": "14de7a59b6d4db19fff62aa65ac9758e434c563676a36cfe077203d756d56472",
+      "runtimeBytes": 1042,
+      "creationCodeBytes": 1068,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/HousePoolRedemptionMathSidecar.sol": "HousePoolRedemptionMathSidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ArbitrumSepoliaReleaseHousePool": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseHousePool.json",
+      "abiSha256": "e4587d9b1cc2736fbf382b036eeea93312756c17f090c5df64acb51d4112d08a",
+      "runtimeBytes": 23848,
+      "creationCodeBytes": 29187,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "script/DeployPerpsArbitrumSepolia.s.sol": "ArbitrumSepoliaReleaseHousePool"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngineProtocolLens": {
+      "artifact": "out/CfdEngineProtocolLens.sol/CfdEngineProtocolLens.json",
+      "abiSha256": "65ab5787dfb7a71627b76afec0adff2e39b4c77e87c2cadc14638a0a2adea460",
+      "runtimeBytes": 4223,
+      "creationCodeBytes": 4376,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEngineProtocolLens.sol": "CfdEngineProtocolLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "TrancheVault": {
+      "artifact": "out/TrancheVault.sol/TrancheVault.json",
+      "abiSha256": "6cf331ae3ee6cec2bc28c9f0fd7ae779b8892dacf74705820f55f3ba12bce093",
+      "runtimeBytes": 23879,
+      "creationCodeBytes": 26098,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/TrancheVault.sol": "TrancheVault"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngineAccountLens": {
+      "artifact": "out/CfdEngineAccountLens.sol/CfdEngineAccountLens.json",
+      "abiSha256": "10e0c7af07f276d52d2f28be2efe7751b61c5508f0705b37f2bebda1a70af336",
+      "runtimeBytes": 10593,
+      "creationCodeBytes": 10873,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEngineAccountLens.sol": "CfdEngineAccountLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngineLens": {
+      "artifact": "out/CfdEngineLens.sol/CfdEngineLens.json",
+      "abiSha256": "9c523a2dbe33e99049beff22478fdf5bbc2cc7bd4910ba85ffdb2388e67a5906",
+      "runtimeBytes": 21234,
+      "creationCodeBytes": 31981,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEngineLens.sol": "CfdEngineLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngineOpenQuoter": {
+      "artifact": "out/CfdEngineOpenQuoter.sol/CfdEngineOpenQuoter.json",
+      "abiSha256": "3662d3a2163170b8d979b3b81afb66d2b846c70c2cf37d3a372655852bbde3e8",
+      "runtimeBytes": 10220,
+      "creationCodeBytes": 10246,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdEngineOpenQuoter.sol": "CfdEngineOpenQuoter"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdOrderPolicyEvaluator": {
+      "artifact": "out/CfdOrderPolicyEvaluator.sol/CfdOrderPolicyEvaluator.json",
+      "abiSha256": "c2e80270e79bb7b2fa937f823d8f7cc083aac4f7591f3d6fb94012ca17ebad45",
+      "runtimeBytes": 19822,
+      "creationCodeBytes": 19848,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdOrderPolicyEvaluator.sol": "CfdOrderPolicyEvaluator"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdClosePreview": {
+      "artifact": "out/CfdClosePreview.sol/CfdClosePreview.json",
+      "abiSha256": "c6fd9f560f87a8cfe46642a1aa03e1ab7e43b3f81be25c3d9c09f934a2f612bd",
+      "runtimeBytes": 22470,
+      "creationCodeBytes": 22496,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/CfdClosePreview.sol": "CfdClosePreview"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "OrderRouterV2ExecutionSidecar": {
+      "artifact": "out/OrderRouterV2ExecutionSidecar.sol/OrderRouterV2ExecutionSidecar.json",
+      "abiSha256": "91b2220039aa08a52d06c7dae7314e20cbdfd4caf05c414b983939f2b7bb6ea7",
+      "runtimeBytes": 23727,
+      "creationCodeBytes": 31404,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/OrderRouterV2ExecutionSidecar.sol": "OrderRouterV2ExecutionSidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "OrderRecoverySidecar": {
+      "artifact": "out/OrderRecoverySidecar.sol/OrderRecoverySidecar.json",
+      "abiSha256": "50e80e2e376e55939bca63266945f8116ccebba682df7570d4e2795ee5885c00",
+      "runtimeBytes": 7469,
+      "creationCodeBytes": 7528,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/OrderRecoverySidecar.sol": "OrderRecoverySidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ArbitrumSepoliaReleaseOracle": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseOracle.json",
+      "abiSha256": "4db31a669ce6b326698783463597b91e31189ea401ebe730eb77cb2f960663da",
+      "runtimeBytes": 13388,
+      "creationCodeBytes": 15270,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "script/DeployPerpsArbitrumSepolia.s.sol": "ArbitrumSepoliaReleaseOracle"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "OrderRouterLiquidationBatchSidecar": {
+      "artifact": "out/OrderRouterLiquidationBatchSidecar.sol/OrderRouterLiquidationBatchSidecar.json",
+      "abiSha256": "7626a1ac1d8cb5febf600f6ebd0881b738ec6eb45b3f8f6138da5e5d1058102b",
+      "runtimeBytes": 21936,
+      "creationCodeBytes": 22108,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/OrderRouterLiquidationBatchSidecar.sol": "OrderRouterLiquidationBatchSidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "OrderLifecycleBook": {
+      "artifact": "out/OrderLifecycleBook.sol/OrderLifecycleBook.json",
+      "abiSha256": "a7ff72ef47fe5537447f2e0b25ec47f9d845e9bbdbdda3f56f0b01d98475c7eb",
+      "runtimeBytes": 14723,
+      "creationCodeBytes": 15127,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/OrderLifecycleBook.sol": "OrderLifecycleBook"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ArbitrumSepoliaReleaseRouter": {
+      "artifact": "out/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseRouter.json",
+      "abiSha256": "8ce440f113f4bf6e5b5d84c31bd28d38bc0334633df8b2e0404e515776b36a75",
+      "runtimeBytes": 21246,
+      "creationCodeBytes": 46903,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "script/DeployPerpsArbitrumSepolia.s.sol": "ArbitrumSepoliaReleaseRouter"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "OrderRouterAdmin": {
+      "artifact": "out/OrderRouterAdmin.sol/OrderRouterAdmin.json",
+      "abiSha256": "b3fdc2dfeebe54292e656a2828d50b72779e81382135f17787e7455566e40c00",
+      "runtimeBytes": 5289,
+      "creationCodeBytes": 5631,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/OrderRouterAdmin.sol": "OrderRouterAdmin"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "PositionProtectionBook": {
+      "artifact": "out/PositionProtectionBook.sol/PositionProtectionBook.json",
+      "abiSha256": "89ad7e1f81863b684f228a3de190e657303b18179d693c948eb677186b50e227",
+      "runtimeBytes": 17084,
+      "creationCodeBytes": 17465,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/PositionProtectionBook.sol": "PositionProtectionBook"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "PerpsPublicLens": {
+      "artifact": "out/PerpsPublicLens.sol/PerpsPublicLens.json",
+      "abiSha256": "7138c3d71cda217d2407ee5301921eca6c361227e89121cbe65e5b549b2fd190",
+      "runtimeBytes": 14461,
+      "creationCodeBytes": 14815,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/PerpsPublicLens.sol": "PerpsPublicLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "SettlementMonitorLens": {
+      "artifact": "out/SettlementMonitorLens.sol/SettlementMonitorLens.json",
+      "abiSha256": "e64496ee673613835659b5c8d75a16ea1b00b40554c800d2945893aada38c2d3",
+      "runtimeBytes": 23339,
+      "creationCodeBytes": 49025,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/SettlementMonitorLens.sol": "SettlementMonitorLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "SettlementMonitorLensSidecar": {
+      "artifact": "out/SettlementMonitorLensSidecar.sol/SettlementMonitorLensSidecar.json",
+      "abiSha256": "546b2eb7d9f3796cd9ff1acd063473a3a4452b60e7c465a241ac61e3228e680e",
+      "runtimeBytes": 19345,
+      "creationCodeBytes": 20719,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/SettlementMonitorLensSidecar.sol": "SettlementMonitorLensSidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "EmergencyPauseCoordinator": {
+      "artifact": "out/EmergencyPauseCoordinator.sol/EmergencyPauseCoordinator.json",
+      "abiSha256": "6db26a16f0680543fb7f9d9cf14805a1653f0d12ce35a238a6faf2398446dd83",
+      "runtimeBytes": 2788,
+      "creationCodeBytes": 3257,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/EmergencyPauseCoordinator.sol": "EmergencyPauseCoordinator"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "AccountLensViewTypes": {
+      "artifact": "out/AccountLensViewTypes.sol/AccountLensViewTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/AccountLensViewTypes.sol": "AccountLensViewTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "CfdEngineSettlementTypes": {
+      "artifact": "out/CfdEngineSettlementTypes.sol/CfdEngineSettlementTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/CfdEngineSettlementTypes.sol": "CfdEngineSettlementTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ClaimEngineViewTypes": {
+      "artifact": "out/ClaimEngineViewTypes.sol/ClaimEngineViewTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ClaimEngineViewTypes.sol": "ClaimEngineViewTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "EngineStatusViewTypes": {
+      "artifact": "out/EngineStatusViewTypes.sol/EngineStatusViewTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/EngineStatusViewTypes.sol": "EngineStatusViewTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "HousePoolEngineViewTypes": {
+      "artifact": "out/HousePoolEngineViewTypes.sol/HousePoolEngineViewTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/HousePoolEngineViewTypes.sol": "HousePoolEngineViewTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IAsyncTrancheVault": {
+      "artifact": "out/IAsyncTrancheVault.sol/IAsyncTrancheVault.json",
+      "abiSha256": "7f135369791beeb186512e0654001fd51849646a71822979b6204cbceb64380e",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IAsyncTrancheVault.sol": "IAsyncTrancheVault"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IAsyncTrancheVaultClaimableRedeem": {
+      "artifact": "out/IAsyncTrancheVaultClaimableRedeem.sol/IAsyncTrancheVaultClaimableRedeem.json",
+      "abiSha256": "2eaf23eb340c92ce3ea2995a9e371bfecc145b14f3e95416edc7e1a9821ba296",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IAsyncTrancheVaultClaimableRedeem.sol": "IAsyncTrancheVaultClaimableRedeem"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngine": {
+      "artifact": "out/ICfdEngine.sol/ICfdEngine.json",
+      "abiSha256": "961dc6c55c87b85cf17daeb545c0d34ced4857b1fd4f3a0a14e279cac0f37494",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngine.sol": "ICfdEngine"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineAccountLens": {
+      "artifact": "out/ICfdEngineAccountLens.sol/ICfdEngineAccountLens.json",
+      "abiSha256": "5ec4932079210c321c10c2451319177cc2992ec8064c985a674155a20400fa02",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineAccountLens.sol": "ICfdEngineAccountLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineAdminHost": {
+      "artifact": "out/ICfdEngineAdminHost.sol/ICfdEngineAdminHost.json",
+      "abiSha256": "d6c5ac1fe4fd111998130388d418983d57d6dc612f534627cb7f97cafc5a5832",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineAdminHost.sol": "ICfdEngineAdminHost"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineCore": {
+      "artifact": "out/ICfdEngineCore.sol/ICfdEngineCore.json",
+      "abiSha256": "9994f78a1c6196b9a8501543c91c2351dced4fbcc5ce6864f37b25ad673591c2",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineCore.sol": "ICfdEngineCore"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineLens": {
+      "artifact": "out/ICfdEngineLens.sol/ICfdEngineLens.json",
+      "abiSha256": "20ff55f7ee634f77c4f8d58ab704a360bf9379be330db979139ad01e749b324e",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineLens.sol": "ICfdEngineLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEnginePlanner": {
+      "artifact": "out/ICfdEnginePlanner.sol/ICfdEnginePlanner.json",
+      "abiSha256": "4123fc291f8aef871c1b8abf351acf9a37f995e65b5864ad56db990f68fd395f",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEnginePlanner.sol": "ICfdEnginePlanner"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineProtocolLens": {
+      "artifact": "out/ICfdEngineProtocolLens.sol/ICfdEngineProtocolLens.json",
+      "abiSha256": "31f4036cc48d1db6441abbab3c1c1206a527515952af74ed9f594cef5fabc75e",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineProtocolLens.sol": "ICfdEngineProtocolLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineRiskParamsView": {
+      "artifact": "out/ICfdEngineRiskParamsView.sol/ICfdEngineRiskParamsView.json",
+      "abiSha256": "19db5e4fe0e487ef467dd66e5e5c351385688a60756a6e30f27d1895877e000f",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineRiskParamsView.sol": "ICfdEngineRiskParamsView"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineSettlementHost": {
+      "artifact": "out/ICfdEngineSettlementHost.sol/ICfdEngineSettlementHost.json",
+      "abiSha256": "f68ae7ccf8a4c284edbd611e8f605832a5179e7caeb0feacd5a9bfaf083791ca",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineSettlementHost.sol": "ICfdEngineSettlementHost"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineSettlementSidecar": {
+      "artifact": "out/ICfdEngineSettlementSidecar.sol/ICfdEngineSettlementSidecar.json",
+      "abiSha256": "9175b1873708c31d5430d082b320090bddbd624ae67f43bcc1604e28b841d86d",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineSettlementSidecar.sol": "ICfdEngineSettlementSidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdEngineTypes": {
+      "artifact": "out/ICfdEngineTypes.sol/ICfdEngineTypes.json",
+      "abiSha256": "6a067efdac38caaa492c52eba4ebd9fb012598d54af216e9adad69434381f3ec",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdEngineTypes.sol": "ICfdEngineTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ICfdOrderPolicyEvaluator": {
+      "artifact": "out/ICfdOrderPolicyEvaluator.sol/ICfdOrderPolicyEvaluator.json",
+      "abiSha256": "a93eab823185ffaabe8b49ff94ac7982ef35e44afb7ac117f88537b321067fae",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ICfdOrderPolicyEvaluator.sol": "ICfdOrderPolicyEvaluator"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IERC7540": {
+      "artifact": "out/IERC7540.sol/IERC7540.json",
+      "abiSha256": "bf93bbe131950a1869f86b21d2949d99ab53309f698df99b85a65e621ed5b17a",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IERC7540.sol": "IERC7540"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IERC7575": {
+      "artifact": "out/IERC7575.sol/IERC7575.json",
+      "abiSha256": "eecab836c351713ac0f788c00aa465e1f46f087781a163ad427005b6c0fe335a",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IERC7575.sol": "IERC7575"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IHousePool": {
+      "artifact": "out/IHousePool.sol/IHousePool.json",
+      "abiSha256": "9b320c3d929fb072c67ba733ff64854182a3b242cd239c6d19f27ac6c7589ac4",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IHousePool.sol": "IHousePool"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IHousePoolEmergencyAdmin": {
+      "artifact": "out/IHousePoolEmergencyAdmin.sol/IHousePoolEmergencyAdmin.json",
+      "abiSha256": "a5a97d3f4d8846b651e30fa7cd1dd10682059746838fc98c4d71086bf650a502",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IHousePoolEmergencyAdmin.sol": "IHousePoolEmergencyAdmin"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IHousePoolRedemptionMathSidecar": {
+      "artifact": "out/IHousePoolRedemptionMathSidecar.sol/IHousePoolRedemptionMathSidecar.json",
+      "abiSha256": "7170c9d7fc1ed18a0b6106057ed45af82abfc72a9a0c1bb636981af1266a0926",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IHousePoolRedemptionMathSidecar.sol": "IHousePoolRedemptionMathSidecar"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IMarginAccount": {
+      "artifact": "out/IMarginAccount.sol/IMarginAccount.json",
+      "abiSha256": "3a9a5d94c1e64be1c6669c737f2bbad14eec8f3ace1e66b71c8f35e86c4ec9e5",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IMarginAccount.sol": "IMarginAccount"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IMarginClearinghouse": {
+      "artifact": "out/IMarginClearinghouse.sol/IMarginClearinghouse.json",
+      "abiSha256": "b85818cee0eb8bcbe2e7e3f541cbcbe0529639ef9c75252dadc295d5429931a2",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IMarginClearinghouse.sol": "IMarginClearinghouse"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderLifecycleBook": {
+      "artifact": "out/IOrderLifecycleBook.sol/IOrderLifecycleBook.json",
+      "abiSha256": "312df400dc4d631ea41fb76abf7bf2965f040d4f00dcc4939f0209d09f6028af",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderLifecycleBook.sol": "IOrderLifecycleBook"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderRouter": {
+      "artifact": "out/IOrderRouter.sol/IOrderRouter.json",
+      "abiSha256": "c6652024d51e6c12be0be95377bedc8a5bd296a25a0cc35929fb6d363d072f88",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderRouter.sol": "IOrderRouter"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderRouterAccounting": {
+      "artifact": "out/IOrderRouterAccounting.sol/IOrderRouterAccounting.json",
+      "abiSha256": "5f0fdd5f16c8da154657e4159bf7a6ab9bacadce748e3910967bab1680f26e37",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderRouterAccounting.sol": "IOrderRouterAccounting"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderRouterAdminHost": {
+      "artifact": "out/IOrderRouterAdminHost.sol/IOrderRouterAdminHost.json",
+      "abiSha256": "3b82402a5ae8a7a08d96359bb56d18f07d772c8c6117e5248f763a3afbae137c",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderRouterAdminHost.sol": "IOrderRouterAdminHost"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderRouterEmergencyAdmin": {
+      "artifact": "out/IOrderRouterEmergencyAdmin.sol/IOrderRouterEmergencyAdmin.json",
+      "abiSha256": "9de11d1ab1fea2b73ddbb22c97025ca2bf04b7f0fe09eb283fcd70da9fdae107",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderRouterEmergencyAdmin.sol": "IOrderRouterEmergencyAdmin"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderRouterErrors": {
+      "artifact": "out/IOrderRouterErrors.sol/IOrderRouterErrors.json",
+      "abiSha256": "b4bb4ace4bc7a12c2871b4f9bf02687e24d2e60aaa3feee56598c89735f8f411",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderRouterErrors.sol": "IOrderRouterErrors"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderRouterLiquidationBatchHost": {
+      "artifact": "out/IOrderRouterLiquidationBatchHost.sol/IOrderRouterLiquidationBatchHost.json",
+      "abiSha256": "4516c96b93224ead1b32eaaa804d4139835bef53724d70abe8a38e8380416ca3",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderRouterLiquidationBatchHost.sol": "IOrderRouterLiquidationBatchHost"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IOrderRouterV2ExecutionHost": {
+      "artifact": "out/IOrderRouterV2ExecutionHost.sol/IOrderRouterV2ExecutionHost.json",
+      "abiSha256": "fa259f46d0cdbb70dc0fe2c595b2ca93c53a39543e7f1925919470b6ad568b96",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IOrderRouterV2ExecutionHost.sol": "IOrderRouterV2ExecutionHost"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsAdmin": {
+      "artifact": "out/IPerpsAdmin.sol/IPerpsAdmin.json",
+      "abiSha256": "560bea993ff9410621651b333a72e6f7608bbe78cea66e33245b1b5569739b3e",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsAdmin.sol": "IPerpsAdmin"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsKeeper": {
+      "artifact": "out/IPerpsKeeper.sol/IPerpsKeeper.json",
+      "abiSha256": "2652a1d55a5b7dfd79a251f70d75f0c90a731c6b9b5a00bc482532d6d45ecf85",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsKeeper.sol": "IPerpsKeeper"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsLP": {
+      "artifact": "out/IPerpsLP.sol/IPerpsLP.json",
+      "abiSha256": "238c16ef7aee5cacbd4aa2e71280fdc2ad0de3ea8ca4784e60985eb1c92b3da8",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsLP.sol": "IPerpsLP"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsLPActions": {
+      "artifact": "out/IPerpsLPActions.sol/IPerpsLPActions.json",
+      "abiSha256": "bb4f1511dcb12895393fc26616befec2d5758a7929a23946c0eb4509e0f3c7e2",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsLPActions.sol": "IPerpsLPActions"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsLPViews": {
+      "artifact": "out/IPerpsLPViews.sol/IPerpsLPViews.json",
+      "abiSha256": "945c438eeb073e53cbe184737179dc305a16e474df9fd12439a355773cd08e81",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsLPViews.sol": "IPerpsLPViews"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsTrader": {
+      "artifact": "out/IPerpsTrader.sol/IPerpsTrader.json",
+      "abiSha256": "d0d29b3056948754d1f16f5a301add5a47efa6feec447afadde1a891c0cbc966",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsTrader.sol": "IPerpsTrader"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsTraderActions": {
+      "artifact": "out/IPerpsTraderActions.sol/IPerpsTraderActions.json",
+      "abiSha256": "89304ce427517bb0d66ea542b7792600b76edd956b277982bb2f8b29e670d177",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsTraderActions.sol": "IPerpsTraderActions"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPerpsTraderViews": {
+      "artifact": "out/IPerpsTraderViews.sol/IPerpsTraderViews.json",
+      "abiSha256": "f5c84520ccc58d8d3db7041d9febc05afe0a868abbd88b71349ff310adcbca2b",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPerpsTraderViews.sol": "IPerpsTraderViews"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPletherOracle": {
+      "artifact": "out/IPletherOracle.sol/IPletherOracle.json",
+      "abiSha256": "76405625fbed95448f43f30c781f6c3d70dffb4dfe2f3f81f8415e7b4ff49777",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPletherOracle.sol": "IPletherOracle"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPositionProtectionActions": {
+      "artifact": "out/IPositionProtectionActions.sol/IPositionProtectionActions.json",
+      "abiSha256": "7bd899250ba24906296bc40cc3e316ad791ba1b6fb700c4d38625e093d1ab682",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPositionProtectionActions.sol": "IPositionProtectionActions"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPositionProtectionBook": {
+      "artifact": "out/IPositionProtectionBook.sol/IPositionProtectionBook.json",
+      "abiSha256": "6660adddca1a2a6a8353fbbcb05a8fb9bd5d927730ad95a0fdd74a75eaa780b0",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPositionProtectionBook.sol": "IPositionProtectionBook"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IPositionProtectionViews": {
+      "artifact": "out/IPositionProtectionViews.sol/IPositionProtectionViews.json",
+      "abiSha256": "38d01bc8aef96f993587d9722b9b06bca066948118410f1a551f2aa2697eb0d4",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IPositionProtectionViews.sol": "IPositionProtectionViews"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IProtocolViews": {
+      "artifact": "out/IProtocolViews.sol/IProtocolViews.json",
+      "abiSha256": "d2c9516f8f2d14f80c2fa2340e84d526fea28f008f30c51630138ec488b1decc",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IProtocolViews.sol": "IProtocolViews"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ISettlementMonitorLens": {
+      "artifact": "out/ISettlementMonitorLens.sol/ISettlementMonitorLens.json",
+      "abiSha256": "f26996a56567fae7a2911c2f93d01da3e4120bcb966f468d7ef63b852dcf8c8d",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ISettlementMonitorLens.sol": "ISettlementMonitorLens"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ITerminalNavBookV2": {
+      "artifact": "out/ITerminalNavBookV2.sol/ITerminalNavBookV2.json",
+      "abiSha256": "b3a46907218accca8f184f9bc9f7feaf382cf178d2fd992071c906668c93ae4f",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ITerminalNavBookV2.sol": "ITerminalNavBookV2"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ITrancheVaultBootstrap": {
+      "artifact": "out/ITrancheVaultBootstrap.sol/ITrancheVaultBootstrap.json",
+      "abiSha256": "787f772448c7492e68227f466518eaf7ffb72bed13acbddd80e526c6756fc740",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ITrancheVaultBootstrap.sol": "ITrancheVaultBootstrap"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "IWithdrawGuard": {
+      "artifact": "out/IWithdrawGuard.sol/IWithdrawGuard.json",
+      "abiSha256": "77a839969c1d8b140c4d02317c3fe1c131b899e4a46d63b7c8bd30c101120601",
+      "runtimeBytes": 0,
+      "creationCodeBytes": 0,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/IWithdrawGuard.sol": "IWithdrawGuard"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "PerpsViewTypes": {
+      "artifact": "out/PerpsViewTypes.sol/PerpsViewTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/PerpsViewTypes.sol": "PerpsViewTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "PositionProtectionTypes": {
+      "artifact": "out/PositionProtectionTypes.sol/PositionProtectionTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/PositionProtectionTypes.sol": "PositionProtectionTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "ProtocolLensViewTypes": {
+      "artifact": "out/ProtocolLensViewTypes.sol/ProtocolLensViewTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/ProtocolLensViewTypes.sol": "ProtocolLensViewTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    },
+    "SettlementMonitorViewTypes": {
+      "artifact": "out/SettlementMonitorViewTypes.sol/SettlementMonitorViewTypes.json",
+      "abiSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "runtimeBytes": 57,
+      "creationCodeBytes": 85,
+      "compiler": {
+        "version": "0.8.35+commit.47b9dedd"
+      },
+      "settings": {
+        "remappings": [
+          "@morpho-blue/=lib/morpho-blue/src/",
+          "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+          "@plether/options/=packages/options/src/",
+          "@plether/perps-aa/=packages/perps-aa/src/",
+          "@plether/perps/=packages/perps/src/",
+          "@plether/shared/=packages/shared/src/",
+          "@plether/spot/=packages/spot/src/",
+          "@plether/test-utils/=packages/shared/test-support/",
+          "forge-std/=lib/forge-std/src/"
+        ],
+        "optimizer": {
+          "enabled": true,
+          "runs": 200
+        },
+        "metadata": {
+          "bytecodeHash": "ipfs"
+        },
+        "compilationTarget": {
+          "packages/perps/src/interfaces/SettlementMonitorViewTypes.sol": "SettlementMonitorViewTypes"
+        },
+        "evmVersion": "prague",
+        "libraries": {},
+        "viaIR": true
+      }
+    }
+  }
+}

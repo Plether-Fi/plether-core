@@ -361,7 +361,6 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         if (
             config.openOrderExecutionBountyBps == 0 || config.openOrderExecutionBountyBps > 10_000
                 || config.minOpenOrderExecutionBountyUsdc == 0 || config.maxOpenOrderExecutionBountyUsdc == 0
-                || config.closeOrderExecutionBountyUsdc == 0
                 || config.closeOrderExecutionBountyUsdc > MAX_CLOSE_ORDER_EXECUTION_BOUNTY_USDC
                 || config.positionProtectionTriggerBountyUsdc == 0
                 || config.positionProtectionTriggerBountyUsdc > MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_USDC

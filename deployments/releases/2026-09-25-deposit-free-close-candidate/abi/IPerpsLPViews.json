@@ -1,0 +1,455 @@
+[
+  {
+    "type": "function",
+    "name": "getJuniorTranche",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "viewData",
+        "type": "tuple",
+        "internalType": "struct PerpsViewTypes.TrancheView",
+        "components": [
+          {
+            "name": "totalAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "totalShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "effectiveTotalShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingMaintenanceFeeShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maintenanceFeeAprBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maintenanceFeeRecipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "sharePrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxWithdrawUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenLpFeeBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "depositEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "withdrawEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getLpDepositCooldownState",
+    "inputs": [
+      {
+        "name": "isSenior",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "viewData",
+        "type": "tuple",
+        "internalType": "struct PerpsViewTypes.LpDepositCooldownStateView",
+        "components": [
+          {
+            "name": "vault",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "requestId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "controller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "activationTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "cooldownEnd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "remainingClaimableShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "directRedeemableShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getLpRequestState",
+    "inputs": [
+      {
+        "name": "isSenior",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "viewData",
+        "type": "tuple",
+        "internalType": "struct PerpsViewTypes.LpRequestStateView",
+        "components": [
+          {
+            "name": "vault",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "requestId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "controller",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "pendingDepositAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingDepositSharesEstimate",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimableDepositAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimableDepositShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingRedeemShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingRedeemAssetsEstimate",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimableRedeemShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "claimableRedeemAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "refundableDepositAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "refundableRedeemShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "redeemRefundPending",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getLpStatus",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "viewData",
+        "type": "tuple",
+        "internalType": "struct PerpsViewTypes.LpStatusView",
+        "components": [
+          {
+            "name": "tradingActive",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "withdrawalLive",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "lastMarkTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "oracleFresh",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "lpEpochSettlementPaused",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getSeniorTranche",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "viewData",
+        "type": "tuple",
+        "internalType": "struct PerpsViewTypes.TrancheView",
+        "components": [
+          {
+            "name": "totalAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "totalShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "effectiveTotalShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingMaintenanceFeeShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maintenanceFeeAprBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maintenanceFeeRecipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "sharePrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxWithdrawUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenLpFeeBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "depositEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "withdrawEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getTrancheQueues",
+    "inputs": [
+      {
+        "name": "isSenior",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "viewData",
+        "type": "tuple",
+        "internalType": "struct PerpsViewTypes.TrancheQueueView",
+        "components": [
+          {
+            "name": "vault",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "currentEpoch",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "cutoffEpoch",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nextRequestEpoch",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "nextRequestCutoffTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "depositHeadEpoch",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "depositHeadAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "redeemHeadEpoch",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "redeemHeadShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "depositBacklog",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "redeemBacklog",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "settlementLive",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "poolPaused",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "lpEpochSettlementPaused",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  }
+]

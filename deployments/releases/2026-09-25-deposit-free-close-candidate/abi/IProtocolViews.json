@@ -1,0 +1,57 @@
+[
+  {
+    "type": "function",
+    "name": "getProtocolStatus",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "viewData",
+        "type": "tuple",
+        "internalType": "struct PerpsViewTypes.ProtocolStatusView",
+        "components": [
+          {
+            "name": "phase",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "lastMarkPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lastMarkTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "fadWindow",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "tradingActive",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "withdrawalLive",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "lpEpochSettlementPaused",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  }
+]

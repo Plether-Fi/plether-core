@@ -117,7 +117,7 @@ durable order state:
 - `isProtectionAttempt(orderId)` identifies the Router-registered close-attempt marker while that order is pending;
   `ProtectionAttemptRegistered` is the permanent event evidence after finalization removes the transient marker.
 - `lifecycleStatus(orderId)` returns `None`, `Pending`, `Executed`, or `Failed`.
-- `outcome(orderId)` returns the permanent compact terminal outcome and receipt hash.
+- `terminalOutcome(orderId)` returns account, terminal block, status, reason, and receipt hash. Fetch detailed history from `OrderFinalized`; `verifyReceipt(receipt, terminalTime)` authenticates a supplied receipt.
 
 The Book owns no funds and has no owner, upgrade, migration, or arbitrary mutation path. Only its immutable Router may
 register and finalize records.
@@ -393,11 +393,12 @@ For an externally submitted bounded order, use both on-chain state and the canon
 1. Resolve `(account, clientOrderId)` with `clientIntent` and compare the stored intent hash with
    `hashOrderRequest(account, request)`.
 2. While pending, compare `pendingIntent` and `pendingPolicy` with the instruction approved by the account layer.
-3. On terminal status, read `outcome(orderId)` from the Book.
+3. On terminal status, read `terminalOutcome(orderId)` from the Book. Its terminal block is the Solidity receipt clock, not an RPC log locator on Arbitrum; executor, price, bounty and failure details are event history.
 4. Fetch the corresponding `OrderFinalized` event using the Book address and indexed order/account/client-id fields.
 5. Recompute
    `keccak256(abi.encode(RECEIPT_TYPEHASH, chainId, book, router, terminalBlock, terminalTime, receipt))` and compare it
-   with both the event and `outcome(orderId).receiptHash`.
+   with both the event and `terminalOutcome(orderId).receiptHash`.
+   Alternatively, use `verifyReceipt(receipt, terminalTime)` on the Book; still compare the event hash and indexed identity to the stored summary. The SDK `decodeVerifiedOrderFinalized` performs these checks locally.
 6. Independently reconcile the receipt economics with Engine, Clearinghouse, and pool events when the strategy's risk
    policy requires deeper accounting assurance.
 

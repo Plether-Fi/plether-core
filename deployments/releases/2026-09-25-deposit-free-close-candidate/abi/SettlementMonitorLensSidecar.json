@@ -1,0 +1,511 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "router_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "MONITOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getObservableConfigDigest",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "available",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "digest",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getOracleStatus",
+    "inputs": [
+      {
+        "name": "minimumPublishTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "oracleStatus",
+        "type": "tuple",
+        "internalType": "struct SettlementMonitorViewTypes.OracleStatus",
+        "components": [
+          {
+            "name": "oracle",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "pyth",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "markPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "confidence",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "publishTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "maxStaleness",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maximumConfidenceRatioBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "failureSelector",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "failureHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "readSucceeded",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "policyValid",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "publishTimeMeetsEpochFloor",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "fadWindow",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "closeOnly",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "dependencyFailureMask",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getSettlementAccounting",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "accounting",
+        "type": "tuple",
+        "internalType": "struct SettlementMonitorViewTypes.SettlementAccounting",
+        "components": [
+          {
+            "name": "poolRawAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolAccountedAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolTotalAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolExcessAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "withdrawalReservedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "storedSeniorPrincipalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "storedJuniorPrincipalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "storedSeniorHighWaterMarkUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "cachedPreviewSeniorPrincipalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "cachedPreviewJuniorPrincipalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "cachedPreviewMaxSeniorWithdrawUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "cachedPreviewMaxJuniorWithdrawUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingRecapitalizationUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingTradingRevenueUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "unassignedAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "reservedSeniorDepositAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "storedTerminalDeficitUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "cachedPreviewTerminalDeficitUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lastReconcileTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lastSeniorCouponCheckpointTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "terminalMarkPrice",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "terminalMarkTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "terminalLpPriceDeltaUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "totalTraderClaimsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxDirectionalLiabilityUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "terminalBookVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "terminalHasOpenPositions",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "terminalDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "cachedPreviewAvailable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "terminalSnapshotAvailable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "dependencyFailureMask",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getSettlementHealth",
+    "inputs": [
+      {
+        "name": "queueFaultMask",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "queueDependencyFailureMask",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "health",
+        "type": "tuple",
+        "internalType": "struct SettlementMonitorViewTypes.SettlementHealth",
+        "components": [
+          {
+            "name": "state",
+            "type": "uint8",
+            "internalType": "enum SettlementMonitorViewTypes.HealthState"
+          },
+          {
+            "name": "criticalFaultMask",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "dependencyFailureMask",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bookCapPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "engineCapPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bookActiveCurveCount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bookTotalLots",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bookTotalEntryCostUsdcAtoms",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bookTotalEffectiveCapUsdcAtoms",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "engineLongOpenInterest",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "engineShortOpenInterest",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "engineLongEntryNotional",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "engineShortEntryNotional",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sizeQuantum",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolRawAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolAccountedAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolCustodyDeficitUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolCustodySurplusUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorRequiredAssetEscrowUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorActualAssetEscrowUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorRequiredShareEscrow",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorActualShareEscrow",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorRequiredAssetEscrowUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorActualAssetEscrowUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorRequiredShareEscrow",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorActualShareEscrow",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorPrincipalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorHighWaterMarkUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorImpairmentUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorPrincipalAboveHighWaterMarkUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "protectedSeniorExposureUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "error",
+    "name": "SettlementMonitorLensSidecar__OnlyMonitor",
+    "inputs": []
+  }
+]

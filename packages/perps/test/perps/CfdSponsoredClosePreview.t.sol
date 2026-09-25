@@ -260,11 +260,13 @@ contract CfdSponsoredClosePreviewTest is CfdClosePreviewTestBase {
         assertEq(router.lifecycleBook().clientIntent(ACCOUNT, r.clientOrderId).orderId, 0);
     }
 
-    function test_PartialCloseDoesNotWaiveUnfundedTradingCharges() public {
+    function test_PartialCloseFundsChargesFromSafeReleaseOnNewStack() public {
         _openNormally(CfdTypes.Side.LONG, 0);
         OrderV2Types.OrderRequest memory r = _request(SIZE / 2);
-        vm.expectRevert();
-        sponsored.previewSponsoredClose(address(engine), ACCOUNT, r, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
+        CfdClosePreview.SponsoredClosePreview memory preview =
+            sponsored.previewSponsoredClose(address(engine), ACCOUNT, r, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
+        assertGt(preview.assessment.close.actionChargeFromReleasedMarginUsdc, 0);
+        assertEq(preview.assessment.close.actionChargeWaivedUsdc, 0);
     }
 
     function test_PendingOrderRejectsBeforeMint() public {

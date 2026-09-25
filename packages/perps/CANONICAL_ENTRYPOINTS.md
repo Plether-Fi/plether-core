@@ -155,8 +155,8 @@ by the Book's trailing payload.
   `OrderLifecycleBook` exposed by `OrderRouter.lifecycleBook()` via `IOrderLifecycleBook`. Use
   `currentExecutionConfigHash()` before constructing a request, `clientIntent(account,
   clientOrderId)` to resolve permanent idempotency, `lifecycleStatus(orderId)` / `pendingPolicy(orderId)` while live,
-  `isProtectionAttempt(orderId)` for the transient Router-authenticated child marker, and `outcome(orderId)` for the
-  compact authenticated terminal result. `ProtectionAttemptRegistered` is permanent event evidence after finalization
+  `isProtectionAttempt(orderId)` for the transient Router-authenticated child marker, and `terminalOutcome(orderId)` for the
+  two-slot authenticated terminal summary (account, block, status, reason and hash). Use `verifyReceipt(receipt, terminalTime)` to authenticate supplied full history. `ProtectionAttemptRegistered` is permanent event evidence after finalization
   removes the marker. Full terminal receipts are emitted by `OrderFinalized`; their hash is retained in the compact
   outcome.
 - Settlement operations and security monitoring: `SettlementMonitorLens`. Its route, oracle, queue, and invariant

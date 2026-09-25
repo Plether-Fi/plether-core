@@ -1,0 +1,67 @@
+[
+  {
+    "type": "function",
+    "name": "riskParams",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct CfdTypes.RiskParams",
+        "components": [
+          {
+            "name": "vpiFactor",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxSkewRatio",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maintMarginBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "initMarginBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "fadMarginBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "baseCarryBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bountyBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "keeperShareBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "protocolShareBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  }
+]

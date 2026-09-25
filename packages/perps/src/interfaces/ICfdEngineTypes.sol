@@ -85,14 +85,15 @@ interface ICfdEngineTypes {
     error CfdEngine__StillInsolvent();
     /// @notice A required dependency, token, account, or recipient address is zero.
     error CfdEngine__ZeroAddress();
-    /// @notice Free settlement after carry cannot fund the prepaid close-order execution bounty.
+    /// @notice Free settlement and eligible pledge after carry cannot fund the close-order bounty.
     error CfdEngine__InsufficientCloseOrderBountyBacking(
-        uint256 requiredBountyUsdc, uint256 availableFreeSettlementUsdc, uint256 unpaidCarryUsdc
+        uint256 requiredBountyUsdc, uint256 availableBackingUsdc, uint256 unpaidCarryUsdc
     );
     /// @notice The requested close size is not divisible by the canonical size quantum.
     error CfdEngine__InvalidCloseSizeQuantum();
     /// @notice A partial-close commitment would start from a position below maintenance health.
     error CfdEngine__PartialCloseUnhealthy();
+    error CfdEngine__PartialCloseCarryUnfunded(uint256 unpaidCarryUsdc);
     /// @notice The one-time terminal NAV book has already been configured.
     error CfdEngine__TerminalNavBookAlreadySet();
     /// @notice A terminal NAV book is absent, has no code, or is not bound to this Engine and price domain.

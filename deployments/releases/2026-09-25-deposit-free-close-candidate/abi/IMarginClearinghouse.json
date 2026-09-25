@@ -1,0 +1,1568 @@
+[
+  {
+    "type": "function",
+    "name": "actionReserveUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "applyLiquidationSettlementPlan",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "reservationOrderIds",
+        "type": "uint64[]",
+        "internalType": "uint64[]"
+      },
+      {
+        "name": "plan",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.LiquidationSettlementPlan",
+        "components": [
+          {
+            "name": "settlementRetainedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "settlementSeizedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freshTraderPayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "badDebtUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "positionMarginUnlockedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "otherLockedMarginUnlockedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "keeper",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "keeperBountyUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "protocolFeeAccount",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "protocolFeeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "lpLiquidationFeeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "seizedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "applyOpenCost",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "marginDeltaUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "tradeCostUsdc",
+        "type": "int256",
+        "internalType": "int256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "protocolFeeAccount",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "protocolFeeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "netMarginChangeUsdc",
+        "type": "int256",
+        "internalType": "int256"
+      },
+      {
+        "name": "protocolFeeCreditedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "balanceUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "consumeActionCharge",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "chargeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actionReserveConsumedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actionCommittedMarginConsumedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "protocolTreasury",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "protocolFeeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "collectedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "protocolFeeCreditedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "consumePnlPledgeLoss",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "priceLossUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "consumedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "shortfallUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "consumeSettlementLoss",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "lockedPositionMarginUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "lossUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "marginConsumedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "freeSettlementConsumedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "uncoveredUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "consumeVpiRebateReserve",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "creditPnlPledge",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getAccountEquityUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountReservationSummary",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "summary",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.AccountReservationSummary",
+        "components": [
+          {
+            "name": "activeCommittedOrderMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "activeReservationCount",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountUsdcBuckets",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "buckets",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.AccountUsdcBuckets",
+        "components": [
+          {
+            "name": "settlementBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "totalLockedMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "activePositionMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "otherLockedMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freeSettlementUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getBountyReservation",
+    "inputs": [
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IMarginClearinghouse.BountyKind"
+      },
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.BountyReservation",
+        "components": [
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amountUsdc",
+            "type": "uint96",
+            "internalType": "uint96"
+          },
+          {
+            "name": "state",
+            "type": "uint8",
+            "internalType": "enum IMarginClearinghouse.BountyReservationState"
+          },
+          {
+            "name": "freeFundedUsdc",
+            "type": "uint96",
+            "internalType": "uint96"
+          },
+          {
+            "name": "pledgeFundedUsdc",
+            "type": "uint96",
+            "internalType": "uint96"
+          },
+          {
+            "name": "sourcePositionEpoch",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getFreeBuyingPowerUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getLockedMarginBuckets",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "buckets",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.LockedMarginBuckets",
+        "components": [
+          {
+            "name": "positionMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "committedOrderMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "reservedSettlementUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "totalLockedMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMarginReservationIds",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64[]",
+        "internalType": "uint64[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getOrderReservation",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reservation",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.OrderReservation",
+        "components": [
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "originalAmountUsdc",
+            "type": "uint96",
+            "internalType": "uint96"
+          },
+          {
+            "name": "remainingAmountUsdc",
+            "type": "uint96",
+            "internalType": "uint96"
+          },
+          {
+            "name": "previousOrderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "nextOrderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "bucket",
+            "type": "uint8",
+            "internalType": "enum IMarginClearinghouse.ReservationBucket"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum IMarginClearinghouse.ReservationStatus"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPnlIsolationBuckets",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "buckets",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.PnlIsolationBuckets",
+        "components": [
+          {
+            "name": "settlementBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pnlPledgeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidationReserveUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "orderMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "actionReserveUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vpiRebateReserveUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "totalLockedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freeSettlementUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "liquidationReserveUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "lockPositionMargin",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "lockReservedSettlement",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "lockVpiRebateReserve",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "lockedMarginUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "marginReservationHead",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "marginReservationTail",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "moveBountyReservation",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "fromKind",
+        "type": "uint8",
+        "internalType": "enum IMarginClearinghouse.BountyKind"
+      },
+      {
+        "name": "fromId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "toKind",
+        "type": "uint8",
+        "internalType": "enum IMarginClearinghouse.BountyKind"
+      },
+      {
+        "name": "toId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "orderMarginUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pnlPledgeUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reclassifyPnlPledgeToLiquidationReserve",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reclassifyPnlPledgeToVpiRebateReserve",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordBountyReservation",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IMarginClearinghouse.BountyKind"
+      },
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordFundedBountyReservation",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IMarginClearinghouse.BountyKind"
+      },
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pledgeFundedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "sourcePositionEpoch",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recoverExpiredBounty",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct IMarginClearinghouse.BountyRecovery",
+        "components": [
+          {
+            "name": "freeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pledgeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sourcePositionEpoch",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "discrepancy",
+            "type": "uint8",
+            "internalType": "uint8"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "refundReservedBounty",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "freeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pledgeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseInvalidatedOrderReserves",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "orderIds",
+        "type": "uint64[]",
+        "internalType": "uint64[]"
+      },
+      {
+        "name": "refundableBountyUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "releasedMarginUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseLiquidationReserve",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseOrderReservationForTerminalCleanup",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "releasedUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseReservedExecutionBountyToSource",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "executionBountyUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseVpiRebateReserve",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reserveCloseBounty",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "fromFreeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "fromPledgeUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reserveCloseExecutionBountyFromSettlement",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reserveCommittedOrderMargin",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reserveStaleCloseExecutionBountyFromSettlement",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "settleUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "int256",
+        "internalType": "int256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "takeBountyReservation",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IMarginClearinghouse.BountyKind"
+      },
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "totalBountyReservationsUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "transferReservedSettlement",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "unlockCloseMargin",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "safeRelease",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "fromReleased",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "netRelease",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "cashChargeAfterVpi",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "vpiRelease",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "unlockPositionMargin",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "unlockReservedSettlement",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "validateBountyReservation",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IMarginClearinghouse.BountyKind"
+      },
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "entitlementUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "vpiRebateReserveUsdc",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__ActionReserveMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__AmountOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__EngineAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__IncompleteReservationCoverage",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__InsufficientAssetToSeize",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__InsufficientBalance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__InsufficientBucketMargin",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__InsufficientFreeEquity",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__InsufficientUsdcForSettlement",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__InvalidMarginBucket",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__NotAccountOwner",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__NotOperator",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__ReservationAccountMismatch",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expectedAccount",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actualAccount",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__ReservationAlreadyExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__ReservationNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MarginClearinghouse__ZeroAmount",
+    "inputs": []
+  }
+]

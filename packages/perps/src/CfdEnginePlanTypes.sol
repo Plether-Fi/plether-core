@@ -18,6 +18,17 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 ///      and timestamps are Unix seconds.
 library CfdEnginePlanTypes {
 
+    /// @notice Custody debits and bucket transfers applied once when a close is committed.
+    struct CloseCommitment {
+        uint256 carryCollectedUsdc;
+        uint256 carryOutstandingUsdc;
+        uint256 bountyFromFreeUsdc;
+        uint256 bountyFromPledgeUsdc;
+        uint256 settlementBeforeUsdc;
+        uint256 settlementAfterUsdc;
+        uint256 freeSettlementAfterUsdc;
+    }
+
     /// @notice Failure-lifecycle classification used by router open-order policy.
     enum OpenFailurePolicyCategory {
         /// @notice The plan succeeded or the code has no open-failure policy.
@@ -254,7 +265,8 @@ library CfdEnginePlanTypes {
         /// @notice A partial close cannot collect every assessed action charge without touching protected collateral.
         PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE,
         /// @notice Dedicated reserve does not fully back the position's negative lifetime-VPI obligation.
-        VPI_REBATE_RESERVE_UNDERFUNDED
+        VPI_REBATE_RESERVE_UNDERFUNDED,
+        PARTIAL_CLOSE_UNHEALTHY
     }
 
     /// @notice Sign of the close settlement after realized PnL, VPI, fees, spread, and pending carry.
@@ -308,6 +320,9 @@ library CfdEnginePlanTypes {
     /// @param price Execution price capped at `RawSnapshot.capPrice`, with 8 decimals.
     /// @param realizedPnlUsdc Signed realized price PnL before VPI, fee, spread, and carry.
     struct CloseDelta {
+        uint256 safeMarginReleaseUsdc;
+        uint256 actionChargeFromReleasedMarginUsdc;
+        uint256 netReleasedMarginUsdc;
         bool valid;
         CloseRevertCode revertCode;
 

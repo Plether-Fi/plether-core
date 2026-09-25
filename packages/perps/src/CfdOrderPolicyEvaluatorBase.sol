@@ -11,6 +11,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -85,6 +86,7 @@ interface ICfdOrderPolicyEngineView {
     function CAP_PRICE() external view returns (uint256);
 
     function executionFeeBps() external view returns (uint256);
+    function settlementBufferBps() external view returns (uint256);
 
     function isFadWindow() external view returns (bool);
 
@@ -128,13 +130,23 @@ abstract contract CfdOrderPolicyEvaluatorBase {
 
     function _assessOrder(
         AssessmentContext memory context,
-        CfdTypes.Order calldata order,
-        OrderV2Types.ExecutionBounds calldata bounds
+        CfdTypes.Order memory order,
+        OrderV2Types.ExecutionBounds memory bounds
     ) internal view returns (OrderV2Types.ExecutionAssessment memory assessment) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(context.engineAddress);
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc);
+        return _assessSnapshot(context, order, bounds, planner, snapshot);
+    }
+
+    function _assessSnapshot(
+        AssessmentContext memory context,
+        CfdTypes.Order memory order,
+        OrderV2Types.ExecutionBounds memory bounds,
+        ICfdEnginePlanner planner,
+        CfdEnginePlanTypes.RawSnapshot memory snapshot
+    ) internal view returns (OrderV2Types.ExecutionAssessment memory) {
         bool bountyReturnsToAccount = context.executor == order.account;
         OrderV2Types.ExecutionBounds memory boundsCopy = bounds;
 
@@ -182,6 +194,18 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         address account,
         uint256 poolDepthUsdc
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
+        return _buildRawSnapshot(engine, planner, account, poolDepthUsdc, IHousePool(engine.pool()).totalAssets());
+    }
+
+    /// @dev Authoritative assessment already read canonical pool cash. Reuse that observation; simulation callers
+    ///      may supply a different pricing depth and must use the four-argument overload to read historical carry cash.
+    function _buildRawSnapshot(
+        ICfdOrderPolicyEngineView engine,
+        ICfdEnginePlanner planner,
+        address account,
+        uint256 poolDepthUsdc,
+        uint256 poolCashUsdc
+    ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
         (
             snapshot.position.size,
             snapshot.position.margin,
@@ -201,7 +225,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.lastMarkTime = engine.lastMarkTime();
         snapshot.riskParams = engine.riskParams();
 
-        snapshot.poolCashUsdc = IHousePool(engine.pool()).totalAssets();
+        snapshot.poolCashUsdc = poolCashUsdc;
         snapshot.longSide =
             _sideSnapshot(engine, planner, CfdTypes.Side.LONG, snapshot.poolCashUsdc, snapshot.riskParams.baseCarryBps);
         snapshot.shortSide = _sideSnapshot(
@@ -210,14 +234,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.poolAssetsUsdc = poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
-        snapshot.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
-        snapshot.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snapshot.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
-        snapshot.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
-        snapshot.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        snapshot.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
-        // The clearinghouse bucket is the canonical active-margin source even if the Engine tuple was stale.
-        snapshot.position.margin = snapshot.lockedBuckets.positionMarginUsdc;
+        CfdEngineCollateralSnapshotLib.load(snapshot, clearinghouse, account, false);
 
         snapshot.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
         snapshot.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
@@ -225,6 +242,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.degradedMode = engine.degradedMode();
         snapshot.capPrice = engine.CAP_PRICE();
         snapshot.executionFeeBps = engine.executionFeeBps();
+        snapshot.settlementBufferBps = engine.settlementBufferBps();
         snapshot.isFadWindow = engine.isFadWindow();
         snapshot.oracleFrozen = engine.isOracleFrozen();
         snapshot.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -369,6 +387,18 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         OrderV2Types.ExecutionMode mode
     ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
         assessment.mode = mode;
+        assessment.close = OrderV2Types.CloseEconomics({
+            postFreeSettlementUsdc: 0,
+            safeMarginReleaseUsdc: delta.safeMarginReleaseUsdc,
+            actionChargeFromReleasedMarginUsdc: delta.actionChargeFromReleasedMarginUsdc,
+            netReleasedMarginUsdc: delta.netReleasedMarginUsdc,
+            priceLossUsdc: delta.priceLossUsdc,
+            pricePnlClaimConsumedUsdc: delta.pricePnlClaimConsumedUsdc,
+            pricePnlPledgeConsumedUsdc: delta.pricePnlPledgeConsumedUsdc,
+            priceLossWrittenOffUsdc: delta.priceLossWrittenOffUsdc,
+            actionChargeWithheldUsdc: delta.actionChargeWithheldUsdc,
+            actionChargeWaivedUsdc: delta.actionChargeWaivedUsdc
+        });
         assessment.executionNotionalUsdc = CfdMath.sizeToLots(delta.sizeDelta) * delta.price;
         assessment.grossAccountDebitUsdc = delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc
             + delta.realizedCarryUsdc + delta.actionChargeCollectedUsdc + executionBountyUsdc;
@@ -400,6 +430,15 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         }
         assessment.postPositionSize = delta.closeState.remainingSize;
         assessment.postPositionMarginUsdc = delta.posMarginAfter;
+        uint256 actionReserveAfter = snapshot.actionReserveUsdc - delta.actionReserveConsumedUsdc
+            - (delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc);
+        // Pure simulation may omit the reservation; canonical close assessment always authenticates it.
+        actionReserveAfter = actionReserveAfter > executionBountyUsdc ? actionReserveAfter - executionBountyUsdc : 0;
+        uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveUsdc
+            - delta.liquidationReserveReleaseUsdc + snapshot.lockedBuckets.committedOrderMarginUsdc
+            - delta.actionCommittedMarginConsumedUsdc + actionReserveAfter;
+        assessment.close.postFreeSettlementUsdc =
+            assessment.postSettlementBalanceUsdc > lockedAfter ? assessment.postSettlementBalanceUsdc - lockedAfter : 0;
 
         if (delta.deletePosition) {
             return assessment;
@@ -422,6 +461,21 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         );
         assessment.postPositionEquityUsdc = riskState.equityUsdc;
         assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalUsdc, riskState.equityUsdc);
+    }
+
+    function _includeCommitment(
+        OrderV2Types.ExecutionAssessment memory assessment,
+        CfdEnginePlanTypes.CloseCommitment memory effects,
+        OrderV2Types.ExecutionBounds memory bounds,
+        uint256 bounty
+    ) internal pure {
+        assessment.grossAccountDebitUsdc += effects.carryCollectedUsdc;
+        assessment.actionChargeAssessedUsdc += effects.carryCollectedUsdc;
+        assessment.actionChargeCollectedUsdc += effects.carryCollectedUsdc;
+        assessment.carryUsdc += effects.carryCollectedUsdc;
+        // Zero residual size identifies a full close; strict partial bounds apply to every positive remainder.
+        // slither-disable-next-line incorrect-equality
+        _enforceBounds(assessment, bounds, bounty, assessment.postPositionSize == 0);
     }
 
     /// @dev Bound precedence is deliberately identical to the order of `ConstraintKind` values.

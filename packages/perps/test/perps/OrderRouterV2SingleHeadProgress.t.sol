@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -14,6 +15,7 @@ contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
     uint256 internal constant MARK_PRICE = 1e8;
 
     function test_SingleTargetExecutesAfterEarlierTerminalHeadCleanup() public {
+        _startRecordingLogs();
         _fundTrader(EXPIRED_TRADER, 2000e6);
         _fundTrader(TARGET_TRADER, 2000e6);
 
@@ -44,7 +46,8 @@ contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
             "the target result must retain its execution classification"
         );
 
-        OrderV2Types.CompactOutcome memory expiredOutcome = router.lifecycleBook().outcome(expiredOrderId);
+        OrderV2Types.CompactOutcome memory expiredOutcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), expiredOrderId);
         assertEq(
             uint256(expiredOutcome.status),
             uint256(OrderV2Types.LifecycleStatus.Failed),
@@ -57,7 +60,8 @@ contract OrderRouterV2SingleHeadProgressTest is BasePerpTest {
         );
         assertEq(expiredOutcome.executor, KEEPER, "the cleanup receipt must retain the external keeper");
 
-        OrderV2Types.CompactOutcome memory targetOutcome = router.lifecycleBook().outcome(targetOrderId);
+        OrderV2Types.CompactOutcome memory targetOutcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), targetOrderId);
         assertEq(
             uint256(targetOutcome.status),
             uint256(OrderV2Types.LifecycleStatus.Executed),

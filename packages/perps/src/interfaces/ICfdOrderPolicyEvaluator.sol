@@ -7,11 +7,23 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 
 /// @title ICfdOrderPolicyEvaluator
 /// @notice Stateless authoritative planning, normalization, and financial-policy checks for V2 delayed orders.
-/// @dev `assessOrder` reconstructs the Engine snapshot. The pure entrypoints accept a supplied snapshot and delta for
+/// @dev `assessCommittedOrder` resolves authenticated lifecycle authority. `assessOrder` is non-authoritative simulation. The pure entrypoints accept a supplied snapshot and delta for
 ///      deterministic simulation. Planner business-rule failures retain the existing `CfdEngine__TypedOrderFailure`
 ///      selector so Router classification remains stable. USDC values use 6 decimals, prices use 8 decimals, and
 ///      position sizes use 18 decimals.
 interface ICfdOrderPolicyEvaluator {
+
+    error CfdOrderPolicyEvaluator__CommittedPolicyChanged(uint64 orderId);
+
+    error CfdOrderPolicyEvaluator__TerminalPositionChanged(uint64 orderId);
+    error CfdOrderPolicyEvaluator__ReservationMismatch(uint64 orderId);
+    function assessCommittedOrder(
+        address engine,
+        uint64 orderId,
+        address executor,
+        uint256 executionPrice,
+        uint64 publishTime
+    ) external view returns (OrderV2Types.ExecutionAssessment memory assessment);
 
     /// @notice A planner returned `OK` without producing a valid delta.
     error CfdOrderPolicyEvaluator__InvalidPlannerResult();

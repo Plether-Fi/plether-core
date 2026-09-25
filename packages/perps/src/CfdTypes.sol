@@ -78,7 +78,9 @@ library CfdTypes {
         /// @notice The requested close size is not divisible by the canonical 100-token position quantum.
         InvalidSizeQuantum,
         /// @notice The position's dedicated negative-VPI rebate reserve is below its required target.
-        VpiRebateReserveUnderfunded
+        VpiRebateReserveUnderfunded,
+        PartialActionChargeUncollectible,
+        PartialCloseUnhealthy
     }
 
     /// @notice Global risk parameters used by position, VPI, carry, margin, and liquidation accounting.

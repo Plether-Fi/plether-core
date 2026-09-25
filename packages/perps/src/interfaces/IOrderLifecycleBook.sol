@@ -1,11 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 
 /// @title Immutable V2 order lifecycle book
 /// @notice Permanent idempotency records and authenticated terminal receipts for delayed orders.
 interface IOrderLifecycleBook {
+
+    error OrderLifecycleBook__InvalidCommitmentEffects();
+
+    error OrderLifecycleBook__CommitmentBoundExceeded(
+        OrderV2Types.ConstraintKind constraint, uint256 actual, uint256 limit
+    );
+
+    function pendingTerminalExitId(
+        address account
+    ) external view returns (uint64);
+    function recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        uint64 epoch,
+        CfdTypes.Side side,
+        uint256 size
+    ) external;
 
     /// @notice A mutation was attempted by an address other than the immutable Router.
     error OrderLifecycleBook__Unauthorized();
@@ -116,7 +135,7 @@ interface IOrderLifecycleBook {
         uint64 orderId
     ) external view returns (bool registered);
 
-    /// @notice Atomically deletes pending policy, stores a compact outcome, and emits the full receipt.
+    /// @notice Atomically deletes pending policy, stores a terminal summary, and emits the full receipt.
     function finalize(
         OrderV2Types.OrderReceipt calldata receipt
     ) external returns (bytes32 receiptHash);
@@ -139,8 +158,16 @@ interface IOrderLifecycleBook {
         uint64 orderId
     ) external view returns (OrderV2Types.LifecycleStatus status);
 
-    function outcome(
+    /// @notice Durable summary only. Detailed fields remain in OrderFinalized, authenticated by receiptHash.
+    function terminalOutcome(
         uint64 orderId
-    ) external view returns (OrderV2Types.CompactOutcome memory terminalOutcome);
+    ) external view returns (OrderV2Types.TerminalOutcome memory);
+
+    /// @notice Verifies a supplied full receipt using its stored terminal block and caller-supplied event timestamp.
+    /// @dev Returns false for unknown/pending orders or any altered receipt, timestamp, chain or Book domain.
+    function verifyReceipt(
+        OrderV2Types.OrderReceipt calldata receipt,
+        uint64 terminalTime
+    ) external view returns (bool);
 
 }

@@ -1,0 +1,1095 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "engine_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "engine",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "engineContract",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract CfdEngine"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isLiquidatableAt",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "poolDepthUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "liquidatable",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "previewClose",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "preview",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineTypes.ClosePreview",
+        "components": [
+          {
+            "name": "valid",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "invalidReason",
+            "type": "uint8",
+            "internalType": "enum CfdTypes.CloseInvalidReason"
+          },
+          {
+            "name": "executionPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sizeDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "realizedPnlUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "vpiDeltaUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "vpiUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "executionFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freshTraderPayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimConsumedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimRemainingUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "immediatePayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "traderClaimBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seizedCollateralUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "badDebtUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "remainingSize",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "remainingMargin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "triggersDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "postOpDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "effectiveAssetsAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLiabilityAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenSpreadUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenSpreadPaidUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenSpreadWaivedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "previewLiquidation",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "preview",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineTypes.LiquidationPreview",
+        "components": [
+          {
+            "name": "liquidatable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "oraclePrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "equityUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "pnlUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "reachableCollateralUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidationChargeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "keeperBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "protocolLiquidationFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lpLiquidationFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seizedCollateralUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "settlementRetainedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freshTraderPayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimConsumedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimRemainingUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "immediatePayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "traderClaimBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "badDebtUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "triggersDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "postOpDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "effectiveAssetsAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLiabilityAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "previewOpen",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "marginDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "publishTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "preview",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineTypes.OpenPreview",
+        "components": [
+          {
+            "name": "valid",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "invalidReason",
+            "type": "uint8",
+            "internalType": "enum CfdEnginePlanTypes.OpenRevertCode"
+          },
+          {
+            "name": "failureCategory",
+            "type": "uint8",
+            "internalType": "enum CfdEnginePlanTypes.OpenFailurePolicyCategory"
+          },
+          {
+            "name": "executionPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sizeDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "notionalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "marginDeltaUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vpiUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "executionFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "tradeCostUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "poolRebatePayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingCarryUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "initialMarginRequirementUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maintenanceMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "postSize",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "postMarginUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "postEntryPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "postVpiAccrued",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "postUnrealizedPnlUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "postEquityUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "postHealthBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "postLiquidatable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "hasLiquidationPrice",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "liquidationPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "previewOpenFailurePolicyCategory",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "marginDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "publishTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "category",
+        "type": "uint8",
+        "internalType": "enum CfdEnginePlanTypes.OpenFailurePolicyCategory"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "previewOpenRevertCode",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "marginDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "publishTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "code",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quoteMaxOpen",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "marginDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "publishTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "quote",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineLens.MaxOpenQuote",
+        "components": [
+          {
+            "name": "maxSizeDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "preview",
+            "type": "tuple",
+            "internalType": "struct ICfdEngineTypes.OpenPreview",
+            "components": [
+              {
+                "name": "valid",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "invalidReason",
+                "type": "uint8",
+                "internalType": "enum CfdEnginePlanTypes.OpenRevertCode"
+              },
+              {
+                "name": "failureCategory",
+                "type": "uint8",
+                "internalType": "enum CfdEnginePlanTypes.OpenFailurePolicyCategory"
+              },
+              {
+                "name": "executionPrice",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "sizeDelta",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "notionalUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "marginDeltaUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "vpiUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "executionFeeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "tradeCostUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "poolRebatePayoutUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "pendingCarryUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "initialMarginRequirementUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maintenanceMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postSize",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postEntryPrice",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postVpiAccrued",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "postUnrealizedPnlUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "postEquityUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "postHealthBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postLiquidatable",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "hasLiquidationPrice",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "liquidationPrice",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "limitingReason",
+            "type": "uint8",
+            "internalType": "enum CfdEnginePlanTypes.OpenRevertCode"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "simulateClose",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "poolDepthUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "preview",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineTypes.ClosePreview",
+        "components": [
+          {
+            "name": "valid",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "invalidReason",
+            "type": "uint8",
+            "internalType": "enum CfdTypes.CloseInvalidReason"
+          },
+          {
+            "name": "executionPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sizeDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "realizedPnlUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "vpiDeltaUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "vpiUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "executionFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freshTraderPayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimConsumedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimRemainingUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "immediatePayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "traderClaimBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seizedCollateralUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "badDebtUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "remainingSize",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "remainingMargin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "triggersDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "postOpDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "effectiveAssetsAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLiabilityAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenSpreadUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenSpreadPaidUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenSpreadWaivedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "simulateLiquidation",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oraclePrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "poolDepthUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "preview",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineTypes.LiquidationPreview",
+        "components": [
+          {
+            "name": "liquidatable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "oraclePrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "equityUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "pnlUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "reachableCollateralUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidationChargeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "keeperBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "protocolLiquidationFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lpLiquidationFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seizedCollateralUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "settlementRetainedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freshTraderPayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimConsumedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "existingTraderClaimRemainingUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "immediatePayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "traderClaimBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "badDebtUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "triggersDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "postOpDegradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "effectiveAssetsAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLiabilityAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "error",
+    "name": "CfdEngineLens__QuoteSearchLimitExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdMath__InvalidSizeQuantum",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeCastOverflowedIntToUint",
+    "inputs": [
+      {
+        "name": "value",
+        "type": "int256",
+        "internalType": "int256"
+      }
+    ]
+  }
+]

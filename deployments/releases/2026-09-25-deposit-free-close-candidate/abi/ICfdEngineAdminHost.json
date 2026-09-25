@@ -1,0 +1,139 @@
+[
+  {
+    "type": "function",
+    "name": "applyCalendarConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineAdminHost.EngineCalendarConfig",
+        "components": [
+          {
+            "name": "fadDayTimestamps",
+            "type": "uint256[]",
+            "internalType": "uint256[]"
+          },
+          {
+            "name": "fadRunwaySeconds",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "applyFreshnessConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineAdminHost.EngineFreshnessConfig",
+        "components": [
+          {
+            "name": "fadMaxStaleness",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "engineMarkStalenessLimit",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "applyRiskConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineAdminHost.EngineRiskConfig",
+        "components": [
+          {
+            "name": "riskParams",
+            "type": "tuple",
+            "internalType": "struct CfdTypes.RiskParams",
+            "components": [
+              {
+                "name": "vpiFactor",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxSkewRatio",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maintMarginBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "initMarginBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "fadMarginBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "baseCarryBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "minBountyUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "keeperShareBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "protocolShareBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "executionFeeBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "frozenCloseSpreadBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "settlementBufferBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  }
+]

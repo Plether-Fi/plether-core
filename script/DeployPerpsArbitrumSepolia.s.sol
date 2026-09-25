@@ -525,6 +525,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(clearinghouse.settlementAsset() == address(housePool.USDC()), "Clearinghouse settlement asset mismatch");
         require(address(orderPolicyEvaluator).code.length > 0, "Order policy evaluator has no code");
         require(address(orderExecutionSidecar).code.length > 0, "Order execution sidecar has no code");
+        require(orderExecutionSidecar.recoverySidecar().code.length > 0, "Order recovery sidecar has no code");
         require(
             orderExecutionSidecar.SELF() == address(orderExecutionSidecar),
             "Order execution sidecar self binding mismatch"
@@ -679,6 +680,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));
         console.log("CfdClosePreview:", address(deployed.closePreview));
         console.log("OrderRouterV2ExecutionSidecar:", address(deployed.orderExecutionSidecar));
+        console.log("OrderRecoverySidecar:", deployed.orderExecutionSidecar.recoverySidecar());
         console.log("OrderRouter:", address(deployed.router));
         console.log("MinimumOpenNotionalUsdc:", deployed.router.minOpenNotionalUsdc());
         console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());

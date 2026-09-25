@@ -1,0 +1,729 @@
+[
+  {
+    "type": "event",
+    "name": "BadDebtCleared",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "remaining",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BountyCredited",
+    "inputs": [
+      {
+        "name": "sourceAccount",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "beneficiary",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CarryCheckpointed",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "addedUnsettledCarryUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "totalUnsettledCarryUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CarryRealized",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "realizedCarryUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "freeSettlementConsumedUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "marginConsumedUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "remainingUnsettledCarryUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CarryUpdated",
+    "inputs": [
+      {
+        "name": "longIndex",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      },
+      {
+        "name": "shortIndex",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      },
+      {
+        "name": "absSkewUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DegradedModeCleared",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DegradedModeEntered",
+    "inputs": [
+      {
+        "name": "effectiveAssets",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxLiability",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "triggeringAccount",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "EngineMarkStalenessLimitUpdated",
+    "inputs": [
+      {
+        "name": "newStaleness",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FadDaysAdded",
+    "inputs": [
+      {
+        "name": "timestamps",
+        "type": "uint256[]",
+        "indexed": false,
+        "internalType": "uint256[]"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FadDaysRemoved",
+    "inputs": [
+      {
+        "name": "timestamps",
+        "type": "uint256[]",
+        "indexed": false,
+        "internalType": "uint256[]"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FadMaxStalenessUpdated",
+    "inputs": [
+      {
+        "name": "newStaleness",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FadRunwayUpdated",
+    "inputs": [
+      {
+        "name": "newRunway",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarginAdded",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionClosed",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "price",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "pnl",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionLiquidated",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "size",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "price",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "keeperBounty",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionOpened",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "price",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "marginDelta",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TerminalNavBookSet",
+    "inputs": [
+      {
+        "name": "terminalNavBook",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TokenSwept",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TraderClaimRecorded",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TraderClaimSettled",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__AccountingMutationInProgress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__BadDebtTooLarge",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__CarryExceedsMargin",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__CloseSizeExceedsPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__DegradedMode",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__DependenciesAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__DustPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__EmptyDays",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InsufficientCloseOrderBountyBacking",
+    "inputs": [
+      {
+        "name": "requiredBountyUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "availableBackingUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "unpaidCarryUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InsufficientInitialMargin",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InsufficientPoolLiquidity",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InvalidAdmin",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InvalidCloseSizeQuantum",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InvalidRiskParams",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InvalidSettlementSidecar",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__InvalidTerminalNavBook",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__MarginDrainedByFees",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__MarkPriceOutOfOrder",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__MarkPriceStale",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__MustCloseOpposingPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__NoOpenPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__NoPositionToLiquidate",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__NoTraderClaim",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__NotAccountOwner",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__NotClearinghouse",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__NotDegraded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PartialCloseCarryUnfunded",
+    "inputs": [
+      {
+        "name": "unpaidCarryUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PartialCloseUnderwaterCarry",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PartialCloseUnhealthy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PoolAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PoolSolvencyExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PositionIsSolvent",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PositionTooSmall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__PostOpSolvencyBreach",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__ProtocolTreasuryBalanceNotEmpty",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__RouterAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__RunwayTooLong",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__SkewTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__StillInsolvent",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__TerminalNavBookAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__TerminalNavBookHashMismatch",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expectedHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__TerminalNavBookNotSet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__TypedOrderFailure",
+    "inputs": [
+      {
+        "name": "failureCategory",
+        "type": "uint8",
+        "internalType": "enum CfdEnginePlanTypes.ExecutionFailurePolicyCategory"
+      },
+      {
+        "name": "failureCode",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "isClose",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__Unauthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__WithdrawBlockedByOpenPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__ZeroAmount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CfdEngine__ZeroStaleness",
+    "inputs": []
+  }
+]

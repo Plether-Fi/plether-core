@@ -134,6 +134,21 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         return _commitOrder(IOrderLiquidationBatchHost(address(this)), msg.sender, request, true);
     }
 
+    /// @notice Applies the same prospective admission checks as fresh public close commitment.
+    function previewCloseAdmission(
+        address account,
+        OrderV2Types.OrderRequest calldata request
+    ) external view returns (uint256) {
+        IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(_delegatedLogicRouter());
+        if (!request.isClose) {
+            revert OrderRouter__InvalidCloseMode();
+        }
+        _validateFreshRequest(host, account, request, true);
+        return request.closeMode == OrderV2Types.CloseMode.CallerPaidFullExit
+            ? 0
+            : _validatedCloseBounty(host, account, request.side, request.sizeDelta);
+    }
+
     /// @notice Resolves or submits a caller-authored bounded open through the Router's immutable protection Book.
     function commitProtectedOpen(
         address account,
@@ -202,9 +217,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         _validateFreshRequest(host, account, request, enforceProtectionLock);
-        uint256 executionBountyUsdc = request.isClose
-            ? _validatedCloseBounty(host, account, request.side, request.sizeDelta)
-            : _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+        uint256 executionBountyUsdc = request.closeMode == OrderV2Types.CloseMode.CallerPaidFullExit
+            ? 0
+            : request.isClose
+                ? _validatedCloseBounty(host, account, request.side, request.sizeDelta)
+                : _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
         if (executionBountyUsdc > request.bounds.maxExecutionBountyUsdc) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
                 executionBountyUsdc, request.bounds.maxExecutionBountyUsdc
@@ -258,6 +275,25 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         OrderValidationLib.validateBaseCommit(request.sizeDelta, request.marginDelta, request.isClose);
+        uint64 terminalId = host.lifecycleBook().pendingTerminalExitId(account);
+        if (terminalId != 0) {
+            revert OrderRouter__TerminalExitActive(terminalId);
+        }
+        if (request.closeMode == OrderV2Types.CloseMode.CallerPaidFullExit) {
+            (uint256 size,,,, CfdTypes.Side side,,) = host.engine().positions(account);
+            if (
+                !request.isClose || request.marginDelta != 0 || size == 0 || request.sizeDelta != size
+                    || request.side != side || request.bounds.maxPostPositionSize != 0
+            ) {
+                revert OrderRouter__InvalidCloseMode();
+            }
+            if (
+                host.pendingOrderCounts(account) != 0
+                    || host.positionProtectionBook().activePositionProtectionId(account) != 0
+            ) {
+                revert OrderRouter__TerminalExitBusy();
+            }
+        }
         if (enforceProtectionLock && host.positionProtectionBook().activePositionProtectionId(account) != 0) {
             revert OrderRouter__ProtectionActive();
         }

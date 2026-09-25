@@ -12,10 +12,22 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {CloseCommitmentLib} from "@plether/perps/libraries/CloseCommitmentLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 
+interface ICloseAdmission {
+
+    function previewCloseAdmission(
+        address account,
+        OrderV2Types.OrderRequest calldata request
+    ) external view returns (uint256);
+
+}
+
 interface ICfdClosePreviewRouter {
+
+    function liquidationBatchSidecar() external view returns (address);
 
     function closeOrderExecutionBountyUsdc() external view returns (uint256);
     function lifecycleBook() external view returns (address);
@@ -37,7 +49,7 @@ interface ICfdClosePreviewProtection {
 
 /// @title CfdClosePreview
 /// @notice Read-only preview of a prospective close after projecting commitment carry and a new bounty reservation.
-/// @dev Deployable alongside an existing engine; it is not a replacement for the router's execution evaluator.
+/// @dev This schema targets a fresh deployment. Historical engines require their archived preview and planner ABI.
 contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
 
     error CfdClosePreview__NotCloseOrder();
@@ -59,9 +71,61 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
     }
 
     struct ClosePreview {
+        CfdEnginePlanTypes.CloseCommitment commitment;
         uint256 commitmentCarryUsdc;
         uint256 executionBountyUsdc;
         OrderV2Types.ExecutionAssessment assessment;
+    }
+
+    function previewClose(
+        address engineAddress,
+        address account,
+        OrderV2Types.OrderRequest calldata request,
+        address executor,
+        uint256 executionPrice,
+        uint64 publishTime
+    ) external view returns (ClosePreview memory preview) {
+        if (!request.isClose) {
+            revert CfdClosePreview__NotCloseOrder();
+        }
+        CfdEnginePlanTypes.RawSnapshot memory snapshot;
+        CfdEnginePlanTypes.CloseDelta memory delta;
+        uint256 bounty;
+        {
+            ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
+            ICfdClosePreviewRouter router = ICfdClosePreviewRouter(engine.orderRouter());
+            bounty = ICloseAdmission(router.liquidationBatchSidecar()).previewCloseAdmission(account, request);
+            ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
+            snapshot = _buildRawSnapshot(engine, planner, account, IHousePool(engine.pool()).totalAssets());
+            preview.commitment = CloseCommitmentLib.project(snapshot, request.sizeDelta, bounty);
+            preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
+            preview.executionBountyUsdc = bounty;
+            delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice, publishTime);
+        }
+        preview.assessment = _evaluateClose(snapshot, delta, request.bounds, bounty, executor == account);
+        _includeCommitment(preview.assessment, preview.commitment, request.bounds, bounty);
+    }
+
+    /// @notice Bit flags: 1 no position, 2 pending orders, 4 active protection, 8 pending terminal exit.
+    function fullExitBlockers(
+        address engineAddress,
+        address account
+    ) external view returns (uint8 blockers) {
+        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
+        ICfdClosePreviewRouter router = ICfdClosePreviewRouter(engine.orderRouter());
+        (uint256 size,,,,,,) = engine.positions(account);
+        if (size == 0) {
+            blockers |= 1;
+        }
+        if (router.pendingOrderCounts(account) != 0) {
+            blockers |= 2;
+        }
+        if (ICfdClosePreviewProtection(router.positionProtectionBook()).activePositionProtectionId(account) != 0) {
+            blockers |= 4;
+        }
+        if (IOrderLifecycleBook(router.lifecycleBook()).pendingTerminalExitId(account) != 0) {
+            blockers |= 8;
+        }
     }
 
     /// @notice Projects commitment now and close execution at the supplied price, using canonical pool depth.
@@ -127,7 +191,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         uint64 publishTime
     ) private view returns (ClosePreview memory) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
-        return _previewSnapshot(
+        return _previewLegacySnapshot(
             engine, ICfdEnginePlanner(engine.planner()), snapshot, order, executor, executionPrice, publishTime, bounds
         );
     }
@@ -246,6 +310,27 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         preview.executionBountyUsdc = ICfdClosePreviewRouter(engine.orderRouter()).closeOrderExecutionBountyUsdc();
         _validateRouterCommit(snapshot, order);
 
+        preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta, preview.executionBountyUsdc);
+        preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
+        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice, publishTime);
+        preview.assessment =
+            _evaluateClose(snapshot, delta, bounds, preview.executionBountyUsdc, executor == order.account);
+        _includeCommitment(preview.assessment, preview.commitment, bounds, preview.executionBountyUsdc);
+    }
+
+    function _previewLegacySnapshot(
+        ICfdOrderPolicyEngineView engine,
+        ICfdEnginePlanner planner,
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        CfdTypes.Order memory order,
+        address executor,
+        uint256 executionPrice,
+        uint64 publishTime,
+        OrderV2Types.ExecutionBounds calldata bounds
+    ) private view returns (ClosePreview memory preview) {
+        preview.executionBountyUsdc = ICfdClosePreviewRouter(engine.orderRouter()).closeOrderExecutionBountyUsdc();
+        _validateRouterCommit(snapshot, order);
+
         // Match the engine's commitment path, whose zero-bounty branch skips carry and funding validation.
         if (preview.executionBountyUsdc != 0) {
             _validateCommit(snapshot, order.sizeDelta);
@@ -294,7 +379,9 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         if (snapshot.position.size != 0 && order.side != snapshot.position.side) {
             revert IOrderRouterErrors.OrderRouter__SideMismatch();
         }
+        // Deterministic lot alignment, not entropy: modulo only selects the size-validation path.
         if (
+            // slither-disable-next-line weak-prng
             order.sizeDelta == 0 || order.sizeDelta >= snapshot.position.size
                 || order.sizeDelta % CfdTypes.SIZE_QUANTUM != 0
         ) {
@@ -324,6 +411,8 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         if (size > snapshot.position.size) {
             revert ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition();
         }
+        // Deterministic SIZE_QUANTUM divisibility check; no random selection or payout depends on entropy.
+        // slither-disable-next-line weak-prng
         if (size % CfdTypes.SIZE_QUANTUM != 0) {
             revert ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum();
         }

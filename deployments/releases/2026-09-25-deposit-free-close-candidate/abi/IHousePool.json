@@ -1,0 +1,1172 @@
+[
+  {
+    "type": "function",
+    "name": "areSeniorDepositReservationsWithinLimits",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "assignUnassignedAssets",
+    "inputs": [
+      {
+        "name": "toSenior",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "receiver",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "canAcceptOrdinaryDeposits",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "canAcceptTrancheDeposits",
+    "inputs": [
+      {
+        "name": "isSenior",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "canIncreaseRisk",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "canSettleDepositEntries",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "currentLpEpoch",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "frozenLpFeeBps",
+    "inputs": [
+      {
+        "name": "isSenior",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMaxJuniorWithdraw",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getMaxSeniorWithdraw",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPendingDepositTrancheState",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "seniorPrincipalUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "juniorPrincipalUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPendingTrancheState",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "seniorPrincipalUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "juniorPrincipalUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxSeniorWithdrawUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxJuniorWithdrawUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getSeniorDepositCapacity",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hasSeedLifecycleStarted",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initializeSeedPosition",
+    "inputs": [
+      {
+        "name": "toSenior",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "receiver",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isOracleFrozen",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isSeedLifecycleComplete",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isSeniorImpairedAfterPendingDepositReconcile",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isTradingActive",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isWithdrawalLive",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "juniorPrincipal",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "lpEpochSettlementPaused",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "lpEpochStart",
+    "inputs": [
+      {
+        "name": "epochId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "markStalenessLimit",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxSeniorExposureUsdc",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxSeniorShareBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "minTrancheDepositUsdc",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pauseLpEpochSettlement",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "payOut",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reconcile",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordClaimantInflow",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum IHousePool.ClaimantInflowKind"
+      },
+      {
+        "name": "cashMode",
+        "type": "uint8",
+        "internalType": "enum IHousePool.ClaimantInflowCashMode"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseSeniorDepositReservation",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reserveSeniorDeposit",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reservedSeniorDepositAssetsUsdc",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "seniorHighWaterMark",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "seniorPrincipal",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "settleLpEpoch",
+    "inputs": [
+      {
+        "name": "expectedMarkPrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedPublishTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "tuple",
+        "internalType": "struct IHousePool.LpEpochSettlementResult",
+        "components": [
+          {
+            "name": "cutoffEpoch",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorFundedShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorFundedAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorFundedShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorFundedAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorProcessedEpochs",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorProcessedEpochs",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorDepositAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "juniorDepositShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorDepositAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorDepositShares",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "seniorBacklog",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "juniorBacklog",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "entriesDeferred",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "terminalDeficitUsdc",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "totalAssets",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "unassignedAssets",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "unpauseLpEpochSettlement",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "ClaimantInflowAccounted",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum IHousePool.ClaimantInflowKind"
+      },
+      {
+        "name": "cashMode",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum IHousePool.ClaimantInflowCashMode"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ExcessAccounted",
+    "inputs": [
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "accountedAssetsUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ExcessSwept",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FrozenLpFeesUpdated",
+    "inputs": [
+      {
+        "name": "seniorFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "juniorFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LpEpochSettlementPauseUpdated",
+    "inputs": [
+      {
+        "name": "caller",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "paused",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MarkStalenessLimitUpdated",
+    "inputs": [
+      {
+        "name": "newLimit",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PauserUpdated",
+    "inputs": [
+      {
+        "name": "previousPauser",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newPauser",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PoolConfigFinalized",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PoolConfigProposed",
+    "inputs": [
+      {
+        "name": "seniorRateBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "markStalenessLimit",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "seniorFrozenLpFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "juniorFrozenLpFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxSeniorExposureUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxSeniorShareBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "activationTime",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Reconciled",
+    "inputs": [
+      {
+        "name": "seniorPrincipal",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "juniorPrincipal",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "delta",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SeedPositionInitialized",
+    "inputs": [
+      {
+        "name": "toSenior",
+        "type": "bool",
+        "indexed": true,
+        "internalType": "bool"
+      },
+      {
+        "name": "receiver",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "sharesMinted",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SeniorCapacityUpdated",
+    "inputs": [
+      {
+        "name": "maxSeniorExposureUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxSeniorShareBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SeniorRateUpdated",
+    "inputs": [
+      {
+        "name": "newRateBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TradingActivated",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "UnassignedAssetsAssigned",
+    "inputs": [
+      {
+        "name": "toSenior",
+        "type": "bool",
+        "indexed": true,
+        "internalType": "bool"
+      },
+      {
+        "name": "receiver",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "sharesMinted",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "HousePool__BootstrapSharesZero",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__DegradedMode",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__DepositTooSmall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__ExceedsMaxJuniorWithdraw",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__ExceedsMaxSeniorWithdraw",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__ExceedsSeniorDepositCapacity",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__ExcessAmountTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__InsufficientSeniorDepositReservation",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__InvalidFrozenLpFee",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__InvalidMaxSeniorExposure",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__InvalidMaxSeniorShareBps",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__InvalidRedemptionMathSidecar",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__InvalidSeniorRate",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__JuniorVaultAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__LpEpochSettlementNotPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__LpEpochSettlementPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__MarkPriceStale",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__NoExcessAssets",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__NoLpEpochProgress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__NoProposal",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__NoUnassignedAssets",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__NotAVault",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__NotSeniorVault",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__OracleFrozen",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__PendingBootstrap",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__RouterAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__SeedAlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__SeniorCapacityNotConfigured",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__SeniorDepositReservationsExceedLimits",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__SeniorImpaired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__SeniorVaultAlreadySet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__TimelockNotReady",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__TradingActivationNotReady",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__Unauthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__UnauthorizedPauser",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "HousePool__ZeroStaleness",
+    "inputs": []
+  }
+]

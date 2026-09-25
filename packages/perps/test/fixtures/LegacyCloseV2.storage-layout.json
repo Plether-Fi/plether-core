@@ -1,0 +1,873 @@
+{
+  "sourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
+  "compiler": "0.8.35",
+  "note": "Compiler-derived historical layout; chain equality assertions require CLOSE_REGRESSION_ARCHIVE_RPC_URL. No storage overrides are used.",
+  "contracts": {
+    "CfdEngine": {
+      "storage": [
+        {
+          "astId": 388,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "_owner",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_address"
+        },
+        {
+          "astId": 536,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "_pendingOwner",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_address"
+        },
+        {
+          "astId": 72558,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "pool",
+          "offset": 0,
+          "slot": "2",
+          "type": "t_contract(IHousePool)140196"
+        },
+        {
+          "astId": 72562,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "planner",
+          "offset": 0,
+          "slot": "3",
+          "type": "t_contract(ICfdEnginePlanner)138306"
+        },
+        {
+          "astId": 72566,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "settlementSidecar",
+          "offset": 0,
+          "slot": "4",
+          "type": "t_contract(ICfdEngineSettlementSidecar)138576"
+        },
+        {
+          "astId": 72569,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "admin",
+          "offset": 0,
+          "slot": "5",
+          "type": "t_address"
+        },
+        {
+          "astId": 72573,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "terminalNavBook",
+          "offset": 0,
+          "slot": "6",
+          "type": "t_contract(ITerminalNavBookV2)143257"
+        },
+        {
+          "astId": 72578,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "_terminalCurveMutationDepth",
+          "offset": 0,
+          "slot": "7",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 72584,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "sides",
+          "offset": 0,
+          "slot": "8",
+          "type": "t_array(t_struct(SideState)139156_storage)2_storage"
+        },
+        {
+          "astId": 72587,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "lastMarkPrice",
+          "offset": 0,
+          "slot": "16",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 72590,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "lastMarkTime",
+          "offset": 0,
+          "slot": "17",
+          "type": "t_uint64"
+        },
+        {
+          "astId": 72595,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "sideBorrowBaseUsdc",
+          "offset": 0,
+          "slot": "18",
+          "type": "t_array(t_uint256)2_storage"
+        },
+        {
+          "astId": 72600,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "sideCarryIndex",
+          "offset": 0,
+          "slot": "20",
+          "type": "t_array(t_uint256)2_storage"
+        },
+        {
+          "astId": 72605,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "sideCarryTimestamp",
+          "offset": 0,
+          "slot": "22",
+          "type": "t_array(t_uint64)2_storage"
+        },
+        {
+          "astId": 72610,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "unsettledCarryUsdc",
+          "offset": 0,
+          "slot": "23",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 72613,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "degradedMode",
+          "offset": 0,
+          "slot": "24",
+          "type": "t_bool"
+        },
+        {
+          "astId": 72617,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "_activeRiskParams",
+          "offset": 0,
+          "slot": "25",
+          "type": "t_struct(RiskParams)88572_storage"
+        },
+        {
+          "astId": 72622,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "_positions",
+          "offset": 0,
+          "slot": "35",
+          "type": "t_mapping(t_address,t_struct(StoredPosition)72543_storage)"
+        },
+        {
+          "astId": 72627,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "traderClaimBalanceUsdc",
+          "offset": 0,
+          "slot": "36",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 72630,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "totalTraderClaimBalanceUsdc",
+          "offset": 0,
+          "slot": "37",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 72633,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "orderRouter",
+          "offset": 0,
+          "slot": "38",
+          "type": "t_address"
+        },
+        {
+          "astId": 72636,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "protocolTreasury",
+          "offset": 0,
+          "slot": "39",
+          "type": "t_address"
+        },
+        {
+          "astId": 72641,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "fadDayOverrides",
+          "offset": 0,
+          "slot": "40",
+          "type": "t_mapping(t_uint256,t_bool)"
+        },
+        {
+          "astId": 72644,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "_fadOverrideDays",
+          "offset": 0,
+          "slot": "41",
+          "type": "t_array(t_uint256)dyn_storage"
+        },
+        {
+          "astId": 72648,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "fadMaxStaleness",
+          "offset": 0,
+          "slot": "42",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 72652,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "fadRunwaySeconds",
+          "offset": 0,
+          "slot": "43",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 72656,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "engineMarkStalenessLimit",
+          "offset": 0,
+          "slot": "44",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 72660,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "executionFeeBps",
+          "offset": 0,
+          "slot": "45",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 72666,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "frozenCloseSpreadBps",
+          "offset": 0,
+          "slot": "46",
+          "type": "t_uint256"
+        },
+        {
+          "astId": 72670,
+          "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+          "label": "settlementBufferBps",
+          "offset": 0,
+          "slot": "47",
+          "type": "t_uint256"
+        }
+      ],
+      "types": {
+        "t_address": {
+          "encoding": "inplace",
+          "label": "address",
+          "numberOfBytes": "20"
+        },
+        "t_array(t_struct(SideState)139156_storage)2_storage": {
+          "base": "t_struct(SideState)139156_storage",
+          "encoding": "inplace",
+          "label": "struct ICfdEngineTypes.SideState[2]",
+          "numberOfBytes": "256"
+        },
+        "t_array(t_uint256)2_storage": {
+          "base": "t_uint256",
+          "encoding": "inplace",
+          "label": "uint256[2]",
+          "numberOfBytes": "64"
+        },
+        "t_array(t_uint256)dyn_storage": {
+          "base": "t_uint256",
+          "encoding": "dynamic_array",
+          "label": "uint256[]",
+          "numberOfBytes": "32"
+        },
+        "t_array(t_uint64)2_storage": {
+          "base": "t_uint64",
+          "encoding": "inplace",
+          "label": "uint64[2]",
+          "numberOfBytes": "32"
+        },
+        "t_bool": {
+          "encoding": "inplace",
+          "label": "bool",
+          "numberOfBytes": "1"
+        },
+        "t_contract(ICfdEnginePlanner)138306": {
+          "encoding": "inplace",
+          "label": "contract ICfdEnginePlanner",
+          "numberOfBytes": "20"
+        },
+        "t_contract(ICfdEngineSettlementSidecar)138576": {
+          "encoding": "inplace",
+          "label": "contract ICfdEngineSettlementSidecar",
+          "numberOfBytes": "20"
+        },
+        "t_contract(IHousePool)140196": {
+          "encoding": "inplace",
+          "label": "contract IHousePool",
+          "numberOfBytes": "20"
+        },
+        "t_contract(ITerminalNavBookV2)143257": {
+          "encoding": "inplace",
+          "label": "contract ITerminalNavBookV2",
+          "numberOfBytes": "20"
+        },
+        "t_enum(Side)88494": {
+          "encoding": "inplace",
+          "label": "enum CfdTypes.Side",
+          "numberOfBytes": "1"
+        },
+        "t_int256": {
+          "encoding": "inplace",
+          "label": "int256",
+          "numberOfBytes": "32"
+        },
+        "t_mapping(t_address,t_struct(StoredPosition)72543_storage)": {
+          "encoding": "mapping",
+          "key": "t_address",
+          "label": "mapping(address => struct CfdEngine.StoredPosition)",
+          "numberOfBytes": "32",
+          "value": "t_struct(StoredPosition)72543_storage"
+        },
+        "t_mapping(t_address,t_uint256)": {
+          "encoding": "mapping",
+          "key": "t_address",
+          "label": "mapping(address => uint256)",
+          "numberOfBytes": "32",
+          "value": "t_uint256"
+        },
+        "t_mapping(t_uint256,t_bool)": {
+          "encoding": "mapping",
+          "key": "t_uint256",
+          "label": "mapping(uint256 => bool)",
+          "numberOfBytes": "32",
+          "value": "t_bool"
+        },
+        "t_struct(RiskParams)88572_storage": {
+          "encoding": "inplace",
+          "label": "struct CfdTypes.RiskParams",
+          "members": [
+            {
+              "astId": 88553,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "vpiFactor",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88555,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "maxSkewRatio",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88557,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "maintMarginBps",
+              "offset": 0,
+              "slot": "2",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88559,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "initMarginBps",
+              "offset": 0,
+              "slot": "3",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88561,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "fadMarginBps",
+              "offset": 0,
+              "slot": "4",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88563,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "baseCarryBps",
+              "offset": 0,
+              "slot": "5",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88565,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "minBountyUsdc",
+              "offset": 0,
+              "slot": "6",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88567,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "bountyBps",
+              "offset": 0,
+              "slot": "7",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88569,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "keeperShareBps",
+              "offset": 0,
+              "slot": "8",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 88571,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "protocolShareBps",
+              "offset": 0,
+              "slot": "9",
+              "type": "t_uint256"
+            }
+          ],
+          "numberOfBytes": "320"
+        },
+        "t_struct(SideState)139156_storage": {
+          "encoding": "inplace",
+          "label": "struct ICfdEngineTypes.SideState",
+          "members": [
+            {
+              "astId": 139149,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "maxProfitUsdc",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 139151,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "openInterest",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 139153,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "entryNotional",
+              "offset": 0,
+              "slot": "2",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 139155,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "totalMargin",
+              "offset": 0,
+              "slot": "3",
+              "type": "t_uint256"
+            }
+          ],
+          "numberOfBytes": "128"
+        },
+        "t_struct(StoredPosition)72543_storage": {
+          "encoding": "inplace",
+          "label": "struct CfdEngine.StoredPosition",
+          "members": [
+            {
+              "astId": 72517,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "lots",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_uint112"
+            },
+            {
+              "astId": 72520,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "entryCostUsdcAtoms",
+              "offset": 14,
+              "slot": "0",
+              "type": "t_uint144"
+            },
+            {
+              "astId": 72523,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "maxProfitUsdc",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 72527,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "side",
+              "offset": 0,
+              "slot": "2",
+              "type": "t_enum(Side)88494"
+            },
+            {
+              "astId": 72530,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "lastUpdateTime",
+              "offset": 1,
+              "slot": "2",
+              "type": "t_uint64"
+            },
+            {
+              "astId": 72533,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "lastCarryTimestamp",
+              "offset": 9,
+              "slot": "2",
+              "type": "t_uint64"
+            },
+            {
+              "astId": 72536,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "borrowBaseUsdc",
+              "offset": 0,
+              "slot": "3",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 72539,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "lastCarryIndex",
+              "offset": 0,
+              "slot": "4",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 72542,
+              "contract": "@plether/perps/CfdEngine.sol:CfdEngine",
+              "label": "vpiAccrued",
+              "offset": 0,
+              "slot": "5",
+              "type": "t_int256"
+            }
+          ],
+          "numberOfBytes": "192"
+        },
+        "t_uint112": {
+          "encoding": "inplace",
+          "label": "uint112",
+          "numberOfBytes": "14"
+        },
+        "t_uint144": {
+          "encoding": "inplace",
+          "label": "uint144",
+          "numberOfBytes": "18"
+        },
+        "t_uint256": {
+          "encoding": "inplace",
+          "label": "uint256",
+          "numberOfBytes": "32"
+        },
+        "t_uint64": {
+          "encoding": "inplace",
+          "label": "uint64",
+          "numberOfBytes": "8"
+        }
+      }
+    },
+    "MarginClearinghouse": {
+      "storage": [
+        {
+          "astId": 388,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "_owner",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_address"
+        },
+        {
+          "astId": 536,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "_pendingOwner",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_address"
+        },
+        {
+          "astId": 94104,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "settlementBalances",
+          "offset": 0,
+          "slot": "2",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94108,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "positionMarginUsdc",
+          "offset": 0,
+          "slot": "3",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94112,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "committedOrderMarginUsdc",
+          "offset": 0,
+          "slot": "4",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94116,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "reservedSettlementUsdc",
+          "offset": 0,
+          "slot": "5",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94121,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "vpiRebateReserveBalances",
+          "offset": 0,
+          "slot": "6",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94125,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "liquidationReserveBalances",
+          "offset": 0,
+          "slot": "7",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94130,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "orderReservations",
+          "offset": 0,
+          "slot": "8",
+          "type": "t_mapping(t_uint64,t_struct(OrderReservation)140523_storage)"
+        },
+        {
+          "astId": 94134,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "activeCommittedOrderReservationUsdc",
+          "offset": 0,
+          "slot": "9",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94146,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "reservationQueues",
+          "offset": 0,
+          "slot": "10",
+          "type": "t_mapping(t_address,t_struct(ReservationQueue)94141_storage)"
+        },
+        {
+          "astId": 94154,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "bountyReservations",
+          "offset": 0,
+          "slot": "11",
+          "type": "t_mapping(t_enum(BountyKind)140365,t_mapping(t_uint64,t_struct(BountyReservation)140370_storage))"
+        },
+        {
+          "astId": 94158,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "totalBountyReservationsUsdc",
+          "offset": 0,
+          "slot": "12",
+          "type": "t_mapping(t_address,t_uint256)"
+        },
+        {
+          "astId": 94177,
+          "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+          "label": "engine",
+          "offset": 0,
+          "slot": "13",
+          "type": "t_address"
+        }
+      ],
+      "types": {
+        "t_address": {
+          "encoding": "inplace",
+          "label": "address",
+          "numberOfBytes": "20"
+        },
+        "t_enum(BountyKind)140365": {
+          "encoding": "inplace",
+          "label": "enum IMarginClearinghouse.BountyKind",
+          "numberOfBytes": "1"
+        },
+        "t_enum(ReservationBucket)140495": {
+          "encoding": "inplace",
+          "label": "enum IMarginClearinghouse.ReservationBucket",
+          "numberOfBytes": "1"
+        },
+        "t_enum(ReservationStatus)140505": {
+          "encoding": "inplace",
+          "label": "enum IMarginClearinghouse.ReservationStatus",
+          "numberOfBytes": "1"
+        },
+        "t_mapping(t_address,t_struct(ReservationQueue)94141_storage)": {
+          "encoding": "mapping",
+          "key": "t_address",
+          "label": "mapping(address => struct MarginClearinghouse.ReservationQueue)",
+          "numberOfBytes": "32",
+          "value": "t_struct(ReservationQueue)94141_storage"
+        },
+        "t_mapping(t_address,t_uint256)": {
+          "encoding": "mapping",
+          "key": "t_address",
+          "label": "mapping(address => uint256)",
+          "numberOfBytes": "32",
+          "value": "t_uint256"
+        },
+        "t_mapping(t_enum(BountyKind)140365,t_mapping(t_uint64,t_struct(BountyReservation)140370_storage))": {
+          "encoding": "mapping",
+          "key": "t_enum(BountyKind)140365",
+          "label": "mapping(enum IMarginClearinghouse.BountyKind => mapping(uint64 => struct IMarginClearinghouse.BountyReservation))",
+          "numberOfBytes": "32",
+          "value": "t_mapping(t_uint64,t_struct(BountyReservation)140370_storage)"
+        },
+        "t_mapping(t_uint64,t_struct(BountyReservation)140370_storage)": {
+          "encoding": "mapping",
+          "key": "t_uint64",
+          "label": "mapping(uint64 => struct IMarginClearinghouse.BountyReservation)",
+          "numberOfBytes": "32",
+          "value": "t_struct(BountyReservation)140370_storage"
+        },
+        "t_mapping(t_uint64,t_struct(OrderReservation)140523_storage)": {
+          "encoding": "mapping",
+          "key": "t_uint64",
+          "label": "mapping(uint64 => struct IMarginClearinghouse.OrderReservation)",
+          "numberOfBytes": "32",
+          "value": "t_struct(OrderReservation)140523_storage"
+        },
+        "t_struct(BountyReservation)140370_storage": {
+          "encoding": "inplace",
+          "label": "struct IMarginClearinghouse.BountyReservation",
+          "members": [
+            {
+              "astId": 140367,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "account",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_address"
+            },
+            {
+              "astId": 140369,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "amountUsdc",
+              "offset": 20,
+              "slot": "0",
+              "type": "t_uint96"
+            }
+          ],
+          "numberOfBytes": "32"
+        },
+        "t_struct(OrderReservation)140523_storage": {
+          "encoding": "inplace",
+          "label": "struct IMarginClearinghouse.OrderReservation",
+          "members": [
+            {
+              "astId": 140508,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "account",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_address"
+            },
+            {
+              "astId": 140510,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "originalAmountUsdc",
+              "offset": 20,
+              "slot": "0",
+              "type": "t_uint96"
+            },
+            {
+              "astId": 140512,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "remainingAmountUsdc",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_uint96"
+            },
+            {
+              "astId": 140514,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "previousOrderId",
+              "offset": 12,
+              "slot": "1",
+              "type": "t_uint64"
+            },
+            {
+              "astId": 140516,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "nextOrderId",
+              "offset": 20,
+              "slot": "1",
+              "type": "t_uint64"
+            },
+            {
+              "astId": 140519,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "bucket",
+              "offset": 28,
+              "slot": "1",
+              "type": "t_enum(ReservationBucket)140495"
+            },
+            {
+              "astId": 140522,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "status",
+              "offset": 29,
+              "slot": "1",
+              "type": "t_enum(ReservationStatus)140505"
+            }
+          ],
+          "numberOfBytes": "64"
+        },
+        "t_struct(ReservationQueue)94141_storage": {
+          "encoding": "inplace",
+          "label": "struct MarginClearinghouse.ReservationQueue",
+          "members": [
+            {
+              "astId": 94136,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "head",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_uint64"
+            },
+            {
+              "astId": 94138,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "tail",
+              "offset": 8,
+              "slot": "0",
+              "type": "t_uint64"
+            },
+            {
+              "astId": 94140,
+              "contract": "@plether/perps/MarginClearinghouse.sol:MarginClearinghouse",
+              "label": "count",
+              "offset": 16,
+              "slot": "0",
+              "type": "t_uint128"
+            }
+          ],
+          "numberOfBytes": "32"
+        },
+        "t_uint128": {
+          "encoding": "inplace",
+          "label": "uint128",
+          "numberOfBytes": "16"
+        },
+        "t_uint256": {
+          "encoding": "inplace",
+          "label": "uint256",
+          "numberOfBytes": "32"
+        },
+        "t_uint64": {
+          "encoding": "inplace",
+          "label": "uint64",
+          "numberOfBytes": "8"
+        },
+        "t_uint96": {
+          "encoding": "inplace",
+          "label": "uint96",
+          "numberOfBytes": "12"
+        }
+      }
+    }
+  }
+}

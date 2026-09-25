@@ -1,0 +1,710 @@
+[
+  {
+    "type": "function",
+    "name": "MAX_SEARCH_NODES",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quote",
+    "inputs": [
+      {
+        "name": "planner",
+        "type": "address",
+        "internalType": "contract ICfdEnginePlanner"
+      },
+      {
+        "name": "raw",
+        "type": "tuple",
+        "internalType": "struct CfdEnginePlanTypes.RawSnapshot",
+        "components": [
+          {
+            "name": "position",
+            "type": "tuple",
+            "internalType": "struct CfdTypes.Position",
+            "components": [
+              {
+                "name": "size",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "margin",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "entryPrice",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxProfitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "side",
+                "type": "uint8",
+                "internalType": "enum CfdTypes.Side"
+              },
+              {
+                "name": "lastUpdateTime",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "lastCarryTimestamp",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "vpiAccrued",
+                "type": "int256",
+                "internalType": "int256"
+              }
+            ]
+          },
+          {
+            "name": "positionEntryCostUsdcAtoms",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "currentTimestamp",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lastMarkPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lastMarkTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "positionBorrowBaseUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "positionLastCarryIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "longSide",
+            "type": "tuple",
+            "internalType": "struct CfdEnginePlanTypes.SideSnapshot",
+            "components": [
+              {
+                "name": "maxProfitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "openInterest",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "entryNotional",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "totalMargin",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "borrowBaseUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "carryIndex",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "shortSide",
+            "type": "tuple",
+            "internalType": "struct CfdEnginePlanTypes.SideSnapshot",
+            "components": [
+              {
+                "name": "maxProfitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "openInterest",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "entryNotional",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "totalMargin",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "borrowBaseUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "carryIndex",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "poolAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolCashUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "accountBuckets",
+            "type": "tuple",
+            "internalType": "struct IMarginClearinghouse.AccountUsdcBuckets",
+            "components": [
+              {
+                "name": "settlementBalanceUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "totalLockedMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "activePositionMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "otherLockedMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "freeSettlementUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "lockedBuckets",
+            "type": "tuple",
+            "internalType": "struct IMarginClearinghouse.LockedMarginBuckets",
+            "components": [
+              {
+                "name": "positionMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "committedOrderMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "reservedSettlementUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "totalLockedMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "liquidationReserveUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "actionReserveUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vpiRebateReserveUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "protectedExecutionBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "marginReservationIds",
+            "type": "uint64[]",
+            "internalType": "uint64[]"
+          },
+          {
+            "name": "unsettledCarryUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "totalTraderClaimBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "traderClaimBalanceForAccount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "degradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "capPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "riskParams",
+            "type": "tuple",
+            "internalType": "struct CfdTypes.RiskParams",
+            "components": [
+              {
+                "name": "vpiFactor",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxSkewRatio",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maintMarginBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "initMarginBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "fadMarginBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "baseCarryBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "minBountyUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "keeperShareBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "protocolShareBps",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "executionFeeBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isFadWindow",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "frozenCloseSpreadBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "settlementBufferBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "order",
+        "type": "tuple",
+        "internalType": "struct CfdTypes.Order",
+        "components": [
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "sizeDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "marginDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "targetPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "commitTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "commitBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "side",
+            "type": "uint8",
+            "internalType": "enum CfdTypes.Side"
+          },
+          {
+            "name": "isClose",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      },
+      {
+        "name": "executionPrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "publishTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "maxSizeDelta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "delta",
+        "type": "tuple",
+        "internalType": "struct CfdEnginePlanTypes.OpenDelta",
+        "components": [
+          {
+            "name": "valid",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "revertCode",
+            "type": "uint8",
+            "internalType": "enum CfdEnginePlanTypes.OpenRevertCode"
+          },
+          {
+            "name": "openState",
+            "type": "tuple",
+            "internalType": "struct OpenAccountingLib.OpenState",
+            "components": [
+              {
+                "name": "addedMaxProfitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "oldEntryNotional",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "newEntryPrice",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "newEntryCostUsdcAtoms",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "newSize",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "newEntryNotional",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "postSkewUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "vpiUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "notionalUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "executionFeeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "tradeCostUsdc",
+                "type": "int256",
+                "internalType": "int256"
+              },
+              {
+                "name": "maintenanceMarginUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "initialMarginRequirementUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "liquidationReserveTargetUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "posSide",
+            "type": "uint8",
+            "internalType": "enum CfdTypes.Side"
+          },
+          {
+            "name": "newPosSize",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "newPosEntryPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "newPosEntryCostUsdcAtoms",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "posVpiAccruedDelta",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "posMaxProfitIncrease",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "positionMarginAfterOpen",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidationReserveBeforeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidationReserveAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sideOiIncrease",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sideEntryNotionalDelta",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "requiredEffectiveAssetsAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sideMaxProfitIncrease",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "tradeCostUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "marginDeltaUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "netMarginChange",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "poolRebatePayoutUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "executionFeeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "pendingCarryUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vpiRebateReserveBeforeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vpiRebateReserveAfterUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vpiRebateReserveFromPledgeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sideTotalMarginBefore",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "sideTotalMarginAfterOpen",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "sizeDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "limitingReason",
+        "type": "uint8",
+        "internalType": "enum CfdEnginePlanTypes.OpenRevertCode"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "error",
+    "name": "CfdEngineLens__QuoteSearchLimitExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeCastOverflowedUintToInt",
+    "inputs": [
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  }
+]

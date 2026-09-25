@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
@@ -106,8 +108,17 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         address account,
         uint256 sizeDelta,
         uint256 executionBountyUsdc
+    ) internal override returns (CfdEnginePlanTypes.CloseCommitment memory) {
+        return engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc);
+    }
+
+    function _onOrderCommitted(
+        CfdTypes.Order memory order,
+        CfdEnginePlanTypes.CloseCommitment memory effects
     ) internal override {
-        engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc);
+        lifecycleBook.recordCommitment(
+            order.orderId, effects, engine.positionEpoch(order.account), order.side, order.sizeDelta
+        );
     }
 
     /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.

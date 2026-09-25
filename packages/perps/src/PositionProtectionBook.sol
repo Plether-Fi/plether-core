@@ -353,7 +353,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         }
 
         uint256 executionBountyUsdc = _executionBountySnapshots[protectionId];
-        if (executionBountyUsdc == 0 || _executionBounty(protection) != executionBountyUsdc) {
+        if (_executionBounty(protection) != executionBountyUsdc) {
             revert PositionProtectionBook__BountyMismatch();
         }
         if (protection.linkedOrderId == 0 || _attemptProtectionIds[protection.linkedOrderId] != 0) {
@@ -511,7 +511,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         plan.size = protection.size;
         plan.triggerBountyUsdc = _triggerBounty(protection);
         plan.executionBountyUsdc = _executionBounty(protection);
-        if (plan.executionBountyUsdc == 0 || plan.executionBountyUsdc != _executionBountySnapshots[protectionId]) {
+        if (plan.executionBountyUsdc != _executionBountySnapshots[protectionId]) {
             revert PositionProtectionBook__BountyMismatch();
         }
     }
@@ -646,7 +646,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         }
 
         uint256 bountySnapshotUsdc = _executionBountySnapshots[protectionId];
-        if (bountySnapshotUsdc == 0 || executionBountyUsdc != bountySnapshotUsdc || _executionBounty(protection) != 0) {
+        if (executionBountyUsdc != bountySnapshotUsdc || _executionBounty(protection) != 0) {
             revert PositionProtectionBook__BountyMismatch();
         }
 

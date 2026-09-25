@@ -8,6 +8,7 @@ import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Production-stack integration coverage for the agent-facing V2 order lifecycle.
@@ -33,6 +34,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_TransientContainmentDoesNotChangeExecutionConfigHash() public {
+        _startRecordingLogs();
         bytes32 expectedHash = book.currentExecutionConfigHash();
 
         pool.pause();
@@ -53,6 +55,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_FreshCommitAndExactReplayHaveNoSecondSideEffect() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("pending-replay"));
 
         vm.prank(ALICE);
@@ -68,10 +71,10 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         uint256 bountyBefore = book.pendingIntent(orderId).executionBountyUsdc;
         bytes32 pendingHashBefore = keccak256(abi.encode(book.pendingIntent(orderId)));
 
-        vm.recordLogs();
+        _startRecordingLogs();
         vm.prank(ALICE);
         uint64 replayedOrderId = router.commitOrder(request);
-        Vm.Log[] memory replayLogs = vm.getRecordedLogs();
+        Vm.Log[] memory replayLogs = _takeRecordedLogs();
 
         assertEq(replayedOrderId, orderId, "exact replay must return the permanent order id");
         assertEq(replayLogs.length, 0, "exact replay must emit no second commit event");
@@ -90,6 +93,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ClientIdConflictRevertsWithoutChangingOriginalIntent() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory original = _openRequest(bytes32("conflict"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(original);
@@ -119,6 +123,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ClientIdIsNamespacedByAccount() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("shared-id"));
 
         vm.prank(ALICE);
@@ -136,6 +141,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_PublicCommitCannotClaimProtocolClientIdNamespace() public {
+        _startRecordingLogs();
         bytes32 clientOrderId = OrderV2Types.protocolClientOrderId(keccak256("predictable-protection-id"));
         OrderV2Types.OrderRequest memory request = _openRequest(clientOrderId);
         uint64 nextCommitIdBefore = router.nextCommitId();
@@ -171,6 +177,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_RevertedFirstAttemptDoesNotConsumeClientIdOrReservation() public {
+        _startRecordingLogs();
         uint256 quotedBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(OPEN_SIZE);
         _fundTrader(CAROL, quotedBountyUsdc);
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("retry-after-revert"));
@@ -196,6 +203,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ExecutionNotionalEqualityAndDeadlineEqualityExecuteWithCanonicalReceipt() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("inclusive-equality"));
         request.bounds.maxExecutionNotionalUsdc = OPEN_NOTIONAL_USDC;
         request.bounds.validUntil = uint64(block.timestamp + 1);
@@ -207,10 +215,10 @@ contract OrderRouterAgentV2Test is BasePerpTest {
 
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
         assertEq(block.timestamp, request.bounds.validUntil, "setup must execute exactly at the inclusive deadline");
-        vm.recordLogs();
+        _startRecordingLogs();
         vm.prank(KEEPER);
         OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+        Vm.Log[] memory logs = _takeRecordedLogs();
 
         assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
         assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.Executed));
@@ -223,7 +231,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(_remainingCommittedMargin(orderId), 0);
         assertEq(book.pendingIntent(orderId).account, address(0));
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
+        OrderV2Types.CompactOutcome memory outcome = _verifiedOutcome(IOrderLifecycleBook(address(book)), orderId);
         assertEq(outcome.account, ALICE);
         assertEq(outcome.clientOrderId, request.clientOrderId);
         assertEq(outcome.intentHash, pending.intentHash);
@@ -270,6 +278,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ExecutionNotionalOneAtomOverBoundFailsWithoutApplyingPosition() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("notional-one-atom"));
         request.bounds.maxExecutionNotionalUsdc = OPEN_NOTIONAL_USDC - 1;
 
@@ -291,7 +300,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(_remainingCommittedMargin(orderId), 0);
         assertEq(router.pendingOrderCounts(ALICE), 0);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
+        OrderV2Types.CompactOutcome memory outcome = _verifiedOutcome(IOrderLifecycleBook(address(book)), orderId);
         assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.ConstraintViolation));
         assertEq(uint8(outcome.failedConstraint), uint8(OrderV2Types.ConstraintKind.ExecutionNotional));
@@ -304,6 +313,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_OneSecondPastDeadlineExpiresBeforeOracleWork() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("expired"));
         request.bounds.validUntil = uint64(block.timestamp + 1);
 
@@ -324,7 +334,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(_positionSize(ALICE), 0);
         assertEq(_remainingCommittedMargin(orderId), 0);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
+        OrderV2Types.CompactOutcome memory outcome = _verifiedOutcome(IOrderLifecycleBook(address(book)), orderId);
         assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired));
         assertEq(uint8(outcome.priceSource), uint8(OrderV2Types.PriceSource.None));
@@ -335,6 +345,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_FinalizedConfigDriftInvalidatesBeforeOracleWork() public {
+        _startRecordingLogs();
         ICfdEngineAdminHost.EngineCalendarConfig memory config = _engineCalendarConfig();
         engineAdmin.proposeCalendarConfig(config);
         uint256 activationTime = engineAdmin.calendarConfigActivationTime();
@@ -361,7 +372,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(baseMockPyth.parseUniqueCallCount(), uniqueParsesBefore, "config mismatch must precede history");
         assertEq(_positionSize(ALICE), 0);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
+        OrderV2Types.CompactOutcome memory outcome = _verifiedOutcome(IOrderLifecycleBook(address(book)), orderId);
         assertEq(outcome.expectedConfigHash, expectedConfigHash);
         assertEq(outcome.observedConfigHash, observedConfigHash);
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.ConfigMismatch));
@@ -370,7 +381,49 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(outcome.executor, KEEPER);
     }
 
+    /// @dev Synthetic oracle callback: a matured owner action changes configuration during oracle work.
+    ///      The execution item must observe the post-oracle digest and never execute under the earlier policy.
+    function test_ConfigObservationIsRefreshedAfterOracleCallback() public {
+        _startRecordingLogs();
+        engineAdmin.proposeCalendarConfig(_engineCalendarConfig());
+        uint256 activationTime = engineAdmin.calendarConfigActivationTime();
+        vm.warp(activationTime - 10);
+        OrderV2Types.OrderRequest memory request = _openRequest(bytes32("oracle-config-drift"));
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        vm.warp(activationTime);
+        vm.roll(block.number + 2);
+
+        ConfigFinalizingOracleCallback callback = new ConfigFinalizingOracleCallback(this);
+        vm.mockFunction(
+            address(pletherOracle),
+            address(callback),
+            abi.encodeWithSelector(IPletherOracle.updateOrderExecutionPrice.selector)
+        );
+        vm.prank(KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, _mockPythUpdateData(EXECUTION_PRICE));
+        assertTrue(result.status != OrderV2Types.LifecycleStatus.Executed, "post-oracle policy must be checked");
+        assertEq(_positionSize(ALICE), 0, "configuration drift cannot reach position settlement");
+        bytes32 observed = book.currentExecutionConfigHash();
+        assertTrue(observed != request.bounds.expectedConfigHash, "callback must actually finalize a new version");
+
+        // A retryable receipt failure still preserves a binding order; its next pre-oracle cleanup is canonical.
+        if (result.status == OrderV2Types.LifecycleStatus.Pending) {
+            vm.prank(KEEPER);
+            result = router.executeOrder(orderId, new bytes[](0));
+        }
+        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.ConfigMismatch));
+        assertEq(_verifiedOutcome(IOrderLifecycleBook(address(book)), orderId).observedConfigHash, observed);
+        assertEq(router.pendingOrderCounts(ALICE), 0);
+    }
+
+    function finalizeConfigFromOracleCallback() external {
+        require(msg.sender == address(pletherOracle), "only synthetic oracle callback");
+        engineAdmin.finalizeCalendarConfig();
+    }
+
     function test_UnknownEngineFailureIsRetryableAndPreservesReservations() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("unknown-engine"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -386,17 +439,17 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         );
 
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
-        vm.recordLogs();
+        _startRecordingLogs();
         vm.prank(KEEPER);
         OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+        Vm.Log[] memory logs = _takeRecordedLogs();
         vm.clearMockedCalls();
 
         assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
         assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.EngineFailure));
         assertEq(result.receiptHash, bytes32(0));
         assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
-        assertEq(book.outcome(orderId).receiptHash, bytes32(0));
+        assertEq(_verifiedOutcome(IOrderLifecycleBook(address(book)), orderId).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), keccak256(abi.encode(pendingBefore)));
         assertEq(_remainingCommittedMargin(orderId), marginBefore, "item rollback must restore committed margin");
         assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "item rollback must restore bucket classification");
@@ -408,6 +461,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_BountyInvariantFailureIsRetryableAndPreservesReservations() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("bounty-invariant"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -418,24 +472,24 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         uint256 keeperBefore = _settlementBalance(KEEPER);
         vm.mockCallRevert(
             address(policyEvaluator),
-            abi.encodeWithSelector(policyEvaluator.assessOrder.selector),
+            abi.encodeWithSelector(policyEvaluator.assessCommittedOrder.selector),
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, 200_000
             )
         );
 
         bytes[] memory updateData = _mockPythUpdateData(EXECUTION_PRICE);
-        vm.recordLogs();
+        _startRecordingLogs();
         vm.prank(KEEPER);
         OrderV2Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+        Vm.Log[] memory logs = _takeRecordedLogs();
         vm.clearMockedCalls();
 
         assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Pending));
         assertEq(uint8(result.pendingReason), uint8(OrderV2Types.PendingReason.EngineFailure));
         assertEq(result.receiptHash, bytes32(0));
         assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV2Types.LifecycleStatus.Pending));
-        assertEq(book.outcome(orderId).receiptHash, bytes32(0));
+        assertEq(_verifiedOutcome(IOrderLifecycleBook(address(book)), orderId).receiptHash, bytes32(0));
         assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), keccak256(abi.encode(pendingBefore)));
         assertEq(_remainingCommittedMargin(orderId), marginBefore, "item rollback must restore committed margin");
         assertEq(_freeSettlementUsdc(ALICE), freeSettlementBefore, "item rollback must restore bucket classification");
@@ -447,6 +501,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_MalformedEngineSuccessIsRetryableAndPreservesPendingOrder() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("malformed-engine"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -469,6 +524,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_ZeroBountyMaximumMeansZeroAllowance() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("zero-bounty-cap"));
         request.bounds.maxExecutionBountyUsdc = 0;
         uint256 quotedBountyUsdc = _quoteOpenOrderExecutionBountyUsdc(OPEN_SIZE);
@@ -487,6 +543,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_RiskOffReceiptAttributesExternalCleanerAndRefundsBountyToAccount() public {
+        _startRecordingLogs();
         OrderV2Types.OrderRequest memory request = _openRequest(bytes32("risk-off-receipt"));
         vm.prank(ALICE);
         uint64 orderId = router.commitOrder(request);
@@ -497,7 +554,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         vm.prank(KEEPER);
         router.clearRiskOffOrder(orderId);
 
-        OrderV2Types.CompactOutcome memory outcome = book.outcome(orderId);
+        OrderV2Types.CompactOutcome memory outcome = _verifiedOutcome(IOrderLifecycleBook(address(book)), orderId);
         assertEq(uint8(outcome.status), uint8(OrderV2Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.RiskOff));
         assertEq(outcome.executor, KEEPER, "receipt must retain the external cleaner");
@@ -574,6 +631,31 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         address account
     ) internal view returns (uint256 size) {
         (size,,,,,,) = engine.positions(account);
+    }
+
+}
+
+/// @dev Test-only replacement for one oracle method; all other oracle policy/fee calls stay real.
+contract ConfigFinalizingOracleCallback {
+
+    OrderRouterAgentV2Test private immutable fixture;
+
+    constructor(
+        OrderRouterAgentV2Test fixture_
+    ) {
+        fixture = fixture_;
+    }
+
+    function updateOrderExecutionPrice(
+        address,
+        bytes[] calldata,
+        IPletherOracle.OrderExecutionRequest calldata
+    ) external payable returns (bool, IPletherOracle.PriceSnapshot memory snapshot) {
+        fixture.finalizeConfigFromOracleCallback();
+        snapshot.price = 1e8;
+        snapshot.markPrice = 1e8;
+        snapshot.publishTime = uint64(block.timestamp);
+        return (true, snapshot);
     }
 
 }

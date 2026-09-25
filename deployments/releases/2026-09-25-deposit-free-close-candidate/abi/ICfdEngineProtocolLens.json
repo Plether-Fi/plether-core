@@ -1,0 +1,168 @@
+[
+  {
+    "type": "function",
+    "name": "getHousePoolInputSnapshot",
+    "inputs": [
+      {
+        "name": "markStalenessLimit",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "snapshot",
+        "type": "tuple",
+        "internalType": "struct HousePoolEngineViewTypes.HousePoolInputSnapshot",
+        "components": [
+          {
+            "name": "physicalAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "netPhysicalAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLiabilityUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "supplementalReservedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "terminalLpPriceDeltaUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "terminalNavBookVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "traderClaimBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "hasOpenPositions",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "markFreshnessRequired",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "maxMarkStaleness",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getHousePoolStatusSnapshot",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "snapshot",
+        "type": "tuple",
+        "internalType": "struct HousePoolEngineViewTypes.HousePoolStatusSnapshot",
+        "components": [
+          {
+            "name": "lastMarkTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "degradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getProtocolAccountingSnapshot",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "snapshot",
+        "type": "tuple",
+        "internalType": "struct ProtocolLensViewTypes.ProtocolAccountingSnapshot",
+        "components": [
+          {
+            "name": "poolAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "netPhysicalAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLiabilityUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "effectiveSolvencyAssetsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "withdrawalReservedUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "freeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "protocolTreasuryBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "totalTraderClaimBalanceUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "degradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "hasLiveLiability",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  }
+]
