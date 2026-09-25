@@ -1,0 +1,544 @@
+[
+  {
+    "type": "function",
+    "name": "CAP_PRICE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ENGINE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SIZE_QUANTUM",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "authenticateEngineState",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "expectedHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "bookState",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "state",
+        "type": "tuple",
+        "internalType": "struct ITerminalNavBookV2.BookState",
+        "components": [
+          {
+            "name": "capPrice",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "activeCurveCount",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "bookVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "totalLots",
+            "type": "uint112",
+            "internalType": "uint112"
+          },
+          {
+            "name": "totalEntryCostUsdcAtoms",
+            "type": "uint144",
+            "internalType": "uint144"
+          },
+          {
+            "name": "totalEffectiveCapUsdcAtoms",
+            "type": "uint144",
+            "internalType": "uint144"
+          },
+          {
+            "name": "base",
+            "type": "tuple",
+            "internalType": "struct ITerminalNavBookV2.Coeff",
+            "components": [
+              {
+                "name": "slope",
+                "type": "int112",
+                "internalType": "int112"
+              },
+              {
+                "name": "intercept",
+                "type": "int144",
+                "internalType": "int144"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "curveHashOf",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "curveHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "curveOf",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "curve",
+        "type": "tuple",
+        "internalType": "struct ITerminalNavBookV2.CurveRecord",
+        "components": [
+          {
+            "name": "lots",
+            "type": "uint112",
+            "internalType": "uint112"
+          },
+          {
+            "name": "entryCostUsdcAtoms",
+            "type": "uint144",
+            "internalType": "uint144"
+          },
+          {
+            "name": "effectiveCapUsdcAtoms",
+            "type": "uint144",
+            "internalType": "uint144"
+          },
+          {
+            "name": "side",
+            "type": "uint8",
+            "internalType": "enum CfdTypes.Side"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "radixNode",
+    "inputs": [
+      {
+        "name": "level",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "prefix",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "coefficient",
+        "type": "tuple",
+        "internalType": "struct ITerminalNavBookV2.Coeff",
+        "components": [
+          {
+            "name": "slope",
+            "type": "int112",
+            "internalType": "int112"
+          },
+          {
+            "name": "intercept",
+            "type": "int144",
+            "internalType": "int144"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "syncFromEngine",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expectedOldHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "newHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "newBookVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "terminalLpPriceDeltaUsdcAtoms",
+    "inputs": [
+      {
+        "name": "markPrice",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "terminalDeltaUsdcAtoms",
+        "type": "int256",
+        "internalType": "int256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "terminalNavSnapshot",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "snapshot",
+        "type": "tuple",
+        "internalType": "struct ICfdEngineTypes.TerminalNavSnapshot",
+        "components": [
+          {
+            "name": "markPrice",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "markTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "terminalLpPriceDeltaUsdc",
+            "type": "int256",
+            "internalType": "int256"
+          },
+          {
+            "name": "totalTraderClaimsUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxDirectionalLiabilityUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bookVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "hasOpenPositions",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "degradedMode",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "validateEngineBinding",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "valid",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "CurveRemoved",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "oldCurveHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "bookVersion",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CurveSet",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "oldCurveHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "newCurveHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "bookVersion",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "lots",
+        "type": "uint112",
+        "indexed": false,
+        "internalType": "uint112"
+      },
+      {
+        "name": "entryCostUsdcAtoms",
+        "type": "uint144",
+        "indexed": false,
+        "internalType": "uint144"
+      },
+      {
+        "name": "effectiveCapUsdcAtoms",
+        "type": "uint144",
+        "indexed": false,
+        "internalType": "uint144"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum CfdTypes.Side"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__AggregateBoundsExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__BookVersionOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__BreakpointAboveCap",
+    "inputs": [
+      {
+        "name": "breakpoint",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "capPrice",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__CoefficientOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__CurveHashMismatch",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expectedHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__EntryCostAboveCap",
+    "inputs": [
+      {
+        "name": "entryCostUsdcAtoms",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximumEntryCostUsdcAtoms",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__InvalidRadixNode",
+    "inputs": [
+      {
+        "name": "level",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "prefix",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__MarkPriceAboveCap",
+    "inputs": [
+      {
+        "name": "markPrice",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "capPrice",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__Unauthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__ZeroAccount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__ZeroCapPrice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__ZeroCurveHash",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__ZeroEngine",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TerminalNavBookV2__ZeroLots",
+    "inputs": []
+  }
+]

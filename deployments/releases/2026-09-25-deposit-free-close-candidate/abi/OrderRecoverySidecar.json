@@ -1,0 +1,1188 @@
+[
+  {
+    "type": "function",
+    "name": "expireOrder",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct OrderV2Types.ExecutionResult",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.LifecycleStatus"
+          },
+          {
+            "name": "terminalReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.TerminalReason"
+          },
+          {
+            "name": "pendingReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.PendingReason"
+          },
+          {
+            "name": "receiptHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordSettledTerminal",
+    "inputs": [
+      {
+        "name": "input",
+        "type": "tuple",
+        "internalType": "struct IOrderRouterV2ExecutionHost.SettledTerminalInput",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "executor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "observedConfigHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "reason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.TerminalReason"
+          },
+          {
+            "name": "executionMode",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.ExecutionMode"
+          },
+          {
+            "name": "priceSource",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.PriceSource"
+          },
+          {
+            "name": "executionPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "neutralMarkPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolDepthUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "oraclePublishTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "priceReachedEngine",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "bountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bountyRecipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "bountyDisposition",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.BountyDisposition"
+          },
+          {
+            "name": "failure",
+            "type": "tuple",
+            "internalType": "struct OrderV2Types.FailureDetails",
+            "components": [
+              {
+                "name": "selector",
+                "type": "bytes4",
+                "internalType": "bytes4"
+              },
+              {
+                "name": "category",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "code",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "constraint",
+                "type": "uint8",
+                "internalType": "enum OrderV2Types.ConstraintKind"
+              },
+              {
+                "name": "actual",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "limit",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "revertDataHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct OrderV2Types.ExecutionResult",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.LifecycleStatus"
+          },
+          {
+            "name": "terminalReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.TerminalReason"
+          },
+          {
+            "name": "pendingReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.PendingReason"
+          },
+          {
+            "name": "receiptHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recoverExpiredItem",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "executor",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct OrderV2Types.ExecutionResult",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.LifecycleStatus"
+          },
+          {
+            "name": "terminalReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.TerminalReason"
+          },
+          {
+            "name": "pendingReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.PendingReason"
+          },
+          {
+            "name": "receiptHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "settleNonEngine",
+    "inputs": [
+      {
+        "name": "request",
+        "type": "tuple",
+        "internalType": "struct IOrderRouterV2ExecutionHost.ItemRequest",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "action",
+            "type": "uint8",
+            "internalType": "enum IOrderRouterV2ExecutionHost.ItemAction"
+          },
+          {
+            "name": "executor",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "observedConfigHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "executionMode",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.ExecutionMode"
+          },
+          {
+            "name": "priceSource",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.PriceSource"
+          },
+          {
+            "name": "executionPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "neutralMarkPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "poolDepthUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "oraclePublishTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "bountyAccountingPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bountyAccountingPublishTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "oracleFrozen",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "openExecutionCloseOnly",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "internalType": "enum OrderV2Types.TerminalReason"
+      },
+      {
+        "name": "failure",
+        "type": "tuple",
+        "internalType": "struct OrderV2Types.FailureDetails",
+        "components": [
+          {
+            "name": "selector",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          },
+          {
+            "name": "category",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "code",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "constraint",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.ConstraintKind"
+          },
+          {
+            "name": "actual",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "limit",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "revertDataHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct OrderV2Types.ExecutionResult",
+        "components": [
+          {
+            "name": "orderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.LifecycleStatus"
+          },
+          {
+            "name": "terminalReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.TerminalReason"
+          },
+          {
+            "name": "pendingReason",
+            "type": "uint8",
+            "internalType": "enum OrderV2Types.PendingReason"
+          },
+          {
+            "name": "receiptHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "LiquidationBatchItem",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "result",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum IOrderRouterErrors.LiquidationBatchResult"
+      },
+      {
+        "name": "keeperBountyUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "errorSelector",
+        "type": "bytes4",
+        "indexed": false,
+        "internalType": "bytes4"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LiquidationBatchStopped",
+    "inputs": [
+      {
+        "name": "nextIndex",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OrderCommitted",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum CfdTypes.Side"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionArmed",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum CfdTypes.Side"
+      },
+      {
+        "name": "size",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "armedAt",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "armedBlock",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionCancelled",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionCloseAttemptFailed",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "linkedOrderId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum OrderV2Types.TerminalReason"
+      },
+      {
+        "name": "relatched",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionCloseAttemptQueued",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "linkedOrderId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "previousLinkedOrderId",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionCreated",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "parentOrderId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "takeProfitTriggerPrice",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "stopLossTriggerPrice",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "triggerBountyUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "executionBountyUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionReplaced",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "takeProfitTriggerPrice",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "stopLossTriggerPrice",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionTerminal",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "linkedOrderId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum PositionProtectionTypes.PositionProtectionStatus"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionTriggered",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "linkedOrderId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "leg",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum PositionProtectionTypes.PositionProtectionTriggerLeg"
+      },
+      {
+        "name": "triggerMarkPrice",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "triggerPublishTime",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__AccountQueueCorrupt",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__BatchBeforeQueueHead",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__BatchOrderNotCommitted",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__CloseOnlyWindow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__CloseWithPositiveMargin",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__CommitValidation",
+    "inputs": [
+      {
+        "name": "code",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ConditionalTriggerFrozen",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__DegradedMode",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__EmptyFeeds",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__EmptyPythUpdateData",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ExecutionBountyAboveGrossDebit",
+    "inputs": [
+      {
+        "name": "executionBountyUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximumGrossDebitUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ExecutionConfigMismatch",
+    "inputs": [
+      {
+        "name": "expectedConfigHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "currentConfigHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__GlobalQueueCorrupt",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InsufficientFreeEquity",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InsufficientGas",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InsufficientPythFee",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidBasePrice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidCloseMode",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidEngineLens",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidExecutionModeMask",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidExecutionSidecar",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidKeeperSidecar",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidLifecycleBook",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidLiquidationBatchSize",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidOraclePrice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidPletherOracle",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidPolicyEvaluator",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidProtectionPrices",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidSizeQuantum",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidValidUntil",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__InvalidWeights",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__LengthMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__LiquidationOraclePriceTooStale",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__MarginQueueCorrupt",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__MarkPriceOutOfOrder",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__MevDetected",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__MockOracleUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__NoOpenPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__NoOrdersToExecute",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__NoQueuedPosition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__NotInSeedLifecycle",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__OracleConfidenceTooWide",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__OraclePriceTooStale",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__OraclePublishTimesDiverged",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__OrderNotExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__OrderNotPending",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__OrderNotQueueHead",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__OrderNotRiskOff",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__PendingOrdersExist",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__PositionChanged",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__PredictableOpenInvalid",
+    "inputs": [
+      {
+        "name": "code",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectionActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectionAlreadyActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectionMarkTooStale",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectionNotArmed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectionNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectionNotLatched",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectionTriggerAlreadyMet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__SameBlockTrigger",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__SideMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__SizeExceedsQueued",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TerminalExitActive",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TerminalExitBusy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TooManyPendingOrders",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TriggerNotMet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__Unauthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__VaultRiskBlocked",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ZeroClientOrderId",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ZeroPostLeverageBound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ZeroSize",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ZeroTargetPrice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RecoveryIdentityMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RecoveryUnauthorized",
+    "inputs": []
+  }
+]

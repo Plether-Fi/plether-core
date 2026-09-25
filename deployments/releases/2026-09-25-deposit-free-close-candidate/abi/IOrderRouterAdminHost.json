@@ -1,0 +1,130 @@
+[
+  {
+    "type": "function",
+    "name": "applyOracleConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct IOrderRouterAdminHost.OracleConfig",
+        "components": [
+          {
+            "name": "pletherOracle",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "applyRouterConfig",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct IOrderRouterAdminHost.RouterConfig",
+        "components": [
+          {
+            "name": "maxOrderAge",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "orderExecutionStalenessLimit",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "liquidationStalenessLimit",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "basketMaxConfidenceRatioBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "orderSettlementWindow",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxComponentPublishTimeDivergence",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "adverseConfidenceMultiplierBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minOpenNotionalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "openOrderExecutionBountyBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minOpenOrderExecutionBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxOpenOrderExecutionBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "closeOrderExecutionBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "positionProtectionTriggerBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxPendingOrders",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minEngineGas",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxPruneOrdersPerCall",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "nextCommitId",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  }
+]

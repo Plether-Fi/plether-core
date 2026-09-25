@@ -1,0 +1,122 @@
+[
+  {
+    "type": "function",
+    "name": "activePositionProtectionId",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPositionProtection",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "protection",
+        "type": "tuple",
+        "internalType": "struct PositionProtectionTypes.PositionProtectionView",
+        "components": [
+          {
+            "name": "protectionId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "parentOrderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "linkedOrderId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "side",
+            "type": "uint8",
+            "internalType": "enum CfdTypes.Side"
+          },
+          {
+            "name": "size",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "takeProfitTriggerPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "stopLossTriggerPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "triggerBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "executionBountyUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "armedAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "armedBlock",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "triggerMarkPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "triggerPublishTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "triggeredLeg",
+            "type": "uint8",
+            "internalType": "enum PositionProtectionTypes.PositionProtectionTriggerLeg"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum PositionProtectionTypes.PositionProtectionStatus"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  }
+]

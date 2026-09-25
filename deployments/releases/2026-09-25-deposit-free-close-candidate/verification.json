@@ -1,0 +1,66 @@
+{
+  "sourceCommit": "e9df1ed80025d65b9f33e82b871e4fe0bcdfbcc5",
+  "status": "candidate; activation blocked pending archive evidence and external consumer rollout",
+  "checks": [
+    {
+      "check": "broad_fast_suite",
+      "summary": "Ran 237 test suites in 800.79s (2336.84s CPU time): 1789 tests passed, 4 failed, 3 skipped (1796 total tests)",
+      "logSha256": "1f3336d6decece75fe625574fc7d466b776903ba42b5404f6f88d9af4197d85b"
+    },
+    {
+      "check": "corrected_value_invariants",
+      "summary": "Ran 1 test suite in 29.92s (29.92s CPU time): 2 tests passed, 0 failed, 0 skipped (2 total tests)",
+      "logSha256": "72e68f7c627dee37f2c598aec09237f2fc9c221fcb7d401c480154cb3538ba37"
+    },
+    {
+      "check": "corrected_preview_invariants",
+      "summary": "Ran 1 test suite in 43.09s (43.09s CPU time): 3 tests passed, 0 failed, 0 skipped (3 total tests)",
+      "logSha256": "2e59c5d5030089cd1c44ec40ce9774383dd4c76d51d1824dd02363f6984a4757"
+    },
+    {
+      "check": "expanded_close_regressions",
+      "summary": "Ran 12 test suites in 33.34s (43.22s CPU time): 129 tests passed, 0 failed, 3 skipped (132 total tests)",
+      "logSha256": "fc0c585b4f50f09cb1d6b9e827bcd32fa1194742cae7f7581b3b6921f06febe8"
+    },
+    {
+      "check": "production_acceptance_and_gas",
+      "summary": "Ran 5 test suites in 4.45s (8.36s CPU time): 91 tests passed, 0 failed, 0 skipped (91 total tests)",
+      "logSha256": "5f66f51e4de617f8fe6439d5e310ae169eb8a136cd96612e1c90b17ddcf2737f"
+    },
+    {
+      "check": "production_deployment_and_size_simulation",
+      "summary": "Ran 1 test suite in 204.61ms (19.29ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)",
+      "logSha256": "806bbe9249d7740f58188936031da54ea905d81bd006655f82a7318ea2bf269d"
+    }
+  ],
+  "explanation": "The broad run found four outdated invariant assertions. Two suites were corrected for authenticated bounty payment and typed partial-health/funding rejection, then passed at the same 16 runs x 500 depth. No failing invariant remains in the targeted reruns. The later production run includes five additional recovery/bounds tests. Counts overlap and must not be summed.",
+  "sdk": {
+    "typecheck": "passed",
+    "testsPassed": 31,
+    "build": "passed",
+    "historicalEncodingCompatibility": "passed"
+  },
+  "historicalForks": {
+    "status": "not run; archive RPC unavailable (HTTP 403)",
+    "requiredEnvironment": "CLOSE_REGRESSION_ARCHIVE_RPC_URL",
+    "blocks": [
+      309041940,
+      309758933
+    ],
+    "runtimeHashes": "asserted by tests against archived manifest; not chain-verified in this run",
+    "storageLayout": "compiled offline from pinned historical source and dependency; chain slot assertions await archive access"
+  },
+  "deployment": {
+    "broadcast": false,
+    "productionSettings": {
+      "solc": "0.8.35",
+      "viaIR": true,
+      "optimizerRuns": 200,
+      "evmVersion": "prague"
+    },
+    "limitingInitcodeBytesIncludingArguments": {
+      "ArbitrumSepoliaReleaseRouter": 47159,
+      "SettlementMonitorLens": 49057
+    }
+  }
+}
