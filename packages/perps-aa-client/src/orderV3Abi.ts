@@ -2565,6 +2565,11 @@ export const orderLifecycleV4Abi = [
   },
   {
     "type": "error",
+    "name": "OrderLifecycleBook__InvalidCommitmentEffects",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderLifecycleBook__InvalidProtectionAttempt",
     "inputs": [
       {
@@ -2652,5 +2657,21 @@ export const orderLifecycleV4Abi = [
     "type": "error",
     "name": "OrderLifecycleBook__ZeroOrderId",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeCastOverflowedUintDowncast",
+    "inputs": [
+      {
+        "name": "bits",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ] as const;

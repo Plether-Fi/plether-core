@@ -149,6 +149,15 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         address account,
         uint256 poolDepthUsdc
     ) public view onlyEngine returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+        return _buildRawSnapshot(account, poolDepthUsdc, false);
+    }
+
+    /// @dev Commitment needs only its position side and funding/health state. Execution still reads the full snapshot.
+    function _buildRawSnapshot(
+        address account,
+        uint256 poolDepthUsdc,
+        bool closeCommit
+    ) private view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
         (
@@ -171,29 +180,37 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
 
         // Historical carry uses live pool assets, even when trade planning receives a different batch depth.
         snap.poolCashUsdc = IHousePool(host.pool()).totalAssets();
-        snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
-        snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
-        snap.poolAssetsUsdc = poolDepthUsdc;
+        if (!closeCommit || snap.position.side == CfdTypes.Side.LONG) {
+            snap.longSide = _sideSnapshot(engine, CfdTypes.Side.LONG, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
+        }
+        if (!closeCommit || snap.position.side == CfdTypes.Side.SHORT) {
+            snap.shortSide = _sideSnapshot(engine, CfdTypes.Side.SHORT, snap.poolCashUsdc, snap.riskParams.baseCarryBps);
+        }
+        snap.poolAssetsUsdc = closeCommit ? snap.poolCashUsdc : poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
         snap.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
         snap.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
-        snap.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        snap.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
+        if (!closeCommit) {
+            snap.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
+            snap.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
+        }
         snap.position.margin = snap.lockedBuckets.positionMarginUsdc;
 
         snap.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
-        snap.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
         snap.traderClaimBalanceForAccount = engine.traderClaimBalanceUsdc(account);
-        snap.degradedMode = engine.degradedMode();
         snap.capPrice = engine.CAP_PRICE();
-        snap.executionFeeBps = engine.executionFeeBps();
-        snap.settlementBufferBps = engine.settlementBufferBps();
         snap.isFadWindow = engine.isFadWindow();
-        snap.oracleFrozen = engine.isOracleFrozen();
-        snap.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
+        if (!closeCommit) {
+            snap.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
+            snap.degradedMode = engine.degradedMode();
+            snap.executionFeeBps = engine.executionFeeBps();
+            snap.settlementBufferBps = engine.settlementBufferBps();
+            snap.oracleFrozen = engine.isOracleFrozen();
+            snap.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
+        }
     }
 
     function _loadRiskParams(
@@ -300,8 +317,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     ) external onlyEngine returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
-        CfdEnginePlanTypes.RawSnapshot memory snap = buildRawSnapshot(account, IHousePool(host.pool()).totalAssets());
-        (effects,) = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta, amountUsdc);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, 0, true);
+        effects = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta, amountUsdc);
         host.settlementRealizeCarry(account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
         uint256 marginBefore = clearinghouse.pnlPledgeUsdc(account);
@@ -309,9 +326,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         host.settlementSyncTotalSideMargin(
             snap.position.side, marginBefore, marginBefore - effects.bountyFromPledgeUsdc
         );
+        IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets = clearinghouse.getAccountUsdcBuckets(account);
         if (
-            clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc != effects.settlementAfterUsdc
-                || clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc != effects.freeSettlementAfterUsdc
+            afterBuckets.settlementBalanceUsdc != effects.settlementAfterUsdc
+                || afterBuckets.freeSettlementUsdc != effects.freeSettlementAfterUsdc
         ) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }

@@ -11,6 +11,8 @@ import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
+import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 
 contract DepositFreeCloseTest is CfdClosePreviewTestBase {
@@ -94,6 +96,36 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
 
     function test_StandardFullLongZeroFree() public {
         _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, false, KEEPER);
+    }
+
+    function test_CommitmentSidecarFailureAndMalformedReturnRollBack() public {
+        _openNormally(CfdTypes.Side.LONG, 0);
+        OrderV2Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, false);
+        address target = address(engine.settlementSidecar());
+        bytes memory callData = abi.encodeCall(
+            ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty,
+            (ACCOUNT, SIZE, router.closeOrderExecutionBountyUsdc())
+        );
+        bytes32 beforeBuckets = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT)));
+        bytes memory failure = hex"abcdef0123456789";
+        vm.mockCallRevert(target, callData, failure);
+        vm.expectRevert(failure);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        vm.clearMockedCalls();
+        vm.mockCall(target, callData, new bytes(223));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        vm.clearMockedCalls();
+        assertEq(beforeBuckets, keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT))));
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+        vm.prank(ACCOUNT);
+        uint64 id = router.commitOrder(request);
+        bytes[] memory update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV2Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed), "reentrancy guard is restored");
     }
 
     function test_StandardFullShortZeroFree() public {

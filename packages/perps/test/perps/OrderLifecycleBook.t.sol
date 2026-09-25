@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
@@ -34,6 +35,49 @@ contract OrderLifecycleBookTest is Test {
 
     function setUp() public {
         book = new OrderLifecycleBook(address(this), ENGINE, CLEARINGHOUSE, HOUSE_POOL);
+    }
+
+    function testFuzz_CompactCommitmentRoundTripsWithoutNarrowingBalances(
+        uint128 cash,
+        uint128 carry,
+        uint256 outstanding,
+        uint96 freeBounty,
+        bool terminal
+    ) public {
+        OrderV2Types.OrderRequest memory request = _request(bytes32("compact-commitment"));
+        request.closeMode = terminal ? OrderV2Types.CloseMode.CallerPaidFullExit : OrderV2Types.CloseMode.Standard;
+        request.bounds.maxExecutionBountyUsdc = type(uint96).max;
+        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
+        request.bounds.maxActionChargeUsdc = type(uint256).max;
+        book.registerPending(ACCOUNT, 1, request, type(uint96).max);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.carryCollectedUsdc = carry;
+        effects.carryOutstandingUsdc = outstanding;
+        effects.bountyFromFreeUsdc = freeBounty;
+        effects.bountyFromPledgeUsdc = type(uint96).max - freeBounty;
+        effects.settlementAfterUsdc = (uint256(1) << 200) + cash;
+        effects.settlementBeforeUsdc = effects.settlementAfterUsdc + carry;
+        effects.freeSettlementAfterUsdc = cash;
+        book.recordCommitment(1, effects, 77, CfdTypes.Side.SHORT, request.sizeDelta);
+        OrderV2Types.PendingIntent memory pending = book.pendingIntent(1);
+        assertEq(keccak256(abi.encode(pending.commitment)), keccak256(abi.encode(effects)));
+        assertEq(pending.positionEpoch, terminal ? 77 : 0);
+        assertEq(pending.positionSize, terminal ? request.sizeDelta : 0);
+        assertEq(uint8(pending.positionSide), uint8(terminal ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG));
+    }
+
+    function test_CompactCommitmentRejectsInconsistentReconstruction() public {
+        OrderV2Types.OrderRequest memory request = _request(bytes32("invalid-commitment"));
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        effects.carryCollectedUsdc = 1;
+        vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
+        book.recordCommitment(1, effects, 0, CfdTypes.Side.LONG, 0);
+        effects.settlementBeforeUsdc = 1;
+        effects.bountyFromFreeUsdc -= 1;
+        vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
+        book.recordCommitment(1, effects, 0, CfdTypes.Side.LONG, 0);
     }
 
     function test_ConstructorBindsExplicitRouterAndDependencies() public view {

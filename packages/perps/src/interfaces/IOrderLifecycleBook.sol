@@ -9,6 +9,8 @@ import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 /// @notice Permanent idempotency records and authenticated terminal receipts for delayed orders.
 interface IOrderLifecycleBook {
 
+    error OrderLifecycleBook__InvalidCommitmentEffects();
+
     error OrderLifecycleBook__CommitmentBoundExceeded(
         OrderV2Types.ConstraintKind constraint, uint256 actual, uint256 limit
     );

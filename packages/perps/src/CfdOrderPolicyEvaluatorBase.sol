@@ -193,6 +193,18 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         address account,
         uint256 poolDepthUsdc
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
+        return _buildRawSnapshot(engine, planner, account, poolDepthUsdc, IHousePool(engine.pool()).totalAssets());
+    }
+
+    /// @dev Authoritative assessment already read canonical pool cash. Reuse that observation; simulation callers
+    ///      may supply a different pricing depth and must use the four-argument overload to read historical carry cash.
+    function _buildRawSnapshot(
+        ICfdOrderPolicyEngineView engine,
+        ICfdEnginePlanner planner,
+        address account,
+        uint256 poolDepthUsdc,
+        uint256 poolCashUsdc
+    ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
         (
             snapshot.position.size,
             snapshot.position.margin,
@@ -212,7 +224,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.lastMarkTime = engine.lastMarkTime();
         snapshot.riskParams = engine.riskParams();
 
-        snapshot.poolCashUsdc = IHousePool(engine.pool()).totalAssets();
+        snapshot.poolCashUsdc = poolCashUsdc;
         snapshot.longSide =
             _sideSnapshot(engine, planner, CfdTypes.Side.LONG, snapshot.poolCashUsdc, snapshot.riskParams.baseCarryBps);
         snapshot.shortSide = _sideSnapshot(

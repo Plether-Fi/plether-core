@@ -80,17 +80,27 @@ PR #99's reservation-aware preview, protected-bounty accounting, canonical recei
 
 New work adds pledge-funded commitment, released-pledge charge funding, strict residual health with retained collateral, explicit caller-paid terminal admission, position epochs and provenance-aware recovery, oracle-independent expiry, authoritative committed assessment, and V3/V4 consumer schemas. No fee/carry schedule, VPI economic formula, liquidation-reserve top-up policy, or terminal shortfall allocation is changed.
 
+## Storage and read optimization
+
+The internal lifecycle record packs account/mode/terminal identity together and the two bounty-source amounts into one slot. Bounty widths match the clearinghouse's existing uint96 limit; carry and custody amounts retain uint256, including values above uint128. Pre-commitment custody is reconstructed exactly as post-commitment custody plus collected carry. Commitment validates that identity before accepting the record. The public pending-intent and receipt tuples remain unchanged. Position epoch/side/size in the pending intent are populated only for CallerPaidFullExit; ordinary order identity remains in the router order, and pledge funding provenance remains in the clearinghouse reservation.
+
+Actual commitment loads only the relevant side and funding/health fields, while prospective previews retain the full execution snapshot. Both use the unchanged `CloseCommitmentLib` calculation. The pure planner's `planCloseCommit` returns only commitment effects; its unused projected-snapshot return was removed from this not-yet-deployed candidate ABI. Regenerate planner consumers with the release packet.
+
+Both carry-side checkpoints share one pool-cash read because index updates do not move pool cash. Committed assessment also reuses its canonical pool-depth observation for carry cash; non-authoritative simulations still fetch actual pool cash independently from caller-supplied pricing depth. Reservation authentication, bounds, terminal conservation, and post-settlement checks remain in place.
+
+The engine's fixed-shape sidecar call shares one buffer for its 100-byte input and 224-byte output. It checks the exact response length, bubbles revert bytes, and returns through Solidity so terminal/borrow synchronization and the reentrancy modifier's cleanup always run. Regression tests cover malformed return data, rollback, subsequent successful execution, full-width commitment round trips, and invalid reconstruction identities.
+
 ## Measured production costs
 
-Compiler: Solidity 0.8.35, optimizer 200, via IR, Prague; Forge 1.5.1-stable. Compared with checkout `8c555544` using the same `GasProfile` fixtures and compiler settings:
+Compiler: Solidity 0.8.35, optimizer 200, via IR, Prague; Forge 1.5.1-stable. Identical `GasProfile` operation fixtures compare original checkout `8c555544`, initial implementation `e9df1ed8`, and the optimized candidate:
 
-| Operation | Baseline gas | Candidate gas | Change |
-| --- | ---: | ---: | ---: |
-| Close commitment | 858,206 | 1,086,923 | +26.65% |
-| Full-close execution | 961,649 | 1,047,317 | +8.91% |
-| Partial-close execution | 1,156,801 | 1,251,822 | +8.21% |
-| Engine close preview | 146,185 | 148,113 | +1.32% |
+| Operation | Original checkout | Initial implementation | Optimized | Optimized vs original |
+| --- | ---: | ---: | ---: | ---: |
+| Close commitment | 858,206 | 1,086,923 | 980,673 | +14.27% |
+| Full-close execution | 961,649 | 1,047,317 | 1,045,621 | +8.73% |
+| Partial-close execution | 1,156,801 | 1,251,822 | 1,250,126 | +8.07% |
+| Engine close preview | 146,185 | 148,113 | 148,113 | +1.32% |
 
-These are measured operation gas, not the surrounding test's total gas. New authentication, provenance, commitment effects, and receipt fields have a measurable cost. Native execution and oracle costs remain caller-paid.
+Optimization saves **106,250 gas (9.78%) per commitment** versus the initial implementation. Full and partial executions each save **1,696 gas** (0.16% and 0.14%). This removes about 46% of the added commitment overhead; it does not eliminate the remaining cost of the new accounting and lifecycle guarantees. These are operation gas measurements from the same fixture conditions, not a quote for an Arbitrum transaction's combined execution/data fee.
 
-The engine runtime is 24,566 bytes (10 bytes below EIP-170); its settlement sidecar is 24,510 bytes (66 bytes below). The release router's constructor-inclusive initcode is 47,159 bytes; the settlement monitor's is 49,057 bytes (95 bytes below EIP-3860). Future source/compiler changes must repeat size gates. The release build packet records all contract template sizes; deployment simulation checks instantiated runtime sizes and these limiting constructor paths.
+Engine runtime is **24,430 bytes**, below both EIP-170 (24,576) and the existing repository budget (24,439); the budget was not relaxed. Its settlement sidecar is **23,596 bytes**, down 914 bytes. The release router's constructor-inclusive initcode is **47,159 bytes**; the settlement monitor's remains **49,057 bytes**, leaving 95 bytes below EIP-3860. Repeat compiler and size gates after every source change. The release packet records all contract template sizes, while deployment simulation checks instantiated runtime sizes and the limiting constructor paths.

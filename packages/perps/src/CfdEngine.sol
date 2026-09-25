@@ -588,22 +588,29 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         uint256 amountUsdc
     ) external onlyRouter nonReentrant returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
-        (bool success, bytes memory result) = address(settlementSidecar)
-            .call(
-                abi.encodeCall(
-                    ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty, (account, sizeDelta, amountUsdc)
-                )
-            );
-        if (!success) {
-            assembly ("memory-safe") { revert(add(result, 32), mload(result)) }
+        address target = address(settlementSidecar);
+        bytes4 selector = ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty.selector;
+        bytes4 invalidResult = ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector;
+        // Reuse one fixed buffer for the three-word call and seven-word response. Do not return from assembly:
+        // borrow/terminal synchronization and the nonReentrant epilogue must still run.
+        assembly ("memory-safe") {
+            effects := mload(0x40)
+            mstore(effects, selector)
+            mstore(add(effects, 4), account)
+            mstore(add(effects, 36), sizeDelta)
+            mstore(add(effects, 68), amountUsdc)
+            if iszero(call(gas(), target, 0, effects, 100, effects, 224)) {
+                returndatacopy(effects, 0, returndatasize())
+                revert(effects, returndatasize())
+            }
+            if iszero(eq(returndatasize(), 224)) {
+                mstore(effects, invalidResult)
+                revert(effects, 4)
+            }
+            mstore(0x40, add(effects, 224))
         }
         _syncPositionBorrowBase(account, _positions[account]);
         _endTerminalCurveMutation(account, expectedOldHash);
-        // All fields are uint256; alias the fixed tuple while still running the reentrancy modifier's epilogue.
-        if (result.length != 224) {
-            revert CfdEngine__InvalidRiskParams();
-        }
-        assembly ("memory-safe") { effects := add(result, 32) }
     }
 
     /// @notice Returns authenticated bounty funding without collecting carry or requiring an oracle update.
@@ -1064,22 +1071,17 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     function _advanceAllCarryIndexes(
         uint256 timestampNow
     ) internal {
-        _advanceSideCarryIndex(CfdTypes.Side.LONG, timestampNow);
-        _advanceSideCarryIndex(CfdTypes.Side.SHORT, timestampNow);
-    }
-
-    function _advanceSideCarryIndex(
-        CfdTypes.Side side,
-        uint256 timestampNow
-    ) internal {
-        uint256 index = _sideIndex(side);
-        uint64 previousTimestamp = sideCarryTimestamp[index];
-        if (timestampNow <= previousTimestamp) {
+        if (timestampNow <= sideCarryTimestamp[0] && timestampNow <= sideCarryTimestamp[1]) {
             return;
         }
+        // Neither side update moves pool cash; both indexes must use the same pool observation.
         uint256 poolAssetsUsdc = _poolAssetsForCarry();
-        sideCarryIndex[index] = _currentSideCarryIndex(side, timestampNow, poolAssetsUsdc);
-        sideCarryTimestamp[index] = uint64(timestampNow);
+        for (uint256 index; index < 2; ++index) {
+            if (timestampNow > sideCarryTimestamp[index]) {
+                sideCarryIndex[index] = _currentSideCarryIndex(CfdTypes.Side(index), timestampNow, poolAssetsUsdc);
+                sideCarryTimestamp[index] = uint64(timestampNow);
+            }
+        }
     }
 
     function _currentSideCarryIndex(

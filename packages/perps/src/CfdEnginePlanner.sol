@@ -20,13 +20,8 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         uint256 size,
         uint256 bounty
-    )
-        external
-        pure
-        returns (CfdEnginePlanTypes.CloseCommitment memory effects, CfdEnginePlanTypes.RawSnapshot memory afterCommit)
-    {
+    ) external pure returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         effects = CloseCommitmentLib.project(snapshot, size, bounty);
-        return (effects, snapshot);
     }
 
     /// @notice Classifies the recurring and governance-override market-calendar regimes.
