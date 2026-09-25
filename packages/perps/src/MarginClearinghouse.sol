@@ -815,8 +815,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
     /// @dev Negative-VPI backing and clearinghouse-attributed execution bounties remain protected in the shared action-reserve
     ///      bucket. The caller supplies the exact planned reserve and committed-margin split so a state mismatch
-    ///      reverts. Committed order margin is consumed in clearinghouse FIFO order. PnL pledge and liquidation
-    ///      reserve are never reachable, and any charge above eligible value is waived.
+    ///      reverts. Committed order margin is consumed in clearinghouse FIFO order. Locked PnL pledge and liquidation
+    ///      reserve are never reachable here. Full-close settlement releases their post-carry, post-price-loss surplus
+    ///      into free settlement before this call; any charge above eligible value is waived.
     function consumeActionCharge(
         address account,
         uint256 chargeUsdc,

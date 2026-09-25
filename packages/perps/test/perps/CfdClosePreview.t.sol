@@ -103,16 +103,16 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         _lifecycle(CfdTypes.Side.SHORT, SIZE / 2, PRICE, true);
     }
 
-    function test_ExactFundingChangesCollectedCharges() public {
+    function test_ExactFundingPreservesBountyWhileReleasedReservePaysCharges() public {
         _openNormally(CfdTypes.Side.SHORT, 200_000);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
         OrderV2Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
             address(engine), o, KEEPER, 95_000_000, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
         );
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(o, 95_000_000, KEEPER);
-        assertEq(unreserved.actionChargeCollectedUsdc, 200_000);
-        assertEq(p.assessment.actionChargeCollectedUsdc, 0);
-        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc + 200_000);
+        assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, 95_000_000));
+        assertEq(p.assessment.actionChargeCollectedUsdc, unreserved.actionChargeCollectedUsdc);
+        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc);
     }
 
     function test_OneAtomicUnitShortMatchesCommitFundingError() public {
@@ -340,10 +340,10 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         OrderV2Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
             address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
         );
-        assertEq(unreserved.actionChargeCollectedUsdc, 200_000);
+        assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, adversePrice));
         (uint64 closeId, CfdClosePreview.ClosePreview memory p) = _commitParity(o, adversePrice, KEEPER);
-        assertEq(p.assessment.actionChargeCollectedUsdc, 0);
-        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc + 200_000);
+        assertEq(p.assessment.actionChargeCollectedUsdc, unreserved.actionChargeCollectedUsdc);
+        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc);
 
         bytes[] memory closeUpdate = _mockPythUpdateData(adversePrice);
         vm.prank(KEEPER);

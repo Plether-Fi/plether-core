@@ -576,6 +576,14 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             }
         }
 
+        if (delta.deletePosition) {
+            // Carry and price losses have first priority. A terminal position's remaining collateral is now
+            // free settlement, eligible for action charges before committed-order margin is consumed.
+            // Both clearinghouse release operations are no-ops for zero amounts.
+            clearinghouse.unlockPositionMargin(delta.account, delta.unlockMarginUsdc);
+            clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseUsdc);
+        }
+
         uint256 protocolFeeCreditedUsdc = _settleCloseActionCharge(host, clearinghouse, delta);
 
         uint256 cashArrivedRevenueUsdc =
@@ -592,7 +600,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         uint256 feeWithheldUsdc = delta.executionFeeUsdc - protocolFeeCreditedUsdc;
         _recordRetainedCloseRevenue(host, delta.actionChargeWithheldUsdc - feeWithheldUsdc);
 
-        if (delta.unlockMarginUsdc > 0) {
+        if (!delta.deletePosition && delta.unlockMarginUsdc > 0) {
             // Keep the collectible pledge required by the remaining terminal curve locked; only its excess is free.
             clearinghouse.unlockPositionMargin(delta.account, delta.unlockMarginUsdc);
         }
@@ -629,7 +637,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 })
             );
         }
-        if (delta.liquidationReserveReleaseUsdc > 0) {
+        if (!delta.deletePosition && delta.liquidationReserveReleaseUsdc > 0) {
             clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseUsdc);
         }
 

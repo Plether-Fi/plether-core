@@ -390,9 +390,13 @@ contract MarginFirstCarryTest is BasePerpTest {
             );
             assertEq(delta.pricePnlClaimConsumedUsdc, 0);
             assertEq(delta.existingTraderClaimRemainingUsdc, 987e6);
-            assertEq(delta.actionChargeWaivedUsdc, i == 0 ? 123e6 : i == 1 ? 23e6 : 0);
+            uint256 afterWithholding = i == 0 ? 123e6 : i == 1 ? 23e6 : 0;
+            uint256 fromReleasedReserve =
+                afterWithholding < snap.liquidationReserveUsdc ? afterWithholding : snap.liquidationReserveUsdc;
+            assertEq(delta.actionChargeCollectedUsdc, fromReleasedReserve);
+            assertEq(delta.actionChargeWaivedUsdc, afterWithholding - fromReleasedReserve);
         }
-        // Liquidation shares the same allocation and terminal waiver, preserving the dedicated bounty reserve.
+        // Liquidation retains its separate charge allocation and cannot release its bounty reserve to pay carry.
         CfdEnginePlanTypes.LiquidationDelta memory liquidation =
             engine.planner().planLiquidation(snap, 1e8, uint64(block.timestamp));
         assertTrue(liquidation.liquidatable);
