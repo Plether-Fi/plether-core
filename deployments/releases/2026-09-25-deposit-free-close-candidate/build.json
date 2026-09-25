@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "7fa1fdd1f6f72a60032907243dd0d65d3d985ef8",
+  "sourceCommit": "c089e646d9eaa5418e83c654828e5b31618566fc",
   "submodules": [
     "f5495c9b993bfc6e79dd52adfdcb7dac0a1da918 lib/forge-std (v1.15.0-7-gf5495c9)",
     " 55d2d99304fb3fb930c688462ae2ccabb1d533ad lib/morpho-blue (v1.0.0)",
@@ -191,8 +191,8 @@
     "CfdEngineSettlementSidecar": {
       "artifact": "out/CfdEngineSettlementSidecar.sol/CfdEngineSettlementSidecar.json",
       "abiSha256": "7356b43f4595930f2fab027c0be27b94f15965828ab0878d39a20eff3df9bcc7",
-      "runtimeBytes": 23596,
-      "creationCodeBytes": 23775,
+      "runtimeBytes": 23436,
+      "creationCodeBytes": 23615,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -506,8 +506,8 @@
     "CfdOrderPolicyEvaluator": {
       "artifact": "out/CfdOrderPolicyEvaluator.sol/CfdOrderPolicyEvaluator.json",
       "abiSha256": "c2e80270e79bb7b2fa937f823d8f7cc083aac4f7591f3d6fb94012ca17ebad45",
-      "runtimeBytes": 20024,
-      "creationCodeBytes": 20050,
+      "runtimeBytes": 19822,
+      "creationCodeBytes": 19848,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -541,8 +541,8 @@
     "CfdClosePreview": {
       "artifact": "out/CfdClosePreview.sol/CfdClosePreview.json",
       "abiSha256": "c6fd9f560f87a8cfe46642a1aa03e1ab7e43b3f81be25c3d9c09f934a2f612bd",
-      "runtimeBytes": 22662,
-      "creationCodeBytes": 22688,
+      "runtimeBytes": 22470,
+      "creationCodeBytes": 22496,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -576,8 +576,8 @@
     "OrderRouterV2ExecutionSidecar": {
       "artifact": "out/OrderRouterV2ExecutionSidecar.sol/OrderRouterV2ExecutionSidecar.json",
       "abiSha256": "91b2220039aa08a52d06c7dae7314e20cbdfd4caf05c414b983939f2b7bb6ea7",
-      "runtimeBytes": 23680,
-      "creationCodeBytes": 31357,
+      "runtimeBytes": 23727,
+      "creationCodeBytes": 31404,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },
@@ -716,8 +716,8 @@
     "OrderLifecycleBook": {
       "artifact": "out/OrderLifecycleBook.sol/OrderLifecycleBook.json",
       "abiSha256": "f822988d07da191451bdfb2f515ee79e4fa2647c545ddef583d3dfe4928c0acc",
-      "runtimeBytes": 14784,
-      "creationCodeBytes": 15181,
+      "runtimeBytes": 14840,
+      "creationCodeBytes": 15237,
       "compiler": {
         "version": "0.8.35+commit.47b9dedd"
       },

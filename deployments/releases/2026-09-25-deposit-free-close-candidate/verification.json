@@ -1,29 +1,44 @@
 {
-  "sourceCommit": "7fa1fdd1f6f72a60032907243dd0d65d3d985ef8",
+  "sourceCommit": "c089e646d9eaa5418e83c654828e5b31618566fc",
   "status": "candidate; activation blocked pending archive evidence, review and external consumer rollout",
   "checks": [
     {
       "check": "broad_fast_suite",
-      "summary": "Ran 237 test suites in 778.17s (2406.93s CPU time): 1802 tests passed, 0 failed, 3 skipped (1805 total tests)",
-      "logSha256": "37d2ae7f0adf7f3d65faa2d95a99c0f16402d48b863a44a59689e0de3fb65abe"
+      "summary": "Ran 238 test suites in 706.01s (1890.51s CPU time): 1814 tests passed, 0 failed, 3 skipped (1817 total tests)",
+      "logSha256": "885cccc6ddf889b5fdc9934a594486d92e8f814c4b62c760542c23a2bcc8b0f9"
     },
     {
       "check": "production_acceptance_and_gas",
-      "summary": "Ran 6 test suites in 2.37s (5.85s CPU time): 146 tests passed, 0 failed, 0 skipped (146 total tests)",
-      "logSha256": "a73949052eea6de0fa1f872ca9641d2eb7f8a3f219624a392d23268bca559678"
+      "summary": "Ran 8 test suites in 3.47s (8.77s CPU time): 173 tests passed, 0 failed, 0 skipped (173 total tests)",
+      "logSha256": "0f3e6fcaf95eda9639b4014eb71deeb489f79fd6ff09611b504bf74f67ab2853"
     },
     {
-      "check": "final_assessment_regressions",
-      "summary": "Ran 4 test suites in 2.15s (4.40s CPU time): 100 tests passed, 0 failed, 0 skipped (100 total tests)",
-      "logSha256": "c39cc1ce7e1e6c86ca65ce9ec704d151e4d74c6fdda7dc3f6c960a88f503d721"
+      "check": "router_configuration_and_rollback_regressions",
+      "summary": "Ran 4 test suites in 173.72ms (46.10ms CPU time): 27 tests passed, 0 failed, 0 skipped (27 total tests)",
+      "logSha256": "943e67cb32ab22a7727ac856885912b3b713d55116602827f8c104322fffc273"
+    },
+    {
+      "check": "collateral_snapshot_parity_and_assessment",
+      "summary": "Ran 5 test suites in 1.84s (5.49s CPU time): 107 tests passed, 0 failed, 0 skipped (107 total tests)",
+      "logSha256": "9c038b0ff88fc03b35fcba471f99acf241749d075e6742cb7b73fbb65c94c33b"
+    },
+    {
+      "check": "packed_lifecycle_regressions",
+      "summary": "Ran 2 test suites in 164.57ms (57.33ms CPU time): 34 tests passed, 0 failed, 0 skipped (34 total tests)",
+      "logSha256": "c8c82ad4fac14684d43e008d4ef25294b29f4cff73aef4b5876322c9587bf6c3"
     },
     {
       "check": "production_deployment_and_size_simulation",
-      "summary": "Ran 1 test suite in 204.69ms (16.69ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)",
-      "logSha256": "695898adbbf4232ac5454d58e70fe5c7fd0520f00b045b2a3305d4cf7916d09f"
+      "summary": "Ran 1 test suite in 194.98ms (16.00ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)",
+      "logSha256": "b6184d34047c37e2bbb1798c9ddae9afedad97c73ca971ca3f37a8ce16c48db9"
+    },
+    {
+      "check": "production_release_export",
+      "summary": "83 ABIs exported; production compiler and size gates passed; every ABI unchanged from first-pass packet.",
+      "logSha256": "6fc8364bd9a83473f99f46e50ce46a4ecf8bca3731e63f51d69703b060c24c8f"
     }
   ],
-  "explanation": "Counts overlap and must not be summed. Production tests use unchanged solc 0.8.35, via IR, optimizer 200 and Prague settings. The broad run includes the compact storage, minimal commitment snapshot, fixed call buffer and carry-loop changes; the final canonical pool-cash read reuse is covered by the 100 targeted assessment tests and 146 production tests. Deployment simulation predates only that internal view-read reuse; the final full production build and exported sizes passed.",
+  "explanation": "Counts overlap and must not be summed. Focused production tests, direct production-request benchmarks, deployment simulation, and the broad fast suite cover the combined storage and read optimizations. Production compiler settings and invariant/fuzz depths remain unchanged. Three historical archive-dependent tests remain skipped because no accessible archive RPC was available.",
   "sdk": {
     "typecheck": "passed",
     "testsPassed": 31,
@@ -54,7 +69,10 @@
     },
     "runtimeBytes": {
       "CfdEngine": 24430,
-      "CfdEngineSettlementSidecar": 23596
+      "CfdEngineSettlementSidecar": 23436,
+      "CfdOrderPolicyEvaluator": 19822,
+      "OrderLifecycleBook": 14840,
+      "OrderRouterV2ExecutionSidecar": 23727
     },
     "repositoryEngineRuntimeBudgetBytes": 24439
   },
@@ -62,32 +80,178 @@
     "measurement": "Operation gas from identical production GasProfile fixtures; not total Arbitrum transaction fees.",
     "originalCommit": "8c555544",
     "initialImplementationCommit": "e9df1ed80025d65b9f33e82b871e4fe0bcdfbcc5",
-    "optimizedCommit": "7fa1fdd1f6f72a60032907243dd0d65d3d985ef8",
+    "optimizedCommit": "c089e646d9eaa5418e83c654828e5b31618566fc",
     "operations": {
       "closeCommit": {
         "original": 858206,
         "initialImplementation": 1086923,
-        "optimized": 980673
+        "optimized": 951586,
+        "firstOptimization": 980673
       },
       "fullCloseExecution": {
         "original": 961649,
         "initialImplementation": 1047317,
-        "optimized": 1045621
+        "optimized": 986901,
+        "firstOptimization": 1045621
       },
       "partialCloseExecution": {
         "original": 1156801,
         "initialImplementation": 1251822,
-        "optimized": 1250126
+        "optimized": 1191406,
+        "firstOptimization": 1250126
       },
       "enginePreview": {
         "original": 146185,
         "initialImplementation": 148113,
-        "optimized": 148113
+        "optimized": 148113,
+        "firstOptimization": 148113
       }
-    }
+    },
+    "firstOptimizationCommit": "7fa1fdd1f6f72a60032907243dd0d65d3d985ef8"
   },
   "ci": {
-    "status": "in progress at optimization evidence preparation; not claimed green",
-    "outstanding": "Aggregate Slither check reports findings requiring triage; individual Slither (perps) job passes."
+    "sourceCommit": "c089e646d9eaa5418e83c654828e5b31618566fc",
+    "status": "production build and SDK CI passed; perps package/coverage pending at preparation",
+    "outstanding": "Aggregate Slither check failed with findings requiring triage; individual Slither (perps) job passed. Archive replay and external consumer rollout remain activation gates.",
+    "workflowUrl": "https://github.com/Plether-Fi/plether-core/actions/runs/36174454519"
+  },
+  "directAndComparisonGasEvidence": {
+    "baselineSourceCommit": "c66074198d264597b9ed287b2fbb2387094068f5",
+    "baselineSourceArchive": "/private/tmp/plether-close-opt2-baseline-c6607419",
+    "fixture": "packages/perps/test/perps/DirectCloseGas.t.sol",
+    "fixtureSha256": "5fd7b7eb421b0cec919856aa8f75be25fcd1fe1af641124f9b50b43d3a043c20",
+    "compiler": {
+      "version": "0.8.35+commit.47b9dedd"
+    },
+    "compilerSettings": {
+      "viaIR": true,
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "evmVersion": "prague"
+    },
+    "baselineLog": {
+      "path": "/private/tmp/close-opt2-baseline-production-gas.log",
+      "sha256": "f92018598d4f3cc2a937e5e73c009f2bbb2db65ed3a431ba0f91e2f02ba3efb1"
+    },
+    "candidateLog": {
+      "path": "/private/tmp/close-opt2-candidate-production-gas.log",
+      "sha256": "15f1cf1fcb57f27ca9f89e9bf37fee61ecd70f41fd778673f3e41feea1742dda"
+    },
+    "verification": {
+      "baseline": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      },
+      "candidate": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "gas": {
+      "direct_commit_caller_paid_full_zero_free": {
+        "before": 1276767,
+        "after": 1247367,
+        "savedGas": 29400,
+        "savedPercent": 2.3027
+      },
+      "direct_commit_standard_full_zero_free": {
+        "before": 1438107,
+        "after": 1409016,
+        "savedGas": 29091,
+        "savedPercent": 2.0229
+      },
+      "direct_commit_standard_partial_zero_free": {
+        "before": 1459443,
+        "after": 1430352,
+        "savedGas": 29091,
+        "savedPercent": 1.9933
+      },
+      "direct_execute_standard_partial_zero_free": {
+        "before": 1527599,
+        "after": 1464115,
+        "savedGas": 63484,
+        "savedPercent": 4.1558
+      },
+      "direct_execute_standard_full_zero_free": {
+        "before": 1479917,
+        "after": 1416433,
+        "savedGas": 63484,
+        "savedPercent": 4.2897
+      },
+      "02_commitOrder_close": {
+        "before": 980673,
+        "after": 951586,
+        "savedGas": 29087,
+        "savedPercent": 2.966
+      },
+      "05_executeOrder_close_full": {
+        "before": 1045621,
+        "after": 986901,
+        "savedGas": 58720,
+        "savedPercent": 5.6158
+      },
+      "06_executeOrder_close_partial": {
+        "before": 1250126,
+        "after": 1191406,
+        "savedGas": 58720,
+        "savedPercent": 4.6971
+      },
+      "direct_execute_caller_paid_full_zero_free": {
+        "before": 1430149,
+        "after": 1386566,
+        "savedGas": 43583,
+        "savedPercent": 3.0474
+      }
+    },
+    "measurementNotes": [
+      "Direct fixtures deploy production OrderRouter. Request construction, config hash read, oracle-data creation, and vm.prank are outside the measured gasleft interval.",
+      "Fixture opening and zero-free withdrawal use public lifecycle calls in setUp. Execute fixtures also commit the close during setUp.",
+      "All protocol contract accounts and storage slots are cooled immediately before each measured call.",
+      "Gasleft deltas are gross EVM call consumption, before transaction refunds; they exclude intrinsic transaction gas, data publication charges, and real oracle service/update fees.",
+      "Direct scenarios use one LONG position: size 10000e18, 250e6 requested margin, flat 1e8 execution price, 500 bps base carry, 0.0005e18 VPI factor, a 30 second interval before close commitment, and configured 0.2 USDC standard close bounty.",
+      "Existing GasProfile numbers are a distinct warm fixture with a Legacy test adapter; only compare within the same named fixture, not against direct cold call absolute gas."
+    ],
+    "commands": {
+      "baseline": "FOUNDRY_TEST=.gas-bench-tests FOUNDRY_OUT=out-gas-prod FOUNDRY_CACHE_PATH=cache-gas-prod FOUNDRY_VIA_IR=true FOUNDRY_EVM_VERSION=prague forge test --root /private/tmp/plether-close-opt2-baseline-c6607419/packages/perps --skip script --match-test 'test_Gas_DirectClose|test_gas_02_commitOrder_close|test_gas_05_executeOrder_close_full|test_gas_06_executeOrder_close_partial' -vv",
+      "candidate": "FOUNDRY_TEST=.gas-bench-tests FOUNDRY_OUT=/private/tmp/close-opt2-candidate-out FOUNDRY_CACHE_PATH=/private/tmp/close-opt2-candidate-cache FOUNDRY_VIA_IR=true FOUNDRY_EVM_VERSION=prague forge test --root packages/perps --skip script --match-test 'test_Gas_DirectClose|test_gas_02_commitOrder_close|test_gas_05_executeOrder_close_full|test_gas_06_executeOrder_close_partial' -vv"
+    },
+    "candidateSourceCommit": "c089e646d9eaa5418e83c654828e5b31618566fc"
+  },
+  "storageLayout": {
+    "compiler": "0.8.35+commit.47b9dedd",
+    "bounds": {
+      "beforeBytes": 352,
+      "afterBytes": 320,
+      "beforeSlots": 11,
+      "afterSlots": 10
+    },
+    "outcome": {
+      "beforeBytes": 416,
+      "afterBytes": 352,
+      "beforeSlots": 13,
+      "afterSlots": 11
+    },
+    "pendingEntitlement": {
+      "slotOffset": 3,
+      "byteOffset": 0
+    },
+    "publicAbi": "unchanged; compiler ABI arrays compared exactly",
+    "numericDomains": "unchanged; no additional narrowing",
+    "beforeLayoutSha256": "9eaf874d4cabcc55fb46a55b87a1bcf5b51cd4b1fa1b573d2d60f4d5296fde8e",
+    "afterLayoutSha256": "c8153b81b7b9f451484286b93b81db6d31892dffc90f3dd2367224cbf6e7396b"
+  },
+  "singlePlanExecution": {
+    "status": "evaluated, not implemented",
+    "decision": "Separate Engine-owned committed-close refactor; retain independent post-state/source checks, public assessment authentication, exact failure phases and runtime budget. See packages/perps/DEPOSIT_FREE_CLOSE.md."
+  },
+  "abiExport": {
+    "count": 83,
+    "unchangedFromFirstPass": true,
+    "allSha256Verified": true,
+    "sourceCommit": "c089e646d9eaa5418e83c654828e5b31618566fc"
   }
 }
