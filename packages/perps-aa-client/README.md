@@ -145,13 +145,9 @@ const summary = await publicClient.readContract({
 });
 // None/Pending has no terminal history. Wait for finality before caching.
 if (summary.status === 2 || summary.status === 3) {
-  const logs = await publicClient.getLogs({
-    address: book,
-    fromBlock: summary.terminalBlock,
-    toBlock: summary.terminalBlock,
-  });
-  // Select the OrderFinalized log for orderId (or retrieve it from an indexer).
-  // The helper rejects unrelated logs, wrong indexed identity and modified data.
+  // Fetch by chain + Book + order ID from your receipt index, or select the
+  // event from the known execution transaction receipt. The helper checks it.
+  const matchingFinalizedLog = await history.getFinalizedLog({ chainId, book, orderId });
   const verified = decodeVerifiedOrderFinalized({
     chainId: BigInt(chainId), book, router, summary, log: matchingFinalizedLog,
   });
@@ -159,7 +155,7 @@ if (summary.status === 2 || summary.status === 3) {
 }
 ```
 
-`matchingFinalizedLog` includes its emitter address, data, and nonempty topics.
+`history.getFinalizedLog` represents the application's event retrieval layer; it is not an SDK method. `matchingFinalizedLog` includes its emitter address, data, and nonempty topics.
 The helper authenticates the event, clocks and full receipt against the summary;
 `hashOrderReceiptV4` exposes the same digest separately. Solidity consumers can
 call `verifyReceipt(receipt, terminalTime)` on the Book. The V4 receipt and V3
@@ -172,3 +168,12 @@ reads now require a supplied full receipt. The archived `orderLifecycleV4Abi`
 export and old-stack action/assistance bindings remain available; choose ABI by
 deployment, and migrate external app/keeper reads before new-stack activation.
 Commitment history remains stored and does not require an event join.
+
+On Arbitrum, the authenticated `terminalBlock` retains Solidity `block.number`
+semantics (an approximate ancestor-chain block); it is **not** the RPC/L2 log
+block number. Never use it directly as an `eth_getLogs` block range. Use the
+execution transaction receipt, an index keyed by chain/Book/order ID, or paginated
+RPC log queries over the known L2 deployment-to-head range. Keep transport
+`blockNumber`/`blockHash` separately for indexing and reorg handling; hash the
+event's authenticated `terminalBlock` as emitted. See [Arbitrum block-number
+documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time).

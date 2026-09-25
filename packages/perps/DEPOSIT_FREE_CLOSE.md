@@ -139,11 +139,30 @@ Engine runtime is **24,430 bytes**, below both EIP-170 (24,576) and the existing
 
 The new candidate stores only account, terminal block, lifecycle status, terminal reason and receipt hash: **two slots instead of eleven**. Complete terminal receipt data remains in the unchanged `OrderFinalized` event. Finalization validates the same identity, bounds, entitlement, commitment and receipt semantics before persisting the summary and deleting pending state. Client-ID replay records remain permanent. No settlement, funding, protection or recovery policy is relaxed.
 
-This is an intentional new-stack read-API change. `outcome(uint64)` is removed, so stale calls fail rather than returning fabricated zero details. Consumers use `terminalOutcome(uint64)` and fetch the Book's event at `terminalBlock`. The Book's `verifyReceipt(receipt, terminalTime)` hashes a supplied receipt using its stored block and its chain/Book/Router domain; it cannot retrieve missing event data. Validate the indexed order/account/client ID and event hash as well. Do not present an unavailable event as zero economics.
+This is an intentional new-stack read-API change. `outcome(uint64)` is removed, so stale calls fail rather than returning fabricated zero details. Consumers use `terminalOutcome(uint64)` and fetch the Book's event by chain/Book/order identity or known execution transaction. On Arbitrum, `terminalBlock` retains Solidity's ancestor-chain `block.number` semantics and must not be used as the L2 RPC log block; see [Arbitrum documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time). Record RPC block/hash separately for retrieval and reorg handling. The Book's `verifyReceipt(receipt, terminalTime)` hashes a supplied receipt using its stored block and its chain/Book/Router domain; it cannot retrieve missing event data. Validate the indexed order/account/client ID and event hash as well. Do not present an unavailable event as zero economics.
 
 SDK version 0.2.0 exports `orderLifecycleV5Abi`, `hashOrderReceiptV4`, and `decodeVerifiedOrderFinalized`. The helper checks the emitter, indexed identity, summary fields and exact domain hash before returning full event history. Its summary must come from the trusted Book on the intended chain; apply finality/reorg policy before caching. Existing `orderLifecycleV4Abi` is archived unchanged for older candidates, and other historical bindings remain intact. Intent V3, receipt V4 and configuration V4 domains and full event tuples are unchanged. V5 names the read API, not a new receipt hash domain.
 
 The external app/keeper must migrate historical detail reads before new-stack activation. Index by chain, Book and order ID, retain full receipts and terminal times, and refetch on reorg. A smart contract that needs detailed history must receive the receipt and call `verifyReceipt`; it can no longer read those details by order ID alone. See the SDK README for the retrieval example. Existing position and old-stack servicing remain outside this migration.
+
+### Measured terminal-record savings
+
+Identical production fixtures at pre-simplification `23c19dfd` and source `f7e8714c`:
+
+| Direct zero-free-USDC operation | Before | Two-slot terminal records | Change |
+| --- | ---: | ---: | ---: |
+| Standard full commitment | 1,409,016 | 1,409,281 | +265 (+0.019%) |
+| Standard partial commitment | 1,430,352 | 1,430,617 | +265 (+0.019%) |
+| Caller-paid full commitment | 1,247,367 | 1,247,632 | +265 (+0.021%) |
+| Standard full execution | 1,416,433 | 1,235,575 | −180,858 (−12.77%) |
+| Standard partial execution | 1,464,115 | 1,283,257 | −180,858 (−12.35%) |
+| Caller-paid full execution | 1,386,566 | 1,225,608 | −160,958 (−11.61%) |
+
+Commitment cost is effectively unchanged. Savings occur when an order terminates and fewer permanent slots are written. Caller-paid executions had fewer nonzero legacy outcome fields, so their savings differ. These are gross call-level EVM measurements before refunds, with the same exclusions and cold-state fixtures described above, not complete Arbitrum fee quotes.
+
+The separate legacy-adapter operation fixtures now measure commitment **951,851**, full execution **806,043**, and partial execution **1,010,548**. Relative to the preceding pass this saves 18.33% on full and 15.18% on partial execution. Relative to original pre-feature `8c555544`, execution is 16.18%/12.64% lower, while commitment remains 10.91% higher. Compare within each fixture family.
+
+Compiler storage layout confirms `TerminalOutcome` is 64 bytes: account/block/status/reason at byte offsets 0/20/28/29 in slot 0, hash in slot 1. Engine runtime remains 24,430 bytes and settlement sidecar 23,436; the lifecycle Book is 14,723 bytes, 117 smaller. Full release-export and local deployment gates continue to enforce the original limits.
 
 ## Evaluation: commitment-history events (not implemented)
 

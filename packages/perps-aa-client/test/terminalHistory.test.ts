@@ -42,7 +42,9 @@ describe("authenticated terminal history", () => {
     expect(receiptHash).toBe("0xca7de82d4a264ebae62485a3db72e94cff8d7ca629914cfa5fd9df75c3c4d07b");
   });
   it("returns complete receipt history after verification", () => {
-    expect(decodeVerifiedOrderFinalized(input).receipt).toEqual(receipt);
+    // RPC/L2 log position can differ from the Solidity/ancestor-chain receipt clock.
+    const rpcLog = { ...input.log, blockNumber: 900_000n };
+    expect(decodeVerifiedOrderFinalized({ ...input, log: rpcLog }).receipt).toEqual(receipt);
   });
   it("rejects altered economics, commitment, bounty and indexed identity", () => {
     for (const changed of [

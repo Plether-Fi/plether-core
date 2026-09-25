@@ -393,7 +393,7 @@ For an externally submitted bounded order, use both on-chain state and the canon
 1. Resolve `(account, clientOrderId)` with `clientIntent` and compare the stored intent hash with
    `hashOrderRequest(account, request)`.
 2. While pending, compare `pendingIntent` and `pendingPolicy` with the instruction approved by the account layer.
-3. On terminal status, read `terminalOutcome(orderId)` from the Book. Its terminal block locates the receipt log; executor, price, bounty and failure details are event history.
+3. On terminal status, read `terminalOutcome(orderId)` from the Book. Its terminal block is the Solidity receipt clock, not an RPC log locator on Arbitrum; executor, price, bounty and failure details are event history.
 4. Fetch the corresponding `OrderFinalized` event using the Book address and indexed order/account/client-id fields.
 5. Recompute
    `keccak256(abi.encode(RECEIPT_TYPEHASH, chainId, book, router, terminalBlock, terminalTime, receipt))` and compare it
