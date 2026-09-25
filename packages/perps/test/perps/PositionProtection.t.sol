@@ -81,6 +81,13 @@ contract PositionProtectionTest is BasePerpTest {
         _refreshMark(MARK_PRICE);
     }
 
+    function test_ZeroBountyProtectionExpiryAndRetryUsesExplicitReservation() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.closeOrderExecutionBountyUsdc = 0;
+        _setRouterConfig(config);
+        test_RetryPositionProtectionClose_ReusesSnapshotAfterBountyConfigChangeWithoutFreshFunds();
+    }
+
     function test_Constructor_RejectsZeroRouterOrEngine() public {
         vm.expectRevert(PositionProtectionBook.PositionProtectionBook__ZeroAddress.selector);
         new PositionProtectionBook(address(0), address(engine));

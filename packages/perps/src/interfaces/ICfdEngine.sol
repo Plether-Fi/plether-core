@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -15,6 +17,10 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 ///      Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals,
 ///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngine is ICfdEngineTypes {
+
+    function positionEpoch(
+        address account
+    ) external view returns (uint64);
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     /// @return Clearinghouse contract address
@@ -61,7 +67,7 @@ interface ICfdEngine is ICfdEngineTypes {
         address account,
         uint256 sizeDelta,
         uint256 amountUsdc
-    ) external;
+    ) external returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Moves forfeited reserved execution-bounty reservation into the protocol treasury account.
     /// @dev Callable only by the router. Reclassifies clearinghouse balances without moving ERC20 tokens; zero is a

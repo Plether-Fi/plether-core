@@ -418,7 +418,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         uint256 keeperBefore = _settlementBalance(KEEPER);
         vm.mockCallRevert(
             address(policyEvaluator),
-            abi.encodeWithSelector(policyEvaluator.assessOrder.selector),
+            abi.encodeWithSelector(policyEvaluator.assessCommittedOrder.selector),
             abi.encodeWithSelector(
                 ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking.selector, 0, 200_000
             )

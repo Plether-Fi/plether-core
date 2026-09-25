@@ -1,11 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 
 /// @title Immutable V2 order lifecycle book
 /// @notice Permanent idempotency records and authenticated terminal receipts for delayed orders.
 interface IOrderLifecycleBook {
+
+    error OrderLifecycleBook__CommitmentBoundExceeded(
+        OrderV2Types.ConstraintKind constraint, uint256 actual, uint256 limit
+    );
+
+    function pendingTerminalExitId(
+        address account
+    ) external view returns (uint64);
+    function recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        uint64 epoch,
+        CfdTypes.Side side,
+        uint256 size
+    ) external;
 
     /// @notice A mutation was attempted by an address other than the immutable Router.
     error OrderLifecycleBook__Unauthorized();

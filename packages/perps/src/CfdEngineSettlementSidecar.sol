@@ -148,7 +148,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function buildRawSnapshot(
         address account,
         uint256 poolDepthUsdc
-    ) external view onlyEngine returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
+    ) public view onlyEngine returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
         (
@@ -297,79 +297,23 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         address account,
         uint256 sizeDelta,
         uint256 amountUsdc
-    ) external onlyEngine {
+    ) external onlyEngine returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
-        if (amountUsdc == 0) {
-            return;
-        }
-
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
-        CfdTypes.Position memory pos = _loadPosition(engine, account);
-        if (pos.size == 0) {
-            revert ICfdEngineTypes.CfdEngine__NoOpenPosition();
-        }
-        if (sizeDelta == 0) {
-            revert ICfdEngineTypes.CfdEngine__ZeroAmount();
-        }
-        if (sizeDelta > pos.size) {
-            revert ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition();
-        }
-        if (sizeDelta % CfdTypes.SIZE_QUANTUM != 0) {
-            revert ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum();
-        }
-
-        (bool priceFresh, uint256 price) = _liveMark(engine, host);
-        if (price == 0) {
-            revert ICfdEngineTypes.CfdEngine__MarkPriceStale();
-        }
-        OracleFreshnessPolicyLib.Policy memory closePolicy =
-            _markPolicy(engine, host, OracleFreshnessPolicyLib.Mode.CloseCommitFallback);
-        if (closePolicy.requireStoredMark && engine.lastMarkTime() == 0) {
-            revert ICfdEngineTypes.CfdEngine__MarkPriceStale();
-        }
-
+        CfdEnginePlanTypes.RawSnapshot memory snap = buildRawSnapshot(account, IHousePool(host.pool()).totalAssets());
+        (effects,) = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta, amountUsdc);
         host.settlementRealizeCarry(account);
-        pos = _loadPosition(engine, account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        uint256 positionMarginUsdc = clearinghouse.pnlPledgeUsdc(account);
-        uint256 freeSettlementUsdc = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
-        if (freeSettlementUsdc < amountUsdc) {
-            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking(
-                amountUsdc, freeSettlementUsdc, engine.unsettledCarryUsdc(account)
-            );
-        }
-
-        if (sizeDelta != pos.size) {
-            pos.margin = positionMarginUsdc;
-            _requirePartialCloseBountyHealthy(engine, account, pos, price);
-        }
-
-        if (priceFresh) {
-            clearinghouse.reserveCloseExecutionBountyFromSettlement(account, amountUsdc);
-        } else {
-            clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(account, amountUsdc);
-        }
-    }
-
-    function _requirePartialCloseBountyHealthy(
-        ICfdEngineAccountActionView engine,
-        address account,
-        CfdTypes.Position memory pos,
-        uint256 price
-    ) private view {
-        CfdTypes.RiskParams memory params = _loadRiskParams(engine);
-        uint256 requiredBps = engine.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
-        bool liquidatable = ICfdEnginePlanner(engine.planner())
-            .isExactPriceRiskLiquidatable(
-                pos,
-                engine.positionEntryCostUsdcAtoms(account),
-                price,
-                engine.CAP_PRICE(),
-                pos.margin + engine.traderClaimBalanceUsdc(account),
-                requiredBps
-            );
-        if (liquidatable) {
-            revert ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy();
+        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(account);
+        clearinghouse.reserveCloseBounty(account, effects.bountyFromFreeUsdc, effects.bountyFromPledgeUsdc);
+        host.settlementSyncTotalSideMargin(
+            snap.position.side, marginBefore, marginBefore - effects.bountyFromPledgeUsdc
+        );
+        if (
+            clearinghouse.getAccountUsdcBuckets(account).settlementBalanceUsdc != effects.settlementAfterUsdc
+                || clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc != effects.freeSettlementAfterUsdc
+        ) {
+            revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
     }
 
@@ -576,6 +520,17 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             }
         }
 
+        if (delta.safeMarginReleaseUsdc != delta.unlockMarginUsdc) {
+            revert CfdEngineSettlementSidecar__SettlementMismatch();
+        }
+        clearinghouse.unlockCloseMargin(
+            delta.account,
+            delta.safeMarginReleaseUsdc,
+            delta.actionChargeFromReleasedMarginUsdc,
+            delta.netReleasedMarginUsdc,
+            delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc,
+            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc
+        );
         uint256 protocolFeeCreditedUsdc = _settleCloseActionCharge(host, clearinghouse, delta);
 
         uint256 cashArrivedRevenueUsdc =
@@ -592,10 +547,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         uint256 feeWithheldUsdc = delta.executionFeeUsdc - protocolFeeCreditedUsdc;
         _recordRetainedCloseRevenue(host, delta.actionChargeWithheldUsdc - feeWithheldUsdc);
 
-        if (delta.unlockMarginUsdc > 0) {
-            // Keep the collectible pledge required by the remaining terminal curve locked; only its excess is free.
-            clearinghouse.unlockPositionMargin(delta.account, delta.unlockMarginUsdc);
-        }
         if (delta.pricePayoutUsdc > 0) {
             host.settlementRecordTraderClaim(delta.account, delta.pricePayoutUsdc, !delta.deletePosition);
         }

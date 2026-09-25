@@ -59,6 +59,7 @@ contract LegacyOrderRouterHarness is OrderRouter {
         }
 
         OrderV2Types.OrderRequest memory request = OrderV2Types.OrderRequest({
+            closeMode: OrderV2Types.CloseMode.Standard,
             clientOrderId: clientOrderId,
             side: side,
             sizeDelta: sizeDelta,

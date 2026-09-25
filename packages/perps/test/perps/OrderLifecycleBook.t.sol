@@ -44,16 +44,16 @@ contract OrderLifecycleBookTest is Test {
         assertEq(
             book.INTENT_TYPEHASH(),
             keccak256(
-                "PletherOrderIntentV2(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 validUntil,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,uint256 minPostPositionEquityUsdc,uint32 maxPostLeverageBps)"
+                "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint8 closeMode,uint64 validUntil,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,uint256 minPostPositionEquityUsdc,uint32 maxPostLeverageBps)"
             )
         );
         assertEq(
             book.RECEIPT_TYPEHASH(),
             keccak256(
-                "PletherOrderReceiptV3(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,OrderReceipt receipt)"
+                "PletherOrderReceiptV4(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,OrderReceipt receipt)"
             )
         );
-        assertEq(book.CONFIG_SCHEMA_HASH(), keccak256("PletherExecutionConfigV3"));
+        assertEq(book.CONFIG_SCHEMA_HASH(), keccak256("PletherExecutionConfigV4"));
         assertEq(uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry), 4);
         assertEq(uint8(PositionProtectionTypes.PositionProtectionStatus.Executed), 4);
         assertEq(uint8(PositionProtectionTypes.PositionProtectionStatus.Failed), 5);
@@ -230,7 +230,8 @@ contract OrderLifecycleBookTest is Test {
             request.sizeDelta,
             request.marginDelta,
             request.targetPrice,
-            request.isClose
+            request.isClose,
+            uint8(request.closeMode)
         );
         bytes memory financialPolicy = abi.encode(
             bounds.validUntil,
@@ -463,6 +464,8 @@ contract OrderLifecycleBookTest is Test {
         OrderV2Types.OrderReceipt memory receipt = _failedReceipt(73, ACCOUNT, request, intentHash);
         receipt.observedConfigHash = keccak256("observed-config");
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.RetainedForProtectionRetry;
+        receipt.bounty.bountyPaidUsdc = 0;
+        receipt.bounty.bountyRetainedUsdc = receipt.bountyUsdc;
         receipt.bountyRecipient = address(0);
 
         _expectInvalidTerminal(receipt);
@@ -490,6 +493,8 @@ contract OrderLifecycleBookTest is Test {
         OrderV2Types.OrderReceipt memory receipt = _failedReceipt(74, ACCOUNT, request, intentHash);
         receipt.observedConfigHash = keccak256("observed-config");
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.RetainedForProtectionRetry;
+        receipt.bounty.bountyPaidUsdc = 0;
+        receipt.bounty.bountyRetainedUsdc = receipt.bountyUsdc;
         receipt.bountyRecipient = EXECUTOR;
         _expectInvalidTerminal(receipt);
         assertTrue(book.isProtectionAttempt(74));
@@ -528,6 +533,8 @@ contract OrderLifecycleBookTest is Test {
         receipt.executionPrice = 0;
         receipt.oraclePublishTime = 0;
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.RefundedToAccount;
+        receipt.bounty.bountyPaidUsdc = 0;
+        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
         receipt.bountyRecipient = ACCOUNT;
         delete receipt.failure;
 
@@ -658,6 +665,7 @@ contract OrderLifecycleBookTest is Test {
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 61, request, 0);
         OrderV2Types.OrderReceipt memory receipt = _executedReceipt(61, ACCOUNT, request, intentHash);
         receipt.bountyUsdc = 0;
+        delete receipt.bounty;
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.None;
         receipt.bountyRecipient = OTHER_ACCOUNT;
 
@@ -679,6 +687,7 @@ contract OrderLifecycleBookTest is Test {
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 40, request, 0);
         OrderV2Types.OrderReceipt memory receipt = _executedReceipt(40, ACCOUNT, request, intentHash);
         receipt.bountyUsdc = 0;
+        delete receipt.bounty;
         receipt.bountyRecipient = address(0);
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.None;
 
@@ -784,9 +793,12 @@ contract OrderLifecycleBookTest is Test {
         receipt.oraclePublishTime = 1_700_000_001;
         receipt.priceReachedEngine = true;
         receipt.bountyUsdc = EXECUTION_BOUNTY_USDC;
+        receipt.bounty.bountyEntitlementUsdc = EXECUTION_BOUNTY_USDC;
+        receipt.bounty.bountyPaidUsdc = EXECUTION_BOUNTY_USDC;
         receipt.bountyRecipient = EXECUTOR;
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
         receipt.economics = OrderV2Types.OrderEconomics({
+            close: OrderV2Types.CloseEconomics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             executionNotionalUsdc: 100e6,
             realizedPnlUsdc: 0,
             vpiUsdc: 50_000,
@@ -830,6 +842,8 @@ contract OrderLifecycleBookTest is Test {
         receipt.oraclePublishTime = 1_700_000_001;
         receipt.priceReachedEngine = false;
         receipt.bountyUsdc = EXECUTION_BOUNTY_USDC;
+        receipt.bounty.bountyEntitlementUsdc = EXECUTION_BOUNTY_USDC;
+        receipt.bounty.bountyPaidUsdc = EXECUTION_BOUNTY_USDC;
         receipt.bountyRecipient = EXECUTOR;
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
         receipt.failure = OrderV2Types.FailureDetails({
@@ -855,6 +869,8 @@ contract OrderLifecycleBookTest is Test {
         receipt.executionPrice = 0;
         receipt.oraclePublishTime = 0;
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.RefundedToAccount;
+        receipt.bounty.bountyPaidUsdc = 0;
+        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
         receipt.bountyRecipient = ACCOUNT;
         delete receipt.failure;
     }
@@ -870,6 +886,8 @@ contract OrderLifecycleBookTest is Test {
         receipt.priceSource = OrderV2Types.PriceSource.Liquidation;
         receipt.priceReachedEngine = false;
         receipt.bountyDisposition = OrderV2Types.BountyDisposition.Forfeited;
+        receipt.bounty.bountyPaidUsdc = 0;
+        receipt.bounty.bountyForfeitedUsdc = receipt.bountyUsdc;
         receipt.bountyRecipient = PROTOCOL_TREASURY;
         delete receipt.failure;
     }

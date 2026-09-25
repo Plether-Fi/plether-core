@@ -172,6 +172,42 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return _getPendingOrderView(orderId);
     }
 
+    function pendingTerminalExitId(
+        address account
+    ) external view returns (uint64) {
+        return lifecycleBook.pendingTerminalExitId(account);
+    }
+
+    function expireOrder(
+        uint64 orderId
+    ) external nonReentrant returns (OrderV2Types.ExecutionResult memory) {
+        orderId;
+        return abi.decode(_delegateExecutionSidecar(), (OrderV2Types.ExecutionResult));
+    }
+
+    function expireMismatchedOrderFromSidecar(
+        uint64 orderId
+    ) external returns (IMarginClearinghouse.BountyRecovery memory recovery) {
+        _onlySelfCall();
+        (, CfdTypes.Order memory order) = _pendingOrder(orderId);
+        if (block.timestamp <= lifecycleBook.pendingIntent(orderId).bounds.validUntil) {
+            revert OrderRouter__OrderNotExpired();
+        }
+        recovery = clearinghouse.recoverExpiredBounty(order.account, orderId);
+        if (recovery.freeUsdc != 0 || recovery.pledgeUsdc != 0) {
+            (uint256 liveSize,,,,,,) = engine.positions(order.account);
+            bool samePosition = liveSize != 0 && engine.positionEpoch(order.account) == recovery.sourcePositionEpoch;
+            engine.refundCloseBounty(
+                order.account,
+                recovery.freeUsdc + (samePosition ? 0 : recovery.pledgeUsdc),
+                samePosition ? recovery.pledgeUsdc : 0
+            );
+        }
+        // An invalid margin ledger is left protected; expiry must not invent a release.
+        try clearinghouse.releaseOrderReservationForTerminalCleanup(orderId) {} catch {}
+        _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
+    }
+
     /// @notice Permissionlessly executes or terminally classifies an eligible global queue head.
     /// @dev Risk-off, expiry, and pinned-config mismatch are checked in that order before oracle work. Slippage and
     ///      exact-shape typed planner/policy rejections are terminal and receive canonical receipts. Close-only, MEV,
@@ -253,11 +289,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         settlement.bountyUsdc = bountyUsdc;
         if (retained) {
             settlement.bountyDisposition = OrderV2Types.BountyDisposition.RetainedForProtectionRetry;
-        } else if (bountyUsdc != 0) {
+        } else {
             clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, orderId);
-            settlement.bountyRecipient = bountyRecipient;
-            settlement.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
-            if (bountyRecipient == order.account) {
+            if (bountyUsdc != 0) {
+                settlement.bountyRecipient = bountyRecipient;
+                settlement.bountyDisposition = OrderV2Types.BountyDisposition.Paid;
+            }
+            if (bountyUsdc == 0) {
+                // Explicit zero entitlement is settled without custody movement.
+            } else if (bountyRecipient == order.account) {
                 clearinghouse.releaseReservedExecutionBountyToSource(order.account, bountyUsdc);
             } else {
                 engine.creditBounty(order.account, bountyRecipient, bountyUsdc, accountingPrice, accountingPublishTime);

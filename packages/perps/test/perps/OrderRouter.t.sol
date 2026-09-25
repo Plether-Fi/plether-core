@@ -535,7 +535,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(_executionBountyReserve(1), 200_000, "Close orders should pre-seize the flat router bounty");
     }
 
-    function test_CloseCommit_RejectsPositionMarginBackedBountyWhenFullyUtilized() public {
+    function test_CloseCommit_AcceptsPositionMarginBackedBountyWhenFullyUtilized() public {
         address trader = address(0x334);
         address account = trader;
         address counterparty = address(0x335);
@@ -550,21 +550,20 @@ contract OrderRouterTest is BasePerpTest {
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(marginAfter, marginBefore, "Rejected close bounty must not consume PnL pledge");
-        assertEq(router.pendingOrderCounts(account), 0, "Rejected close must not enter the FIFO queue");
-        assertEq(router.nextCommitId(), 1, "Rejected close must not consume an order id");
+        assertEq(marginAfter, marginBefore - router.closeOrderExecutionBountyUsdc(), "bounty reclassification is exact");
+        assertEq(router.pendingOrderCounts(account), 1, "accepted close enters FIFO");
+        assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
-            0,
-            "Rejected close must not create an action reserve"
+            router.closeOrderExecutionBountyUsdc(),
+            "bounty is protected in action reserve"
         );
     }
 
-    function test_CloseCommit_StaleMarkStillRejectsPositionMarginBackedBounty() public {
+    function test_CloseCommit_StaleMarkStillAllowsPositionMarginBackedBounty() public {
         address trader = address(0x3341);
         address account = trader;
         address counterparty = address(0x3351);
@@ -581,16 +580,19 @@ contract OrderRouterTest is BasePerpTest {
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
         vm.prank(trader);
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(marginAfter, marginBefore, "Reverted stale-mark commit must roll back carry and preserve PnL pledge");
-        assertEq(router.pendingOrderCounts(account), 0, "Rejected stale-mark close must not queue");
+        assertLe(
+            marginAfter,
+            marginBefore - router.closeOrderExecutionBountyUsdc(),
+            "commit collects carry and reserves its bounty"
+        );
+        assertEq(router.pendingOrderCounts(account), 1, "accepted stale-mark close queues");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
-            0,
-            "Rejected stale-mark close must not reserve a bounty"
+            router.closeOrderExecutionBountyUsdc(),
+            "accepted close protects its bounty"
         );
     }
 
@@ -684,7 +686,7 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(marginConsumed, expectedCarry, "Carry consumes margin while bounty alone consumes free settlement");
     }
 
-    function test_ReserveCloseOrderExecutionBounty_RevertsWhenFreeSettlementUnavailable() public {
+    function test_ReserveCloseOrderExecutionBounty_RejectsUnhealthyExposedPosition() public {
         address trader = address(0x336);
         address account = trader;
         address counterparty = address(0x337);
@@ -701,11 +703,11 @@ contract OrderRouterTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6);
     }
 
-    function test_InvalidClose_CannotReserveBountyFromPnlPledge() public {
+    function test_EligibleSmallRemainderCanReserveBountyFromPledge() public {
         address trader = address(0x338);
         address account = trader;
         address counterparty = address(0x339);
@@ -717,20 +719,23 @@ contract OrderRouterTest is BasePerpTest {
         _open(counterpartyAccount, CfdTypes.Side.SHORT, 500_000e18, 50_000e6, 1e8, depth);
 
         uint256 positionSize = 1100e18;
-        uint256 invalidPartialCloseSize = 1000e18;
+        uint256 partialCloseSize = 1000e18;
         _open(account, CfdTypes.Side.LONG, positionSize, 50_000e6, 1e8, depth);
 
         (, uint256 marginBeforeCommit,,,,,) = engine.positions(account);
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(trader);
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        router.commitOrder(CfdTypes.Side.LONG, invalidPartialCloseSize, 0, 0, true);
+        router.commitOrder(CfdTypes.Side.LONG, partialCloseSize, 0, 0, true);
 
         (, uint256 marginAfterCommit,,,,,) = engine.positions(account);
-        assertEq(marginAfterCommit, marginBeforeCommit, "Rejected commit must preserve PnL pledge");
-        assertEq(router.pendingOrderCounts(account), 0, "Rejected commit must not enter the queue");
-        assertEq(router.nextCommitId(), 1, "Rejected commit must not consume an order id");
+        assertEq(
+            marginAfterCommit,
+            marginBeforeCommit - router.closeOrderExecutionBountyUsdc(),
+            "bounty reclassification is exact"
+        );
+        assertEq(router.pendingOrderCounts(account), 1, "eligible reduction enters queue");
+        assertEq(router.nextCommitId(), 2, "eligible reduction consumes one ID");
     }
 
     function test_AlignedPartialClose_FreeBackedBountyPaysKeeper() public {

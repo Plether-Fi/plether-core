@@ -150,15 +150,20 @@ contract MarginFirstCarryTest is BasePerpTest {
     function test_BountyShortfallReportsPostCarryAndRollsBackNestedMutation() public {
         _fundTrader(TRADER, 10_000e6 + 100_000);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
-        vm.warp(block.timestamp + 1 days);
+        vm.warp(block.timestamp + 200_000 days);
         uint256 beforeMargin = _margin(TRADER);
         uint256 beforeBalance = clearinghouse.balanceUsdc(TRADER);
         uint256 beforePool = pool.totalAssets();
         bytes32 beforeHash = terminalNavBook.curveHashOf(TRADER);
         bytes32 beforeBook = keccak256(abi.encode(terminalNavBook.bookState()));
+        uint256 accrued = _expectedIndexedCarryUsdc(TRADER);
+        assertGt(accrued, beforeMargin + 100_000);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector, 200_000, 100_000, 0
+                ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector,
+                200_000,
+                0,
+                accrued - beforeMargin - 100_000
             )
         );
         vm.prank(TRADER);
@@ -287,9 +292,15 @@ contract MarginFirstCarryTest is BasePerpTest {
             }
         }
         assertEq(uint8(receipt.status), uint8(OrderV2Types.LifecycleStatus.Executed));
-        assertEq(receipt.economics.carryUsdc, int256(carry));
-        assertEq(receipt.economics.actionChargeCollectedUsdc, carry + (isPartial ? 20e6 : 40e6));
-        assertEq(receipt.economics.grossAccountDebitUsdc, carry + (isPartial ? 20e6 : 40e6) + 200_000);
+        assertEq(receipt.economics.carryUsdc, int256(carry + receipt.commitment.carryCollectedUsdc));
+        assertEq(
+            receipt.economics.actionChargeCollectedUsdc,
+            receipt.commitment.carryCollectedUsdc + carry + (isPartial ? 20e6 : 40e6)
+        );
+        assertEq(
+            receipt.economics.grossAccountDebitUsdc,
+            receipt.commitment.carryCollectedUsdc + carry + (isPartial ? 20e6 : 40e6) + 200_000
+        );
         assertEq(receipt.economics.preSettlementBalanceUsdc, balanceAfterCommit);
         assertEq(receipt.economics.postSettlementBalanceUsdc, clearinghouse.balanceUsdc(TRADER));
         assertEq(realized, carry);

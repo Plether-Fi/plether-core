@@ -724,6 +724,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("CAP_PRICE()"), abi.encode(2e8));
         vm.mockCall(ENGINE, abi.encodeWithSignature("executionFeeBps()"), abi.encode(4));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("settlementBufferBps()"), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("isFadWindow()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("isOracleFrozen()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("frozenCloseSpreadBps()"), abi.encode(0));

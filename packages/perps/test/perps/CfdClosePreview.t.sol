@@ -14,6 +14,19 @@ import {Vm} from "forge-std/Vm.sol";
 
 import {CfdClosePreviewTestBase} from "./CfdClosePreviewTestBase.sol";
 
+interface ILegacyClosePreview {
+
+    function previewClose(
+        address engine,
+        CfdTypes.Order calldata order,
+        address executor,
+        uint256 price,
+        uint64 publishTime,
+        OrderV2Types.ExecutionBounds calldata bounds
+    ) external view;
+
+}
+
 contract CfdClosePreviewTest is CfdClosePreviewTestBase {
 
     function test_SyntheticCounterexampleUsesReservationAwarePreview() public {
@@ -115,17 +128,11 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc + 200_000);
     }
 
-    function test_OneAtomicUnitShortMatchesCommitFundingError() public {
+    function test_OneAtomicUnitShortUsesPledgeAndMatchesCommit() public {
         _openNormally(CfdTypes.Side.LONG, 199_999);
-        CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE);
-        bytes memory err = abi.encodeWithSelector(
-            ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector, 200_000, 199_999, 0
-        );
-        vm.expectRevert(err);
-        previewer.previewClose(address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds());
-        vm.expectRevert(err);
-        vm.prank(ACCOUNT);
-        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+        (, CfdClosePreview.ClosePreview memory p) = _commitParity(_order(CfdTypes.Side.LONG, SIZE), PRICE, KEEPER);
+        assertEq(p.commitment.bountyFromFreeUsdc, 199_999);
+        assertEq(p.commitment.bountyFromPledgeUsdc, 1);
     }
 
     function test_OtherOrderBountyIsNotTheProspectiveBounty() public {
@@ -363,7 +370,7 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         vm.warp(block.timestamp + 1 hours);
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(_order(CfdTypes.Side.SHORT, SIZE), PRICE, KEEPER);
         assertGt(p.commitmentCarryUsdc, 0);
-        assertEq(p.assessment.carryUsdc, 0);
+        assertEq(p.assessment.carryUsdc, p.commitmentCarryUsdc);
     }
 
     function test_CarryExhaustingFreeSettlementMatchesFundingFailure() public {
@@ -374,7 +381,8 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         (bool previewOk, bytes memory previewError) = address(previewer)
             .staticcall(
                 abi.encodeCall(
-                    previewer.previewClose, (address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds())
+                    ILegacyClosePreview(address(previewer)).previewClose,
+                    (address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds())
                 )
             );
         assertFalse(previewOk);

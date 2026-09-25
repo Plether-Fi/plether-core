@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -12,6 +13,11 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 /// @dev The clearinghouse is canonical for USDC custody and committed-margin values. This contract stores
 ///      order metadata and lifecycle queue indexes; it never holds the reserved USDC itself.
 abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRouterErrors {
+
+    function _onOrderCommitted(
+        CfdTypes.Order memory order,
+        CfdEnginePlanTypes.CloseCommitment memory effects
+    ) internal virtual;
 
     /// @notice Ephemeral metadata and linked-list pointers for one pending order.
     /// @dev The complete record is deleted on every terminal transition. Permanent identity and outcomes live in the
@@ -90,30 +96,29 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     }
 
     /// @notice Reserves the keeper bounty for a newly assigned order id.
-    /// @dev A zero bounty is a no-op. Open-order bounties are locked from free settlement after an explicit
-    ///      balance check; close-order bounties use the engine hook implemented by the router base.
+    /// @dev Zero close bounties still validate admission and checkpoint carry. Open-order bounties are locked from
+    ///      free settlement; close-order bounties use the engine hook implemented by the router base.
     /// @param account Account funding the bounty.
     /// @param sizeDelta Order size used by close-bounty reservation (18 decimals).
-    /// @param executionBountyUsdc Bounty to reserve (6-decimal USDC).
+    /// @param bounty Bounty to reserve (6-decimal USDC).
     /// @param isClose Whether to use the close-order reservation path.
     function _reserveExecutionBounty(
         address account,
         uint256 sizeDelta,
-        uint256 executionBountyUsdc,
+        uint256 bounty,
         bool isClose
-    ) internal {
-        if (executionBountyUsdc == 0) {
-            return;
-        }
-
+    ) internal returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         if (isClose) {
-            _reserveCloseExecutionBounty(account, sizeDelta, executionBountyUsdc);
-        } else {
-            if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < executionBountyUsdc) {
-                revert OrderRouter__InsufficientFreeEquity();
-            }
-            clearinghouse.lockReservedSettlement(account, executionBountyUsdc);
+            return _reserveCloseExecutionBounty(account, sizeDelta, bounty);
         }
+        effects.bountyFromFreeUsdc = bounty;
+        if (bounty == 0) {
+            return effects;
+        }
+        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < bounty) {
+            revert OrderRouter__InsufficientFreeEquity();
+        }
+        clearinghouse.lockReservedSettlement(account, bounty);
     }
 
     /// @notice Reserves open-order margin in the clearinghouse and links the order into the margin queue.
@@ -216,6 +221,6 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         address account,
         uint256 sizeDelta,
         uint256 executionBountyUsdc
-    ) internal virtual;
+    ) internal virtual returns (CfdEnginePlanTypes.CloseCommitment memory);
 
 }

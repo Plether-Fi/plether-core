@@ -9,3 +9,7 @@ export * from "./sponsorship.js";
 export * from "./types.js";
 export * from "./protection.js";
 export * from "./protectionAbi.js";
+export * from "./orderV3Abi.js";
+export * from "./orderV3.js";
+
+export { classifyCloseFailureV3 } from "./orderV3.js";

@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {
+    ILegacyClosePolicy,
+    ILegacyClosePreview,
+    ILegacyCloseRouter,
+    LegacyCloseTypes as OrderV2Types
+} from "../fixtures/LegacyCloseV2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -34,7 +39,7 @@ contract CfdSponsoredCloseForkTest is Test {
     address constant ACCOUNT = address(bytes20(hex"8aff8f1a58934f31ed97b750dd4bd13478f893df"));
     address constant TOKEN = address(bytes20(hex"f7cbfcc74f2d9eb6fa7dc11941b3bef9fd7f8eb8"));
     address constant HOUSE = address(bytes20(hex"fa6e677ec1062757c1194d411a5e61e1e9644499"));
-    CfdClosePreview lens;
+    ILegacyClosePreview lens;
 
     function setUp() public {
         string memory url = vm.envOr("SPONSORED_CLOSE_FORK_RPC_URL", string(""));
@@ -42,10 +47,11 @@ contract CfdSponsoredCloseForkTest is Test {
             vm.skip(true);
             return;
         }
-        vm.createSelectFork(url);
+        vm.createSelectFork(url, 309_758_933);
         assertEq(block.chainid, 421_614);
         assertEq(ACCOUNT.codehash, 0x41ee894da413cc99e8dec0a1784470eceb736845ad1591e06ff0ecdf0aca26c9);
-        lens = new CfdClosePreview();
+        lens = ILegacyClosePreview(0xC8Ad43019D371DEe7784C06dFa1A2F1538E0D7cf);
+        assertEq(address(lens).codehash, 0x7cb66d1cb8f7c6748bd34150207ad1b8ead01ce8e77002dde384160ba3a1333e);
     }
 
     function _request(
@@ -76,12 +82,12 @@ contract CfdSponsoredCloseForkTest is Test {
     ) internal view returns (ISponsoredSimpleAccount.Call[] memory c) {
         c = new ISponsoredSimpleAccount.Call[](5);
         c[0] = ISponsoredSimpleAccount.Call(
-            address(lens), 0, abi.encodeCall(CfdClosePreview.validateSponsoredClose, (address(ENGINE), r, amount))
+            address(lens), 0, abi.encodeCall(ILegacyClosePreview.validateSponsoredClose, (address(ENGINE), r, amount))
         );
         c[1] = ISponsoredSimpleAccount.Call(TOKEN, 0, abi.encodeWithSignature("mint(address,uint256)", ACCOUNT, amount));
         c[2] = ISponsoredSimpleAccount.Call(TOKEN, 0, abi.encodeCall(IERC20.approve, (HOUSE, amount)));
         c[3] = ISponsoredSimpleAccount.Call(HOUSE, 0, abi.encodeWithSignature("depositMargin(uint256)", amount));
-        c[4] = ISponsoredSimpleAccount.Call(address(ROUTER), 0, abi.encodeCall(OrderRouter.commitOrder, (r)));
+        c[4] = ISponsoredSimpleAccount.Call(address(ROUTER), 0, abi.encodeCall(ILegacyCloseRouter.commitOrder, (r)));
     }
 
     function _commit(
@@ -95,7 +101,7 @@ contract CfdSponsoredCloseForkTest is Test {
         if (isPartial) {
             price = r.side == CfdTypes.Side.LONG ? price - price / 10 : price + price / 10;
         }
-        CfdClosePreview.SponsoredClosePreview memory preview =
+        ILegacyClosePreview.SponsoredClosePreview memory preview =
             lens.previewSponsoredClose(address(ENGINE), ACCOUNT, r, address(ROUTER), price, uint64(block.timestamp));
         assertEq(preview.subsidyUsdc, amount);
         address owner = ISponsoredSimpleAccount(ACCOUNT).owner();
@@ -105,7 +111,7 @@ contract CfdSponsoredCloseForkTest is Test {
         CfdTypes.Order memory order = CfdTypes.Order(
             ACCOUNT, r.sizeDelta, 0, r.targetPrice, uint64(block.timestamp), uint64(block.number), 0, r.side, true
         );
-        OrderV2Types.ExecutionAssessment memory actual = ICfdOrderPolicyEvaluator(
+        OrderV2Types.ExecutionAssessment memory actual = ILegacyClosePolicy(
                 address(bytes20(hex"43c93d3028fcd4c1f578a50639750b8fbfdee799"))
             )
             .assessOrder(
@@ -150,7 +156,7 @@ contract CfdSponsoredCloseForkTest is Test {
         uint256 supply = IERC20(TOKEN).totalSupply();
         vm.mockCallRevert(
             address(ROUTER),
-            abi.encodeCall(OrderRouter.commitOrder, (r)),
+            abi.encodeCall(ILegacyCloseRouter.commitOrder, (r)),
             abi.encodeWithSignature("Error(string)", "commit failed")
         );
         address owner = ISponsoredSimpleAccount(ACCOUNT).owner();

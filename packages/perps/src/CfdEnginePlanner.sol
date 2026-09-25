@@ -5,6 +5,7 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {CloseCommitmentLib} from "@plether/perps/libraries/CloseCommitmentLib.sol";
 import {MarketCalendarLib} from "@plether/perps/libraries/MarketCalendarLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -14,6 +15,19 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 ///      must supply canonical, internally consistent snapshots and orders. Unless stated otherwise, USDC amounts use
 ///      6 decimals, prices use 8 decimals, sizes use 18 decimals, and timestamps are Unix seconds.
 contract CfdEnginePlanner is ICfdEnginePlanner {
+
+    function planCloseCommit(
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        uint256 size,
+        uint256 bounty
+    )
+        external
+        pure
+        returns (CfdEnginePlanTypes.CloseCommitment memory effects, CfdEnginePlanTypes.RawSnapshot memory afterCommit)
+    {
+        effects = CloseCommitmentLib.project(snapshot, size, bounty);
+        return (effects, snapshot);
+    }
 
     /// @notice Classifies the recurring and governance-override market-calendar regimes.
     /// @dev Keeps the New York daylight-saving calculation in this stateless sidecar so the canonical engine remains

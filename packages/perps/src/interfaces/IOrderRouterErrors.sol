@@ -8,6 +8,11 @@ import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtect
 /// @notice Canonical custom errors and commit event shared by the delayed-order router stack.
 interface IOrderRouterErrors {
 
+    error OrderRouter__InvalidCloseMode();
+    error OrderRouter__TerminalExitBusy();
+    error OrderRouter__TerminalExitActive(uint64 orderId);
+    error OrderRouter__OrderNotExpired();
+
     /// @notice Terminal result of one independently isolated liquidation-batch item.
     enum LiquidationBatchResult {
         Liquidated,

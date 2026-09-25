@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
@@ -68,6 +69,10 @@ interface IOrderRouterV2ExecutionHost {
         address bountyRecipient;
         OrderV2Types.BountyDisposition bountyDisposition;
     }
+
+    function expireMismatchedOrderFromSidecar(
+        uint64 orderId
+    ) external returns (IMarginClearinghouse.BountyRecovery memory);
 
     function engine() external view returns (address);
 

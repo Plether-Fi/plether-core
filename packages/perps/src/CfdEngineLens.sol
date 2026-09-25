@@ -387,10 +387,14 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
         if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE) {
-            preview.invalidReason = CfdTypes.CloseInvalidReason.PartialCloseUnderwater;
+            preview.invalidReason = CfdTypes.CloseInvalidReason.PartialActionChargeUncollectible;
             return preview;
         }
 
+        if (delta.revertCode == CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNHEALTHY) {
+            preview.invalidReason = CfdTypes.CloseInvalidReason.PartialCloseUnhealthy;
+            return preview;
+        }
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
         preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
         preview.existingTraderClaimRemainingUsdc = delta.existingTraderClaimRemainingUsdc;

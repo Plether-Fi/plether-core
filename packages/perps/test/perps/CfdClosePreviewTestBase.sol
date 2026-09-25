@@ -112,16 +112,8 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         vm.prank(ACCOUNT);
         id = router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
         assertEq(settlementBefore - clearinghouse.balanceUsdc(ACCOUNT), p.commitmentCarryUsdc);
-        OrderV2Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
-            address(engine),
-            o,
-            executor,
-            price,
-            pool.totalAssets(),
-            uint64(vm.getBlockTimestamp()),
-            _bounds(),
-            p.executionBountyUsdc
-        );
+        OrderV2Types.ExecutionAssessment memory actual =
+            policyEvaluator.assessCommittedOrder(address(engine), id, executor, price, uint64(vm.getBlockTimestamp()));
         assertEq(
             keccak256(abi.encode(p.assessment)), keccak256(abi.encode(actual)), "preview equals committed assessment"
         );
@@ -143,6 +135,16 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
                 assertEq(receipt.economics.grossAccountDebitUsdc, predicted.grossAccountDebitUsdc);
                 assertEq(receipt.economics.actionChargeCollectedUsdc, predicted.actionChargeCollectedUsdc);
                 assertEq(receipt.economics.postTraderClaimBalanceUsdc, predicted.postTraderClaimUsdc);
+                assertEq(keccak256(abi.encode(receipt.economics.close)), keccak256(abi.encode(predicted.close)));
+                assertEq(
+                    receipt.bounty.bountyEntitlementUsdc,
+                    receipt.bounty.bountyPaidUsdc + receipt.bounty.bountyRefundedUsdc
+                        + receipt.bounty.bountyRetainedUsdc + receipt.bounty.bountyForfeitedUsdc
+                );
+                assertEq(
+                    receipt.commitment.bountyFromFreeUsdc + receipt.commitment.bountyFromPledgeUsdc,
+                    receipt.bounty.bountyEntitlementUsdc
+                );
                 return;
             }
         }
@@ -178,4 +180,3 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
     }
 
 }
-
