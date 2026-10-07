@@ -48,7 +48,7 @@ library MarginClearinghouseAccountingLib {
     /// @param resultingPositionMarginUsdc Active-position margin after unlock or lock.
     /// @param resultingFreeSettlementUsdc Free settlement after every planned mutation.
     /// @param insufficientFreeEquity Whether a debit or margin lock exceeds free settlement.
-    /// @param insufficientPositionMargin Whether a requested margin unlock exceeds active-position margin.
+    /// @param insufficientPositionMargin Retained compatibility flag; always false because this path never unlocks pledge.
     struct OpenCostPlan {
         int256 netMarginChangeUsdc;
         uint256 settlementCreditUsdc;
@@ -62,14 +62,15 @@ library MarginClearinghouseAccountingLib {
         bool insufficientPositionMargin;
     }
 
-    /// @notice Planned account disposition after removing a liquidated position and reserving its total charge.
+    /// @notice Compatibility liquidation result populated by the isolated settlement planner.
+    /// @dev Current liquidation settlement uses the dedicated price-PnL and action fields on `LiquidationDelta`; this
+    ///      struct carries selected mirrors and legacy zero-valued fields.
     /// @param liquidationChargeUsdc Total keeper, protocol, and LP charge reserved from the liquidated account.
-    /// @param settlementRetainedUsdc Existing settlement left in the account toward positive residual equity.
-    /// @param settlementSeizedUsdc Existing settlement transferred away after the charge reserve and retained equity;
-    ///        the LP-owned charge is added by the liquidation planner before live settlement.
-    /// @param freshTraderPayoutUsdc New value required to satisfy positive residual equity.
-    /// @param badDebtUsdc Magnitude of negative residual equity; seizure is not subtracted from this field.
-    /// @param mutation Settlement debit and locked-margin consumption required to apply the plan.
+    /// @param settlementRetainedUsdc Projected settlement balance after all debits and any immediate price payout.
+    /// @param settlementSeizedUsdc PnL pledge collected for price loss; the outer delta separately includes the LP charge.
+    /// @param freshTraderPayoutUsdc New price gain after action-charge withholding, paid immediately or recorded as a claim.
+    /// @param badDebtUsdc Legacy field left zero; excess price loss is reported separately and never stored as debt.
+    /// @param mutation Current planner populates only the full PnL-pledge unlock; other fields remain zero.
     struct LiquidationResidualPlan {
         uint256 liquidationChargeUsdc;
         uint256 settlementRetainedUsdc;

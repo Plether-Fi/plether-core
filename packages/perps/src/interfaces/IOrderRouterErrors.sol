@@ -125,7 +125,7 @@ interface IOrderRouterErrors {
     error OrderRouter__NoOpenPosition();
     /// @notice Protection creation or attached-open submission requires an account with no ordinary pending orders.
     error OrderRouter__PendingOrdersExist();
-    /// @notice The account already has a pending-open, armed, or triggered protection.
+    /// @notice The account already has a pending-open, armed, triggered, or latched protection.
     error OrderRouter__ProtectionAlreadyActive();
     /// @notice No protection record exists for the supplied identifier.
     error OrderRouter__ProtectionNotFound();

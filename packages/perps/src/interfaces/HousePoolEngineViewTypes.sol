@@ -18,7 +18,7 @@ library HousePoolEngineViewTypes {
     /// @param terminalNavBookVersion Monotonic terminal-NAV book version captured with the engine snapshot.
     /// @param traderClaimBalanceUsdc Aggregate unpaid trader claims senior to fresh discretionary payouts.
     /// @param hasOpenPositions Whether either side has nonzero open interest.
-    /// @param markFreshnessRequired Whether live maximum-profit liability requires a fresh mark.
+    /// @param markFreshnessRequired Whether any open position requires a fresh mark, including zero-profit endpoints.
     /// @param maxMarkStaleness Maximum permitted mark age for the active calendar regime, in seconds; zero when
     ///        `markFreshnessRequired` is false.
     struct HousePoolInputSnapshot {

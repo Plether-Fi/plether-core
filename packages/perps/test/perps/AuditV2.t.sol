@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+// Historical audit identifiers and test names are retained for traceability.
+// The assertions below exercise current behavior; legacy names do not describe unfixed vulnerabilities.
+
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
@@ -19,7 +22,7 @@ import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 // ═══════════════════════════════════════════════════════════════════
-// C-01: checkWithdraw No-Op allows bad-debt extraction
+// C-01 regression: withdrawal rejects an unhealthy open position
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
@@ -53,8 +56,8 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         _open(aliceAccount, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
 
         // Price rises to 1.15e8 → LONG unrealized loss ≈ 75K.
-        // Alice's true cross-margin equity = 100K deposit - fees - 75K loss ≈ 25K.
-        // She should only withdraw ~15K (25K equity minus 10K margin requirement).
+        // The loss exceeds its isolated PnL pledge. Free settlement does not back price-risk equity,
+        // so the account cannot withdraw merely because clearinghouse funds are unencumbered.
         uint256 underwaterPrice = 1.15e8;
         vm.prank(address(router));
         engine.updateMarkPrice(underwaterPrice, uint64(block.timestamp));
@@ -63,9 +66,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
         uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
         uint256 withdrawable = chBalance - locked;
 
-        // checkWithdraw is a no-op. Clearinghouse ignores unrealized PnL.
-        // Alice withdraws ~90K despite only having ~25K of true equity.
-        // This should revert (withdrawal exceeds PnL-aware equity) but doesn't.
+        // Attempting to withdraw all locally free settlement must fail the Engine health guard.
         vm.prank(alice);
         vm.expectRevert();
         clearinghouse.withdraw(aliceAccount, withdrawable);
@@ -74,7 +75,7 @@ contract AuditV2_C01_WithdrawGuardTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// C-02: _reconcile early return permanently destroys senior coupon checkpointing
+// C-02 regression: repeated old-mark reconciliation preserves Senior coupon value
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
@@ -155,8 +156,8 @@ contract AuditV2_C02_ReconcileTimeConsumptionTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// C-03: OracleFrozen blocks close orders (asymmetric weekend DoS)
-//       Requires MockPyth to trigger the production code path.
+// C-03 regression: policy-valid closes execute while oracle-frozen.
+// MockPyth supplies the production oracle path with controlled feed data.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
@@ -256,7 +257,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertGt(size, 0, "Position should be open");
 
-        // Warp to Saturday (oracle frozen per _isOracleFrozen: dayOfWeek==6)
+        // Warp to Saturday, which is oracle-frozen under the canonical market calendar.
         vm.warp(SATURDAY_NOON);
         mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
 
@@ -264,9 +265,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
-        // executeOrder hard-reverts with OracleFrozen for ALL orders including closes.
-        // executeLiquidation relaxes staleness and proceeds — asymmetric DoS.
-        // Close orders should use fadMaxStaleness like liquidations do.
+        // The frozen close uses the applicable frozen oracle policy and must clear the position.
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
         router.executeOrder{value: 0.01 ether}(1, updateData);
@@ -278,7 +277,7 @@ contract AuditV2_C03_OracleFrozenCloseTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// H-01: Deposits without _requireFreshMark allow NAV sniping
+// H-01 regression: stale live-market marks block new LP deposit requests
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_H01_DepositStaleMark is BasePerpTest {
@@ -343,7 +342,7 @@ contract AuditV2_H01_DepositStaleMark is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// H-02: _requireFreshMark hardcoded staleness blocks weekend withdrawals
+// H-02 regression: the frozen oracle age limit permits eligible weekend redemption funding
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
@@ -382,7 +381,7 @@ contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
         uint256 saturdayNoon = FRIDAY_AFTER_CLOSE + 14 hours;
         vm.warp(saturdayNoon);
 
-        // The coordinated async exit remains live during the FAD window.
+        // The coordinated async exit remains live while frozen, using the frozen mark-age limit.
         _settleLpEpochForTest();
         uint256 claimableShares = juniorVault.claimableRedeemRequest(requestId, bob);
         vm.prank(bob);
@@ -395,7 +394,7 @@ contract AuditV2_H02_WeekendWithdrawalDoS is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-01: VPI rebates satisfy Initial Margin (free option)
+// M-01 regression: a VPI rebate cannot substitute for required isolated price collateral
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
@@ -428,8 +427,8 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
         // Alice creates LONG skew; pays VPI to open
         _open(aliceAccount, CfdTypes.Side.LONG, 300_000e18, 50_000e6, 1e8);
 
-        // Bob opens opposing SHORT with 0 margin — the VPI rebate (skew reduction)
-        // should NOT satisfy IMR. With vpiFactor=0.05, rebate ≈ 2250 USDC > exec fee 180.
+        // Bob attempts an opposing SHORT with zero margin. Its skew-reducing rebate must not
+        // substitute for the required PnL pledge and protected reserves.
         _fundTrader(bob, 1e6);
         address bobAccount = bob;
 
@@ -493,7 +492,7 @@ contract AuditV2_M01_VPIRebateIMRTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-02: EVM 63/64 gas griefing in batch execution
+// M-02 historical gas-griefing fixture: sufficient-gas batch execution succeeds
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_M02_GasGriefingTest is BasePerpTest {
@@ -516,22 +515,9 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
         uint64 orderId = router.nextCommitId() - 1;
         bytes[] memory priceData = _mockPythUpdateData();
 
-        // Batch execution wraps processOrder in try/catch (line 412).
-        // Under EIP-150's 63/64 rule, a malicious keeper can supply gas G such that:
-        //   63/64 * G < gas_needed_for_processOrder (inner call OOGs)
-        //   1/64 * G >= gas_needed_for_catch (catch block succeeds)
-        //
-        // The catch block permanently deletes the order and advances the queue —
-        // the user's valid order is irrecoverably cancelled and the keeper collects
-        // the fee. No `require(gasleft() >= MIN_ENGINE_GAS)` guard exists.
-        //
-        // Demonstrating the exact gas calibration is fragile (depends on compiler
-        // optimization, EVM internals). Instead we prove the prerequisite: the
-        // try/catch catches ALL processOrder failures including bare reverts
-        // (which is what OOG produces), permanently deleting valid orders.
-        //
-        // This is the ONLY test that passes (by design) — it documents the
-        // architectural exposure rather than triggering the exact exploit.
+        // This call does not constrain gas or inject a failure. It checks only the successful
+        // batch path. The current router has execution-gas checks and leaves retryable
+        // failures pending; this fixture does not demonstrate an EIP-150 exploit.
         vm.deal(keeper, 1 ether);
         vm.prank(keeper);
         router.executeOrderBatch{value: 0.01 ether}(orderId, priceData);
@@ -539,16 +525,16 @@ contract AuditV2_M02_GasGriefingTest is BasePerpTest {
         address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
 
-        // With enough gas, the order executes fine. The vulnerability is that
-        // the same code path with insufficient gas silently cancels instead of
-        // reverting, because there's no minimum gas guard before the try block.
+        // Confirm the sufficient-gas batch opened the position.
         assertGt(size, 0, "M-02: order executed with sufficient gas (vulnerability is gas-dependent)");
     }
 
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-03: Immutable Pyth arrays brick the router on feed deprecation
+// M-03 historical feed-rotation fixture: Engine-to-Router wiring is set once.
+// This assertion does not exercise feed replacement; the current RouterAdmin can
+// timelock-rotate the oracle while preserving the canonical Router binding.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV2_M03_ImmutablePythArraysTest is BasePerpTest {

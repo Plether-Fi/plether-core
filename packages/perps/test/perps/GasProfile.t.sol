@@ -90,8 +90,8 @@ contract ControllablePythGas {
 }
 
 /// @notice Gas profiling for top 20 perps operations.
-/// Run: (source .env && forge test --match-contract GasProfileTest --fork-url $MAINNET_RPC_URL -vv)
-/// Or without fork: forge test --match-contract GasProfileTest -vv
+/// Run from the repository root: forge test --root packages/perps --match-contract GasProfileTest -vv
+/// An optional RPC fork can be selected with --fork-url "$MAINNET_RPC_URL"; this fixture deploys its own stack.
 contract GasProfileTest is Test {
 
     address constant USDC_MAINNET = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;

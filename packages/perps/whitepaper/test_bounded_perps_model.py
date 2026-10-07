@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0
+"""Regression checks for the frozen publication model and its saved artifacts.
+
+These vectors check Python research arithmetic and publication consistency;
+they do not execute or establish parity with the current V2 Solidity contracts.
+"""
 
 import datetime as dt
 import json
@@ -12,6 +17,8 @@ import bounded_perps_model as model
 
 
 class SolidityKernelVectorTests(unittest.TestCase):
+    """Vectors for Solidity-derived kernels retained from the publication model."""
+
     def test_pnl_and_max_profit(self) -> None:
         size = 100_000 * model.SIZE
         is_profit, pnl = model.calculate_pnl(
@@ -193,6 +200,8 @@ class SolidityKernelVectorTests(unittest.TestCase):
     def test_multi_increase_weighted_entry_can_exceed_stored_max_by_dust(
         self,
     ) -> None:
+        """Capture legacy average-entry dust, absent from V2 exact entry cost."""
+
         size_delta = 100 * model.SIZE
         first_price = 90_000_000
         second_price = 90_000_001

@@ -73,7 +73,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @dev A flat account returns all current free settlement without degraded-mode or mark-freshness gating. For an
     ///      open position, the estimate is zero in degraded mode, with no usable cached mark, after the applicable
     ///      engine/HousePool freshness limit, when exact price-risk equity does not exceed the active requirement, or
-    ///      when any carry remains uncovered. The calculation hypothetically consumes stored plus elapsed carry from
+    ///      when any carry remains uncovered, or when the negative-VPI reserve is underfunded. The calculation
+    ///      hypothetically consumes stored plus elapsed carry from
     ///      active position margin first, then free settlement. Price health uses the reduced pledge plus same-account
     ///      claim. Claims and other reserves cannot pay residual carry. The full post-carry free amount
     ///      is withdrawable only when the position clears the stricter of initial margin and the active FAD or maintenance

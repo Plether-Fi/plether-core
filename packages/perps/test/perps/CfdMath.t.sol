@@ -13,10 +13,10 @@ contract CfdMathTest is Test {
     CfdTypes.RiskParams params;
 
     function setUp() public {
-        // Set up standard institutional risk parameters
+        // Risk parameters for this arithmetic fixture; these are not deployment defaults.
         params = CfdTypes.RiskParams({
             vpiFactor: 0.0005e18, // 5 bps impact factor
-            maxSkewRatio: 0.4e18, // 40% Hard wall // 25% Inflection point // 15% APY at the kink // 300% APY at the wall
+            maxSkewRatio: 0.4e18, // 40% skew/depth admission cap
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
@@ -125,14 +125,14 @@ contract CfdMathTest is Test {
     // 2. VPI WASH-TRADE IMMUNITY (FUZZ TEST)
     // ==========================================
 
-    /// @notice Proves that Opening and Closing the exact same position results in exactly 0 net VPI.
-    /// This guarantees wash-trading to farm rebates is mathematically impossible.
+    /// @notice Checks opposite skew transitions have exactly zero net raw VPI at fixed depth and factor.
+    /// @dev This arithmetic property does not model changing depth, execution fees, or lifetime rebate clamps.
     function testFuzz_VpiWashTradingIsZeroSum(
         uint256 preSkewUsdc,
         uint256 tradeSizeUsdc,
         uint256 depthUsdc
     ) public view {
-        // Bound fuzz inputs to realistic protocol limits (min $10k depth, max $100m depth)
+        // Bound the arithmetic campaign to $10k-$100m depth; these are test bounds, not protocol limits.
         depthUsdc = bound(depthUsdc, 10_000 * 1e6, 100_000_000 * 1e6);
         // Pre-skew can be up to 40% of depth
         preSkewUsdc = bound(preSkewUsdc, 0, (depthUsdc * 40) / 100);
@@ -154,7 +154,7 @@ contract CfdMathTest is Test {
         }
     }
 
-    /// @notice Proves a whale splitting trades into chunks costs exactly the same VPI
+    /// @notice Checks equal VPI for this exactly divisible ten-chunk example at fixed depth and factor.
     function test_VpiPathIndependence() public pure {
         uint256 depthUsdc = 10_000_000 * 1e6;
         uint256 vpiFactor = 0.0005e18;

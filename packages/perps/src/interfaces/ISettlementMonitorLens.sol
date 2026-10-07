@@ -29,6 +29,7 @@ interface ISettlementMonitorLens {
 
     /// @notice Hashes accessible active settlement configuration and bound dependency identities.
     /// @dev This is not a monotonic version and cannot enumerate the Engine's full override-day set or Oracle basket.
+    ///      Returns zero when a required configuration or binding read is unavailable or invalid.
     function observableConfigDigest() external view returns (bytes32 digest);
 
 }

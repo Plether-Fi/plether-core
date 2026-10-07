@@ -48,8 +48,8 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     mapping(address => uint64) internal accountTailOrderId;
 
     /// @notice Binds reservation accounting to an engine and its clearinghouse.
-    /// @dev When `_engine` has no code, `clearinghouse` is deliberately set to zero instead of attempting
-    ///      an interface call; operational methods will then fail until deployed with a real engine.
+    /// @dev When `_engine` has no code, `clearinghouse` is deliberately set to zero instead of attempting an interface
+    ///      call. That immutable binding is not refreshed if code is later deployed at the engine address.
     /// @param _engine Engine address used by the router stack.
     constructor(
         address _engine
@@ -61,6 +61,7 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     }
 
     /// @notice Combines Router-owned lifecycle counts with clearinghouse-owned reservation balances.
+    /// @dev The bounty total includes live order reserves and unpaid protection reserves, including latched retries.
     function getAccountReservations(
         address account
     ) public view override returns (IOrderRouterAccounting.AccountReservationView memory reservation) {

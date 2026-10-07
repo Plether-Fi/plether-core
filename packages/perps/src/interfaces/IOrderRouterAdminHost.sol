@@ -9,7 +9,7 @@ interface IOrderRouterAdminHost {
     function nextCommitId() external view returns (uint64);
 
     /// @notice Complete router queue, oracle-policy, bounty, and execution-resource configuration.
-    /// @param maxOrderAge Maximum pending lifetime before an order is expired, in seconds.
+    /// @param maxOrderAge Maximum future deadline offset accepted for a fresh request, in seconds; stored deadlines govern expiry.
     /// @param orderExecutionStalenessLimit Maximum live order-execution price age, in seconds.
     /// @param liquidationStalenessLimit Maximum live liquidation price age, in seconds.
     /// @param basketMaxConfidenceRatioBps Maximum aggregate basket confidence divided by basket price, in basis points.
@@ -24,7 +24,7 @@ interface IOrderRouterAdminHost {
     /// @param positionProtectionTriggerBountyUsdc Fixed protection-trigger bounty in 6-decimal USDC.
     /// @param maxPendingOrders Maximum number of live pending orders per account.
     /// @param minEngineGas Minimum EIP-150-forwardable gas required before an engine execution attempt.
-    /// @param maxPruneOrdersPerCall Maximum expired queue heads one execution call may terminally prune.
+    /// @param maxPruneOrdersPerCall Maximum expired or config-mismatched heads one call may prune; risk-off uses a separate cap.
     struct RouterConfig {
         uint256 maxOrderAge;
         uint256 orderExecutionStalenessLimit;
