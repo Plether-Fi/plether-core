@@ -8,8 +8,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 import {IAsyncTrancheVaultClaimableRedeem} from "@plether/perps/interfaces/IAsyncTrancheVaultClaimableRedeem.sol";
 import {IHousePoolRedemptionMathSidecar} from "@plether/perps/interfaces/IHousePoolRedemptionMathSidecar.sol";
@@ -129,7 +129,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("OrderRouterLiquidationBatchSidecar:", router.liquidationBatchSidecar());
         console.log("PositionProtectionBook:", address(router.positionProtectionBook()));
         console.log("CfdOrderPolicyEvaluator:", router.policyEvaluator());
-        console.log("OrderRouterV3ExecutionSidecar:", router.executionSidecar());
+        console.log("OrderRouterExecutionSidecar:", router.executionSidecar());
         console.log("OrderLifecycleBook:", address(router.lifecycleBook()));
         console.log("OrderExecutionConfigHash:");
         console.logBytes32(router.lifecycleBook().currentExecutionConfigHash());
@@ -224,7 +224,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         address executionSidecar = router.executionSidecar();
         require(executionSidecar.code.length > 0, "Order execution sidecar has no code");
         require(
-            OrderRouterV3ExecutionSidecar(executionSidecar).SELF() == executionSidecar,
+            OrderRouterExecutionSidecar(executionSidecar).SELF() == executionSidecar,
             "Order execution sidecar self binding mismatch"
         );
 

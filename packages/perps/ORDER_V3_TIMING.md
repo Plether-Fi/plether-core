@@ -3,6 +3,10 @@
 This source release requires a fresh protocol graph. It does not deploy contracts, publish packages, alter historical
 release bundles, or migrate existing orders. V2 requests and signatures are not accepted by the V3 interface.
 
+Version labels identify the signed order schema and public client bindings. The internal execution module uses
+`OrderRouterExecutionSidecar` and `IOrderRouterExecutionHost`, with matching unversioned callback names. Fresh
+release manifests use `orderRouterExecutionSidecar` and retain `orderInterfaceVersion: 3` to identify the order API.
+
 `OrderV3Types.ExecutionBounds` replaces `validUntil` with `uint64 submitBy` and `uint32 executionWindowSeconds`.
 All economic fields retain their existing meaning. Clients default to a fresh reviewed block timestamp plus 120 seconds
 for submission and a 60-second execution duration. Fresh commitments accept equality at `submitBy`; the execution

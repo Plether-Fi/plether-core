@@ -19,8 +19,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -59,11 +59,10 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
         MarginClearinghouse clearinghouse,
         HousePool housePool,
         CfdOrderPolicyEvaluator orderPolicyEvaluator,
-        OrderRouterV3ExecutionSidecar orderExecutionSidecar,
+        OrderRouterExecutionSidecar orderExecutionSidecar,
         OrderRouter router
     ) external view returns (OrderLifecycleBook lifecycleBook) {
-        return
-            _verifyV3OrderStack(engine, clearinghouse, housePool, orderPolicyEvaluator, orderExecutionSidecar, router);
+        return _verifyOrderStack(engine, clearinghouse, housePool, orderPolicyEvaluator, orderExecutionSidecar, router);
     }
 
 }
@@ -251,7 +250,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
             address(engine), address(genericPool), address(pyth), feedIds, quantities, basePrices, inversions
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address expectedRouter = vm.computeCreateAddress(address(this), uint256(routerDependencyNonce) + 2);
         OrderLifecycleBook lifecycleBook =
@@ -309,7 +308,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         );
         CfdEngineLens engineLens = new CfdEngineLens(address(engine));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address expectedRouter = vm.computeCreateAddress(address(this), uint256(routerDependencyNonce) + 2);
         OrderLifecycleBook predeployedLifecycleBook =
@@ -374,7 +373,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         CfdEngineLens engineLens = new CfdEngineLens(address(engine));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address expectedRouter = vm.computeCreateAddress(address(this), uint256(routerDependencyNonce) + 2);
         OrderLifecycleBook predeployedLifecycleBook =

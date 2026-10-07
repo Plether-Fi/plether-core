@@ -20,8 +20,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -101,7 +101,7 @@ abstract contract BasePerpTest is Test {
     TrancheVault juniorVault;
     LegacyOrderRouterHarness router;
     CfdOrderPolicyEvaluator policyEvaluator;
-    OrderRouterV3ExecutionSidecar orderExecutionSidecar;
+    OrderRouterExecutionSidecar orderExecutionSidecar;
     OrderRouterAdmin routerAdmin;
     PletherOracle pletherOracle;
     PerpsPublicLens publicLens;
@@ -882,7 +882,7 @@ abstract contract BasePerpTest is Test {
         address oracle_
     ) internal returns (LegacyOrderRouterHarness deployedRouter) {
         policyEvaluator = new CfdOrderPolicyEvaluator();
-        orderExecutionSidecar = new OrderRouterV3ExecutionSidecar();
+        orderExecutionSidecar = new OrderRouterExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, engine_, address(clearinghouse), pool_);

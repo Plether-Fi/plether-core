@@ -3,11 +3,11 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
-import {IOrderRouterV3ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV3ExecutionHost.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 
 /// @notice Fault injection at the production Router's self-call boundary must preserve the signed intent,
 ///         reservations and original deadline, so a corrected dependency can retry the same order.
@@ -69,9 +69,9 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     }
 
     function test_BountyMismatchRollsBackEngineAndCanRetry() public {
-        IOrderRouterV3ExecutionHost.BountySettlement memory settlement;
+        IOrderRouterExecutionHost.BountySettlement memory settlement;
         vm.mockCall(
-            address(router), abi.encodeWithSelector(router.settleV3OrderFromSidecar.selector), abi.encode(settlement)
+            address(router), abi.encodeWithSelector(router.settleOrderFromSidecar.selector), abi.encode(settlement)
         );
         _assertPendingThenRecover(OrderV3Types.PendingReason.ReceiptFailure);
     }
@@ -82,48 +82,48 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     }
 
     function test_InvalidItemActionsCannotBypassPendingOrderPolicy() public {
-        IOrderRouterV3ExecutionHost.ItemRequest memory request;
+        IOrderRouterExecutionHost.ItemRequest memory request;
         request.orderId = orderId;
-        request.action = IOrderRouterV3ExecutionHost.ItemAction.Expire;
+        request.action = IOrderRouterExecutionHost.ItemAction.Expire;
         vm.expectRevert(
             abi.encodeWithSelector(
-                OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__InvalidItemAction.selector, orderId
+                OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__InvalidItemAction.selector, orderId
             )
         );
         vm.prank(address(router));
-        router.executeV3OrderItemFromSidecar(request);
-        request.action = IOrderRouterV3ExecutionHost.ItemAction.RiskOff;
+        router.executeOrderItemFromSidecar(request);
+        request.action = IOrderRouterExecutionHost.ItemAction.RiskOff;
         vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotRiskOff.selector);
         vm.prank(address(router));
-        router.executeV3OrderItemFromSidecar(request);
+        router.executeOrderItemFromSidecar(request);
         _assertPreserved();
     }
 
     function test_HistoricalBoundaryAndCloseOnlyRemainRetryable() public {
-        IOrderRouterV3ExecutionHost.ItemRequest memory request;
+        IOrderRouterExecutionHost.ItemRequest memory request;
         request.orderId = orderId;
         request.openExecutionCloseOnly = true;
         vm.prank(address(router));
-        OrderV3Types.ExecutionResult memory result = router.executeV3OrderItemFromSidecar(request);
+        OrderV3Types.ExecutionResult memory result = router.executeOrderItemFromSidecar(request);
         assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.CloseOnly));
         request.openExecutionCloseOnly = false;
         request.oraclePublishTime = book.orderTiming(orderId).commitTimestamp;
         vm.roll(block.number + 1);
         vm.prank(address(router));
-        result = router.executeV3OrderItemFromSidecar(request);
+        result = router.executeOrderItemFromSidecar(request);
         assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.MevBoundary));
         _assertPreserved();
     }
 
     function test_SettledReceiptRejectsUnrelatedReasonOrBounty() public {
-        IOrderRouterV3ExecutionHost.SettledTerminalInput memory input = _riskOffInput();
+        IOrderRouterExecutionHost.SettledTerminalInput memory input = _riskOffInput();
         input.reason = OrderV3Types.TerminalReason.Expired;
         _expectInvalidReceipt(input);
         input = _riskOffInput();
         input.bountyUsdc++;
         vm.expectRevert(
             abi.encodeWithSelector(
-                OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__OrderIdentityMismatch.selector, orderId
+                OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__OrderIdentityMismatch.selector, orderId
             )
         );
         vm.prank(address(router));
@@ -134,7 +134,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     function test_SettledReceiptRejectsFabricatedFailureEvidence() public {
         // Each field must be empty; a trusted callback cannot manufacture a user-policy failure.
         for (uint256 field; field < 7; ++field) {
-            IOrderRouterV3ExecutionHost.SettledTerminalInput memory input = _riskOffInput();
+            IOrderRouterExecutionHost.SettledTerminalInput memory input = _riskOffInput();
             if (field == 0) {
                 input.failure.selector = bytes4(0x12345678);
             }
@@ -162,7 +162,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     }
 
     function test_RiskOffReceiptRejectsWrongBountyRecipientOrDisposition() public {
-        IOrderRouterV3ExecutionHost.SettledTerminalInput memory input = _riskOffInput();
+        IOrderRouterExecutionHost.SettledTerminalInput memory input = _riskOffInput();
         input.bountyRecipient = KEEPER;
         _expectInvalidReceipt(input);
         input = _riskOffInput();
@@ -173,7 +173,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
 
     function test_RiskOffReceiptRejectsFabricatedExecutionEvidence() public {
         for (uint256 field; field < 5; ++field) {
-            IOrderRouterV3ExecutionHost.SettledTerminalInput memory input = _riskOffInput();
+            IOrderRouterExecutionHost.SettledTerminalInput memory input = _riskOffInput();
             if (field == 0) {
                 input.executionMode = OrderV3Types.ExecutionMode.Live;
             }
@@ -202,7 +202,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     }
 
     function test_LiquidationReceiptRejectsWrongBountyAndPriceEvidence() public {
-        IOrderRouterV3ExecutionHost.SettledTerminalInput memory input = _riskOffInput();
+        IOrderRouterExecutionHost.SettledTerminalInput memory input = _riskOffInput();
         input.reason = OrderV3Types.TerminalReason.AccountLiquidated;
         _expectInvalidReceipt(input);
         input.bountyDisposition = OrderV3Types.BountyDisposition.Forfeited;
@@ -214,7 +214,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         _assertPreserved();
     }
 
-    function _riskOffInput() internal view returns (IOrderRouterV3ExecutionHost.SettledTerminalInput memory input) {
+    function _riskOffInput() internal view returns (IOrderRouterExecutionHost.SettledTerminalInput memory input) {
         input.orderId = orderId;
         input.executor = KEEPER;
         input.reason = OrderV3Types.TerminalReason.RiskOff;
@@ -224,9 +224,9 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     }
 
     function _expectInvalidReceipt(
-        IOrderRouterV3ExecutionHost.SettledTerminalInput memory input
+        IOrderRouterExecutionHost.SettledTerminalInput memory input
     ) internal {
-        vm.expectRevert(OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__InvalidSettledReason.selector);
+        vm.expectRevert(OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__InvalidSettledReason.selector);
         vm.prank(address(router));
         router.recordSettledTerminal(input);
     }

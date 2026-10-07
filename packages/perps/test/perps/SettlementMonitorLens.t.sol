@@ -5,8 +5,8 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -198,7 +198,7 @@ contract SettlementMonitorLensTest is BasePerpTest {
         address wrongPool = address(0xBADF00D);
         SettlementMonitorOracleBindingMock wrongOracle =
             new SettlementMonitorOracleBindingMock(address(engine), wrongPool, address(baseMockPyth));
-        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), wrongPool);

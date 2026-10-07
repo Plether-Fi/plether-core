@@ -2,14 +2,14 @@
 pragma solidity 0.8.35;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
-import {IOrderRouterV3ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV3ExecutionHost.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {Test} from "forge-std/Test.sol";
 
-contract OrderRouterV3ExecutionSidecarHarness is OrderRouterV3ExecutionSidecar {
+contract OrderRouterExecutionSidecarHarness is OrderRouterExecutionSidecar {
 
     function classify(
         bytes calldata revertData
@@ -30,18 +30,18 @@ contract OrderRouterV3ExecutionSidecarHarness is OrderRouterV3ExecutionSidecar {
 
 }
 
-contract OrderRouterV3ExecutionSidecarTest is Test {
+contract OrderRouterExecutionSidecarTest is Test {
 
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
 
-    OrderRouterV3ExecutionSidecarHarness internal sidecar;
+    OrderRouterExecutionSidecarHarness internal sidecar;
 
     function setUp() public {
-        sidecar = new OrderRouterV3ExecutionSidecarHarness();
+        sidecar = new OrderRouterExecutionSidecarHarness();
     }
 
     function testProductionRuntimeFitsEip170() public {
-        OrderRouterV3ExecutionSidecar productionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar productionSidecar = new OrderRouterExecutionSidecar();
         assertLe(
             address(productionSidecar).code.length,
             EIP170_RUNTIME_CODE_LIMIT,
@@ -51,12 +51,12 @@ contract OrderRouterV3ExecutionSidecarTest is Test {
 
     function testDirectStatefulCallsAreRejected() public {
         bytes[] memory updates = new bytes[](0);
-        vm.expectRevert(OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__OnlyDelegateCall.selector);
+        vm.expectRevert(OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__OnlyDelegateCall.selector);
         sidecar.executeOrder(1, updates);
 
-        IOrderRouterV3ExecutionHost.ItemRequest memory request;
-        vm.expectRevert(OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__OnlyDelegateCall.selector);
-        sidecar.executeV3OrderItemFromSidecar(request);
+        IOrderRouterExecutionHost.ItemRequest memory request;
+        vm.expectRevert(OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__OnlyDelegateCall.selector);
+        sidecar.executeOrderItemFromSidecar(request);
     }
 
     function testExactPlannerFailureIsTerminal() public view {
@@ -187,7 +187,7 @@ contract OrderRouterV3ExecutionSidecarTest is Test {
 
     function testWrappedRetryablePendingReasonClassification() public view {
         bytes memory markFailure = abi.encodeWithSelector(
-            OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__RetryableFailure.selector,
+            OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__RetryableFailure.selector,
             address(0x1234),
             ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector,
             uint256(4)
@@ -195,7 +195,7 @@ contract OrderRouterV3ExecutionSidecarTest is Test {
         assertEq(uint8(sidecar.pendingReason(markFailure)), uint8(OrderV3Types.PendingReason.MarkPriceOutOfOrder));
 
         bytes memory gasFailure = abi.encodeWithSelector(
-            OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__RetryableFailure.selector,
+            OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__RetryableFailure.selector,
             address(0x1234),
             bytes4(keccak256("OrderRouter__InsufficientGas()")),
             uint256(0)
@@ -203,7 +203,7 @@ contract OrderRouterV3ExecutionSidecarTest is Test {
         assertEq(uint8(sidecar.pendingReason(gasFailure)), uint8(OrderV3Types.PendingReason.InsufficientGas));
 
         bytes memory unknownFailure = abi.encodeWithSelector(
-            OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__RetryableFailure.selector,
+            OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__RetryableFailure.selector,
             address(0x1234),
             bytes4(keccak256("Unknown()")),
             uint256(4)
@@ -211,7 +211,7 @@ contract OrderRouterV3ExecutionSidecarTest is Test {
         assertEq(uint8(sidecar.pendingReason(unknownFailure)), uint8(OrderV3Types.PendingReason.EngineFailure));
 
         bytes memory malformedSuccess = abi.encodeWithSelector(
-            OrderRouterV3ExecutionSidecar.OrderRouterV3ExecutionSidecar__MalformedSuccess.selector,
+            OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__MalformedSuccess.selector,
             address(0x1234),
             uint256(32)
         );

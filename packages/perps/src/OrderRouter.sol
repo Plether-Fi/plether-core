@@ -6,7 +6,7 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
-import {IOrderRouterV3ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV3ExecutionHost.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
@@ -207,9 +207,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Returns one canonical live record to the immutable execution sidecar.
     /// @dev Restricted to Router self-calls so only a delegate-executing trusted sidecar can consume the host surface.
-    function getV3OrderForSidecar(
+    function getOrderForSidecar(
         uint64 orderId
-    ) external view returns (IOrderRouterV3ExecutionHost.OrderView memory orderView) {
+    ) external view returns (IOrderRouterExecutionHost.OrderView memory orderView) {
         _onlySelfCall();
         OrderRecord storage record = orderRecords[orderId];
         orderView.order = record.core;
@@ -217,10 +217,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         orderView.pending = record.status == IOrderRouterAccounting.OrderStatus.Pending;
     }
 
-    /// @notice Re-enters one V3 item through an independently revertible Router frame.
+    /// @notice Re-enters one order item through an independently revertible Router frame.
     /// @dev The outer non-reentrant entrypoint remains active; this callback delegates the exact authenticated calldata.
-    function executeV3OrderItemFromSidecar(
-        IOrderRouterV3ExecutionHost.ItemRequest calldata request
+    function executeOrderItemFromSidecar(
+        IOrderRouterExecutionHost.ItemRequest calldata request
     ) external returns (OrderV3Types.ExecutionResult memory result) {
         _onlySelfCall();
         request;
@@ -233,7 +233,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     ///      checkpoint occurs; all other recipients use the canonical Engine bounty-credit path. A failed protection
     ///      attempt may instead reattribute the bounty to its protection namespace without unlocking settlement,
     ///      allowing a later attempt to reuse the same reserve.
-    function settleV3OrderFromSidecar(
+    function settleOrderFromSidecar(
         uint64 orderId,
         bool success,
         OrderV3Types.TerminalReason reason,
@@ -241,7 +241,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 executionPrice,
         uint256 accountingPrice,
         uint64 accountingPublishTime
-    ) external returns (IOrderRouterV3ExecutionHost.BountySettlement memory settlement) {
+    ) external returns (IOrderRouterExecutionHost.BountySettlement memory settlement) {
         _onlySelfCall();
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         clearinghouse.releaseOrderReservationForTerminalCleanup(orderId);
@@ -297,7 +297,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Delegates receipt construction for an order already settled by risk-off or liquidation accounting.
     function recordSettledTerminal(
-        IOrderRouterV3ExecutionHost.SettledTerminalInput calldata input
+        IOrderRouterExecutionHost.SettledTerminalInput calldata input
     ) external returns (OrderV3Types.ExecutionResult memory result) {
         _onlySelfCall();
         input;

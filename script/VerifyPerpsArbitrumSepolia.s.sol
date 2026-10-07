@@ -18,8 +18,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
@@ -66,7 +66,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         CfdEngineLens engineLens;
         CfdOrderPolicyEvaluator orderPolicyEvaluator;
         CfdClosePreview closePreview;
-        OrderRouterV3ExecutionSidecar orderExecutionSidecar;
+        OrderRouterExecutionSidecar orderExecutionSidecar;
         OrderRouter router;
         OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
         OrderLifecycleBook lifecycleBook;
@@ -118,7 +118,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         deployed.engineLens = CfdEngineLens(vm.envAddress("PERPS_ENGINE_LENS"));
         deployed.orderPolicyEvaluator = CfdOrderPolicyEvaluator(vm.envAddress("PERPS_ORDER_POLICY_EVALUATOR"));
         deployed.closePreview = CfdClosePreview(vm.envAddress("PERPS_CLOSE_PREVIEW"));
-        deployed.orderExecutionSidecar = OrderRouterV3ExecutionSidecar(vm.envAddress("PERPS_ORDER_EXECUTION_SIDECAR"));
+        deployed.orderExecutionSidecar = OrderRouterExecutionSidecar(vm.envAddress("PERPS_ORDER_EXECUTION_SIDECAR"));
         deployed.router = OrderRouter(vm.envAddress("PERPS_ORDER_ROUTER"));
         deployed.liquidationBatchSidecar =
             OrderRouterLiquidationBatchSidecar(vm.envAddress("PERPS_LIQUIDATION_BATCH_SIDECAR"));

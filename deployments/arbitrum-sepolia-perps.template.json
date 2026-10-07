@@ -39,7 +39,7 @@
     "cfdEngineOpenQuoter": { "address": null, "runtimeCodeHash": null },
     "cfdOrderPolicyEvaluator": { "address": null, "runtimeCodeHash": null },
     "cfdClosePreview": { "address": null, "runtimeCodeHash": null },
-    "orderRouterV3ExecutionSidecar": { "address": null, "runtimeCodeHash": null },
+    "orderRouterExecutionSidecar": { "address": null, "runtimeCodeHash": null },
     "pletherOracle": {
       "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
       "address": null,

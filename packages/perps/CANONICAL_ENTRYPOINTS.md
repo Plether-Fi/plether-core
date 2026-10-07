@@ -232,7 +232,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
   is immutable-bound to the predicted Router, Engine, Clearinghouse, and HousePool; the Router constructor validates
   all four bindings before accepting it. Only that Router may register or finalize lifecycle state, and the Book owns
   no funds or execution authority.
-- `OrderRouterV3ExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
+- `OrderRouterExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
   execution, failure classification, and receipts. Direct stateful calls are rejected; integrations call the Router.
 - `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, exactly Router-bound stateless
   implementation detail for mark refresh, protection-trigger oracle/orchestration, single and batch liquidation, and

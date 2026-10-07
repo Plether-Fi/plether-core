@@ -89,7 +89,7 @@ The deploy script creates and wires:
 14. `ArbitrumSepoliaReleaseOracle`, a constructor-only `PletherOracle` wrapper with the `2,500`-bps multiplier
 15. `CfdOrderPolicyEvaluator`
 16. `CfdClosePreview`, separately deployed as a stateless pre-commit close-review contract, distinct from the Router's evaluator
-17. `OrderRouterV3ExecutionSidecar`
+17. `OrderRouterExecutionSidecar`
 18. `OrderLifecycleBook`, separately deployed and immutable-bound to the predicted Router, Engine,
     MarginClearinghouse, and HousePool
 19. `OrderRouterLiquidationBatchSidecar`, separately deployed with the same predicted Router address
@@ -163,7 +163,7 @@ Important:
   `currentExecutionConfigHash()` is nonzero after core wiring. The Book is
   the authoritative source for permanent client-intent identity and terminal order outcomes; it has no independent
   owner, setter, or mutable wiring.
-- `CfdOrderPolicyEvaluator` and `OrderRouterV3ExecutionSidecar` are separately deployed contracts whose exact
+- `CfdOrderPolicyEvaluator` and `OrderRouterExecutionSidecar` are separately deployed contracts whose exact
   addresses are pinned immutably in the Router. Deployment must verify code at both addresses and equality with the
   Router's `policyEvaluator()` and `executionSidecar()` getters. The execution sidecar is stateless and rejects direct
   stateful use; keepers call the Router. Record both addresses independently for bytecode verification. Bootstrap
@@ -442,7 +442,7 @@ including at least:
 - `PletherOracle`
 - `CfdOrderPolicyEvaluator`
 - `CfdClosePreview`
-- `OrderRouterV3ExecutionSidecar`
+- `OrderRouterExecutionSidecar`
 - `OrderRouter`
 - the separately deployed `OrderRouterLiquidationBatchSidecar` returned by
   `OrderRouter.liquidationBatchSidecar()`

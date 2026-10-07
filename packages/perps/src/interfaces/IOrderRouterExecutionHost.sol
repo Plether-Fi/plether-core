@@ -4,9 +4,9 @@ pragma solidity 0.8.35;
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
-/// @title V3 execution-sidecar host surface
-/// @notice Minimal Router callbacks used by the stateless V3 order-execution delegate module.
-interface IOrderRouterV3ExecutionHost {
+/// @title Execution-sidecar host surface
+/// @notice Minimal Router callbacks used by the stateless order-execution delegate module.
+interface IOrderRouterExecutionHost {
 
     /// @notice Operation isolated by the Router's self-call rollback boundary.
     enum ItemAction {
@@ -23,7 +23,7 @@ interface IOrderRouterV3ExecutionHost {
         bool pending;
     }
 
-    /// @notice Complete input for one independently revertible V3 order attempt.
+    /// @notice Complete input for one independently revertible order attempt.
     struct ItemRequest {
         uint64 orderId;
         ItemAction action;
@@ -89,20 +89,20 @@ interface IOrderRouterV3ExecutionHost {
 
     /// @notice Returns the Router's canonical live queue record for `orderId`.
     /// @dev The Router may restrict this callback to `msg.sender == address(this)`.
-    function getV3OrderForSidecar(
+    function getOrderForSidecar(
         uint64 orderId
     ) external view returns (OrderView memory orderView);
 
     /// @notice Executes one item in a Router self-call rollback frame.
     /// @dev The Router implementation delegates this exact calldata to the immutable execution sidecar.
-    function executeV3OrderItemFromSidecar(
+    function executeOrderItemFromSidecar(
         ItemRequest calldata request
     ) external returns (OrderV3Types.ExecutionResult memory result);
 
     /// @notice Releases remaining order margin, settles or retains its bounty, and unlinks its Router record.
     /// @dev `bountyRecipient` is explicit because a Router self-call changes `msg.sender`. Failed protection attempts
     ///      return a retained disposition with a zero recipient so their one reserved bounty can fund a fresh retry.
-    function settleV3OrderFromSidecar(
+    function settleOrderFromSidecar(
         uint64 orderId,
         bool success,
         OrderV3Types.TerminalReason reason,

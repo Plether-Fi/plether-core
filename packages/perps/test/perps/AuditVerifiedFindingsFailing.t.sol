@@ -19,8 +19,8 @@ import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemption
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -237,7 +237,7 @@ contract AuditVerifiedFindingsFailing_F3_StaleKeeperFee is Test {
         bases[1] = 1e8;
 
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         CfdEngineLens testEngineLens = new CfdEngineLens(address(engine));
         PletherOracle testOracle =
             new PletherOracle(address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions);

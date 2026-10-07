@@ -5,7 +5,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterV3ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV3ExecutionHost.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
 /// @title OrderLiquidationHandler
@@ -115,7 +115,7 @@ abstract contract OrderLiquidationHandler is OrderValidation {
 
             // Solidity zero-initializes fields that are inapplicable to liquidation terminal evidence.
             // slither-disable-next-line uninitialized-local
-            IOrderRouterV3ExecutionHost.SettledTerminalInput memory receiptInput;
+            IOrderRouterExecutionHost.SettledTerminalInput memory receiptInput;
             receiptInput.orderId = orderId;
             receiptInput.executor = keeper;
             receiptInput.observedConfigHash = observedConfigHash;

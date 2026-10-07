@@ -14,8 +14,8 @@ import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemption
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -169,7 +169,7 @@ contract PythRealUpdateForkTest is Test {
             address(engine), address(pool), REAL_PYTH, _singleFeedIds(), weights, basePrices, new bool[](1)
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
         OrderLifecycleBook lifecycleBook =

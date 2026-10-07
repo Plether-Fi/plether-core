@@ -254,7 +254,7 @@ The main runtime and read surfaces are:
   and exact Engine, Clearinghouse, and HousePool dependencies.
 - `CfdOrderPolicyEvaluator`: separately deployed stateless coordinator that rebuilds the Engine's authoritative
   snapshot, calls the configured planner, and applies the order's financial bounds before Engine mutation.
-- `OrderRouterV3ExecutionSidecar`: separately deployed stateless delegate module for single/batch oracle
+- `OrderRouterExecutionSidecar`: separately deployed stateless delegate module for single/batch oracle
   orchestration, policy classification, Engine execution, and receipt construction.
 - `PositionProtectionBook`: stateful Router-deployed action/view surface and retained TP/SL lifecycle store.
 - `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, stateless keeper implementation for mark
@@ -303,7 +303,7 @@ The main runtime and read surfaces are:
   selectors: clients call the discovered protection Book directly. That Book has no token custody and cannot mutate
   FIFO by itself; it invokes narrow Router host paths for the parent open, trigger mark refresh, and close-attempt
   append.
-- `CfdOrderPolicyEvaluator` and `OrderRouterV3ExecutionSidecar` are deployed separately and supplied to a fresh
+- `CfdOrderPolicyEvaluator` and `OrderRouterExecutionSidecar` are deployed separately and supplied to a fresh
   Router. The execution sidecar is fixed by the Router, has no mutable storage or upgrade path, and rejects direct
   stateful calls. Router execution entrypoints delegate to it so external Clearinghouse, lifecycle Book, Oracle, and
   Engine calls retain the Router as caller. The reusable sidecar does not claim that every delegatecaller is the
@@ -982,7 +982,7 @@ The perps system intentionally splits accounting into separate kernels:
 - `OrderReservationAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
 - `OrderRouterBase` / `OrderCommitHandler` / Router handler modules: live queue storage, bounded commit validation,
   authenticated V3 sidecar callbacks, liquidation, bounty accounting, mark refresh, LP settlement, and emergency
-  cleanup. `OrderRouterV3ExecutionSidecar`, `CfdOrderPolicyEvaluator`, and `OrderLifecycleBook` own V3 single/batch
+  cleanup. `OrderRouterExecutionSidecar`, `CfdOrderPolicyEvaluator`, and `OrderLifecycleBook` own V3 single/batch
   orchestration, financial-policy assessment, and permanent lifecycle evidence respectively.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 

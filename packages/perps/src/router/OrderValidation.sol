@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
-import {IOrderRouterV3ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV3ExecutionHost.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {OrderBountyAccounting} from "@plether/perps/router/OrderBountyAccounting.sol";
 
 /// @title OrderValidation
@@ -26,23 +26,23 @@ abstract contract OrderValidation is OrderBountyAccounting {
         }
         // Solidity zero-initializes oracle fields that are deliberately absent from pre-oracle risk-off cleanup.
         // slither-disable-next-line uninitialized-local
-        IOrderRouterV3ExecutionHost.ItemRequest memory request;
+        IOrderRouterExecutionHost.ItemRequest memory request;
         request.orderId = orderId;
-        request.action = IOrderRouterV3ExecutionHost.ItemAction.RiskOff;
+        request.action = IOrderRouterExecutionHost.ItemAction.RiskOff;
         request.executor = executor;
         request.observedConfigHash = lifecycleBook.currentExecutionConfigHash();
         request.neutralMarkPrice = neutralMarkPrice;
         request.poolDepthUsdc = housePool.totalAssets();
         request.bountyAccountingPrice = neutralMarkPrice;
         request.bountyAccountingPublishTime = engine.lastMarkTime();
-        return IOrderRouterV3ExecutionHost(address(this)).executeV3OrderItemFromSidecar(request);
+        return IOrderRouterExecutionHost(address(this)).executeOrderItemFromSidecar(request);
     }
 
     /// @notice Delegates canonical receipt construction for accounting already settled by liquidation.
     function _recordSettledTerminalReceipt(
-        IOrderRouterV3ExecutionHost.SettledTerminalInput memory input
+        IOrderRouterExecutionHost.SettledTerminalInput memory input
     ) internal returns (OrderV3Types.ExecutionResult memory result) {
-        return IOrderRouterV3ExecutionHost(address(this)).recordSettledTerminal(input);
+        return IOrderRouterExecutionHost(address(this)).recordSettledTerminal(input);
     }
 
 }

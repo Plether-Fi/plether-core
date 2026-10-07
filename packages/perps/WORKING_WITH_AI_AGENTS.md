@@ -186,7 +186,7 @@ terminally resolves the protection as `Failed`.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
-execution sidecar (`OrderRouterV3ExecutionSidecar`) applies oracle, policy, rollback-isolation, and receipt logic.
+execution sidecar (`OrderRouterExecutionSidecar`) applies oracle, policy, rollback-isolation, and receipt logic.
 Integrations must still call the Router or the Router-discovered protection Book. Direct sidecar calls are not
 alternative protocol entrypoints and cannot acquire Router authority.
 

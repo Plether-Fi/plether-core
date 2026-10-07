@@ -16,8 +16,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -154,7 +154,7 @@ contract PerpsForkTest is Test {
         PletherOracle oracle =
             new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV3ExecutionSidecar executionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
         OrderLifecycleBook lifecycleBook =
@@ -432,7 +432,7 @@ contract PerpsForkTest is Test {
         PletherOracle realPythOracle =
             new PletherOracle(address(engine), address(pool), REAL_PYTH, feedIds, rw, rb, new bool[](1));
         CfdOrderPolicyEvaluator realPythEvaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV3ExecutionSidecar realPythExecutionSidecar = new OrderRouterV3ExecutionSidecar();
+        OrderRouterExecutionSidecar realPythExecutionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
         address predictedRouter = vm.computeCreateAddress(address(this), routerDependencyNonce + 2);
         OrderLifecycleBook lifecycleBook =

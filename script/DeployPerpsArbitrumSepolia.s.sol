@@ -19,8 +19,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV3ExecutionSidecar} from "@plether/perps/OrderRouterV3ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
@@ -182,7 +182,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         CfdEngineLens engineLens;
         CfdOrderPolicyEvaluator orderPolicyEvaluator;
         CfdClosePreview closePreview;
-        OrderRouterV3ExecutionSidecar orderExecutionSidecar;
+        OrderRouterExecutionSidecar orderExecutionSidecar;
         OrderRouter router;
         OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
         address positionProtectionBook;
@@ -278,7 +278,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.orderPolicyEvaluator = new CfdOrderPolicyEvaluator();
         deployed.closePreview = new CfdClosePreview(address(deployed.engine));
         require(address(deployed.closePreview).code.length > 0, "Close preview has no code");
-        deployed.orderExecutionSidecar = new OrderRouterV3ExecutionSidecar();
+        deployed.orderExecutionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(deployer);
         address expectedRouter = vm.computeCreateAddress(deployer, uint256(routerDependencyNonce) + 2);
         deployed.lifecycleBook = new OrderLifecycleBook(
@@ -303,7 +303,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         deployed.engine.setOrderRouter(address(deployed.router));
         deployed.clearinghouse.setEngine(address(deployed.engine));
         require(deployed.engine.orderRouter() == address(deployed.router), "Engine OrderRouter mismatch");
-        OrderLifecycleBook verifiedLifecycleBook = _verifyV3OrderStack(
+        OrderLifecycleBook verifiedLifecycleBook = _verifyOrderStack(
             deployed.engine,
             deployed.clearinghouse,
             deployed.housePool,
@@ -509,12 +509,12 @@ contract DeployPerpsArbitrumSepolia is Script {
     }
 
     /// @dev Verifies the independently deployed V3 policy modules and predeployed authoritative lifecycle book.
-    function _verifyV3OrderStack(
+    function _verifyOrderStack(
         CfdEngine engine,
         MarginClearinghouse clearinghouse,
         HousePool housePool,
         CfdOrderPolicyEvaluator orderPolicyEvaluator,
-        OrderRouterV3ExecutionSidecar orderExecutionSidecar,
+        OrderRouterExecutionSidecar orderExecutionSidecar,
         OrderRouter router
     ) internal view returns (OrderLifecycleBook lifecycleBook) {
         require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
@@ -678,7 +678,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("CfdEngineLens:", address(deployed.engineLens));
         console.log("CfdOrderPolicyEvaluator:", address(deployed.orderPolicyEvaluator));
         console.log("CfdClosePreview:", address(deployed.closePreview));
-        console.log("OrderRouterV3ExecutionSidecar:", address(deployed.orderExecutionSidecar));
+        console.log("OrderRouterExecutionSidecar:", address(deployed.orderExecutionSidecar));
         console.log("OrderRouter:", address(deployed.router));
         console.log("MinimumOpenNotionalUsdc:", deployed.router.minOpenNotionalUsdc());
         console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());
