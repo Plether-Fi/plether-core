@@ -3,7 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
@@ -61,7 +61,7 @@ contract GasBurningBatchKeeper {
         address router,
         uint64 maxOrderId,
         bytes[] calldata updateData
-    ) external payable returns (OrderV2Types.BatchResult memory result) {
+    ) external payable returns (OrderV3Types.BatchResult memory result) {
         return IPerpsKeeper(router).executeOrderBatch{value: msg.value}(maxOrderId, updateData);
     }
 
@@ -91,34 +91,34 @@ contract OrderRouterV2BatchOogIsolationTest is BasePerpTest {
         uint256 pythCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
 
         vm.deal(address(this), REFUND_AMOUNT);
-        OrderV2Types.BatchResult memory result =
+        OrderV3Types.BatchResult memory result =
             keeper.executeBatch{value: REFUND_AMOUNT, gas: 8_000_000}(address(router), secondOrderId, new bytes[](0));
 
         assertEq(result.terminalCount, 1, "the completed prefix must be reported");
         assertEq(result.nextOrderId, secondOrderId, "the OOG item must remain the returned cursor");
         assertEq(
             uint256(result.stopReason),
-            uint256(OrderV2Types.PendingReason.EngineFailure),
+            uint256(OrderV3Types.PendingReason.EngineFailure),
             "an empty OOG revert must stop as a retryable dependency failure"
         );
         assertEq(router.nextExecuteId(), secondOrderId, "the global cursor must preserve the retryable item");
 
-        OrderV2Types.CompactOutcome memory firstOutcome = router.lifecycleBook().outcome(firstOrderId);
+        OrderV3Types.CompactOutcome memory firstOutcome = router.lifecycleBook().outcome(firstOrderId);
         assertEq(
             uint256(firstOutcome.status),
-            uint256(OrderV2Types.LifecycleStatus.Failed),
+            uint256(OrderV3Types.LifecycleStatus.Failed),
             "the first receipt must persist after the later OOG"
         );
         assertEq(
             uint256(firstOutcome.reason),
-            uint256(OrderV2Types.TerminalReason.RiskOff),
+            uint256(OrderV3Types.TerminalReason.RiskOff),
             "the completed prefix must retain its exact terminal reason"
         );
         assertEq(firstOutcome.executor, address(keeper), "the prefix receipt must retain the external keeper");
 
         assertEq(
             uint256(router.lifecycleBook().lifecycleStatus(secondOrderId)),
-            uint256(OrderV2Types.LifecycleStatus.Pending),
+            uint256(OrderV3Types.LifecycleStatus.Pending),
             "the OOG receipt finalization must roll back the complete second item"
         );
         assertEq(

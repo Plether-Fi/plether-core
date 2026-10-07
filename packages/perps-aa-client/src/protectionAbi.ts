@@ -1,4 +1,4 @@
-// Generated from perps v1.2.1 source c3f60f58bcd5dc1b85a28739a5de7ec4a2ee114c. Do not edit.
+// Generated from the V3 Solidity ABI. Source-only; no deployment addresses.
 export const positionProtectionBookAbi = [
   {
     "type": "constructor",
@@ -165,7 +165,7 @@ export const positionProtectionBookAbi = [
       {
         "name": "request",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.OrderRequest",
+        "internalType": "struct OrderV3Types.OrderRequest",
         "components": [
           {
             "name": "clientOrderId",
@@ -200,12 +200,17 @@ export const positionProtectionBookAbi = [
           {
             "name": "bounds",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.ExecutionBounds",
+            "internalType": "struct OrderV3Types.ExecutionBounds",
             "components": [
               {
-                "name": "validUntil",
+                "name": "submitBy",
                 "type": "uint64",
                 "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
               },
               {
                 "name": "allowedExecutionModes",
@@ -490,7 +495,7 @@ export const positionProtectionBookAbi = [
       {
         "name": "reason",
         "type": "uint8",
-        "internalType": "enum OrderV2Types.TerminalReason"
+        "internalType": "enum OrderV3Types.TerminalReason"
       },
       {
         "name": "executionBountyUsdc",
@@ -775,7 +780,7 @@ export const positionProtectionBookAbi = [
         "name": "reason",
         "type": "uint8",
         "indexed": false,
-        "internalType": "enum OrderV2Types.TerminalReason"
+        "internalType": "enum OrderV3Types.TerminalReason"
       },
       {
         "name": "relatched",
@@ -1106,6 +1111,11 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__InvalidExecutionWindow",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__InvalidKeeperSidecar",
     "inputs": []
   },
@@ -1146,7 +1156,7 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InvalidValidUntil",
+    "name": "OrderRouter__InvalidSubmitBy",
     "inputs": []
   },
   {
@@ -1263,11 +1273,6 @@ export const positionProtectionBookAbi = [
   {
     "type": "error",
     "name": "OrderRouter__ProtectionAlreadyActive",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__ProtectionDisabled",
     "inputs": []
   },
   {

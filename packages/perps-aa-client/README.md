@@ -128,3 +128,17 @@ encodings and hashes; `RELEASING.md` describes the artifact compatibility gate.
 ## UI errors and fallback
 
 Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and contract failures into stable codes and user-safe messages. Do not silently fall back to an EOA transaction: it would create protocol state under a different `msg.sender` and split the user's account. If sponsorship is unavailable, show a retry/support state unless the product has explicitly implemented and disclosed user-paid smart-account gas.
+
+## V3 order timing (0.2.0 source release)
+
+`buildPlaceOrderV3Action` and `buildProtectedOpenAction` encode `submitBy` and
+`executionWindowSeconds`. A fresh web review uses 120 seconds for submission
+and 60 seconds for execution after commitment. Both builders expose
+`submissionDeadline`; `sendSponsoredAction` rejects stub or final sponsorship
+that extends beyond it before requesting the owner signature. The contract
+resolves the execution deadline at commitment, so execution requires no new
+client signature. V2 signed calldata cannot be reinterpreted as V3.
+
+This is a breaking order ABI release. No package publication or deployment is
+included. See `packages/perps/ORDER_V3_TIMING.md` in the repository for activation
+requirements and the canonical lifecycle timing tuple.

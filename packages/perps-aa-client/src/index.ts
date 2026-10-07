@@ -9,3 +9,5 @@ export * from "./sponsorship.js";
 export * from "./types.js";
 export * from "./protection.js";
 export * from "./protectionAbi.js";
+export * from "./orderV3.js";
+export * from "./orderV3Abi.js";

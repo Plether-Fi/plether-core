@@ -110,7 +110,7 @@ interface IMarginClearinghouse {
         LiquidationReserve
     }
 
-    /// @notice Canonical V2 ownership split for one account's settlement custody.
+    /// @notice Canonical V3 ownership split for one account's settlement custody.
     /// @dev Every locked bucket is a classification within `settlementBalanceUsdc`, not an additional asset.
     ///      Legacy `positionMarginUsdc`, `committedOrderMarginUsdc`, and `reservedSettlementUsdc` getters map to
     ///      `pnlPledgeUsdc`, `orderMarginUsdc`, and `actionReserveUsdc`, respectively.

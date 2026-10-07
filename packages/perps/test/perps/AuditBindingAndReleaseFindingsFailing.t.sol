@@ -61,7 +61,7 @@ contract AuditBindingAndReleaseFindingsFailing is BasePerpTest {
         bytes[] memory empty = _mockPythUpdateData();
         uint256 keeperBefore = usdc.balanceOf(address(this));
 
-        vm.warp(block.timestamp + router.maxOrderAge() + 1);
+        vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
         vm.roll(block.number + 1);
         router.executeOrder(1, empty);
 

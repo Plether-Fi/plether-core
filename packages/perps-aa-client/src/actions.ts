@@ -152,6 +152,7 @@ export function buildSmartAccountBalanceDepositAction(input: {
   ]);
 }
 
+/** @deprecated Historical scalar-router helper. V3 deployments require buildPlaceOrderV3Action. */
 export function buildPlaceOrderAction(input: {
   readonly account: Address;
   readonly orderRouter: Address;

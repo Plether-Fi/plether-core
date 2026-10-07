@@ -31,9 +31,9 @@ contract AuditV3Failing_QueueGriefing is BasePerpTest {
         assertEq(router.nextCommitId(), 2, "Commit should succeed without sending ETH");
     }
 
-    function test_1_MaxOrderAgeShouldBeNonZeroByDefault() public {
+    function test_1_MaxExecutionWindowSecondsShouldBeNonZeroByDefault() public {
         // A nonzero default lifetime lets terminal cleanup expire abandoned queue entries.
-        assertGt(router.maxOrderAge(), 0, "maxOrderAge should have a non-zero default");
+        assertGt(router.maxExecutionWindowSeconds(), 0, "maxExecutionWindowSeconds should have a non-zero default");
     }
 
 }

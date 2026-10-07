@@ -6,7 +6,7 @@ import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -45,12 +45,12 @@ contract CfdSponsoredCloseForkTest is Test {
         vm.createSelectFork(url);
         assertEq(block.chainid, 421_614);
         assertEq(ACCOUNT.codehash, 0x41ee894da413cc99e8dec0a1784470eceb736845ad1591e06ff0ecdf0aca26c9);
-        lens = new CfdClosePreview();
+        lens = new CfdClosePreview(address(ENGINE));
     }
 
     function _request(
         bool isPartial
-    ) internal view returns (OrderV2Types.OrderRequest memory r) {
+    ) internal view returns (OrderV3Types.OrderRequest memory r) {
         (uint256 size,,,, CfdTypes.Side side,,) = ENGINE.positions(ACCOUNT);
         require(size > 0, "Fork fixture position no longer live");
         r.clientOrderId = keccak256(abi.encode("sponsored-fork", isPartial, block.number));
@@ -58,7 +58,9 @@ contract CfdSponsoredCloseForkTest is Test {
         r.sizeDelta = isPartial ? size / 2 / CfdTypes.SIZE_QUANTUM * CfdTypes.SIZE_QUANTUM : size;
         r.targetPrice = side == CfdTypes.Side.LONG ? type(uint256).max : 1;
         r.isClose = true;
-        r.bounds.validUntil = uint64(block.timestamp + ROUTER.maxOrderAge());
+        r.bounds.submitBy = uint64(block.timestamp + ROUTER.maxExecutionWindowSeconds());
+        r.bounds.executionWindowSeconds =
+            uint32(uint256(uint64(block.timestamp + ROUTER.maxExecutionWindowSeconds())) - block.timestamp);
         r.bounds.expectedConfigHash = ROUTER.lifecycleBook().currentExecutionConfigHash();
         r.bounds.allowedExecutionModes = 1;
         r.bounds.maxExecutionBountyUsdc = 200_000;
@@ -71,7 +73,7 @@ contract CfdSponsoredCloseForkTest is Test {
     }
 
     function _calls(
-        OrderV2Types.OrderRequest memory r,
+        OrderV3Types.OrderRequest memory r,
         uint256 amount
     ) internal view returns (ISponsoredSimpleAccount.Call[] memory c) {
         c = new ISponsoredSimpleAccount.Call[](5);
@@ -87,7 +89,7 @@ contract CfdSponsoredCloseForkTest is Test {
     function _commit(
         bool isPartial
     ) internal {
-        OrderV2Types.OrderRequest memory r = _request(isPartial);
+        OrderV3Types.OrderRequest memory r = _request(isPartial);
         uint256 free = IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         require(free < 200_000, "Fork fixture no longer needs assistance");
         uint256 amount = 200_000 - free;
@@ -105,7 +107,7 @@ contract CfdSponsoredCloseForkTest is Test {
         CfdTypes.Order memory order = CfdTypes.Order(
             ACCOUNT, r.sizeDelta, 0, r.targetPrice, uint64(block.timestamp), uint64(block.number), 0, r.side, true
         );
-        OrderV2Types.ExecutionAssessment memory actual = ICfdOrderPolicyEvaluator(
+        OrderV3Types.ExecutionAssessment memory actual = ICfdOrderPolicyEvaluator(
                 address(bytes20(hex"43c93d3028fcd4c1f578a50639750b8fbfdee799"))
             )
             .assessOrder(
@@ -145,7 +147,7 @@ contract CfdSponsoredCloseForkTest is Test {
     }
 
     function testFork_DeployedAccountRollsBackMintOnCommitFailure() public {
-        OrderV2Types.OrderRequest memory r = _request(false);
+        OrderV3Types.OrderRequest memory r = _request(false);
         uint256 free = IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         uint256 supply = IERC20(TOKEN).totalSupply();
         vm.mockCallRevert(

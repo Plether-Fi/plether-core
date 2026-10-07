@@ -51,7 +51,8 @@ rejects a zero grant.
 
 The account must have no pending orders or active protection. The request must be a close with zero margin delta,
 nonzero target price, an unused nonzero client intent outside the protocol-reserved prefix, the current configuration
-hash, a deadline between the current timestamp and `maxOrderAge`, sufficient bounty allowance, and valid execution
+hash, a `submitBy` at or after the current timestamp, a positive `executionWindowSeconds` no greater than
+`maxExecutionWindowSeconds`, sufficient bounty allowance, and valid execution
 modes. Preview accepts nonempty combinations of the three mode bits; the final guard requires one mode. Ordinary
 side, size, dust, funding, execution bounds, and partial-close charge rules still apply.
 

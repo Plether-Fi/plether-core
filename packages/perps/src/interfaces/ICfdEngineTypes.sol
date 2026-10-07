@@ -71,7 +71,7 @@ interface ICfdEngineTypes {
     error CfdEngine__NotAccountOwner();
     /// @notice An operation requiring an existing position was requested for an account without one.
     error CfdEngine__NoOpenPosition();
-    /// @notice Unused legacy selector retained in the shared ABI; V2 has no accumulated-debt repayment path.
+    /// @notice Unused legacy selector retained in the shared ABI; V3 has no accumulated-debt repayment path.
     error CfdEngine__BadDebtTooLarge();
     /// @notice Risk, fee, spread, price-cap, or liquidation-bounty parameters violate engine bounds.
     error CfdEngine__InvalidRiskParams();
@@ -163,7 +163,7 @@ interface ICfdEngineTypes {
     /// @notice Legacy event describing a change to the engine's live cached-mark staleness component.
     /// @param newStaleness New maximum age in seconds.
     event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
-    /// @notice Unused legacy event retained in the shared ABI; V2 does not emit or maintain accumulated debt.
+    /// @notice Unused legacy event retained in the shared ABI; V3 does not emit or maintain accumulated debt.
     /// @param amount Legacy cleared amount in USDC.
     /// @param remaining Legacy remaining amount in USDC.
     event BadDebtCleared(uint256 amount, uint256 remaining);

@@ -10,20 +10,20 @@ import {OrderQueueBook} from "@plether/perps/router/OrderQueueBook.sol";
 abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBook {
 
     /// @notice Legacy failure classifications retained for the Router event ABI.
-    /// @dev V2 emits `OrderFailed` only for RiskOff and AccountLiquidated. Every V2 terminal reason is recorded by
+    /// @dev V3 emits `OrderFailed` only for RiskOff and AccountLiquidated. Every V3 terminal reason is recorded by
     ///      `OrderLifecycleBook.OrderFinalized`; the remaining enum members are retained compatibility values.
     enum OrderFailReason {
         /// @notice Legacy age-based expiry classification.
         Expired,
-        /// @notice Legacy close-only classification; V2 leaves close-only opens pending.
+        /// @notice Legacy close-only classification; V3 leaves close-only opens pending.
         CloseOnly,
         /// @notice Legacy classification for a direction-aware limit violation.
         SlippageExceeded,
-        /// @notice Legacy panic classification; V2 panics leave the order pending.
+        /// @notice Legacy panic classification; V3 panics leave the order pending.
         EnginePanic,
         /// @notice The order was cleared because its account was liquidated.
         AccountLiquidated,
-        /// @notice Legacy non-panic engine-revert classification; V2 requires recognized typed terminal evidence.
+        /// @notice Legacy non-panic engine-revert classification; V3 requires recognized typed terminal evidence.
         EngineRevert,
         /// @notice A pre-cutoff open was invalidated by the persistent emergency risk-off latch.
         RiskOff
@@ -34,7 +34,7 @@ abstract contract OrderExecutionSettlement is OrderOracleExecution, OrderQueueBo
     /// @param executionPrice Oracle price used by the engine (8 decimals).
     event OrderExecuted(uint64 indexed orderId, uint256 executionPrice);
     /// @notice Emitted for risk-off or account-liquidation cleanup when an order is removed from live queues.
-    /// @dev Read `OrderLifecycleBook.OrderFinalized` for complete V2 terminal evidence, including other failures.
+    /// @dev Read `OrderLifecycleBook.OrderFinalized` for complete V3 terminal evidence, including other failures.
     /// @param orderId Failed order id.
     /// @param reason Router-level failure classification.
     event OrderFailed(uint64 indexed orderId, OrderFailReason reason);

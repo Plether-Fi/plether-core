@@ -18,7 +18,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @notice Stateless evaluator that enforces the account's pinned execution policy before settlement is applied.
     address public immutable policyEvaluator;
 
-    /// @notice Predeployed immutable registry for V2 client intents, pending policy, and authenticated receipts.
+    /// @notice Predeployed immutable registry for V3 client intents, pending policy, and authenticated receipts.
     OrderLifecycleBook public immutable lifecycleBook;
 
     /// @notice Minimum open/increase notional accepted at commit time (6-decimal USDC).
@@ -42,7 +42,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @param _engineLens CfdEngineLens used for open-order commit preflight.
     /// @param _housePool HousePool used for depth and risk-availability queries.
     /// @param _pletherOracle Deployed Plether oracle used for Pyth basket pricing.
-    /// @param _policyEvaluator Deployed stateless V2 financial-policy evaluator.
+    /// @param _policyEvaluator Deployed stateless V3 financial-policy evaluator.
     /// @param _lifecycleBook Predeployed lifecycle Book bound to this predicted Router and protocol stack.
     constructor(
         address _engine,

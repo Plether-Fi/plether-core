@@ -361,7 +361,7 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
-            maxOrderAge: 60,
+            maxExecutionWindowSeconds: 60,
             orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
             liquidationStalenessLimit: router.pletherOracle().liquidationStalenessLimit(),
             basketMaxConfidenceRatioBps: router.pletherOracle().basketMaxConfidenceRatioBps(),
