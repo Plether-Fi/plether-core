@@ -192,7 +192,7 @@ interface IPletherOracle {
     /// @notice Thrown when configuration contains a zero required window or an excessive component divergence.
     error PletherOracle__InvalidSettlementConfig();
 
-    /// @notice Emitted when an immediate excess-fee refund fails and becomes claimable.
+    /// @notice Emitted when an immediate ETH refund fails and becomes claimable.
     /// @param recipient Account credited with the deferred refund.
     /// @param amount Deferred ETH amount in wei.
     event EthRefundDeferred(address indexed recipient, uint256 amount);
@@ -281,7 +281,7 @@ interface IPletherOracle {
         address account
     ) external payable returns (PriceSnapshot memory snapshot);
 
-    /// @notice Applies oracle update data and returns the latest live order-execution basket price.
+    /// @notice Applies oracle update data and returns the current neutral order-policy basket price.
     /// @dev Equivalent to `updatePrice(refundRecipient, pythUpdateData, PriceMode.OrderExecution).price`. It reads the
     ///      current neutral basket; it neither parses a unique post-commit tick nor applies a side-adverse shift.
     /// @param refundRecipient Recipient for any ETH left after paying Pyth fees.
@@ -310,7 +310,7 @@ interface IPletherOracle {
     /// @return confidence Aggregate basket confidence in 8-decimal price units.
     function getLatestPoolReconcilePrice() external view returns (PriceSnapshot memory snapshot, uint256 confidence);
 
-    /// @notice Returns the latest validated live order-execution basket price without applying a Pyth update.
+    /// @notice Returns the current validated neutral order-policy basket price without applying a Pyth update.
     /// @dev Equivalent to `getLatestPrice(PriceMode.OrderExecution).price`; it is neither historical nor side-adjusted.
     /// @return latestPrice Latest validated neutral order-policy basket price in 8-decimal units.
     function getLatestPrice() external view returns (uint256 latestPrice);
@@ -380,7 +380,8 @@ interface IPletherOracle {
 
     /// @notice Returns max allowed publish-time divergence across basket components.
     /// @dev This configured value applies to unique historical order baskets; current-basket reads derive their
-    ///      divergence limit from the applicable live staleness configuration.
+    ///      divergence limit from the applicable staleness policy. Frozen MarkRefresh, Liquidation, and PoolReconcile
+    ///      use `fadMaxStaleness`; frozen OrderExecution retains the live order-staleness divergence limit.
     /// @return Historical basket component-time divergence limit in seconds.
     function maxComponentPublishTimeDivergence() external view returns (uint256);
 

@@ -47,7 +47,7 @@ library CfdEnginePlanTypes {
     /// @notice Aggregate planning state for one position side.
     /// @param maxProfitUsdc Maximum-profit liability envelope for the side.
     /// @param openInterest Aggregate synthetic-token size, with 18 decimals.
-    /// @param entryNotional Aggregate raw `size * entryPrice` value, with 26 decimals.
+    /// @param entryNotional Aggregate exact entry cost scaled by `1e20`, with 26-decimal precision.
     /// @param totalMargin Aggregate canonical position margin for the side.
     /// @param borrowBaseUsdc Aggregate LP-backed amount on which side carry accrues.
     /// @param carryIndex Current cumulative carry index, scaled by 1e18.
@@ -64,8 +64,9 @@ library CfdEnginePlanTypes {
     /// @dev Some context fields are retained for plan/apply parity even when the current planner does not read them.
     ///      Callers must construct a mutually consistent snapshot; the planner does not authenticate or reload it.
     /// @param position Account's current canonical position.
+    /// @param positionEntryCostUsdcAtoms Exact remaining position entry basis, in 6-decimal USDC atoms.
     /// @param account Clearinghouse account whose collateral and claims are represented.
-    /// @param currentTimestamp Snapshot timestamp in Unix seconds; retained as context but currently not read by plans.
+    /// @param currentTimestamp Snapshot timestamp in Unix seconds; used by commitment-carry projection.
     /// @param lastMarkPrice Latest stored mark price; retained as context but currently not read by plans.
     /// @param lastMarkTime Latest stored mark publish time; retained as context but currently not read by plans.
     /// @param positionBorrowBaseUsdc Position carry borrow base.
@@ -76,8 +77,12 @@ library CfdEnginePlanTypes {
     /// @param poolCashUsdc Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
     /// @param accountBuckets Aggregate clearinghouse custody buckets for `account`.
     /// @param lockedBuckets Typed clearinghouse margin buckets for `account`.
+    /// @param liquidationReserveUsdc Dedicated backing for the configured liquidation charge.
+    /// @param actionReserveUsdc Aggregate action reserve, including VPI backing and protected execution bounties.
+    /// @param vpiRebateReserveUsdc Dedicated backing for negative lifetime VPI, included in `actionReserveUsdc`.
+    /// @param protectedExecutionBountyUsdc Execution-bounty reservations excluded from action-charge collection.
     /// @param marginReservationIds Reserved legacy context; canonical builders leave it empty and plans do not read it.
-    /// @param unsettledCarryUsdc Carry already checkpointed but not yet realized for `account`.
+    /// @param unsettledCarryUsdc Carry already checkpointed but not yet collected for `account`.
     /// @param totalTraderClaimBalanceUsdc Aggregate outstanding trader-claim liability.
     /// @param traderClaimBalanceForAccount Outstanding trader claim owned by `account`.
     /// @param degradedMode Whether the engine was already in degraded mode.
@@ -162,11 +167,11 @@ library CfdEnginePlanTypes {
         INSUFFICIENT_INITIAL_MARGIN,
         /// @notice Projected effective solvency assets cannot cover maximum liability plus protected settlement headroom.
         SOLVENCY_EXCEEDED,
-        /// @notice Requested size is not divisible by the canonical 100-token position quantum.
+        /// @notice Requested size is zero or not divisible by the canonical 100-token position quantum.
         INVALID_SIZE_QUANTUM,
         /// @notice Order-supplied margin cannot fund the position's required dedicated liquidation reserve.
         LIQUIDATION_RESERVE_UNFUNDED,
-        /// @notice Rebate cash plus newly supplied pledge cannot fully back the resulting negative lifetime VPI.
+        /// @notice Existing VPI backing is deficient, or free settlement plus new pledge cannot back resulting negative VPI.
         VPI_REBATE_RESERVE_UNFUNDED
     }
 
@@ -177,17 +182,18 @@ library CfdEnginePlanTypes {
     /// @param openState Detailed notional, VPI, fee, margin-requirement, and entry-price calculation.
     /// @param posSide Side of the resulting position.
     /// @param newPosSize Resulting position size, with 18 decimals.
-    /// @param newPosEntryPrice Resulting volume-weighted entry price, with 8 decimals.
+    /// @param newPosEntryPrice Display-only average entry price from exact resulting entry cost per lot, rounded down.
+    /// @param newPosEntryCostUsdcAtoms Exact resulting position entry basis, in 6-decimal USDC atoms.
     /// @param posVpiAccruedDelta Signed 6-decimal USDC VPI added to accrual; positive is a charge, negative a rebate.
     /// @param posMaxProfitIncrease Increase in the position maximum-profit envelope, in 6-decimal USDC.
     /// @param positionMarginAfterOpen Resulting clearinghouse position-margin bucket in 6-decimal USDC.
     /// @param sideOiIncrease Increase in aggregate side open interest, with 18 decimals.
-    /// @param sideEntryNotionalDelta Signed change in raw side `size * entryPrice`, with 26 decimals.
+    /// @param sideEntryNotionalDelta Signed change in exact side entry cost scaled by `1e20`, with 26-decimal precision.
     /// @param requiredEffectiveAssetsAfterUsdc Minimum post-settlement effective assets required by protected admission.
     /// @param sideMaxProfitIncrease Increase in the aggregate side maximum-profit envelope, in 6-decimal USDC.
     /// @param tradeCostUsdc Signed VPI plus execution fee; positive debits the account and negative rebates it.
     /// @param marginDeltaUsdc Order margin supplied for the open/increase.
-    /// @param netMarginChange Exact signed change in PnL pledge after action cost and liquidation-reserve carve-out.
+    /// @param netMarginChange Exact signed change in PnL pledge after action cost and VPI/liquidation-reserve carve-outs.
     /// @param poolRebatePayoutUsdc Pool-funded cash needed when `tradeCostUsdc` is negative.
     /// @param executionFeeUsdc Execution fee included in `tradeCostUsdc`.
     /// @param pendingCarryUsdc Total checkpointed and indexed carry to realize before opening.
@@ -247,9 +253,9 @@ library CfdEnginePlanTypes {
         OK,
         /// @notice Requested close size exceeds the snapshot position size.
         CLOSE_SIZE_EXCEEDS,
-        /// @notice A partial close would leave less margin than the configured minimum bounty.
+        /// @notice Legacy dust-failure value retained for ABI compatibility; the current close planner does not emit it.
         DUST_POSITION,
-        /// @notice Requested close size is not divisible by the canonical 100-token position quantum.
+        /// @notice Requested close size is zero or not divisible by the canonical 100-token position quantum.
         INVALID_SIZE_QUANTUM,
         /// @notice A partial close cannot collect every assessed action charge without touching protected collateral.
         PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE,
@@ -257,13 +263,13 @@ library CfdEnginePlanTypes {
         VPI_REBATE_RESERVE_UNDERFUNDED
     }
 
-    /// @notice Sign of the close settlement after realized PnL, VPI, fees, spread, and pending carry.
+    /// @notice Coarse close-payout classification; price PnL and action economics are settled separately.
     enum SettlementType {
-        /// @notice Net settlement is exactly zero.
+        /// @notice No fresh payout, raw price loss, or collected action charge remains after isolated settlement.
         ZERO,
-        /// @notice The close creates value payable to the trader.
+        /// @notice The close has a net price payout or paid action rebate, even if another component consumes collateral.
         GAIN,
-        /// @notice The close requires collateral collection from the trader.
+        /// @notice No fresh payout is due, and the close has a raw price loss or collected action charge.
         LOSS
     }
 
@@ -281,26 +287,25 @@ library CfdEnginePlanTypes {
     /// @param deletePosition Whether settlement removes the entire position.
     /// @param side Side of the position being reduced.
     /// @param sideOiDecrease Reduction in aggregate side open interest, with 18 decimals.
-    /// @param sideEntryNotionalReduction Reduction in raw side `size * entryPrice`, with 26 decimals.
+    /// @param sideEntryNotionalReduction Exact entry basis removed from the side, scaled by `1e20` to 26 decimals.
     /// @param sideMaxProfitReduction Reduction in aggregate side maximum-profit envelope, in 6-decimal USDC.
-    /// @param unlockMarginUsdc Proportional position margin unlocked before settlement collection.
-    /// @param settlementType Sign of carry-adjusted net settlement.
-    /// @param lossUsdc Magnitude to collect when `settlementType` is `LOSS`; otherwise zero.
-    /// @param freshTraderPayoutUsdc New trader value created by a `GAIN`; zero for other settlement types.
-    /// @param freshPayoutIsImmediate `GAIN`-only forecast that unreserved pool cash can service the fresh payout.
-    /// @param freshPayoutCreatesClaim `GAIN`-only forecast that the fresh payout remains a trader-claim liability.
-    /// @param existingTraderClaimConsumedUsdc `LOSS`-only existing claim value netted against collection shortfall.
-    /// @param existingTraderClaimRemainingUsdc `LOSS`-only account claim remaining after netting; otherwise default zero.
-    /// @param traderClaimFeeRecoveryUsdc `LOSS`-only consumed claim allocated to an uncollected execution fee.
-    /// @param lossResult `LOSS`-only seized collateral, fee collection, shortfall, and pre-netting write-off breakdown.
-    /// @param lossConsumption `LOSS`-only clearinghouse buckets consumed to collect the close loss.
+    /// @param unlockMarginUsdc Unconsumed close-allocated pledge released while preserving the remaining terminal cap.
+    /// @param settlementType Coarse payout-first classification after price and action settlement planning.
+    /// @param lossUsdc Raw realized price loss before same-account claim and PnL-pledge collection.
+    /// @param freshTraderPayoutUsdc Net price payout plus the actually payable action rebate.
+    /// @param freshPayoutIsImmediate Whether no price claim is created; also true for a valid zero-payout close.
+    /// @param freshPayoutCreatesClaim Whether the net price payout creates a trader claim; action rebates never do.
+    /// @param existingTraderClaimConsumedUsdc Same-account claim consumed first toward raw realized price loss.
+    /// @param existingTraderClaimRemainingUsdc Account claim remaining after price-loss netting, before any new price claim.
+    /// @param traderClaimFeeRecoveryUsdc Legacy field left zero; existing claims cannot fund action fees.
+    /// @param lossResult Legacy settlement breakdown left zero; use dedicated price-PnL and action fields.
+    /// @param lossConsumption Legacy consumption breakdown left zero; use dedicated price-PnL and action fields.
     /// @param syncMarginQueueAmount Reserved legacy field; active reservation queues are maintained by the clearinghouse.
-    /// @param executionFeeUsdc Fee included in close economics; for a loss it is limited to retained, collected, and
-    ///        claim-recovered amounts.
+    /// @param executionFeeUsdc Assessed execution fee capped by eligible withheld price gain and collected action cash.
     /// @param protocolFeeTopUpUsdc Additional unreserved pool cash planned for the protocol treasury fee credit.
-    /// @param badDebtUsdc Compatibility diagnostic for price loss above claim-plus-pledge collection; never stored debt.
-    /// @param pendingCarryUsdc Total checkpointed and indexed carry included in close settlement.
-    /// @param totalMarginBefore Aggregate selected-side position margin before the close, in 6-decimal USDC.
+    /// @param badDebtUsdc Legacy field left zero; excess price loss is reported by `priceLossWrittenOffUsdc`.
+    /// @param pendingCarryUsdc Total checkpointed and indexed carry before margin-first collection and action settlement.
+    /// @param totalMarginBefore Aggregate selected-side position margin after projected carry collection, in 6-decimal USDC.
     /// @param totalMarginAfterClose Projected aggregate selected-side margin after the close, in 6-decimal USDC.
     /// @param solvency Projected post-close solvency and degraded-mode flags.
     /// @param account Account copied from the order and mutated during settlement.
@@ -394,34 +399,35 @@ library CfdEnginePlanTypes {
     /// @notice Planned full-position liquidation and all values needed by the settlement sidecar.
     /// @dev When `liquidatable` is false, only pre-check diagnostic fields are authoritative.
     /// @param liquidatable Whether P+C price equity breaches the active requirement or an independent delinquency applies.
-    /// @param riskState Exact price PnL, P+C equity, notional, margin requirement, and price-risk liquidation test.
+    /// @param riskState Exact price PnL, P+C equity, notional, and margin requirement; its liquidation flag also includes
+    ///        uncovered-carry delinquency. Underfunded negative-VPI backing reverts before risk planning.
     /// @param liquidationState Liquidation equity and total-charge split calculation.
     /// @param side Side of the position being liquidated.
     /// @param posSize Full position size removed, with 18 decimals.
-    /// @param posMargin Canonical position margin before liquidation, in 6-decimal USDC.
+    /// @param posMargin Canonical position margin after projected carry collection, in 6-decimal USDC.
     /// @param posMaxProfit Position maximum-profit envelope removed from aggregate liability, in 6-decimal USDC.
     /// @param posEntryPrice Position entry price, with 8 decimals.
     /// @param sideOiDecrease Reduction in aggregate side open interest, with 18 decimals.
     /// @param sideMaxProfitDecrease Reduction in aggregate side maximum-profit envelope, in 6-decimal USDC.
-    /// @param sideEntryNotionalReduction Reduction in raw side `size * entryPrice`, with 26 decimals.
+    /// @param sideEntryNotionalReduction Exact entry basis removed from the side, scaled by `1e20` to 26 decimals.
     /// @param sideTotalMarginReduction Diagnostic 6-decimal USDC margin reduction; current apply uses `posMargin` instead.
     /// @param liquidationChargeUsdc Total configured liquidation charge collected from the account.
     /// @param keeperBountyUsdc Configured keeper share credited through clearinghouse settlement.
     /// @param protocolLiquidationFeeUsdc Configured protocol share credited to the treasury clearinghouse account.
     /// @param lpLiquidationFeeUsdc Remaining LP share transferred to the HousePool.
-    /// @param liquidationReachableCollateralUsdc Terminal account settlement reachable before the charge and settlement.
-    /// @param residualUsdc Signed 6-decimal USDC liquidation equity remaining after the total charge.
-    /// @param residualPlan Clearinghouse mutation plan whose nested compatibility field reports the raw negative
-    ///        residual before charge-subsidy adjustment and existing-claim recovery; no value is accumulated as debt.
-    /// @param settlementSeizedUsdc Total existing account settlement transferred to the HousePool, including the LP fee.
-    /// @param settlementRetainedUsdc Existing account settlement retained to satisfy positive residual equity.
-    /// @param freshTraderPayoutUsdc Positive residual equity not already present in retained settlement.
+    /// @param liquidationReachableCollateralUsdc Diagnostic post-carry PnL pledge plus same-account claim and VPI reserve;
+    ///        the separate liquidation reserve caps the keeper/protocol/LP charge.
+    /// @param residualUsdc Diagnostic price equity less the liquidation charge; does not determine isolated cash routing.
+    /// @param residualPlan Selected settlement mirrors and full PnL-pledge unlock; legacy debit/write-off fields stay zero.
+    /// @param settlementSeizedUsdc Price-loss pledge plus the LP liquidation fee; excludes separately collected action cash.
+    /// @param settlementRetainedUsdc Projected settlement balance after all debits and any immediate price payout.
+    /// @param freshTraderPayoutUsdc New price gain after action-charge withholding, payable in full or recorded as a claim.
     /// @param freshPayoutIsImmediate Whether current unreserved pool cash can service the fresh payout.
     /// @param freshPayoutCreatesClaim Whether the fresh payout is expected to remain a trader-claim liability.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted once against exact liquidation price loss.
     /// @param existingTraderClaimRemainingUsdc Account claim balance remaining after planned netting.
     /// @param syncMarginQueueAmount Reserved legacy field; active reservation queues are maintained by the clearinghouse.
-    /// @param badDebtUsdc Compatibility diagnostic for price loss above claim-plus-pledge collection; never stored debt.
+    /// @param badDebtUsdc Legacy field left zero; excess price loss is reported by `priceLossWrittenOffUsdc`.
     /// @param pendingCarryUsdc Total checkpointed and indexed carry; only carry not directly realized enters the action path.
     /// @param solvency Projected post-liquidation solvency and degraded-mode flags.
     /// @param account Account copied from the snapshot and liquidated during settlement.

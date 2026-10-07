@@ -18,7 +18,8 @@ library HousePoolRedemptionMathLib {
     error HousePoolRedemptionMathLib__InvalidFeeBps();
 
     /// @notice Returns the net assets paid for an exact share redemption.
-    /// @dev Gross assets and the fee are independently rounded down. A 100% fee therefore returns zero.
+    /// @dev Gross assets and then the fee-adjusted net payout are rounded down. The retained fee is the difference,
+    ///      equivalent to rounding the fee up. A 100% fee returns zero.
     /// @param shares Shares priced against the pre-burn supply.
     /// @param principal Tranche principal priced as ERC-4626 total assets.
     /// @param supply Pre-burn tranche share supply.

@@ -7,7 +7,8 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 /// @title ICfdOrderPolicyEvaluator
 /// @notice Stateless authoritative planning, normalization, and financial-policy checks for V3 delayed orders.
-/// @dev `assessOrder` reconstructs the Engine snapshot. The pure entrypoints accept a supplied snapshot and delta for
+/// @dev `assessOrder` reads Engine state but currently leaves `settlementBufferBps` at zero; Engine execution
+///      separately enforces the configured open-admission buffer. The pure entrypoints accept a snapshot and delta for
 ///      deterministic simulation. Planner business-rule failures retain the existing `CfdEngine__TypedOrderFailure`
 ///      selector so Router classification remains stable. USDC values use 6 decimals, prices use 8 decimals, and
 ///      position sizes use 18 decimals.
@@ -35,7 +36,7 @@ interface ICfdOrderPolicyEvaluator {
         OrderV3Types.ConstraintKind constraint, uint256 actual, uint256 limit
     );
 
-    /// @notice Rebuilds authoritative Engine state, calls one open/close planning entrypoint, and enforces bounds.
+    /// @notice Reads Engine state, calls one open/close planning entrypoint, and enforces caller financial bounds.
     /// @dev `executor` is explicit because a bounty paid back to `order.account` is a gross debit but has no net effect
     ///      on that account's settlement balance. The supplied Engine and its configured dependencies are read-only;
     ///      this evaluator has no storage and performs no writes. Before assessing a pending open, the caller must

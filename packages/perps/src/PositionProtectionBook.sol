@@ -17,7 +17,7 @@ import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProte
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 
-/// @notice Narrow engine view surface used by the passive position-protection state book.
+/// @notice Narrow engine view surface used by position-protection actions and lifecycle validation.
 interface IPositionProtectionEngine is ICfdEngineRiskParamsView {
 
     function clearinghouse() external view returns (address);
@@ -166,11 +166,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     /// @notice Deployment requires a nonzero router and engine.
     error PositionProtectionBook__ZeroAddress();
-    /// @notice Locally snapshotted bounties do not match the router's current timelocked configuration.
+    /// @notice Bounties disagree with current creation settings or the stored execution-bounty reserve snapshot.
     error PositionProtectionBook__BountyMismatch();
     /// @notice An activation supplied a zero or already-bound linked close id.
     error PositionProtectionBook__InvalidLinkedOrder();
-    /// @notice A reused router entrypoint returned data despite its canonical no-return ABI.
+    /// @notice A Router host returned an unexpected order id or data for a no-return entrypoint.
     error PositionProtectionBook__InvalidHostResponse();
     /// @notice The Router supplied a reason that cannot represent a failed retryable close attempt.
     error PositionProtectionBook__InvalidTerminalReason();

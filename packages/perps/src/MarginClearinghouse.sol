@@ -224,7 +224,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _;
     }
 
-    /// @dev Restricts reserved-settlement locks to the engine, its router, or that router's immutable book.
+    /// @dev Restricts reserved-settlement locks to the engine, its router, or that router's position-protection book.
     modifier onlyReservedSettlementLocker() {
         address engine_ = engine;
         if (
@@ -247,7 +247,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _;
     }
 
-    /// @dev Restricts reserved-settlement unlocks to the engine, its router/sidecar, or that router's immutable book.
+    /// @dev Restricts reserved-settlement unlocks to the engine, its router/sidecar, or the position-protection book.
     modifier onlyReservedSettlementOperator() {
         address engine_ = engine;
         if (
@@ -1095,7 +1095,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @dev The pool transfer contains price PnL collected from pledge plus the LP fee collected from liquidation
     ///      reserve. Keeper and protocol allocations also consume liquidation reserve. Every other bucket is protected.
     /// @param account Liquidated account
-    /// @param reservationOrderIds Active reservation ids allowed to cover committed-order margin consumption
+    /// @param reservationOrderIds Legacy argument, ignored; isolated liquidation does not consume committed-order margin
     /// @param plan Liquidation settlement plan whose amounts use six-decimal USDC units
     /// @param recipient External recipient of `plan.settlementSeizedUsdc`; required when that amount is nonzero
     /// @param keeper Clearinghouse account credited with the bounty; required when the bounty is nonzero
@@ -1681,7 +1681,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     /// @notice Returns the total locked USDC margin across all buckets for an account.
     /// @param account Account to inspect
-    /// @return Sum of position, committed-order, and reserved-settlement margin in six-decimal USDC units
+    /// @return Sum of position, liquidation-reserve, committed-order, and reserved-settlement margin in USDC units
     function lockedMarginUsdc(
         address account
     ) external view returns (uint256) {
@@ -1689,7 +1689,8 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     }
 
     /// @notice Returns the typed locked-margin buckets for an account.
-    /// @dev Every field uses six-decimal USDC units.
+    /// @dev Every field uses six-decimal USDC units. The total includes liquidation reserve, which has no separate
+    ///      field in this legacy struct; use `getPnlIsolationBuckets` for the complete typed breakdown.
     /// @param account Account to inspect
     /// @return buckets Position, committed-order, reserved-settlement, and total locked amounts
     function getLockedMarginBuckets(

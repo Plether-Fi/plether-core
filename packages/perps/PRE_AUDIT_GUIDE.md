@@ -63,7 +63,7 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.reserveSeniorDeposit` / `releaseSeniorDepositReservation` | configured `seniorVault` only | direct LPs and the Junior vault cannot reserve or release pending Senior-entry capacity; activation happens only through synchronized settlement |
 | `HousePool.reconcile` | either configured tranche vault | retained vault integration hook; end users enter and claim through `TrancheVault` |
 | `OrderRouter.settleLpEpoch(bytes[])` | permissionless | validates one PoolReconcile mark and atomically invokes coordinated LP entry activation and redemption funding |
-| `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when live positions exist; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback; every route reverts before mutation while the independent settlement hold is active |
+| `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when positions exist outside frozen mode; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback; every route reverts before mutation while the independent settlement hold is active |
 | `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold without blocking requests, reconciliation, trading, or funded claims |
 | `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
 | `TrancheVault.requestRedeemFromClaimableDeposit` | source controller or its approved operator | consumes one finalized source lot only after its activation-aged cooldown and preserves the controller on the destination redemption request; no token allowance or wallet custody is involved |
@@ -76,15 +76,15 @@ Before trusting a test as a source of truth, ask:
 | `EmergencyPauseCoordinator.triggerFullContainment` | configured guardian only | fixed atomic union of Router risk-off, LP entry pause, and settlement hold |
 | `EmergencyPauseCoordinator.setGuardian` | coordinator owner only | rotate or disable containment authority; the guardian cannot rotate itself |
 | `OrderRouter.clearRiskOffOrder` | permissionless | oracle-free cleanup of one permanently invalidated open; full internal refund to trader, no clearer bounty |
-| `OrderRouterLiquidationBatchSidecar` delegated selectors | exact immutable-bound Router delegatecall context only | separately predeployed stateless size split for mark refresh/protection trigger, LP-epoch settlement, single/batch liquidation, and authenticated active-oracle configuration forwarding; direct and foreign-context calls revert, binding has no setter, Router keeps admin authentication, and Router self-only item callbacks remain the mutation boundary |
+| `OrderRouterLiquidationBatchSidecar` delegated selectors | exact immutable-bound Router delegatecall context only | separately predeployed stateless size split for public/protected-open commits, mark refresh/protection trigger, LP-epoch settlement, single/batch liquidation, and authenticated active-oracle configuration forwarding; direct and foreign-context calls revert, binding has no setter, Router keeps entrypoint authentication, and Router self-only callbacks apply queue mutations |
 
 Any new helper/sidecar contract that can reach these sets should be treated as security-critical and explicitly access-controlled.
 
-Deployment must precompute the next Router `CREATE` address, deploy the sidecar bound to that address, and deploy the
-Router immediately afterward from the same deployer without an intervening nonce-consuming transaction or `CREATE`.
-The Router constructor rejects a
-sidecar with no code or a sidecar whose `ROUTER()` does not equal the Router being constructed. Audit the prediction,
-transaction ordering, and post-deployment getter/code-hash verification as one ordered deployment invariant.
+Deployment must predict the Router address two `CREATE` nonces ahead, then deploy `OrderLifecycleBook`, the bound
+keeper sidecar, and Router consecutively from the same deployer without an intervening nonce-consuming operation.
+The Book must bind that Router and its exact Engine, Clearinghouse, and HousePool. The Router constructor rejects
+missing Book or sidecar code, any mismatched Book dependency, or a sidecar whose `ROUTER()` differs from itself.
+Audit the prediction, transaction ordering, and post-deployment getter/code-hash verification as one deployment invariant.
 
 ### Order lifecycle state machine
 
@@ -99,6 +99,7 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 - typed user-invalid execution
 - protocol-state invalidation
 - slippage failure
+- pinned-configuration mismatch, execution-mode violation, or financial-bound violation
 - expiry
 - persistent risk-off invalidation for a pre-cutoff open
 - liquidation cleanup
@@ -108,12 +109,17 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 - stale oracle revert
 - live-market MEV ordering block
 - frozen-market ineligibility for the attempted action
+- insufficient gas, mark-ordering failure, or unknown/malformed dependency or receipt failure
 
 `Failed/Executed -> terminal`
 
 - no requeue
 - no user cancellation path
 - queue pointers and reservations must be unlinked exactly once
+
+A failed registered protection attempt may move its protection from `Triggered` to `Latched` and retain the execution
+bounty when the protected position still matches exactly. Permissionless retry creates a new child id at the FIFO tail;
+the old child remains terminal in the lifecycle Book.
 
 ### Failure-policy table
 
@@ -128,22 +134,28 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 | Expired open order | `Failed` | keeper paid from reserved bounty | dequeue |
 | Expired close order | `Failed` | keeper paid from reservation under the current terminal-close policy | dequeue |
 | Risk-off open at or below persistent cutoff | `Failed` | full order and attached `PendingOpen` protection bounties returned to trader's internal settlement; clearer unpaid | dequeue |
+| Pinned configuration mismatch, disallowed execution mode, or financial-bound violation | `Failed` | ordinary order pays keeper; matching registered protection attempt retains bounty for retry | dequeue |
+| Failed registered protection attempt with its exact protected position still live | `Failed` child; `Latched` protection | original execution bounty retained; cleaner unpaid | dequeue child; retry appends a new child |
+| Liquidation cleanup of an order not covered by risk-off | `Failed` with `AccountLiquidated` | nonzero bounty forfeited to protocol treasury | unlink from account and global queues |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
 | Close-only ineligibility for queued open | blocked, not terminal | no distribution | keep pending |
+| Unknown, panic, empty, malformed, or insufficient-gas item/receipt failure | pending or reverted call | no distribution in failed item | keep pending; completed prepared-item prefix survives unless outer oracle preparation reverts |
+
+The ordinary failure rows above assume no retained protection attempt; its specific retention rule takes precedence.
 
 ### Bounty-flow table
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Eligible trader free settlement; never active PnL pledge | `MarginClearinghouse` reserved settlement bucket plus router order record | clearinghouse credit for the keeper | n/a | persistent risk-off cleanup refunds the trader internally; every other ordinary terminal failure pays the keeper |
+| Order execution bounty | Eligible trader free settlement; never active PnL pledge | `MarginClearinghouse` action reserve and canonical `BountyKind.Order` reservation | clearinghouse credit for the keeper | n/a | risk-off refunds the trader; matching protection-attempt failure retains the bounty; liquidation cleanup forfeits it to treasury; other ordinary failures pay the keeper |
 | Liquidation charge | Dedicated liquidation-charge reserve, capped by the canonical planned charge | clearinghouse liquidation reserve | Default: 50% keeper clearinghouse credit; 0% protocol-treasury clearinghouse credit; exact 50% remainder to HousePool claimant revenue | n/a | n/a |
 
 ### Oracle regime table
 
 | Regime | Entry condition | Allowed actions | Core checks |
 |--------|-----------------|----------------|-------------|
-| Live market | oracle not frozen, mark fresh enough | opens, closes, liquidations | staleness, `block.number > commitBlock`, `commitTime < publishTime <= block.timestamp`, `publishTime >= lastMarkTime`; opens/increases also require post-op `E >= L + B` |
+| Live market | oracle not frozen, mark fresh enough | opens, closes, liquidations | staleness and mark ordering; queued orders also require a later block and the unique post-commit tick in the configured settlement window; liquidations have no order commit clock; opens/increases also require post-op `E >= L + B` |
 | FAD-only / runway live-close regime | FAD active, oracle not frozen | live close-only rules | same live checks; signed VPI and no frozen-close spread |
 | Frozen close-only regime | oracle frozen but within allowed stale window | closes and liquidations only | relaxed publish-ordering rule and frozen-window stale limits; voluntary closes use signed VPI plus fixed LP-owned spread, liquidations unchanged |
 | Over-stale frozen regime | oracle frozen beyond allowed stale window | no execution | revert/block |
@@ -151,27 +163,30 @@ transaction ordering, and post-deployment getter/code-hash verification as one o
 
 ## Source Of Truth By Quantity
 
+The solvency column refers to physical HousePool solvency, `E = max(P-C, 0)`, rather than trader account health.
+Custody held by the clearinghouse becomes pool backing only when collected into HousePool.
+
 | Quantity | Economic owner | Storage/source of truth | Mutators | Counts as reachable collateral? | Counts toward solvency? | Counts toward LP withdrawal reserve? | Counts toward tranche reconcile? |
 |----------|----------------|-------------------------|----------|---------------------------------|-------------------------|-------------------------------------|----------------------------------|
-| Free settlement | Trader | `MarginClearinghouse.balanceUsdc(account)` | clearinghouse deposit/withdraw, engine settle/seize | yes, action-dependent | yes, via action-specific view | no | no |
-| PnL pledge / active position margin | Trader until exact price settlement | `pnlPledgeUsdc` + engine position mirror | engine/settlement-sidecar open, close, liquidation, claim service | yes only for the account's price-loss cap and health | yes, via risk/equity view | no | yes, only through the capped terminal curve |
+| Free settlement | Trader | `MarginClearinghouse.getFreeBuyingPowerUsdc(account)` or `getPnlIsolationBuckets(account).freeSettlementUsdc` | clearinghouse deposit/withdraw, engine settle/seize | yes, action-dependent | no; not HousePool assets before collection | no | no |
+| PnL pledge / active position margin | Trader until exact price settlement | clearinghouse `pnlPledgeUsdc`; the Engine position getter reads this canonical bucket | engine/settlement-sidecar open, close, liquidation, claim service | yes only for the account's price-loss cap and health | no physical pool asset before collection | no | yes, only through the capped terminal curve |
 | Other locked margin | Trader, reserved to typed non-price obligations | clearinghouse typed reserves | router and engine/sidecar typed reservation paths | only for its matching action; never generic price-loss reachability | no direct pool asset | no | no |
-| Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail | no | no | no | no |
-| Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` reserved settlement bucket + router order record | router commit/distribute/forfeit through engine/clearinghouse | no | no | no | no |
+| Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail and typed action-charge settlement | separate close/liquidation action charges only, after spendable action reserve and free settlement; never price loss | no | no | no |
+| Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` action reserve and canonical bounty-reservation ledger | router commit/distribute/forfeit through engine/clearinghouse | no | no | no | no |
 | Liquidation-charge reserve | Trader, dedicated to the active position charge | `MarginClearinghouse.liquidationReserveUsdc` | engine/settlement sidecar | liquidation charge only | no separate pool asset | no | no |
 | VPI rebate reserve | Trader, dedicated to `max(-vpiAccrued, 0)` | protected sub-balance of clearinghouse action reserve | engine/settlement sidecar | matching VPI clawback only; excluded from price-risk collateral, with underfunding treated as independent delinquency | no separate pool asset | no | no |
 | Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | same-account price-risk health and one-time price-loss netting only; never cash/action collateral | yes, as senior liability | yes | yes |
 | Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
-| Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | active position margin, then free settlement; never claims or unrelated reserves | projected margin debit reduces price equity; remainder after both sources is independent delinquency | no | no |
-| Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | yes, as clearinghouse-custodied protocol margin | no | no |
+| Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | active position margin, then free settlement; never claims or unrelated reserves | no pool asset until collected; projected margin debit separately reduces account price equity | no | no |
+| Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | no; separate custody outside HousePool solvency assets | no | no |
 | Signed terminal price delta | LP marked ownership adjustment | `TerminalNavBookV2` queried through the authenticated Engine snapshot | Engine-only atomic, state-derived `syncFromEngine(...)` | n/a | not the endpoint admission reserve | cannot fund cash redemption | yes, identically for deposit activation and redemption pricing |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
 | Settlement-liability buffer `B` | No separate owner; protected cash headroom | Derived as `ceil(maxLiability * settlementBufferBps / 10_000)` from canonical Engine state | Liability changes and timelocked `EngineRiskConfig` updates change the target; no custody movement | no | no; excluded from raw `E < L` degraded test | yes, as an engine-supplied supplemental reserve | cash-funding constraint only; excluded from terminal NAV and yield |
 | Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
-| Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting and activation timestamp | atomic Router epoch settlement, then controller/operator wallet claim or direct source-lot routing into redemption | no | no separate asset claim | no | yes, through outstanding share supply |
+| Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting and activation timestamp | coordinated HousePool epoch settlement, then controller/operator wallet claim or direct source-lot routing into redemption | no | no separate asset claim | no | yes, through outstanding share supply |
 | Pending LP redemption shares | Request controller; still exposed to tranche P&L | `TrancheVault` request/epoch queue; shares held by vault escrow and still in supply | wallet request or authorized reclassification from deposit-claim escrow, plus pool-authorized settlement callback | no | no separate asset claim before funding | no | yes, through outstanding share supply |
 | Junior maintenance-fee shares | Configured fee recipient | Junior `TrancheVault`; pending dilution in `pendingMaintenanceFeeShares()`, issued ownership in ordinary ERC-20 balance | any nonzero Junior supply mutation (including terminal deposit-claim escrow-dust burn) and fee-config finalization | no | no separate asset claim | no | yes, through effective Junior supply |
-| Funded LP redemption assets | Request controller | USDC held in `TrancheVault` claim escrow and claimable epoch accounting | atomic Router epoch settlement, then controller/operator claim | no | no longer part of pool | no | no |
+| Funded LP redemption assets | Request controller | USDC held in `TrancheVault` claim escrow and claimable epoch accounting | coordinated HousePool epoch settlement, then controller/operator claim | no | no longer part of pool | no | no |
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
 
 Reachability note:
@@ -236,7 +251,7 @@ Reachability note:
 - Liveness problem: reserving the full dormant Senior NAV blocks Junior liquidity even when no Senior holder requested
   an exit.
 - Chosen tradeoff: one permissionless Router call validates a post-boundary pool-accounting mark and reaches the
-  Router-only `HousePool` coordinator in the same transaction. HousePool reconciles once, funds eligible matured Senior
+  `HousePool` coordinator in the same transaction; no-position and frozen routes may call HousePool directly. HousePool reconciles once, funds eligible matured Senior
   demand, then Junior demand, then activates Junior and Senior deposits. Pending shares remain exposed to P&L; funded
   assets move to claim escrow and are irrevocable.
 - Protecting invariants: bounded processing cannot fall through to Junior while an eligible matured Senior head
@@ -375,7 +390,7 @@ Reachability note:
 
 1. Trader commits a full close while `oracleFrozen`.
 2. Planner applies normal signed VPI with the lifetime rebate clamp, then assesses the fixed spread on the full reduced notional.
-3. Terminal price settlement consumes same-account claim plus PnL pledge up to the account cap; action charges use gain withholding, protected VPI reserve, spendable action reserve, and eligible free settlement.
+3. Terminal price settlement consumes same-account claim plus PnL pledge up to the account cap; action charges use gain withholding, protected VPI reserve, spendable action reserve, eligible free settlement, and finally committed-order margin through its canonical FIFO.
 4. The retained or collected spread is booked as LP revenue; it is never routed to protocol treasury.
 5. Any uncollectible spread is exposed as `frozenSpreadWaivedUsdc` and creates no protocol liability or terminal deficit.
 6. Price loss above the precommitted cap is emitted as `PriceLossWrittenOff`, creates no debt accumulator, and the full close removes the account curve.
@@ -385,9 +400,9 @@ Reachability note:
 1. Keeper calls liquidation on an under-maintenance account.
 2. Planner computes exact price PnL, carry/action obligations, and health from typed account buckets.
 3. Total liquidation charge is capped by the dedicated liquidation reserve.
-4. Settlement credits the configured reserve shares to the keeper and protocol
-   treasury, routes the exact rounding remainder to LPs, and computes any fresh trader payout or explicit subsidy
-   shortfall.
+4. Settlement credits the configured reserve shares to the keeper and protocol treasury, routes the exact rounding
+   remainder to LPs, and computes any fresh trader payout. The charge cannot exceed its dedicated reserve; there is no
+   additional pool-funded liquidation-bounty subsidy.
 5. Existing same-account trader claim is not generic collateral; it may net exactly once against that account's price loss.
 6. If cash is available, fresh payout is immediate; otherwise it becomes a trader claim.
 7. Position is removed and queue cleanup runs on the liquidated account's local pending-order queue only.
@@ -489,7 +504,9 @@ Use the suites below as the highest-signal audit companions.
 | Settlement-liability buffer / raw degraded boundary | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditFollowupFindingsFailing.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol` |
 | Economic conservation | `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
 | Multi-account isolation | `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
-| FIFO / expiry / queue | `packages/perps/test/perps/OrderRouter.t.sol` |
+| FIFO / expiry / queue | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol` |
+| Permanent intent identity / config versions / typed execution bounds / authenticated receipts | `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/AdminConfigVersion.t.sol`, `packages/perps/test/perps/CfdOrderPolicyEvaluator.t.sol`, `packages/perps/test/perps/CfdOrderPolicyEvaluatorParity.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol` |
+| Protection latching and bounty retention | `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/PositionProtectionLiquidationBatch.t.sol`, `packages/perps/test/perps/OrderRouterV2ExecutionSidecar.t.sol` |
 | Three-action emergency containment / persistent risk-off refunds | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/invariant/EmergencyRiskOffInvariant.t.sol`, `test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol` |
 | Frozen oracle / FAD | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol` |
 | Oracle refresh / ETH refunds | `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |

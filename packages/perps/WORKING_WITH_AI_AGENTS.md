@@ -3,8 +3,9 @@
 Plether Perps is designed so autonomous software can operate capital without asking an observer to trust its private
 memory, interpretation of protocol state, or report of what happened. The protocol does not give an AI agent special
 privileges. For externally submitted bounded orders, it gives every account a typed, financially bounded and
-permanently identified intent. Position-protection actions add retained OCO geometry and synthesize typed parent or
-linked-close orders. Both paths have deterministic execution semantics and authenticated terminal evidence.
+permanently identified intent. Position-protection actions add retained OCO geometry, accept caller-authored bounded
+parent opens, and synthesize linked-close orders. Both paths have deterministic execution semantics and authenticated
+terminal evidence.
 
 This document explains the core protocol surfaces available to agent developers. It covers order integration, policy
 enforcement, execution, and verification. Wallet delegation, session keys, strategy design, model hosting, market-data
@@ -40,8 +41,8 @@ The practical result is that an agent can separate three questions that are ofte
 
 1. **What am I authorizing?** For externally submitted bounded orders, the complete `OrderRequest` and
    `ExecutionBounds` answer this.
-   For position protection, the action parameters and retained OCO record answer it, while the protocol synthesizes
-   the parent or linked-close request.
+   For position protection, the action parameters and retained OCO record answer it. An attached parent also uses
+   the caller's complete bounded request; the protocol synthesizes only triggered and retried close requests.
 2. **What is the protocol currently willing to do?** Canonical state, previews, and the execution configuration hash
    answer this at a particular block.
 3. **What actually happened?** The lifecycle status, compact outcome, receipt event, and receipt hash answer this after
@@ -137,7 +138,8 @@ Use the smallest canonical surface that answers the decision:
 - `PerpsPublicLens` for compact account, position, tranche, and protocol status.
 - `OrderRouter.pletherOracle()` and the deployed `PletherOracle` configuration for the exact FX-basket market bound
   to the Router.
-- `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for trade-ticket simulation.
+- `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for Engine-level trade-ticket simulation; use
+  `CfdClosePreview.previewClose(...)` for a prospective ordinary close that must first reserve its execution bounty.
 - `IOrderLifecycleBook` for order identity, pinned policy, lifecycle, and outcome.
 - `PerpsPublicLens.getActivePositionProtection(...)` and `getPositionProtection(...)`, or direct
   `IPositionProtectionViews`, for retained protection thresholds, status, trigger evidence, and order linkage.
@@ -173,11 +175,11 @@ Use `IPerpsKeeper` for execution:
   the original trigger.
 
 The submitting agent does not have to be the executor. Any keeper may execute an order. For a freshly submitted
-bounded-order request, execution remains inside the limits pinned by the account. Protection parent and linked-close
-orders instead use the documented protocol-synthesized envelope and remain subject to ordinary Router, evaluator,
-Engine, and protection-state checks. Bounty economics differ: self-execution credits the stored order bounty to the
-account while an external keeper receives it. Receipts encode self-execution as `Paid` to `executor == account`;
-`RefundedToAccount` is reserved for risk-off cleanup. A failed registered protection attempt records
+bounded-order request, including an attached protection parent, execution remains inside the limits pinned by the
+account. Only triggered and retried protection close orders use the documented protocol-synthesized envelope; they
+remain subject to ordinary Router, evaluator, Engine, and protection-state checks. Self-execution releases the stored
+order bounty to the account's free settlement; an external keeper receives a clearinghouse credit instead. Receipts
+encode self-execution as `Paid` to `executor == account`; `RefundedToAccount` is reserved for risk-off cleanup. A failed registered protection attempt records
 `RetainedForProtectionRetry`, pays no cleaner, and rolls the same reserved amount back to the latched protection only
 while the exact protected position still matches. A missing or mismatched position instead uses `Paid` cleanup and
 terminally resolves the protection as `Failed`.
@@ -582,8 +584,9 @@ protocol-synthesized execution envelope.
   a strict, predictable progress boundary matters.
 - **Contract size:** several core contracts operate close to EIP-170. Integrations should not assume new convenience
   methods can be added to the core contracts; prefer stable interfaces and off-chain composition.
-- **Audit status:** the protocol remains pre-deployment and formal production audit coverage, including the agent
-  execution-authority components, is pending. Check [`SECURITY.md`](SECURITY.md) against the exact deployment commit.
+- **Audit status:** formal production audit coverage, including the agent execution-authority components, is pending.
+  Testnet release artifacts do not establish production readiness. Check [`SECURITY.md`](SECURITY.md) and the release
+  manifest against the exact deployment commit.
 
 ## Integration checklist
 

@@ -63,17 +63,19 @@ size quantum.
 | `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
+| `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps` | `HousePool` | `onlyOwner`, 48-hour timelock; each fee is capped at `1,000` bps |
 | `maxSeniorExposureUsdc`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
-| `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, basket confidence ratio, historical settlement window, component publish-time skew, adverse confidence multiplier, bounty limits) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| Junior `maintenanceFeeAprBps`, `maintenanceFeeRecipient` | `TrancheVault` | current `HousePool.owner()` only, 48-hour timelock; fee is capped at `1,000` bps nominal APR |
+| `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, confidence policy, historical settlement window, component skew, opening minimum, bounty rates/limits, pending-order cap, minimum execution gas, cleanup cap) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 
 Each successful Engine/Router finalization therefore changes
 `OrderLifecycleBook.currentExecutionConfigHash()`. Proposal, cancellation, pause/unpause, and failed finalization do
 not advance these versions.
 
-The deployed `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
+The release-script `frozenCloseSpreadBps` default is `50` bps (0.50%). Both construction and timelocked updates reject zero and values above the `1,000` bps (10%) hard cap.
 
-The deployed `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
+The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
 `0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
 
 ### One-time wiring
@@ -116,7 +118,7 @@ the sidecar is created second with the same Router; and the Router is created th
 nonce-consuming operation. The Router constructor rejects a lifecycle Book without code or with any mismatched core
 binding, rejects a sidecar with no code or one whose immutable `ROUTER()` does not equal `address(this)`, and exposes the
 accepted address through `liquidationBatchSidecar()`. The sidecar has no mutable storage or upgrade setter and its
-active-oracle configuration, mark-refresh/protection-trigger, LP-epoch settlement, and liquidation selectors are valid
+public/protected-open commit, active-oracle configuration, mark-refresh/protection-trigger, LP-epoch settlement, and liquidation selectors are valid
 only under delegatecall where `address(this)` is that exact Router. Direct calls and delegatecalls from a foreign host
 revert. Router self-callbacks remain self-only, so an external caller cannot use the sidecar to bypass Router
 authorization or reentrancy guards. HousePool remains the canonical settlement-policy boundary, so delegated atomic
@@ -138,12 +140,12 @@ and reciprocal binding before admitting margin, orders, or LP exposure.
 
 The owner can act immediately to:
 
-- pause and unpause `OrderRouter` through `OrderRouterAdmin`,
+- pause and unpause new `OrderRouter` opens and protection creation/replacement through `OrderRouterAdmin`,
 - pause and unpause `HousePool`,
 - pause and unpause `HousePool` LP epoch settlement independently,
 - install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
 - rotate or disable the coordinator guardian,
-- set the protocol treasury account,
+- set the protocol treasury account once the previous treasury clearinghouse balance is empty,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:
@@ -172,7 +174,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 - `CfdOrderPolicyEvaluator` is permissionless and stateless. It is not a custody authority; the Router sidecar pins
   its address, validates exact return shape, and compares selected assessed mode/account/position fields against live
   pre/post state.
-- The separately predeployed `OrderRouterLiquidationBatchSidecar` carries stateless mark-refresh/protection-trigger,
+- The separately predeployed `OrderRouterLiquidationBatchSidecar` carries stateless public/protected-open commit, mark-refresh/protection-trigger,
   single-liquidation, liquidation-batch, and LP-epoch orchestration to preserve Router deploy-size headroom. The Router
   is the only valid execution context for those helpers. Under `delegatecall`, they read integrations through external
   Router getters, never access Router storage by assumed layout, and change Router-owned state only through authorized external self/item
@@ -411,7 +413,7 @@ Keepers are permissionless executors.
 The Router-created position-protection Book owns the retained OCO lifecycle and uses only narrow clearinghouse/Router
 capabilities. It is stateful and distinct from the separately predeployed `OrderRouterLiquidationBatchSidecar`.
 Router `delegatecall` uses
-that sidecar only as a stateless bytecode carrier for mark refresh/protection-trigger resolution, single and batch
+that sidecar only as a stateless bytecode carrier for public/protected-open commits, mark refresh/protection-trigger resolution, single and batch
 liquidation, atomic-refresh LP-epoch settlement, and the active-oracle forwarding step inside an authenticated Router
 configuration finalization. The Router retains admin authentication and applies its storage fields in the original
 before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
@@ -489,8 +491,9 @@ Security properties:
 - partial-close size floors prevent flat-bounty dust closes from occupying global FIFO slots,
 - binding order semantics and the lack of a user cancellation path prevent traders from turning queued intents into
   free options,
-- the stateless evaluator reconstructs the canonical settlement snapshot and calls the configured Engine planner
-  before mutation; the execution sidecar then checks selected assessment fields against actual pre/post state,
+- the stateless evaluator reads a settlement snapshot and calls the configured Engine planner before mutation; its
+  current snapshot leaves `settlementBufferBps` at zero, while Engine execution independently enforces the configured
+  buffer. The execution sidecar checks selected assessment fields against actual pre/post state,
 - the execution sidecar reserves a fixed post-Engine gas tail and finalizes the lifecycle Book only after economic
   settlement and Router-record deletion,
 - batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds
@@ -609,7 +612,7 @@ LP actions intentionally stay live across that split:
 - `FAD` alone keeps ordinary LP pricing,
 - `oracle frozen` keeps eligible synchronized redemption settlement live. Ordinary entry and exit remain
   asynchronous: a request does not lock a price, rate, or fee. Funded redemptions apply the then-active surcharge
-  (`25 bps` Senior, `75 bps` Junior), retain it in the same tranche for incumbents, and place only net assets into
+  (default `25 bps` Senior, `75 bps` Junior), retain it in the same tranche for incumbents, and place only net assets into
   claim escrow. Deposit activation is deferred until the live symmetric-NAV entry gate passes; withdrawal funding is
   not blocked merely because entries are deferred.
 
@@ -990,8 +993,8 @@ Trade-off:
 ### Reachability and bounty bounds
 
 - liquidation accounting is constrained by actually reachable collateral,
-- the proportional liquidation charge has a floor, is capped by reachable value, and may explicitly subsidize
-  low-equity liquidations,
+- the proportional liquidation charge has a floor but is capped by the dedicated liquidation reserve; the pool does
+  not fund an additional bounty subsidy when that reserve is insufficient,
 - the collected charge is conserved across a bounded, timelocked allocation where
   `keeperShareBps + protocolShareBps <= 10_000`: the keeper and protocol treasury each receive their independently
   rounded-down configured shares as clearinghouse credit, and LPs receive the exact remainder, including rounding dust,
@@ -1048,7 +1051,7 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
   form one non-upgradeable reviewed stack. Externalizing the lifecycle Book plus keeper and execution paths saves
   Router initcode/runtime bytes but increases review coupling: a
   change to either Book or any delegated path requires rechecking direct-call rejection, external-getter assumptions,
-  Router caller/event context, and every affected EIP-170 size. Only protection-Book creation code remains embedded in
+  Router caller/event context, and every affected EIP-170 size. Admin and protection-Book creation code remain embedded in
   Router initcode; lifecycle-Book and sidecar creation inputs must be gated independently under EIP-3860,
 - known typed planner/policy failures, slippage, expiry, and config mismatch are terminal for the affected order. A
   current registered protection attempt may relatch for a fresh child when the exact protected position remains; other
@@ -1180,7 +1183,9 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 
 ## Audit Status
 
-The perps system has completed one external pre-audit / security consultation, but has not completed a formal production audit. It remains pre-deployment.
+The repository records one external pre-audit / security consultation and historical Arbitrum Sepolia deployment
+artifacts. A formal production audit remains pending. Historical deployments do not establish that the current source
+or its immutable contract stack is deployed or production-ready.
 
 ### SC Audit Studio Pre-Audit (April-May 2026)
 

@@ -36,7 +36,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     struct StoredPosition {
         /// @notice Position size in canonical 100-token lots.
         uint112 lots;
-        /// @notice Exact sum of entry `lots * executionPrice`, in 6-decimal USDC atoms.
+        /// @notice Exact remaining entry basis, in 6-decimal USDC atoms; closes remove their allocated basis.
         uint144 entryCostUsdcAtoms;
         /// @notice Capped maximum profit envelope, in 6-decimal USDC units.
         uint256 maxProfitUsdc;
@@ -80,7 +80,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Aggregate position accounting by `CfdTypes.Side` index: `0` is LONG and `1` is SHORT.
     /// @dev Each entry contains the sum of maximum-profit envelopes, synthetic open interest, raw entry notional, and
     ///      active position margin for that side. Maximum profit and margin use 6-decimal USDC, open interest uses
-    ///      18 decimals, and raw `size * entryPrice` entry notional uses 26 decimals.
+    ///      18 decimals, and exact entry cost scaled by `1e20` uses 26 decimals; the display average omits basis dust.
     SideState[2] public sides;
     /// @notice Most recently accepted cached mark price, with 8 decimals and bounded by `CAP_PRICE` on router paths.
     uint256 public lastMarkPrice;
@@ -255,7 +255,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ///      planner, settlement sidecar, and admin must be wired separately through their one-time setters.
     /// @param _usdc Settlement token treated by the protocol as USDC with 6 decimals.
     /// @param _clearinghouse Margin clearinghouse that custodies trader balances and margin buckets.
-    /// @param _capPrice Nonzero maximum supported oracle price, with 8 decimals.
+    /// @param _capPrice Nonzero maximum supported oracle price, with 8 decimals and no greater than `type(uint32).max`.
     /// @param _riskParams Initial risk parameters: VPI/skew fields use 1e18 scaling, rates use basis points, and the
     ///                    minimum bounty uses 6-decimal USDC units.
     /// @param _frozenCloseSpreadBps Initial nonzero LP-owned frozen-close spread, in basis points and at most 1,000.
@@ -662,9 +662,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Validates that a clearinghouse withdrawal leaves an open position sufficiently collateralized.
     /// @dev Callable only by the clearinghouse after its provisional balance debit. Accounts without positions pass.
     ///      Open positions require non-degraded mode and a fresh cached mark. Collectible carry is then realized, any
-    ///      remainder stays in pending carry, and position equity must exceed the stricter of initial margin and the
-    ///      active maintenance/FAD margin requirement. Although stateful, every mutation rolls back if the enclosing
-    ///      withdrawal fails.
+    ///      uncovered remainder blocks withdrawal. Negative lifetime VPI must remain fully reserve-backed, and price
+    ///      equity must exceed the stricter of initial margin and the active maintenance/FAD requirement. Every
+    ///      mutation rolls back if the enclosing withdrawal fails.
     /// @param account Clearinghouse account whose post-withdrawal state is checked.
     function checkWithdraw(
         address account
@@ -845,11 +845,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Returns the canonical current position tuple for an account.
-    /// @dev Margin is read from the clearinghouse position-margin bucket; all other fields are engine-owned.
+    /// @dev Margin is read from the clearinghouse position-margin bucket. Entry price is derived from engine-owned
+    ///      exact basis and lots; it is a display average, not the basis used for settlement.
     /// @param account Account to inspect.
     /// @return size Synthetic position size, with 18 decimals.
     /// @return margin Current active position margin, in 6-decimal USDC units.
-    /// @return entryPrice Volume-weighted entry price, with 8 decimals.
+    /// @return entryPrice Exact remaining entry cost divided by lots, rounded down to an 8-decimal display price.
     /// @return maxProfitUsdc Capped maximum profit envelope, in 6-decimal USDC units.
     /// @return side Position direction; the default enum value is returned when no position exists.
     /// @return lastUpdateTime Unix timestamp of the last position mutation.
@@ -881,9 +882,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         return _positions[account].entryCostUsdcAtoms;
     }
 
-    /// @notice Returns one fresh, authenticated terminal price-PnL snapshot for LP accounting.
+    /// @notice Returns one current, authenticated terminal price-PnL snapshot for LP accounting.
     /// @dev The signed delta is read from the Engine-bound book at the cached Engine mark. The call fails closed while
-    ///      any multi-contract account mutation is transient or when the mark/book is unavailable.
+    ///      any multi-contract account mutation is transient or when a required mark/book is unavailable. Mark-age
+    ///      freshness is enforced by consuming pool paths, not by this snapshot getter.
     function terminalNavSnapshot() external view returns (TerminalNavSnapshot memory snapshot) {
         if (_reentrancyGuardEntered()) {
             revert CfdEngine__AccountingMutationInProgress();
@@ -1116,7 +1118,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @param side Side whose totals are mutated.
     /// @param maxProfitDelta Signed maximum-profit envelope delta, in 6-decimal USDC units.
     /// @param openInterestDelta Signed synthetic open-interest delta, with 18 decimals.
-    /// @param entryNotionalDelta Signed raw `size * entryPrice` delta, with 26 decimals.
+    /// @param entryNotionalDelta Signed exact entry-cost delta scaled by `1e20`, with 26-decimal precision.
     function settlementApplySideDelta(
         CfdTypes.Side side,
         int256 maxProfitDelta,
@@ -1159,6 +1161,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ///      a new senior trader-claim liability. A zero amount is a no-op.
     /// @param account Claim beneficiary.
     /// @param amountUsdc Payout or claim amount, in 6-decimal USDC units.
+    /// @param positionRemainsOpen Whether immediate cash is credited to PnL pledge instead of free settlement.
     function settlementRecordTraderClaim(
         address account,
         uint256 amountUsdc,

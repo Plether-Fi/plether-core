@@ -9,9 +9,9 @@ import {OrderCommitHandler} from "@plether/perps/router/OrderCommitHandler.sol";
 
 /// @title PositionProtectionHandler
 /// @notice Lifecycle hooks for the external, state-owning position-protection book.
-/// @dev Trader/keeper protection actions and views live directly on the discoverable Book. The concrete router reuses
-///      its ordinary commit selector for Book-authenticated attached opens; delegated keeper logic calls the Router's
-///      isolated self-only item entrypoints for protection triggers and liquidations.
+/// @dev Trader/keeper protection actions and views live directly on the discoverable Book. The concrete Router
+///      authenticates attached opens through `commitProtectedOpen`; delegated keeper logic calls the Router's
+///      isolated self-only item entrypoints for protection attempts and liquidations.
 abstract contract PositionProtectionHandler is OrderCommitHandler, ReentrancyGuardTransient {
 
     /// @notice Position-protection lifecycle component permanently bound to this router.

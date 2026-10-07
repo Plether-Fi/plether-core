@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+// Historical audit identifiers and test names are retained for traceability.
+// The assertions below exercise current behavior; legacy names do not describe unfixed vulnerabilities.
+
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -14,7 +17,7 @@ import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 // =====================================================================
-// #1 - Queue griefing: zero-fee fake close orders block FIFO queue
+// #1 regression - USDC-funded commits need no ETH and orders have a finite default lifetime
 // =====================================================================
 
 contract AuditV3Failing_QueueGriefing is BasePerpTest {
@@ -29,15 +32,14 @@ contract AuditV3Failing_QueueGriefing is BasePerpTest {
     }
 
     function test_1_MaxExecutionWindowSecondsShouldBeNonZeroByDefault() public {
-        // maxExecutionWindowSeconds defaults to 0 — _skipStaleOrders early-returns,
-        // so bogus orders never expire and block the queue permanently.
+        // A nonzero default lifetime lets terminal cleanup expire abandoned queue entries.
         assertGt(router.maxExecutionWindowSeconds(), 0, "maxExecutionWindowSeconds should have a non-zero default");
     }
 
 }
 
 // =====================================================================
-// #2 - FAD vs oracle-frozen: stale marks accepted during live markets
+// #2 regression - FAD-only live markets retain the normal mark-age limit
 // =====================================================================
 
 contract AuditV3Failing_FadStaleness is BasePerpTest {
@@ -83,8 +85,7 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
 
         vm.warp(fridayEvening + 30 minutes - 1);
 
-        // LP deposit should revert (stale mark during live markets).
-        // But _requireFreshMark uses isFadWindow() -> fadMaxStaleness (3 days).
+        // FAD alone does not relax mark age: the stale live-market mark blocks a new LP request.
         address lp = address(0x1111);
         uint256 depositAmount = pool.minTrancheDepositUsdc();
         usdc.mint(lp, depositAmount);
@@ -99,7 +100,7 @@ contract AuditV3Failing_FadStaleness is BasePerpTest {
 }
 
 // =====================================================================
-// #4 - Tranche wipeout bricks recapitalization
+// #4 regression - ordinary LP deposits cannot recapitalize terminally wiped tranches
 // =====================================================================
 
 contract AuditV3Failing_JuniorWipeout is BasePerpTest {
@@ -149,8 +150,8 @@ contract AuditV3Failing_JuniorWipeout is BasePerpTest {
         assertEq(pool.juniorPrincipal(), 0, "Junior wiped");
         assertGt(juniorVault.totalSupply(), 0, "Shares still exist");
 
-        // Recapitalization deposit should succeed.
-        // Currently reverts with TrancheImpaired (totalAssets=0, totalSupply>0).
+        // Ordinary entry into a zero-NAV tranche with surviving shares is intentionally rejected.
+        // Governance recapitalization is a separate path; this test does not exercise it.
         usdc.mint(lp, 50_000e6);
         vm.startPrank(lp);
         usdc.approve(address(juniorVault), 50_000e6);
@@ -237,8 +238,8 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
         assertEq(pool.seniorPrincipal(), 0, "Senior wiped out");
         assertGt(pool.seniorHighWaterMark(), 0, "Stale HWM remains before recap");
 
-        // Recapitalization deposit should succeed.
-        // Previously reverted forever because HWM remained above zero after wipeout.
+        // The terminal-wipeout guard rejects ordinary entry even though the old HWM remains.
+        // This test does not attempt governance recapitalization.
         usdc.mint(lp, 1_000_000e6);
         vm.startPrank(lp);
         usdc.approve(address(seniorVault), 1_000_000e6);
@@ -250,7 +251,7 @@ contract AuditV3Failing_SeniorImpairment is BasePerpTest {
 }
 
 // =====================================================================
-// #5 - Close order with wrong side inverts slippage protection
+// #5 regression - wrong-side close commitment is rejected before execution
 // =====================================================================
 
 contract AuditV3Failing_CloseSlippageInversion is BasePerpTest {

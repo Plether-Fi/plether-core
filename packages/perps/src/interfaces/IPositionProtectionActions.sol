@@ -10,6 +10,7 @@ interface IPositionProtectionActions {
     /// @notice Arms one OCO protection against the caller's existing full position.
     /// @dev At least one trigger must be enabled. The caller must have no other protection or ordinary pending order.
     ///      Creation reserves both protection bounties and validates trigger geometry against the cached fresh mark.
+    ///      Router pause blocks creation and replacement; cancellation, triggering, and retry remain available.
     /// @param params Direction-aware take-profit and stop-loss trigger prices.
     /// @return protectionId Newly assigned protection identifier.
     function createPositionProtection(
@@ -17,8 +18,8 @@ interface IPositionProtectionActions {
     ) external returns (uint64 protectionId);
 
     /// @notice Atomically replaces the trigger prices of the caller's staged or armed protection.
-    /// @dev Replacement retains the protection id and its snapshotted bounty reserve. Triggered protection is binding
-    ///      and cannot be replaced. Parent execution binds pending-open protection to the actual resulting side and
+    /// @dev Replacement retains the protection id and its snapshotted bounty reserve. Triggered and latched protection
+    ///      are binding and cannot be replaced. Parent execution binds pending-open protection to the actual resulting side and
     ///      full size; threshold crossing at that execution tick does not prevent arming.
     /// @param protectionId Pending-open or armed protection owned by the caller.
     /// @param params Replacement take-profit and stop-loss trigger prices.

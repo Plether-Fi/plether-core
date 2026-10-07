@@ -29,17 +29,20 @@ unchanged. See [Reservation ledger](RESERVATION_LEDGER.md) for the complete owne
 - Environment template: `.env.arbitrum-sepolia-perps.example`
 - Manifest template: `deployments/arbitrum-sepolia-perps.template.json`
 - Current preparation record: `deployments/releases/2026-09-10-perps-arbitrum-sepolia/README.md`
-- Latest recorded deployment (v1.2.3, active, seeded with 0.01 USDC per tranche): `deployments/releases/2026-09-10-perps-arbitrum-sepolia-v1.2.3/README.md`
+- Latest recorded full-stack deployment (v1.2.3, recorded active, seeded with 0.01 USDC per tranche): `deployments/releases/2026-09-10-perps-arbitrum-sepolia-v1.2.3/README.md`
 - Consumer ABI and build-evidence exporter: `scripts/export-perps-release.py`
 
-The deploy script handles contract creation and one-time wiring.
+The deploy script handles contract creation and one-time wiring. Script, environment, and deployment-record paths
+in this document are relative to the repository root; run the commands from that root. Historical deployment records
+describe their recorded state, not a fresh verification of current chain state.
 
 The manifest and ABI export include constructor-created contracts. Record `CfdEngineProtocolLens` from
 `HousePool.ENGINE_PROTOCOL_LENS()` and verify its Engine binding. `CfdEngineLens` now creates the stateless
 `CfdEngineOpenQuoter` helper internally; recover its address from the lens creation trace and verify the deployed
 runtime against the release build. Its immutable address is internal and has no public getter. Consumers call
 `CfdEngineLens.quoteMaxOpen(...)`, not the helper. Include the helper's embedded creation code when checking the
-lens's full creation input against EIP-3860. With these children, the current stack contains 27 deployed contracts;
+lens's full creation input against EIP-3860. With these children and the separately deployed `CfdClosePreview`, the
+current full-stack manifest contains 28 deployed contracts;
 internal creations do not add deployer transactions or change the Router-bound three-`CREATE` sequence.
 
 The bootstrap script handles operator actions after deploy:
@@ -55,7 +58,8 @@ LP deposits and redemptions share the vaults' deterministic round-hour epoch clo
 cutoff. Before each cutoff they target the next epoch; during the final five minutes, beginning at exact cutoff
 equality, they remain valid but target the following epoch. The numeric target does not change at the intervening
 round-hour boundary. After bootstrap, any account may clear matured epochs through
-the route reported by `SettlementMonitorLens.requiredExecutionPath`; no privileged keeper role is required. The
+the `requiredExecutionPath` field returned by `SettlementMonitorLens.getSettlementStatus(observedEpoch)`; no
+privileged keeper role is required. The
 `CachedMark` route calls `HousePool` directly, while `AtomicOracleRefresh` calls `OrderRouter` with a valid
 `PoolReconcile` Pyth basket. Outside oracle-frozen mode, live open-position settlement requires the atomic route and a
 basket published at or after the round-hour boundary, not the request cutoff. Frozen mode also selects atomic refresh
@@ -84,20 +88,21 @@ The deploy script creates and wires:
 13. `CfdEngineLens`
 14. `ArbitrumSepoliaReleaseOracle`, a constructor-only `PletherOracle` wrapper with the `2,500`-bps multiplier
 15. `CfdOrderPolicyEvaluator`
-16. `OrderRouterV3ExecutionSidecar`
-17. `OrderLifecycleBook`, separately deployed and immutable-bound to the predicted Router, Engine,
+16. `CfdClosePreview`, separately deployed as a stateless pre-commit close-review contract, distinct from the Router's evaluator
+17. `OrderRouterV3ExecutionSidecar`
+18. `OrderLifecycleBook`, separately deployed and immutable-bound to the predicted Router, Engine,
     MarginClearinghouse, and HousePool
-18. `OrderRouterLiquidationBatchSidecar`, separately deployed with the same predicted Router address
-19. `ArbitrumSepoliaReleaseRouter`, a constructor-only `OrderRouter` wrapper deployed immediately after those two
+19. `OrderRouterLiquidationBatchSidecar`, separately deployed with the same predicted Router address
+20. `ArbitrumSepoliaReleaseRouter`, a constructor-only `OrderRouter` wrapper deployed immediately after those two
     Router-bound dependencies with the `$1,000` opening minimum. Its eighth and final base-constructor dependency is
     the predeployed lifecycle Book; its base constructor deploys the immutable RouterAdmin and stateful
     position-protection Book
-20. `PositionProtectionBook`, deployed internally and immutably bound by the Router constructor
-21. `PerpsPublicLens`
-22. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
-23. `EmergencyPauseCoordinator`
+21. `PositionProtectionBook`, deployed internally and immutably bound by the Router constructor
+22. `PerpsPublicLens`
+23. `SettlementMonitorLens` (the facade deploys its monitor-bound `SettlementMonitorLensSidecar` internally)
+24. `EmergencyPauseCoordinator`
 
-It then performs the required set-once wiring:
+Contract creation is interleaved with the required set-once wiring:
 
 - `CfdEngine.setDependencies(...)`
 - `CfdEngine.setTerminalNavBook(...)`
@@ -129,7 +134,7 @@ HousePool, PletherOracle, and OrderRouter constructors and generic defaults rema
 constructor also rejects an oracle that does not already expose the exact `2,500`-bps adverse multiplier. After
 construction, all configuration changes use the unchanged HousePool and RouterAdmin 48-hour governance paths.
 
-The Router constructor creates only the stateful position-protection Book. That Book requires no separate deployment
+The Router constructor creates RouterAdmin and the stateful position-protection Book. That Book requires no separate deployment
 transaction or mutable wiring. Discover it from `OrderRouter.positionProtectionBook()` and verify its immutable
 `ROUTER()` and `ENGINE()` values against the new Router and Engine. Discover the separately deployed lifecycle Book
 through `OrderRouter.lifecycleBook()` and the stateless keeper sidecar through
@@ -179,10 +184,11 @@ Important:
   48,794-byte creation code, and 48,826-byte creation input including the 32-byte Router constructor argument, leaving
   326 bytes of EIP-3860 headroom. Its monitor sidecar was 19,114 bytes at runtime with 20,488-byte initcode. The
   maintenance-fee release is monitor schema/domain V3 because its observable configuration digest also commits to the
-  active Junior fee rate and recipient. With optimizer 200, V3 measures 23,339 bytes of facade runtime, 49,010 bytes
-  of facade creation input (142 bytes below EIP-3860), and 19,298 bytes of sidecar runtime. The combined V4 release
-  also commits the Engine settlement buffer and measures 23,339 bytes of facade runtime, 49,057 bytes of facade
-  creation input (95 bytes below EIP-3860), and 19,345 bytes of sidecar runtime. Keep the dedicated runtime and
+  active Junior fee rate and recipient. Historical optimizer-200 V3 measurements were 23,339 bytes of facade runtime,
+  49,010 bytes of facade creation input (142 bytes below EIP-3860), and 19,298 bytes of sidecar runtime. The combined V4
+  baseline also committed the Engine settlement buffer and measured 23,339 bytes of facade runtime, 49,057 bytes of
+  facade creation input (95 bytes below EIP-3860), and 19,345 bytes of sidecar runtime. These are historical build
+  measurements, not evidence for the current source revision. Keep the dedicated runtime and
   creation-input size regressions green and remeasure the exact release commit before deployment.
 - `EmergencyPauseCoordinator` is deployed after the monitor and immutable-bound to the exact RouterAdmin and
   HousePool. The deploy transaction verifies its code, bindings, owner, disabled initial guardian, zero initial
@@ -220,8 +226,9 @@ Important:
   async-deposit (`0xce3bbe50`), async-redeem (`0x620ee8e4`), ERC-7575 vault (`0x2f0a18c5`), and ERC-7575 share-token
   (`0xf815c03d`) interface ids. The added custom timing view changes the custom `IAsyncTrancheVault` interface id but
   does not change these standard ids. Both deploy and bootstrap verification must assert
-  `supportsInterface(type(IAsyncTrancheVault).interfaceId)` for the rebuilt custom interface; regenerate the custom
-  vault and lens ABIs for frontend, keeper, and indexer use.
+  `supportsInterface(type(IAsyncTrancheVault).interfaceId)` for the rebuilt custom interface. Deploy, bootstrap, and
+  standalone verification also check the separate `IAsyncTrancheVaultClaimableRedeem` extension; adding that extension
+  does not change the base custom interface id. Regenerate vault and lens ABIs for frontend, keeper, and indexer use.
 - Deploy verification and the release-default regression fail closed unless Senior reports `0/address(0)` and Junior
   reports `maintenanceFeeAprBps() == 100` with the deployment-time `CfdEngine.protocolTreasury()` snapshot. Neither
   vault may have a pending fee proposal or pending fee shares before seeding. Bootstrap enforces the same snapshot and
@@ -403,17 +410,22 @@ This requires a clean reviewed `origin/master`, pinned submodules, Forge `1.5.1-
 `421614`, upgraded-Pyth bytecode, an authenticated six-feed Hermes payload, and payload/contract compatibility. Its
 Forge simulation omits `--broadcast`.
 
-Required:
+The preflight requires all four values below; the Forge deploy script itself reads `TEST_PRIVATE_KEY`:
 
 ```bash
 TEST_PRIVATE_KEY=...
 ARB_SEPOLIA_RPC_URL=...
+PYTH_API_KEY=...
+RELEASE_COMMIT=...
 ```
 
 Run:
 
 ```bash
-source .env && forge script script/DeployPerpsArbitrumSepolia.s.sol:DeployPerpsArbitrumSepolia --rpc-url $ARB_SEPOLIA_RPC_URL --broadcast
+set -a
+source "${PERPS_RELEASE_ENV_FILE:-.env.arbitrum-sepolia-perps}"
+set +a
+forge script script/DeployPerpsArbitrumSepolia.s.sol:DeployPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL" --broadcast
 ```
 
 The script prints the deployed addresses and position-protection defaults to the console. Save the complete output,
@@ -429,6 +441,7 @@ including at least:
 - both tranche vaults
 - `PletherOracle`
 - `CfdOrderPolicyEvaluator`
+- `CfdClosePreview`
 - `OrderRouterV3ExecutionSidecar`
 - `OrderRouter`
 - the separately deployed `OrderRouterLiquidationBatchSidecar` returned by
@@ -497,10 +510,20 @@ Notes:
 Run:
 
 ```bash
-source .env && forge script script/BootstrapPerpsArbitrumSepolia.s.sol:BootstrapPerpsArbitrumSepolia --rpc-url $ARB_SEPOLIA_RPC_URL --broadcast
+set -a
+source "${PERPS_RELEASE_ENV_FILE:-.env.arbitrum-sepolia-perps}"
+set +a
+forge script script/BootstrapPerpsArbitrumSepolia.s.sol:BootstrapPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL" --broadcast
 ```
 
-Run the standalone verifier without `--broadcast` after every phase and record each successful result in the manifest:
+Populate and export the complete deployment-address section of the release environment template before verification,
+including `PERPS_OWNER` and every deployed module address. Also add `PERPS_CLOSE_PREVIEW` with the distinct deployed
+preview address: the current verifier requires it even though the environment template does not yet list it. The
+bootstrap-only variables above are insufficient for the standalone verifier. Reload the release environment with
+`set -a` / `source` / `set +a` after each edit.
+
+Run the standalone verifier without `--broadcast` after the corresponding phase and record each successful result in
+the manifest; these commands are separated by bootstrap and activation, not run consecutively against one state:
 
 ```bash
 VERIFY_PHASE=deployed forge script script/VerifyPerpsArbitrumSepolia.s.sol:VerifyPerpsArbitrumSepolia --rpc-url "$ARB_SEPOLIA_RPC_URL"
@@ -559,12 +582,13 @@ Position protection has a trigger/attempt/retry keeper model:
    and live/FAD oracle window at the current FIFO tail. Retry requires that exact side/size and zero pending Router
    orders for the account. This loop continues until execution, liquidation, or terminal position mismatch.
 
-The protocol-operated worker automatically retries only an `Expired` latest attempt. It must first prune an expired
+The recommended policy for a protocol-operated worker is to retry automatically only an `Expired` latest attempt.
+This repository does not include that off-chain worker implementation. It should first prune an expired
 sole FIFO head in a separate transaction, funded from the operator gas budget, then re-check the Book and receipt. It
 queues a retry only when live Pyth data (or frozen-close execution) is available and projected head-arrival is no more
 than `maxExecutionWindowSeconds - 15 seconds` (45 seconds with the default TTL). `PlannerRejected`, `ConstraintViolation`, and other
-non-expiry terminal reasons remain latched and page operators with the reason and failure fingerprint; the official
-worker does not hot-loop them before remediation. Permissionless third parties remain free to retry.
+non-expiry terminal reasons should remain latched and page operators with the reason and failure fingerprint; the
+worker should not hot-loop them before remediation. Permissionless third parties remain free to retry.
 
 Trader calls that create, replace, or attach protection are nonpayable and validate against the engine's cached fresh
 mark. They target the `PositionProtectionBook` discovered through `OrderRouter.positionProtectionBook()`, as does the

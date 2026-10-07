@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+// Historical audit identifiers and test names are retained for traceability.
+// The assertions below exercise current behavior; legacy names do not describe unfixed vulnerabilities.
+
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
@@ -18,9 +21,9 @@ import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 // ═══════════════════════════════════════════════════════════════════
-// C-01: OracleFrozen hard revert deadlocks the FIFO queue
-//       over weekends. Liquidations use fadMaxStaleness but
-//       close orders hit an unconditional revert.
+// C-01 regression: expired pre-weekend opens are cleaned up, allowing frozen-market closes.
+// These fixtures cross the default order lifetime before execution; they do not prove
+// that an unexpired close-only open is terminally failed.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
@@ -117,8 +120,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         vm.warp(SATURDAY_NOON);
         mockPyth.setAllPrices(feedIds, int64(1e8), int32(-8), SATURDAY_NOON);
 
-        // executeOrder should soft-fail the open order (like batch does at line 416),
-        // advancing the queue. Bug: hard reverts with OracleFrozen, queue stuck.
+        // The Thursday order has expired before Saturday, so pre-oracle cleanup drains it.
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.deal(keeper, 1 ether);
@@ -153,8 +155,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
-        // Keeper processes both: order 1 soft-fails, order 2 closes Alice's position.
-        // Bug: order 1 hard reverts, blocking order 2 entirely (FIFO deadlock).
+        // Keeper clears expired order 1, then executes the fresh frozen-market close in order 2.
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
         vm.deal(keeper, 2 ether);
@@ -176,11 +177,9 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// C-03: Asymmetric staleness in HousePool
-//       _requireFreshMark uses fadMaxStaleness during FAD,
-//       _reconcile uses hardcoded markStalenessLimit.
-//       The stale early return doesn't update lastReconcileTime,
-//       so coupon/revenue/loss state can diverge across the weekend path.
+// C-03 regression: frozen-mode freshness is shared by reconciliation and withdrawal gates.
+// A mark inside fadMaxStaleness permits weekend reconciliation and coupon checkpointing;
+// FAD-only live-market shoulders still use the normal live limit.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
@@ -228,7 +227,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundJunior(address(this), 500_000e6);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
-        config.seniorRateBps = 1000; // 10% APY
+        config.seniorRateBps = 1000; // 10% annualized target coupon
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         vm.prank(address(router));
@@ -249,10 +248,10 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         pool.reconcile();
         uint256 lastReconcileFriday = pool.lastReconcileTime();
 
-        // Warp to Saturday during FAD; the mark is stale under the ordinary limit but fresh under the FAD runway.
+        // On frozen Saturday, the mark exceeds the live age limit but remains inside fadMaxStaleness.
         vm.warp(SATURDAY_NOON);
 
-        // _reconcile should use the FAD freshness policy and advance lastReconcileTime.
+        // Reconciliation uses the frozen-mode age limit and advances lastReconcileTime.
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -270,7 +269,7 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         _fundJunior(address(this), 500_000e6);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
-        config.seniorRateBps = 1000; // 10% APY
+        config.seniorRateBps = 1000; // 10% annualized target coupon
         pool.proposePoolConfig(config);
         vm.warp(block.timestamp + 48 hours + 1);
         vm.prank(address(router));
@@ -290,9 +289,8 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
         uint256 seniorFriday = pool.seniorPrincipal();
         uint256 lastReconcileFriday = pool.lastReconcileTime();
 
-        // Saturday during FAD: mark is 14h old.
-        // _requireFreshMark uses fadMaxStaleness (3 days) → fresh enough.
-        // Fix: _reconcile uses the same FAD freshness policy → consistent coupon and waterfall accounting.
+        // On frozen Saturday the mark is about 14.5 hours old, within fadMaxStaleness.
+        // Reconciliation shares that policy and checkpoints the coupon and waterfall.
         vm.warp(SATURDAY_NOON);
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -306,9 +304,9 @@ contract AuditV3_C03_AsymmetricStalenessTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// H-01: Keepers get 100% of user's ETH fee on failed orders.
-//       _finalizeExecution has dead `success` param — both branches
-//       are byte-identical, sending everything to msg.sender.
+// H-01 regression: execution bounties do not transfer ETH or USDC directly to keeper wallets.
+// Bounty settlement uses internal clearinghouse balances, which these wallet-only assertions
+// do not measure; they are not evidence that an expired ordinary order pays no bounty.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
@@ -347,14 +345,14 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
 
-        // Alice commits order with 0.01 ETH keeper fee
+        // Alice commits without ETH; the execution bounty is reserved from internal USDC.
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
 
         // Warp past maxExecutionWindowSeconds — order expires
         _warpForward(61);
 
-        // Keeper executes the expired order — it fails softly (OrderFailed "Order expired")
+        // Keeper terminally cleans the expired order without an ETH payment.
         vm.deal(keeper, 0);
         vm.prank(keeper);
         bytes[] memory empty = _mockPythUpdateData();
@@ -365,8 +363,8 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
     }
 
     function test_H01_FinalizeExecutionSuccessParamIsDeadCode() public {
-        // Demonstrate that both successful and failed processing pay the keeper
-        // from the order's reserved USDC fee.
+        // Check that neither successful execution nor expiry sends USDC directly to the keeper wallet.
+        // Internal bounty credits are outside this test's assertions.
         IOrderRouterAdminHost.RouterConfig memory config = IOrderRouterAdminHost.RouterConfig({
             maxExecutionWindowSeconds: 60,
             orderExecutionStalenessLimit: router.pletherOracle().orderExecutionStalenessLimit(),
@@ -427,9 +425,8 @@ contract AuditV3_H01_KeeperFeeTheftTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// H-02: Junior tranche ERC4626 wipeout hyper-dilution.
-//       When reconciliation wipes juniorPrincipal to 0, shares survive.
-//       A $1 deposit captures >99% ownership of the tranche.
+// H-02 regression: surviving shares at zero Junior NAV block ordinary deposit requests,
+// preventing a small new deposit from taking over the wiped tranche.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
@@ -465,7 +462,7 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
         uint256 lpShares = juniorVault.balanceOf(lp);
         assertGt(lpShares, 0, "LP should have shares");
 
-        // Trader opens a LONG position. Max profit = $50K = pool total.
+        // Trader opens a LONG with $50K maximum profit, exceeding Junior capital.
         _fundTrader(trader, 50_000e6);
         address traderAccount = trader;
         _open(traderAccount, CfdTypes.Side.LONG, 50_000e18, 10_000e6, 1e8);
@@ -485,7 +482,7 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
         assertEq(juniorPrincipalAfterWipe, 0, "junior must be fully wiped");
         assertGt(totalSupplyAfterWipe, 0, "shares must survive the wipeout");
 
-        // A new LP can recapitalize the wiped tranche.
+        // A new LP cannot recapitalize the wiped tranche through an ordinary deposit request.
         usdc.mint(attacker, 1e6);
         vm.startPrank(attacker);
         usdc.approve(address(juniorVault), 1e6);
@@ -497,17 +494,9 @@ contract AuditV3_H02_JuniorWipeoutDilutionTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-01: executeOrder lacks the MIN_ENGINE_GAS check that
-//       executeOrderBatch has (line 434). A malicious keeper can
-//       supply gas below 500K, causing processOrder to OOG inside
-//       try/catch. The catch silently cancels the user's valid order.
-//
-//       Exact gas calibration is fragile across compilers, so this
-//       test verifies the prerequisite: executeOrder's try/catch
-//       catches ALL reverts (including OOG), permanently deleting
-//       the order. The gas guard is verified by code inspection:
-//       - executeOrderBatch:434 — if (gasleft() < MIN_ENGINE_GAS) revert
-//       - executeOrder — no equivalent check exists before line 303
+// M-01 regression: a single-order call with insufficient gas reverts and preserves its order.
+// The low-level call below checks failure and queue retention, not the precise internal
+// gas remaining or the revert selector.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
@@ -529,9 +518,7 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(1e8));
 
-        // 450K gas: outer frame uses ~30K in mock mode, leaving ~420K at gas floor check.
-        // Before fix: no gas floor, 420K is plenty for processOrder → order silently executed.
-        // After fix: gas floor triggers (420K < 500K MIN_ENGINE_GAS) → clean revert, order preserved.
+        // Supply 450K gas, below the configured execution floor, and require rollback with queue retention.
         vm.deal(keeper, 1 ether);
         vm.prank(keeper);
         (bool ok,) = address(router).call{gas: 450_000}(
@@ -546,9 +533,9 @@ contract AuditV3_M01_MissingGasFloorTest is BasePerpTest {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M-02: historical legacy-spread desync note kept obsolete for context.
-//       The live carry model does not use side indices.
-//       This obsolete test remains only as audit-history context.
+// M-02: historical legacy-spread note retained as a non-test helper (obsolete_ prefix).
+// The current carry model uses side indexes. This helper checks only that a mark update
+// succeeds after time advances; it makes no assertion about carry realization.
 // ═══════════════════════════════════════════════════════════════════
 
 contract AuditV3_M02_CarryDesyncTest is BasePerpTest {

@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 
 /// @title HousePoolWithdrawalPreviewLib
-/// @notice Pure helpers for applying reservations and computing senior/junior withdrawal caps.
+/// @notice Pure helpers for applying reservations and computing the senior withdrawal cap.
 library HousePoolWithdrawalPreviewLib {
 
     /// @notice Applies an additional reservation to a withdrawal snapshot.

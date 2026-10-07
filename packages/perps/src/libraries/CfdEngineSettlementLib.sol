@@ -2,18 +2,17 @@
 pragma solidity 0.8.35;
 
 /// @title CfdEngineSettlementLib
-/// @notice Shared close-settlement result type carried by engine plan deltas.
-/// @dev Monetary values are 6-decimal USDC.
+/// @notice Legacy close-settlement result type retained in engine plan deltas for ABI compatibility.
+/// @dev Monetary values are 6-decimal USDC. The current isolated close planner leaves these fields zero and
+///      reports price-PnL collection, action charges, fees, and write-offs directly on `CloseDelta`.
 library CfdEngineSettlementLib {
 
-    /// @notice Allocation of a close loss across collateral, execution fees, and base trading loss.
-    /// @dev `badDebtUsdc` intentionally excludes uncollected execution fees and frozen-close spread. Those charges
-    ///      may contribute to `shortfallUsdc`, but only the uncollected base amount is protocol bad debt.
-    /// @param seizedUsdc Account collateral collected toward the total amount owed.
-    /// @param shortfallUsdc Total amount owed but not collected, including any uncollected charges.
-    /// @param collectedExecFeeUsdc Execution fee contained in seized collateral.
-    /// @param retainedExecFeeUsdc Execution fee offset by trader profit outside `owedUsdc` and marked for pool top-up.
-    /// @param badDebtUsdc Uncollected base loss after prioritizing collected execution fee; excludes fee and spread.
+    /// @notice Former combined close-loss allocation, retained only as a zero-valued compatibility result.
+    /// @param seizedUsdc Legacy collateral collection field; currently zero.
+    /// @param shortfallUsdc Legacy collection-shortfall field; currently zero.
+    /// @param collectedExecFeeUsdc Legacy collected-execution-fee field; currently zero.
+    /// @param retainedExecFeeUsdc Legacy withheld-execution-fee field; currently zero.
+    /// @param badDebtUsdc Legacy write-off field; currently zero and never accumulated as protocol debt.
     struct CloseSettlementResult {
         uint256 seizedUsdc;
         uint256 shortfallUsdc;

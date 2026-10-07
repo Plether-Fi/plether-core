@@ -23,7 +23,8 @@ interface IOrderRouterKeeperSidecarBinding {
 /// @notice Queues delayed perps orders and permissionlessly executes them in global FIFO order using Pyth prices.
 /// @dev Does not custody trader collateral or USDC bounty reserves; queued value remains in MarginClearinghouse.
 ///      A dedicated `OrderRouterAdmin` deployed by the base contract timelocks configuration and gates new
-///      risk-increasing commits during an emergency pause. Close commits, execution, mark refresh, and
+///      risk-increasing commits and protection creation/replacement during an emergency pause. Pending opens through
+///      the pause cutoff are invalidated; close commits and execution, protection triggers/retries, mark refresh, and
 ///      liquidation remain available while that admin is paused.
 /// @custom:security-contact contact@plether.com
 contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
@@ -99,8 +100,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     }
 
     /// @notice Queues a fresh close attempt for an already-latched position protection.
-    /// @dev Only the immutable protection Book may call this entrypoint. The Book owns the durable trigger and its
-    ///      already-reserved execution bounty; delegated logic creates fresh lifecycle evidence and appends an ordinary
+    /// @dev Only the immutable protection Book may call this entrypoint. The Book tracks the durable trigger and its
+    ///      clearinghouse-held execution bounty; delegated logic creates fresh lifecycle evidence and appends an ordinary
     ///      short-lived close without reserving the bounty a second time. Parameters are intentionally unnamed because
     ///      the delegated implementation consumes the Router's unchanged original calldata.
     function commitProtectionCloseAttempt(
@@ -164,7 +165,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @notice Returns the pending-order view and next account-queue link for an order id.
     /// @dev Terminal records are deleted from the Router; permanent identity and outcomes are read from `lifecycleBook`.
     /// @param orderId Order id to inspect.
-    /// @return pending Order data plus current clearinghouse margin and router bounty reservation.
+    /// @return pending Order data plus current clearinghouse margin and bounty reservations.
     /// @return nextAccountOrderId Next order id in the live account queue, or zero at the tail.
     function getPendingOrderView(
         uint64 orderId
@@ -177,7 +178,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     ///      exact-shape typed planner/policy rejections are terminal and receive canonical receipts. Close-only, MEV,
     ///      insufficient gas, mark ordering, and unknown, panic, empty, or malformed dependency failures leave the
     ///      order pending. Each returned result is machine-readable; terminal state is permanent in `lifecycleBook`.
-    /// @param orderId Queue-head id to execute, or a later committed id used as the terminal-head cleanup bound.
+    /// @param orderId Queue-head id to execute, or a later id used as the terminal-head cleanup bound.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover all Pyth fees used by the call.
     function executeOrder(
         uint64 orderId,
@@ -230,8 +231,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     /// @dev The recipient is explicit because the item rollback boundary changes `msg.sender` to the Router. When the
     ///      source account executes its own order, only the bounty classification is released and no Engine carry
     ///      checkpoint occurs; all other recipients use the canonical Engine bounty-credit path. A failed protection
-    ///      attempt may instead return the bounty to the durable protection Book without changing clearinghouse
-    ///      classification, allowing a later attempt to reuse the same reserve.
+    ///      attempt may instead reattribute the bounty to its protection namespace without unlocking settlement,
+    ///      allowing a later attempt to reuse the same reserve.
     function settleV3OrderFromSidecar(
         uint64 orderId,
         bool success,
@@ -408,9 +409,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     }
 
     /// @notice Permissionlessly liquidates an unsafe account using an account-adverse oracle price.
-    /// @dev Available while paused. Before liquidation, cutoff-invalid opens are refunded and only bounties on the
-    ///      remaining live orders are forfeited through the engine. On success every queued order is failed, its
-    ///      committed margin is released, and its queue links are removed. The oracle handles Pyth fees and ETH refunds.
+    /// @dev Available while paused. Before liquidation, cutoff-invalid opens are refunded. If the account remains
+    ///      eligible, remaining order and unpaid protection bounties are forfeited through the engine. On success every
+    ///      remaining queued order is failed, its committed margin is released, and its queue links are removed.
+    ///      The oracle handles Pyth fees and ETH refunds.
     /// @param account Canonical account to liquidate.
     /// @param pythUpdateData Pyth price update blobs; `msg.value` must cover the Pyth update fee.
     function executeLiquidation(

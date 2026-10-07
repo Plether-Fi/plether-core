@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: AGPL-3.0
 """Render the Plether Perps Markdown white paper as a publication PDF.
 
-Pandoc is used only as a Markdown parser. ReportLab performs layout so the
-result is deterministic, self-contained, and does not require a TeX runtime.
-SVG charts are rasterized at publication resolution with rsvg-convert.
+Pandoc is used only as a Markdown parser. ReportLab performs layout without a
+TeX runtime and embeds the required macOS Times New Roman fonts. SVG charts are
+rasterized to 1,800 pixels wide with rsvg-convert; Pillow reads their dimensions.
+Layout depends on the installed tools and fonts, and PDF metadata is not fixed
+for byte-for-byte reproducibility.
 """
 
 from __future__ import annotations
@@ -635,6 +637,8 @@ class Renderer:
         return json.loads(result.stdout)
 
     def title_page(self) -> list[Flowable]:
+        """Build the fixed publication cover; metadata is not read from source."""
+
         return [
             Spacer(1, 42 * mm),
             Paragraph(
@@ -664,7 +668,7 @@ class Renderer:
             Spacer(1, 20 * mm),
             Paragraph(
                 "Version 1.0<br/>"
-                "Code revision 06d0ab451ad9bb42f4e9869fc94b0eeb1e88efe5",
+                "Original research revision 06d0ab451ad9bb42f4e9869fc94b0eeb1e88efe5",
                 self.styles["title_meta"],
             ),
             PageBreak(),
@@ -926,7 +930,7 @@ class Renderer:
 
     def build_story(self, document: dict[str, Any]) -> list[Flowable]:
         blocks: list[Block] = document["blocks"]
-        # The first source H1/H2/version line duplicate the designed title page.
+        # Replace all source front matter before Abstract with the fixed cover.
         start = next(
             index
             for index, block in enumerate(blocks)

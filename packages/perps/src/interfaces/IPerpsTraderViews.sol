@@ -34,7 +34,7 @@ interface IPerpsTraderViews {
         address account
     ) external view returns (PerpsViewTypes.PendingOrderView[] memory pending);
 
-    /// @notice Returns the account's pending-open, armed, or triggered position protection.
+    /// @notice Returns the account's pending-open, armed, triggered, or latched position protection.
     /// @param account Account to inspect
     /// @return protection Active protection record, or a zero-valued `None` record when none exists
     function getActivePositionProtection(
@@ -51,7 +51,8 @@ interface IPerpsTraderViews {
 
     /// @notice Returns whether the account's current live position is liquidatable.
     /// @dev Uses the same cached-mark, no-freshness-check risk snapshot as `getPosition`: exact price risk uses dedicated
-    ///      backing, while any carry left after projected eligible-free-settlement collection independently returns true.
+    ///      post-carry pledge plus the same-account claim. Carry uncovered after projected margin-first, then free-
+    ///      settlement collection, or an underfunded negative-VPI reserve independently returns true.
     /// @param account Account to inspect
     /// @return Whether the current cached-mark position meets the active liquidation condition
     function isLiquidatable(

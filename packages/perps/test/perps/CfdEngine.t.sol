@@ -1449,7 +1449,7 @@ contract CfdEngineTest is BasePerpTest {
             lockedAfterOpen.reservedSettlementUsdc, 0, "Open positions should not leave reserved settlement behind"
         );
 
-        // Warp 30 days — accumulates legacy negative spread for lone LONG
+        // Warp 30 days before the next carry checkpoint; no legacy side-spread state exists.
         vm.warp(block.timestamp + 30 days);
 
         // Increase position — triggers carry realization in processOrder
@@ -4244,7 +4244,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900e6, type(uint256).max, false);
 
-        // Make the terminal action charge large enough to exhaust margin and free settlement. This is deliberately separate from
+        // Make the terminal action charge large enough to exhaust spendable action reserve and free settlement. This is separate from
         // the adverse price move: only the action slice may reach the queued committed-margin bucket.
         stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
             .checked_write(uint256(2500e6));
@@ -4846,9 +4846,9 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 1000 * 1e6);
 
-        // notional = 100k * $1 = $100k. execFee = $60, VPI ~= $2.50
+        // The $100k notional requires $1500 of isolated initial margin before considering fees and reserve carve-outs.
         // MMR = 1% of $100k = $1000
-        // Even using full cross-margin equity, $1000 account collateral is below the configured $1500 initial margin requirement.
+        // Even the full $1000 account balance is below that requirement; the order supplies only $200 of margin.
         // Without the initial margin check, this would create an instantly-liquidatable position.
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
@@ -6193,7 +6193,7 @@ contract CfdEngineAuditTest is BasePerpTest {
 }
 
 // ==========================================
-// MarginCappedMtmTest: per-side margin cap prevents phantom profits
+// MarginCappedMtmTest: exact account-local collectible caps prevent phantom LP profits
 // ==========================================
 
 contract MarginCappedMtmTest is BasePerpTest {

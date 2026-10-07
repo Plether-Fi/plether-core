@@ -100,6 +100,8 @@ library OrderV3Types {
     /// @dev Maximum values are inclusive and zero is a real zero allowance. Minimum values are inclusive.
     ///      `maxGrossAccountDebitUsdc` covers settlement debit, trader-claim consumption, and the reserved bounty;
     ///      `minPostSettlementBalanceUsdc` refers to total internal settlement custody, including locked value.
+    ///      Full closes skip the post-position equity and leverage checks; fresh public requests still require a
+    ///      nonzero `maxPostLeverageBps`. Execution modes use bits 1 (Live), 2 (Fad), and 4 (Frozen).
     struct ExecutionBounds {
         uint64 submitBy;
         uint32 executionWindowSeconds;
@@ -185,7 +187,9 @@ library OrderV3Types {
         bytes32 revertDataHash;
     }
 
-    /// @notice Complete normalized economics emitted for a terminal order.
+    /// @notice Normalized economic evidence emitted for a terminal order.
+    /// @dev Executed receipts include the assessment; failed receipts contain observed account/position states and
+    ///      leave unapplied trade economics zero. Liquidation cleanup records state after liquidation.
     struct OrderEconomics {
         uint256 executionNotionalUsdc;
         int256 realizedPnlUsdc;
