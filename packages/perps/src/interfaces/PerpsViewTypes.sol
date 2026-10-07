@@ -22,8 +22,8 @@ library PerpsViewTypes {
     /// @notice Compact custody, reservation, and risk summary for one trader account.
     /// @dev All monetary fields use USDC's 6 decimals.
     /// @param equityUsdc Cached-mark price-risk equity: post-carry pledge plus same-account claim plus exact price PnL.
-    ///        VPI is excluded. Uncovered carry or an underfunded negative-VPI reserve independently sets
-    ///        `liquidatable` and withdrawal capacity to zero. This field is floored at zero and equals raw settlement
+    ///        VPI is excluded. Uncovered carry or an underfunded negative-VPI reserve independently makes
+    ///        `liquidatable` true and withdrawal capacity zero. This field is floored at zero and equals raw settlement
     ///        equity when flat.
     /// @param withdrawableUsdc Same-state withdrawal estimate from the account lens. Uncovered carry or an underfunded
     ///        negative-VPI reserve makes this zero. When price-risk headroom binds, the live guard requires equity to
@@ -33,7 +33,7 @@ library PerpsViewTypes {
     /// @param pendingExecutionBountyUsdc Clearinghouse-custodied settlement attributed to execution bounties.
     /// @param hasOpenPosition Whether the account currently has a nonzero position.
     /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach, carry left
-    ///        uncovered after projected free-settlement collection, or an underfunded negative-VPI reserve; mark
+    ///        uncovered after projected margin-first, then free-settlement collection, or an underfunded negative-VPI reserve; mark
     ///        freshness is not validated by this view.
     struct TraderAccountView {
         uint256 equityUsdc;
@@ -53,8 +53,9 @@ library PerpsViewTypes {
     /// @param marginUsdc Canonical position-margin bucket backing the position.
     /// @param unrealizedPnlUsdc Mark-to-market PnL at the cached engine mark, excluding pending carry and VPI.
     /// @param maintenanceMarginUsdc Margin required at the current mark under the active calendar regime.
-    /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach or any carry
-    ///        left uncovered after projected free-settlement collection; mark freshness is not validated by this view.
+    /// @param liquidatable Cached-mark diagnostic that is true for an exact price-risk maintenance breach, carry left
+    ///        uncovered after projected margin-first, then free-settlement collection, or an underfunded negative-VPI
+    ///        reserve; mark freshness is not validated by this view.
     struct PositionView {
         bool exists;
         CfdTypes.Side side;

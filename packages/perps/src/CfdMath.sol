@@ -35,7 +35,8 @@ library CfdMath {
 
     /// @notice Calculates exact capped price PnL from canonical lots and entry cost.
     /// @dev `entryCostUsdcAtoms` is the sum of `addedLots * executionPrice` and therefore already uses 6-decimal
-    ///      USDC atoms. No average-entry-price rounding is involved. Equality is classified as profit.
+    ///      USDC atoms. No average-entry-price rounding is involved. Equality is classified as profit for a nonzero
+    ///      lot count; a zero lot count returns `(false, 0)`.
     /// @param lots Position size in canonical 100-token lots.
     /// @param entryCostUsdcAtoms Exact entry cost in 6-decimal USDC atoms.
     /// @param side Position direction.
@@ -111,7 +112,7 @@ library CfdMath {
         uint256 skewWad = skewUsdc * 1e12;
         uint256 depthWad = depthUsdc * 1e12;
 
-        // (S^2 * WAD) / D => scaled to WAD
+        // S_WAD^2 / D_WAD => S^2 / D in WAD units
         uint256 sqSkewOverDepthWad = (skewWad * skewWad) / depthWad;
 
         // Cost = (k * (S^2 / D)) / 2
@@ -138,7 +139,7 @@ library CfdMath {
         uint256 preCost = getSkewCost(preSkewUsdc, depthUsdc, vpiFactorWad);
         uint256 postCost = getSkewCost(postSkewUsdc, depthUsdc, vpiFactorWad);
 
-        // Intentionally uncapped negative values to allow massive MM rebates
+        // This primitive leaves rebates uncapped; callers enforce reserve backing and close-lifetime limits.
         vpiUsdc = int256(postCost) - int256(preCost);
     }
 

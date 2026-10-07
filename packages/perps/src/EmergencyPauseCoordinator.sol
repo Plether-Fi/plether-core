@@ -57,7 +57,7 @@ contract EmergencyPauseCoordinator is Ownable2Step {
     /// @param reasonHash Stable application-defined incident reason hash
     /// @param evidenceHash Hash of any archived off-chain incident evidence
     /// @param action Fixed containment action that was requested
-    /// @param riskOffOrderCutoff Inclusive highest order id invalidated by the router pause
+    /// @param riskOffOrderCutoff Order-id boundary at or below which pending opens are invalidated
     /// @param previousRestrictionMask Restriction mask observed before containment
     /// @param newRestrictionMask Restriction mask observed after containment
     event EmergencyContainmentTriggered(
@@ -114,7 +114,7 @@ contract EmergencyPauseCoordinator is Ownable2Step {
     ///      hashes are accepted because incomplete metadata must never block containment.
     /// @param reasonHash Stable application-defined incident reason hash
     /// @param evidenceHash Hash of archived off-chain evidence associated with the incident
-    /// @return riskOffOrderCutoff Inclusive highest order id invalidated by the RouterAdmin pause
+    /// @return riskOffOrderCutoff Inclusive order-id boundary for invalidated pending opens; closes remain eligible
     function triggerEmergencyPause(
         bytes32 reasonHash,
         bytes32 evidenceHash
@@ -161,7 +161,7 @@ contract EmergencyPauseCoordinator is Ownable2Step {
     ///      rolls back its pause and persistent cutoff. Zero incident hashes are accepted.
     /// @param reasonHash Stable application-defined incident reason hash
     /// @param evidenceHash Hash of archived off-chain evidence associated with the incident
-    /// @return riskOffOrderCutoff Inclusive highest order id invalidated by the RouterAdmin pause
+    /// @return riskOffOrderCutoff Inclusive order-id boundary for invalidated pending opens; closes remain eligible
     function triggerFullContainment(
         bytes32 reasonHash,
         bytes32 evidenceHash

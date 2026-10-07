@@ -14,7 +14,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
-/// @dev Exact permissionless Engine read surface needed to reproduce `CfdEngineSettlementSidecar.buildRawSnapshot`.
+/// @dev Permissionless Engine read surface used to build policy-evaluation snapshots.
 interface ICfdOrderPolicyEngineView {
 
     function positions(
@@ -94,12 +94,13 @@ interface ICfdOrderPolicyEngineView {
 
 }
 
-/// @title CfdOrderPolicyEvaluator
-/// @notice Stateless policy coordinator that derives an authoritative plan or evaluates a caller-supplied plan.
-/// @dev `assessOrder` reads only the supplied Engine and its configured dependencies, reproduces the settlement
-///      sidecar snapshot, and invokes exactly one open or close planning entrypoint. The pure entrypoints remain useful
-///      for deterministic simulation and parity testing. Bounds are evaluated in `ConstraintKind` order; equality
-///      passes. A full close checks every non-position bound but skips equity and leverage because no position remains.
+/// @title CfdOrderPolicyEvaluatorBase
+/// @notice Shared policy coordinator that derives a plan or evaluates a caller-supplied plan.
+/// @dev Provides internal snapshot, planner-call, and bound-check helpers for the public evaluator and close preview.
+///      `_assessOrder` reads the supplied Engine and its dependencies and invokes one open or close planner. Its
+///      snapshot leaves `settlementBufferBps` at zero; engine execution separately enforces the configured buffer.
+///      Pure helpers accept caller-supplied snapshots and deltas for deterministic simulation. Bounds follow
+///      `ConstraintKind` order and equality passes. Full closes skip post-position equity and leverage bounds.
 abstract contract CfdOrderPolicyEvaluatorBase {
 
     uint256 private constant BPS = 10_000;

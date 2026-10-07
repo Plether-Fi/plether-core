@@ -106,7 +106,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     /// @notice Binds the predicted Router and its immutable V2 protocol dependencies.
-    /// @dev The Book is deployed immediately before its Router to keep Book creation code out of Router initcode.
+    /// @dev The Book is deployed separately before its Router to keep Book creation code out of Router initcode.
     ///      The Router constructor validates every binding before accepting this instance.
     constructor(
         address router_,

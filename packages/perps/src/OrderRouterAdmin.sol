@@ -9,8 +9,9 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 /// @title OrderRouterAdmin
 /// @notice Timelocked two-step owner administration for router queue, bounty, oracle, gas, and pause settings.
 /// @dev Router and oracle configurations have independent proposal slots and activation clocks. Emergency
-///      pausing is immediate and blocks new risk-increasing commits only; execution, close commits, mark refresh,
-///      and liquidation remain available. Only the owner may unpause.
+///      pausing is immediate, blocks new risk-increasing commits and protection creation/replacement, and permanently
+///      invalidates pending opens through the current order tail. Close commits and execution, protection triggers and
+///      retries, mark refresh, and liquidation remain available. Only the owner may unpause.
 contract OrderRouterAdmin is Ownable2Step, Pausable {
 
     /// @notice Delay between a configuration proposal and its earliest finalization (48 hours).
@@ -25,9 +26,9 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     uint256 internal constant MIN_ENGINE_GAS_FLOOR = 100_000;
     /// @notice Upper bound for minimum engine-call gas.
     uint256 internal constant MIN_ENGINE_GAS_CAP = 5_000_000;
-    /// @notice Upper bound for expired orders pruned in one execution call.
+    /// @notice Upper bound for expired or configuration-invalid heads pruned in one execution call.
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
-    /// @notice Upper bound for pending order lifetime.
+    /// @notice Upper bound for the permitted deadline horizon at commit time.
     uint256 internal constant MAX_ORDER_AGE_LIMIT = 1 hours;
     /// @notice Upper bound for the adverse confidence multiplier in basis points (3x).
     uint256 internal constant MAX_CONFIDENCE_MULTIPLIER_BPS = 30_000;
@@ -41,7 +42,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     mapping(address => uint256) public claimableEth;
     /// @notice Account allowed to pause alongside the owner; the zero address disables the separate pauser.
     address public pauser;
-    /// @notice Inclusive highest order id permanently invalidated by a successful risk-off pause.
+    /// @notice Pending opens at or below this inclusive order-id cutoff are permanently invalidated by a risk-off pause.
     uint64 public riskOffOrderCutoff;
 
     IOrderRouterAdminHost.RouterConfig private _pendingRouterConfig;
@@ -108,7 +109,8 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     event RiskOffActivated(uint64 previousCutoff, uint64 newCutoff);
 
     /// @notice Creates an admin for a fixed router host and starts two-step ownership at `initialOwner`.
-    /// @dev Neither address is validated here. Ownership transfers use `Ownable2Step` proposal and acceptance.
+    /// @dev The Router address is not validated here; `Ownable` rejects a zero initial owner. Ownership transfers use
+    ///      `Ownable2Step` proposal and acceptance.
     /// @param router_ Router host that receives finalized configuration and may credit deferred ETH.
     /// @param initialOwner Owner allowed to propose, cancel, finalize, configure the pauser, and unpause.
     constructor(
@@ -242,7 +244,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         emit RiskOffActivated(previousCutoff, newCutoff);
     }
 
-    /// @notice Removes the emergency gate on new risk-increasing commits; callable only by owner.
+    /// @notice Re-enables new risk-increasing commits and protection creation/replacement; callable only by owner.
     /// @dev Re-enables later commits but does not clear or reduce `riskOffOrderCutoff`.
     function unpause() external onlyOwner {
         _unpause();
@@ -381,7 +383,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         }
     }
 
-    /// @notice Validates the engine-call gas floor and per-call expired-order prune cap.
+    /// @notice Validates the engine-call gas floor and per-call expiry/config-mismatch prune cap.
     /// @param minEngineGas Candidate minimum forwardable engine gas, bounded from 100,000 to 5,000,000.
     /// @param maxPruneOrdersPerCall Candidate prune cap, bounded from 1 to 256.
     function _validateGasConfig(

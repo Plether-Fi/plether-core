@@ -92,7 +92,7 @@ interface IOrderDelegatedLogicRefundAdmin {
 }
 
 /// @title OrderLiquidationBatchLogic
-/// @notice Stateless mark-refresh, LP-settlement, and liquidation orchestration executed by Router delegatecall.
+/// @notice Stateless order commit, protection, oracle-policy, mark-refresh, LP-settlement, and liquidation logic.
 /// @dev This code deliberately reads router state only through external getters and mutates it only through the
 ///      isolated item entrypoints. It therefore has no dependency on the router's storage layout. Delegatecall keeps
 ///      the oracle/engine caller and emitted-event address equal to the router while keeping this code out of the
@@ -149,7 +149,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
     /// @notice Queues a fresh short-lived close attempt for an already-latched protection.
     /// @dev The protection Book authenticates and validates durable state before calling this host. The retry receives
-    ///      fresh timing and lifecycle identity, but reuses the Book-held bounty without creating another reserve.
+    ///      fresh timing and lifecycle identity, but reuses the clearinghouse-held protection bounty without a new lock.
     function commitProtectionCloseAttempt(
         uint64 protectionId,
         address account,

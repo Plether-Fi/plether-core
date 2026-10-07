@@ -528,8 +528,9 @@ interface IHousePool {
     function isOracleFrozen() external view returns (bool);
 
     /// @notice Returns the active frozen-oracle LP fee for a tranche, or zero outside frozen mode.
-    /// @dev TrancheVault applies this same-tranche fee to ERC4626 entry and exit quotes; the fee is retained for
-    ///      incumbent LPs rather than paid to protocol treasury.
+    /// @dev TrancheVault applies this same-tranche fee when funding frozen-oracle redemptions; entry activation is
+    ///      deferred while frozen. Funded claims do not reprice. The fee is retained for incumbent LPs rather than
+    ///      paid to protocol treasury.
     /// @param isSenior True for senior tranche, false for junior tranche
     /// @return Active tranche fee in basis points, or zero when the oracle is not frozen
     function frozenLpFeeBps(

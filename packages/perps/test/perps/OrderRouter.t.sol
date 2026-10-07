@@ -5626,8 +5626,8 @@ contract VpiImrBypassTest is Test {
         }
     }
 
-    // Rebate-aware open validation should allow commits when a skew-reducing rebate
-    // supplies the missing reachable collateral for IMR.
+    // A stale commit mark defers economic admission to execution. This test only proves queue admission;
+    // it does not prove a rebate can fund the isolated PnL pledge required by the execution-time IMR check.
     function test_VpiRebateCanSatisfyReachableCollateralProjection() public {
         _fundJunior(bob, 1_000_000e6);
 
@@ -5694,13 +5694,14 @@ contract VpiImrBypassTest is Test {
 // Regression: H-01
 contract KeeperFeeRefundTest is Test {
 
-    // Policy matrix coverage in this contract/file:
-    // - expired open -> trader refunded: test_ExpiredOrderFeeRefundedToUser, test_ExpiredOpenOrderRefundsUsdcBountyToTrader_NotKeeper
-    // - expired close -> clearer paid: test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty
-    // - slippage open -> trader refunded: test_SlippageFailFeeRefundedToUser
-    // - slippage close -> protocol forfeiture: test_CloseSlippageFailForfeitsBountyToProtocolWhenMarginBacked
-    // - protocol invalidation -> trader refunded: test_PostCommitDegradedModeRefundsUserBounty
-    // - user invalid -> clearer paid: test_TypedUserInvalidOpenPaysClearer
+    // Historical test names retain earlier fee-policy terminology; current bounties are internal USDC credits.
+    // Policy coverage across this file:
+    // - expired opens/closes pay the clearer: test_ExpiredHeadOrderPrunesWithoutHistoricalOracle and
+    //   test_ExitedAccount_ExpiredCloseOrderPaysClearerBounty
+    // - terminal slippage consumes the stored bounty: test_FIFOCleanupImpossibleHeadOrderHasEconomicCleanupIncentive
+    //   and test_CloseSlippageFailPaysFreeBackedBountyToKeeper
+    // - typed protocol/user failures pay the clearer: test_PostCommitDegradedModePaysClearerBounty and
+    //   test_TypedUserInvalidOpenPaysClearer
 
     MockUSDC usdc;
     CfdEngine engine;
@@ -5906,7 +5907,7 @@ contract KeeperFeeRefundTest is Test {
         _fundJunior(bob, 1_000_000e6);
     }
 
-    // Regression: H-01 — fee refunded to user on failure
+    // Legacy ETH-balance regression: no ETH bounty moves on expiry; reserved USDC payment is tested separately.
     function test_ExpiredOrderFeeRefundedToUser() public {
         vm.deal(alice, 1 ether);
         address account = alice;
@@ -5991,7 +5992,7 @@ contract KeeperFeeRefundTest is Test {
         );
     }
 
-    // Regression: H-01 — open slippage failure forfeits the bounty instead of refunding it.
+    // Open slippage consumes the reserved USDC bounty; these assertions inspect trader custody and ETH balances.
     function test_OpenSlippageFailForfeitsBountyToProtocol() public {
         _fundJunior(bob, 1_000_000e6);
 

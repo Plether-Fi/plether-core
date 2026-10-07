@@ -69,8 +69,9 @@ Operational rules:
 - `longMaxProfit`: worst-case payout to all live LONG positions at one price extreme
 - `shortMaxProfit`: worst-case payout to all live SHORT positions at the opposite price extreme
 - `maxLiability = max(longMaxProfit, shortMaxProfit)`
-- `badDebt`: a realized protocol-side shortfall that remains after its authorized settlement paths; it excludes
-  uncollateralized trader price loss above the account's collectible cap
+- `priceLossWrittenOffUsdc`: diagnostic trader price loss above the account's collectible cap; it is not a liability
+  or receivable. Active close/liquidation planners leave the legacy `badDebtUsdc` field at zero. Unpaid protocol-side
+  price payouts become trader claims; negative aggregate terminal equity is reported separately as `terminalDeficit`.
 
 ### Settlement-buffer terms
 
@@ -317,9 +318,10 @@ Required consequences:
 ### 3.1 Junior maintenance-fee supply
 
 The Junior vault may dilute its outstanding shares to pay a maintenance fee. It never transfers USDC or changes
-`juniorPrincipal`, Senior principal/HWM, withdrawal reserves, claimant buckets, or waterfall ownership. The deployment
-default is disabled: `maintenanceFeeAprBps == 0`, `maintenanceFeeRecipient == address(0)`, and effective supply equals
-raw ERC-20 `totalSupply()`.
+`juniorPrincipal`, Senior principal/HWM, withdrawal reserves, claimant buckets, or the allocation of assets between tranches. The constructor
+accepts the initial rate and recipient. `DeployPerpsArbitrumSepolia` initializes Junior at `100` bps nominal APR with
+the engine's protocol treasury as recipient; Senior requires a zero rate and zero recipient. When the Junior rate is
+zero, pending fee shares are zero and effective supply equals raw ERC-20 `totalSupply()`.
 
 For a configured nominal APR `r` in basis points, completed Unix hours accrue through a fixed-point hourly retention
 factor:
@@ -399,7 +401,7 @@ Rules:
 - reservations are provisional rather than grandfathered: if a governance reduction, coupon, loss, or junior-capital
   change makes the book invalid, post-maturity cancellation is enabled so owners can recover escrowed assets,
 - funded junior redemptions of net assets `w` must additionally preserve
-  `E * 10_000 <= B * (E + J - w)` using active protected exposure only; reservations do not lock junior liquidity, so
+  `X * 10_000 <= Q * (X + J - w)` using active protected exposure only; reservations do not lock junior liquidity, so
   permitted Junior funding may instead invalidate provisional reservations and make them refundable,
 - funded Senior redemptions and Junior deposits improve capacity and may cure an overage,
 - governance reductions are prospective for active claims: existing senior shares are not burned, repriced, or forced
@@ -637,8 +639,8 @@ For every checkpoint sequence, `starting arrears + newly accrued carry = margin 
 + ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.
 A close commitment still prepays its bounty exclusively from free settlement after carry collection. Insufficient free
 cash reports required bounty, available free settlement, and unpaid carry; unrelated validation errors propagate unchanged.
-A zero-free-cash account may therefore still need bounty funding. This policy requires a new deployment; existing v1.2.2
-positions are unaffected.
+A zero-free-cash account may therefore still need bounty funding. These are the current source semantics; editing or
+redeploying source does not change previously deployed immutable engine stacks.
 
 ## Trader Claim Liabilities
 
@@ -647,7 +649,8 @@ The protocol supports fail-soft terminal settlement.
 ### Trader claim balance
 
 - profitable closes and some liquidation residuals may create `traderClaimBalanceUsdc[account]`,
-- only the beneficiary account owner may call `settleTraderClaim(account)`,
+- only the beneficiary account itself may call `settleTraderClaim(account)` (`msg.sender == account`; an AA account's
+  owner must execute through that account),
 - settlement is all-or-nothing for the account claim once aggregate trader claim liabilities are fully cash-covered,
 - settlement is credited into `MarginClearinghouse`,
 - if the beneficiary still has a live position, paid claim value is credited directly to `pnlPledgeUsdc` and the
@@ -724,15 +727,15 @@ Rules:
 Component authority is deliberately split:
 
 - `PositionProtectionBook`, discovered through `OrderRouter.positionProtectionBook()`, owns retained protection state,
-  canonical protection actions/views, bounty attribution before trigger, and all protection lifecycle events,
-- `OrderRouter` owns the timelocked protection feature/bounty configuration, the ordinary global FIFO, and the narrow
+  canonical protection actions/views, bounty lifecycle transitions before trigger, and all protection lifecycle events,
+- `OrderRouter` owns the timelocked protection-bounty configuration, general pause gate, ordinary global FIFO, and the narrow
   host operations used by the Book to commit the parent open, refresh a trigger mark, and append each close attempt,
-- `MarginClearinghouse` remains the custody and reserved-settlement source of truth. The Book holds no tokens, and it
-  cannot mutate the Router queue directly.
+- `MarginClearinghouse` owns custody, reserved-settlement balances, and the canonical bounty records in every
+  namespace. The Book holds no tokens, and it cannot mutate the Router queue directly.
 
 - one protection snapshots a fixed trigger bounty and the current fixed close-order bounty at creation,
-- both protection bounties are reserved from free settlement only; dormant protection never uses the active-position-
-  margin close fallback,
+- both protection bounties are reserved from free settlement only, as are ordinary close-order bounties; neither path
+  reclassifies active-position margin to fund a bounty,
 - the protection reserve is locked before post-reservation safety is evaluated. Existing-position creation uses the
   Engine-configured canonical planner's V2 exact-price predicate rather than a local copy of risk math. Inputs are exact
   entry cost and price-risk equity composed only of PnL pledge (`position.margin`) plus the same-account trader claim
@@ -788,7 +791,7 @@ When a close realizes a loss:
 2. seize price loss from the dedicated PnL pledge and explicitly net same-account claim value up to the book's cap,
 3. treat price loss above that cap as a diagnostic write-off; it does not create LP equity, LP deficit, trader claim,
    or protocol debt and does not by itself block a partial close,
-4. handle still-unpaid carry, VPI, fees, spreads, and liquidation charges through their separate settlement paths; those distinct
+4. handle still-unpaid carry, VPI, fees, and spreads through their separate settlement paths; those distinct
    charges retain their explicit partial-close collection policy,
 5. if this is a full close, waive any still-uncollectible frozen-close spread without creating a protocol liability,
 6. atomically replace or remove the account's terminal curve, including the residual position's updated collectible
@@ -798,17 +801,18 @@ Required properties:
 
 - a partial close remains live when its price loss exceeds the collectible cap; LP accounting never recognized the
   excess as a receivable,
-- a price gain on a partial close is either paid from unreserved pool cash directly into the surviving position's PnL
-  pledge or recorded as a same-account trader claim; both outcomes remain in that account's next terminal collectible
-  cap,
-- a price gain on a full close is either paid from unreserved pool cash into free settlement or recorded as a trader
-  claim,
+- a price payout, after any action charge withheld from the gain, is paid in full only when unreserved pool cash
+  covers it; otherwise the entire price payout becomes a same-account trader claim,
+- an immediate partial-close price payout goes directly into the surviving position's PnL pledge; a deferred payout
+  becomes a claim. Both outcomes remain in that account's next terminal collectible cap. An immediate full-close
+  price payout goes to free settlement,
 - the full gross negative lifetime-VPI clawback target `max(-vpiAccrued, 0)` remains protected in the dedicated VPI
   sub-reserve while a position survives. A partial close must leave the exact target for the residual accrual; value
   above that target is consumed when the clawback is collected or released only when equivalent trader value was
   withheld,
-- a new close-time action rebate is funded only from pool cash left free after protecting existing trader claims. Any
-  unfunded portion is explicitly waived and never becomes a trader claim or PnL pledge,
+- a new close-time action rebate uses the cash left after price-payout processing and protection of all trader claims,
+  including a newly deferred price payout. It may be partially paid; the unfunded portion is explicitly waived and
+  never becomes a trader claim or PnL pledge,
 - anticipated carry, VPI, fees, spreads, and other action economics stay outside terminal `K`; the book is synchronized
   only to actually installed PnL pledge and same-account claim state after settlement. The VPI reserve therefore does
   not inflate marked LP receivables or symmetric LP NAV,
@@ -824,10 +828,12 @@ Required properties:
 - carry projection reduces position margin, its locked bucket, the selected side margin total, and settlement custody
   consistently, recomputes the position and side borrowing bases from the reduced pledge, and credits pool assets/cash
   only by the amount actually collected,
-- skew-reducing rebates must count as reachable collateral for projected IMR checks,
+- net open/increase rebates credit free settlement and may fund the required VPI reserve; they do not become PnL
+  pledge or directly increase exact price-risk equity for IMR checks,
 - post-trade skew above the configured cap is allowed only while the open strictly reduces the existing imbalance
   without making the order side heavier; unchanged or worsening skew and above-cap sign flips remain invalid,
-- open preview and execution should not reject a trade solely because the planner omitted a rebate that the live settlement would credit.
+- open preview and execution must apply the same rebate credit, VPI-reserve funding, liquidation-reserve carve-out,
+  and final pledge-plus-claim risk check.
 
 ### Treasury fee withdrawals
 

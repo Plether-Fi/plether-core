@@ -114,7 +114,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     mapping(address => mapping(uint256 => DepositPosition)) public depositRequests;
     mapping(address => mapping(uint256 => RedeemPosition)) public redeemRequests;
 
-    /// @notice Legacy contribution-basis getter, cleared only by claim or refund.
+    /// @notice Unconsumed deposit contribution basis, reduced by claims, direct redemption, or cancellation/refund.
     mapping(address => mapping(uint256 => uint256)) public pendingDepositAssets;
 
     uint256 public depositQueueHead;
@@ -179,7 +179,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     error TrancheVault__NoMaintenanceFeeProposal();
     // Compatibility error declarations retained for downstream source references.
     error TrancheVault__TrancheImpaired();
-    /// @dev Prevents an unapproved sender from resetting an existing holder's whole-balance cooldown with dust shares.
+    /// @dev Prevents a controller from resetting another existing holder's whole-balance cooldown with a share claim.
     error TrancheVault__ThirdPartyDepositForExistingHolder();
 
     event DepositRequest(

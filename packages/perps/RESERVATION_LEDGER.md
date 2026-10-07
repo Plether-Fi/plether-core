@@ -2,7 +2,7 @@
 
 `MarginClearinghouse` owns reservation amounts and their accounting indexes. The Router owns pending-order
 lifecycle and global/account execution queues. `PositionProtectionBook` owns protection lifecycle, attempt linkage,
-and the immutable configured bounty used to authenticate retries. Neither lifecycle owner stores a mutable bounty
+and each protection's immutable execution-bounty snapshot used to authenticate retries. Neither lifecycle owner stores a mutable bounty
 balance or committed-margin queue.
 
 ## Committed margin
@@ -38,9 +38,10 @@ protection records. The book alone can transfer between `Order` and `ProtectionE
 attempt relationship. Transfers reject cross-account attribution, live destinations, other namespace pairs, and
 reuse of any previous order record. A consumed protection-execution record may receive its own retry reserve again.
 
-Creation requires existing reserved-settlement backing for the new amount plus all existing bounties and the VPI
-floor. A take returns the full classified amount and zeroes it; taking the same record again returns zero. The retained
-account prevents re-creation under an already used id. A known record cannot be taken for another account.
+Creation of a nonzero bounty requires existing reserved-settlement backing for the new amount plus all existing
+bounties and the VPI floor. An authorized zero-amount creation is a no-op: it creates no receipt or event and does not
+claim the id. A take returns the full classified amount and zeroes it; taking the same record again returns zero. The
+retained account prevents re-creation under an already used id. A known record cannot be taken for another account.
 
 ## Atomicity and accounting
 

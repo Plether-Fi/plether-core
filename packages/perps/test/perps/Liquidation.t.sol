@@ -357,7 +357,7 @@ contract LiquidationTest is BasePerpTest {
 
         // LONG loses when price rises. At $1.06:
         // PnL = 6000 * $0.06 = -$360. equity = posMargin - $360 < 0 → liquidatable.
-        // Total charge is capped at reachable collateral (the pool never pays more than it recovers).
+        // The liquidation charge is capped by the dedicated liquidation reserve, separately from price-loss collection.
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.06e8);
 
@@ -367,7 +367,7 @@ contract LiquidationTest is BasePerpTest {
         router.executeLiquidation(account, pythData);
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
 
-        // Proportional charge (0.10% of ~$6360 = ~$6.36) stays below posMargin, so the cap does not bind.
+        // The $6.36 marked charge is capped by the $6 opening reserve; the keeper receives its configured share.
         assertGt(bounty, 0, "Keeper still incentivized on negative-equity liquidation");
         assertLe(bounty, posMargin, "Bounty never exceeds margin pool can seize");
         assertGe(usdc.balanceOf(address(pool)), poolBefore, "Pool never pays more than it seizes");
