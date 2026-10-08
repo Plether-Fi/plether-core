@@ -60,13 +60,11 @@ The AA client exports `orderRouterV3Abi`, `closePreviewV3Abi`, `committedOrderV3
 
 Do not point the new preview/planner ABI at v1.2.3 contracts. Their planner return tuples differ. Keep the archived September preview and sponsored-close deployments bound to the old stack until its separate recovery task is resolved.
 
-## Deployment and activation packet
+## Deployment compatibility
 
 The execution sidecar constructor creates an immutable, storage-free `OrderRecoverySidecar`, delegated only through the router execution path. The fresh manifest includes it; deployment logs expose the address and the verifier checks its code and binding using `PERPS_ORDER_RECOVERY_SIDECAR`. Its constructor does not consume the deployer's CREATE nonce used for the router/lifecycle-book address calculation.
 
-Use `scripts/export-perps-release.py` only after source/build inputs are committed, dependencies match pinned submodules, and production compilation passes. It exports consumer ABIs and compiler size evidence without broadcasting. Verify constructor-inclusive initcode and substituted runtime hashes in deployment simulation, then record every address/runtime hash in a new manifest. Do not overwrite historical manifests.
-
-The [candidate artifact manifest and download guide](../../deployments/releases/2026-09-25-deposit-free-close-candidate/README.md) identify the versioned prerelease bundle and its SHA-256 checksum. Generated release ABIs and full build metadata live in the release asset; SDK definitions and verification evidence remain in Git. Use `scripts/package-perps-release.py` to package future exports reproducibly under a new version.
+This feature PR does not define a release candidate. Release versioning, artifact generation and activation belong to the broader release containing this change. Generate consumer interfaces from that release's finalized source and verify constructor-inclusive initcode, deployed runtime hashes and component bindings together.
 
 Activation requires the full regression/invariant suites, production size checks, historical evidence, and a fresh-stack smoke test with assistance disabled: deposit, open Max, execute, ordinary full and partial zero-free closes, and caller-paid fallback. Retire new subsidy issuance only for that verified new stack. Preserve old-stack servicing and authorized reconciliation. Deployment and activation remain separate operator actions.
 
@@ -86,7 +84,7 @@ New work adds pledge-funded commitment, released-pledge charge funding, strict r
 
 The internal lifecycle record packs account/mode/terminal identity together and the two bounty-source amounts into one slot. Bounty widths match the clearinghouse's existing uint96 limit; carry and custody amounts retain uint256, including values above uint128. Pre-commitment custody is reconstructed exactly as post-commitment custody plus collected carry. Commitment validates that identity before accepting the record. The public pending-intent and receipt tuples remain unchanged. Position epoch/side/size in the pending intent are populated only for CallerPaidFullExit; ordinary order identity remains in the router order, and pledge funding provenance remains in the clearinghouse reservation.
 
-Actual commitment loads only the relevant side and funding/health fields, while prospective previews retain the full execution snapshot. Both use the unchanged `CloseCommitmentLib` calculation. The pure planner's `planCloseCommit` returns only commitment effects; its unused projected-snapshot return was removed from this not-yet-deployed candidate ABI. Regenerate planner consumers with the release packet.
+Actual commitment loads only the relevant side and funding/health fields, while prospective previews retain the full execution snapshot. Both use the unchanged `CloseCommitmentLib` calculation. The pure planner's `planCloseCommit` returns only commitment effects; its unused projected-snapshot return was removed from the new ABI. Planner consumers must use the matching interface.
 
 Both carry-side checkpoints share one pool-cash read because index updates do not move pool cash. Committed assessment also reuses its canonical pool-depth observation for carry cash; non-authoritative simulations still fetch actual pool cash independently from caller-supplied pricing depth. Reservation authentication, bounds, terminal conservation, and post-settlement checks remain in place.
 
@@ -134,17 +132,17 @@ The independent direct production-request fixtures compare frozen checkout `c660
 
 The two tables use different fixtures and access conditions, so compare columns within a table. Direct figures exclude transaction refunds, intrinsic/calldata gas, L1 publication and oracle service fees. Each fixture also asserts successful lifecycle and accounting outcomes.
 
-Engine runtime is **24,430 bytes**, below both EIP-170 (24,576) and the existing repository budget (24,439); the budget was not relaxed. Its settlement sidecar is **23,436 bytes**, down another 160 bytes. The lifecycle book grows by 56 bytes to 14,840; all deployment limits remain enforced. The release router's constructor-inclusive initcode is **47,159 bytes**; the settlement monitor's remains **49,057 bytes**, leaving 95 bytes below EIP-3860. Repeat compiler and size gates after every source change. The release packet records all contract template sizes, while deployment simulation checks instantiated runtime sizes and the limiting constructor paths.
+Engine runtime is **24,430 bytes**, below both EIP-170 (24,576) and the existing repository budget (24,439); the budget was not relaxed. Its settlement sidecar is **23,436 bytes**, down another 160 bytes. The lifecycle book grows by 56 bytes to 14,840; all deployment limits remain enforced. The release router's constructor-inclusive initcode is **47,159 bytes**; the settlement monitor's remains **49,057 bytes**, leaving 95 bytes below EIP-3860. Repeat compiler and size gates after every source change. Deployment simulation checks instantiated runtime sizes and the limiting constructor paths.
 
 
 ## Smaller terminal records and consumer migration
 
-The measurements in this section describe the pre-timing candidate. Merging commitment-relative timing preserves
+The measurements in this section describe the pre-timing implementation. Merging commitment-relative timing preserves
 the two-slot summary and adds one packed terminal timing slot for the upstream `orderTiming` API. Requests now include
-both close mode and timing bounds, and full receipt events append authenticated timing. The historical release
-artifact and gas measurements below remain tied to their recorded source; export new artifacts before activation.
+both close mode and timing bounds, and full receipt events append authenticated timing. The gas measurements below
+remain tied to their recorded source and must be repeated against the finalized release.
 
-The new candidate stores only account, terminal block, lifecycle status, terminal reason and receipt hash: **two slots instead of eleven**. Complete terminal receipt data remains in the unchanged `OrderFinalized` event. Finalization validates the same identity, bounds, entitlement, commitment and receipt semantics before persisting the summary and deleting pending state. Client-ID replay records remain permanent. No settlement, funding, protection or recovery policy is relaxed.
+The compact terminal summary stores only account, terminal block, lifecycle status, terminal reason and receipt hash: **two slots instead of eleven**. Complete terminal receipt data remains in the `OrderFinalized` event. Finalization validates the same identity, bounds, entitlement, commitment and receipt semantics before persisting the summary and deleting pending state. Client-ID replay records remain permanent. No settlement, funding, protection or recovery policy is relaxed.
 
 This is an intentional new-stack read-API change. `outcome(uint64)` is removed, so stale calls fail rather than returning fabricated zero details. Consumers use `terminalOutcome(uint64)` and fetch the Book's event by chain/Book/order identity or known execution transaction. On Arbitrum, `terminalBlock` retains Solidity's ancestor-chain `block.number` semantics and must not be used as the L2 RPC log block; see [Arbitrum documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time). Record RPC block/hash separately for retrieval and reorg handling. The Book's `verifyReceipt(receipt, terminalTime)` hashes a supplied receipt using its stored block and its chain/Book/Router domain; it cannot retrieve missing event data. Validate the indexed order/account/client ID and event hash as well. Do not present an unavailable event as zero economics.
 
@@ -179,4 +177,4 @@ A conservative design would retain collected carry and the packed bounty provena
 
 A cleaner product alternative would keep only live carry/provenance state and make terminal receipts reference an authenticated commitment event. Assessment and receipt clients would join two events; historical commitment balances would cease to be directly queryable while pending. This could remove three slots before adding any required commitment digest, but changes the public pending, assessment and receipt schemas and needs a fresh authority design. It must never weaken commitment carry bounds or refund provenance. No gas percentage is claimed without an implementation and identical-fixture measurement.
 
-**Recommendation:** keep commitment history unchanged for this candidate. The terminal simplification captures permanent-write savings with the existing full receipt event. Revisit commitment events only when the external app/keeper can accept a coordinated schema change and event-history retrieval is proven in operation; preserve oracle-independent expiry and liquidation without externally supplied historical data.
+**Recommendation:** keep commitment history unchanged in this implementation. The terminal simplification captures permanent-write savings with the existing full receipt event. Revisit commitment events only when the external app/keeper can accept a coordinated schema change and event-history retrieval is proven in operation; preserve oracle-independent expiry and liquidation without externally supplied historical data.
