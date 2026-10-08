@@ -1,8 +1,41 @@
 # Deposit-free close release candidate — 2026-09-25
 
-Candidate source: `f7e8714c20f3f6d449d4d6ef87d0e4b852562389`. This packet is for a **fresh stack**. It contains 83 consumer/interface ABIs, compiler settings and template sizes (`build.json`), ABI SHA-256 checksums, and verification evidence (`verification.json`). It contains no production deployment addresses and does not authorize broadcast or migration of existing positions.
+Candidate source: `f7e8714c20f3f6d449d4d6ef87d0e4b852562389`. This packet is for a **fresh stack**. The 83 consumer/interface ABIs and generated `build.json` are distributed in the [versioned prerelease artifact](https://github.com/Plether-Fi/plether-core/releases/tag/perps-deposit-free-close-v0.1.0-rc.1). Git retains the download/provenance manifest (`manifest.json`), payload checksums (`SHA256SUMS`), verification evidence (`verification.json`), and this guide. The archive preserves the original bundle bytes, including its historical README and evidence, from repository snapshot `131276fdd7af5a0e99a0d33a50127e8759ade9f3`; moving it does not imply fresh contract validation. It contains no production deployment addresses and does not authorize broadcast or migration of existing positions.
 
 The implementation and migration contract is [DEPOSIT_FREE_CLOSE.md](../../../packages/perps/DEPOSIT_FREE_CLOSE.md). Intent domain V3 and receipt/configuration domains V4 must be activated together. Keep historical ABI exports, old-stack app/keeper bindings, subsidy servicing, and already-authorized sponsored-operation reconciliation intact. New request builders perform a single commitment call without USDC assistance.
+
+## Download and verify
+
+From the repository root, download into a new directory and verify against the checked-in manifest before extraction:
+
+```sh
+bundle_dir=$(mktemp -d)
+version=perps-deposit-free-close-v0.1.0-rc.1
+gh release download "$version" --repo Plether-Fi/plether-core \
+  --pattern "$version.tar.gz" --dir "$bundle_dir"
+python3 - "$bundle_dir/$version.tar.gz" <<'PYVERIFY'
+import hashlib, json, sys
+from pathlib import Path
+manifest = json.loads(Path("deployments/releases/2026-09-25-deposit-free-close-candidate/manifest.json").read_text())
+assert hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() == manifest["archiveSha256"], "Archive checksum mismatch"
+PYVERIFY
+tar -xzf "$bundle_dir/$version.tar.gz" -C "$bundle_dir"
+(cd "$bundle_dir/$version" && shasum -a 256 -c SHA256SUMS)
+```
+
+The release also includes a detached `.tar.gz.sha256` checksum. `manifest.json` distinguishes the compiler source commit from the later repository snapshot containing the exported bundle. Each ABI's original hash remains in the archived `build.json`.
+
+To reproduce this exact archive, recover the frozen packet from Git history and package it with the checked-in script. Use a new output path:
+
+```sh
+frozen_bundle=$(mktemp -d)
+git archive 131276fdd7af5a0e99a0d33a50127e8759ade9f3:deployments/releases/2026-09-25-deposit-free-close-candidate \
+  | tar -x -C "$frozen_bundle"
+python3 scripts/package-perps-release.py "$frozen_bundle" /tmp/perps-close-reproduced \
+  --version perps-deposit-free-close-v0.1.0-rc.1
+```
+
+For future candidates, export to an untracked staging directory with `scripts/export-perps-release.py`, add their README and verification evidence, then package under a new version. The packager validates ABI hashes, normalizes archive metadata and emits the archive, detached checksum, payload checksums and manifest. Never replace an existing version's assets.
 
 ## Terminal-record simplification
 

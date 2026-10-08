@@ -66,6 +66,8 @@ The execution sidecar constructor creates an immutable, storage-free `OrderRecov
 
 Use `scripts/export-perps-release.py` only after source/build inputs are committed, dependencies match pinned submodules, and production compilation passes. It exports consumer ABIs and compiler size evidence without broadcasting. Verify constructor-inclusive initcode and substituted runtime hashes in deployment simulation, then record every address/runtime hash in a new manifest. Do not overwrite historical manifests.
 
+The [candidate artifact manifest and download guide](../../deployments/releases/2026-09-25-deposit-free-close-candidate/README.md) identify the versioned prerelease bundle and its SHA-256 checksum. Generated release ABIs and full build metadata live in the release asset; SDK definitions and verification evidence remain in Git. Use `scripts/package-perps-release.py` to package future exports reproducibly under a new version.
+
 Activation requires the full regression/invariant suites, production size checks, historical evidence, and a fresh-stack smoke test with assistance disabled: deposit, open Max, execute, ordinary full and partial zero-free closes, and caller-paid fallback. Retire new subsidy issuance only for that verified new stack. Preserve old-stack servicing and authorized reconciliation. Deployment and activation remain separate operator actions.
 
 ## Verification status and provenance
