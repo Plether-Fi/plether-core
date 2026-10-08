@@ -6,9 +6,12 @@ import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
+import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
@@ -147,6 +150,100 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
 
     function test_CallerPaidShortZeroFree() public {
         _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE, true, ACCOUNT);
+    }
+
+    function test_FullExitBlockersFollowProtectionOrdersAndTerminalCleanup() public {
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 1, "flat account");
+        _openNormally(CfdTypes.Side.LONG, 10e6);
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "live unencumbered position");
+        IPositionProtectionActions protection = IPositionProtectionActions(address(router.positionProtectionBook()));
+        vm.prank(ACCOUNT);
+        uint64 protectionId = protection.createPositionProtection(
+            PositionProtectionTypes.PositionProtectionParams({
+                takeProfitTriggerPrice: PRICE - 1e6, stopLossTriggerPrice: PRICE + 1e6
+            })
+        );
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 4, "armed protection");
+        vm.prank(ACCOUNT);
+        protection.cancelPositionProtection(protectionId);
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "cancelled protection");
+
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2, false);
+        vm.prank(ACCOUNT);
+        uint64 id = router.commitOrder(request);
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 2, "ordinary pending close");
+        vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
+        router.expireOrder(id);
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "ordinary expiry clears queue");
+
+        request = _request(CfdTypes.Side.LONG, SIZE, true);
+        vm.prank(ACCOUNT);
+        id = router.commitOrder(request);
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 10, "pending order and exclusive exit lock");
+        vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
+        router.expireOrder(id);
+        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "terminal expiry clears both blockers");
+        (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(remaining, SIZE, "preview and expiry do not reduce the position");
+    }
+
+    function test_ProspectiveCloseRejectsAnOpeningRequest() public {
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, false);
+        request.isClose = false;
+        vm.expectRevert(CfdClosePreview.CfdClosePreview__NotCloseOrder.selector);
+        previewer.previewClose(address(engine), ACCOUNT, request, KEEPER, PRICE, uint64(block.timestamp));
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+    }
+
+    function test_CommittedAssessmentRejectsUnknownAndExpiredOrdersWithoutCleanup() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ReservationMismatch.selector, uint64(999)
+            )
+        );
+        policyEvaluator.assessCommittedOrder(address(engine), 999, KEEPER, PRICE, uint64(block.timestamp));
+        _openNormally(CfdTypes.Side.LONG, 0);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
+        vm.prank(ACCOUNT);
+        uint64 id = router.commitOrder(request);
+        bytes32 pendingBefore = keccak256(abi.encode(router.lifecycleBook().pendingIntent(id)));
+        vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__CommittedPolicyChanged.selector, id
+            )
+        );
+        policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE, uint64(block.timestamp));
+        assertEq(keccak256(abi.encode(router.lifecycleBook().pendingIntent(id))), pendingBefore);
+        assertEq(router.pendingTerminalExitId(ACCOUNT), id, "a read cannot clear the exit lock");
+        router.expireOrder(id);
+        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
+    }
+
+    function test_CommittedAssessmentRejectsChangedConfigurationAndCanBeRetried() public {
+        _openNormally(CfdTypes.Side.LONG, 0);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
+        vm.prank(ACCOUNT);
+        uint64 id = router.commitOrder(request);
+        bytes32 pendingBefore = keccak256(abi.encode(router.lifecycleBook().pendingIntent(id)));
+        // Synthetic configuration observation isolates this rejection from execution-window expiry.
+        vm.mockCall(
+            address(router.lifecycleBook()),
+            abi.encodeWithSelector(IOrderLifecycleBook.currentExecutionConfigHash.selector),
+            abi.encode(bytes32(uint256(request.bounds.expectedConfigHash) ^ 1))
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__CommittedPolicyChanged.selector, id
+            )
+        );
+        policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE, uint64(block.timestamp));
+        vm.clearMockedCalls();
+        assertEq(keccak256(abi.encode(router.lifecycleBook().pendingIntent(id))), pendingBefore);
+        OrderV3Types.ExecutionAssessment memory assessment =
+            policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE, uint64(block.timestamp));
+        assertEq(assessment.postPositionSize, 0, "the unchanged order remains assessable");
+        assertEq(router.pendingTerminalExitId(ACCOUNT), id);
     }
 
     function test_TerminalLockReplayAndPermissionlessExpiry() public {
@@ -323,6 +420,13 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
             abi.encodeWithSignature("positionEpoch(address)", ACCOUNT),
             abi.encode(uint64(engine.positionEpoch(ACCOUNT) + 1))
         );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__TerminalPositionChanged.selector, id
+            )
+        );
+        policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE, uint64(block.timestamp));
+        assertEq(router.pendingTerminalExitId(ACCOUNT), id, "assessment does not finalize the changed position");
         bytes[] memory update = _mockPythUpdateData(PRICE);
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
