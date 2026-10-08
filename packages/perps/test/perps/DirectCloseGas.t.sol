@@ -14,9 +14,9 @@ import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemption
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -104,7 +104,7 @@ abstract contract DirectCloseGasFixture is Test {
         measuredAccounts.push(address(oracle));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
         measuredAccounts.push(address(evaluator));
-        OrderRouterV2ExecutionSidecar execution = new OrderRouterV2ExecutionSidecar();
+        OrderRouterExecutionSidecar execution = new OrderRouterExecutionSidecar();
         measuredAccounts.push(address(execution));
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycle =
@@ -154,13 +154,13 @@ abstract contract DirectCloseGasFixture is Test {
         usdc.approve(address(clearinghouse), 1000e6);
         clearinghouse.deposit(ACCOUNT, 1000e6);
         vm.stopPrank();
-        OrderV2Types.OrderRequest memory openRequest = _request(false);
+        OrderV3Types.OrderRequest memory openRequest = _request(false);
         vm.prank(ACCOUNT);
         uint64 openId = router.commitOrder(openRequest);
         bytes[] memory update = _updateData();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(openId, update);
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(openId, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         uint256 free = clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, free);
@@ -184,7 +184,7 @@ abstract contract DirectCloseGasFixture is Test {
 
     function _request(
         bool isClose
-    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+    ) internal view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = keccak256(abi.encode("direct-gas", isClose));
         request.side = CfdTypes.Side.LONG;
         request.sizeDelta = isClose ? _closeSize() : SIZE;
@@ -192,9 +192,10 @@ abstract contract DirectCloseGasFixture is Test {
         request.targetPrice = isClose ? type(uint256).max : PRICE;
         request.isClose = isClose;
         request.closeMode =
-            isClose && _callerPaid() ? OrderV2Types.CloseMode.CallerPaidFullExit : OrderV2Types.CloseMode.Standard;
-        request.bounds = OrderV2Types.ExecutionBounds({
-            validUntil: uint64(vm.getBlockTimestamp() + router.maxOrderAge()),
+            isClose && _callerPaid() ? OrderV3Types.CloseMode.CallerPaidFullExit : OrderV3Types.CloseMode.Standard;
+        request.bounds = OrderV3Types.ExecutionBounds({
+            submitBy: uint64(vm.getBlockTimestamp() + router.maxExecutionWindowSeconds()),
+            executionWindowSeconds: uint32(router.maxExecutionWindowSeconds()),
             allowedExecutionModes: 7,
             expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
             maxExecutionBountyUsdc: type(uint256).max,
@@ -245,7 +246,7 @@ abstract contract DirectCloseGasFixture is Test {
 abstract contract DirectCloseCommitGasFixture is DirectCloseGasFixture {
 
     function test_Gas_DirectCloseCommit() public {
-        OrderV2Types.OrderRequest memory request = _request(true);
+        OrderV3Types.OrderRequest memory request = _request(true);
         _coolProtocol();
         vm.prank(ACCOUNT);
         uint256 beforeGas = gasleft();
@@ -261,7 +262,7 @@ abstract contract DirectCloseExecuteGasFixture is DirectCloseGasFixture {
 
     function setUp() public virtual override {
         super.setUp();
-        OrderV2Types.OrderRequest memory request = _request(true);
+        OrderV3Types.OrderRequest memory request = _request(true);
         vm.prank(ACCOUNT);
         closeOrderId = router.commitOrder(request);
         _assertReservation(closeOrderId);
@@ -272,10 +273,10 @@ abstract contract DirectCloseExecuteGasFixture is DirectCloseGasFixture {
         _coolProtocol();
         vm.prank(KEEPER);
         uint256 beforeGas = gasleft();
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(closeOrderId, update);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(closeOrderId, update);
         uint256 usedGas = beforeGas - gasleft();
         emit log_named_uint(string.concat("direct_execute_", _scenario()), usedGas);
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
         assertEq(remaining, SIZE - _closeSize());
         assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);

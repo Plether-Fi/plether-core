@@ -14,6 +14,7 @@ library CloseAccountingLib {
 
     /// @notice Inputs needed to value a full or partial close.
     /// @param position Position before the close; its size must be nonzero.
+    /// @param positionEntryCostUsdcAtoms Exact remaining entry cost before the close, in 6-decimal USDC atoms.
     /// @param sizeDelta Size being closed; must be no greater than `position.size`.
     /// @param oraclePrice Execution/risk price used to calculate PnL and close notional.
     /// @param capPrice Price cap passed to bounded PnL calculation.
@@ -39,12 +40,14 @@ library CloseAccountingLib {
         uint256 executionFeeBps;
     }
 
-    /// @notice Calculated position reduction and close settlement before carry and collateral collection.
+    /// @notice Calculated position reduction and close economics, excluding carry and collateral collection.
     /// @param realizedPnlUsdc Signed price PnL for the closed size; positive is trader profit.
     /// @param marginToFreeUsdc Pro-rata margin assigned to the closed size and released from the position.
     /// @param remainingMarginUsdc Canonical position margin left after releasing `marginToFreeUsdc`.
     /// @param remainingSize Position size left after the close.
-    /// @param maxProfitReductionUsdc Pro-rata reduction of the position's maximum-profit envelope.
+    /// @param closedEntryCostUsdcAtoms Exact basis allocated to the closed lots, rounded down on a partial close.
+    /// @param remainingEntryCostUsdcAtoms Entry basis retained by the remaining position, including proration dust.
+    /// @param maxProfitReductionUsdc Exact endpoint profit envelope of the closed lots and their allocated entry basis.
     /// @param proportionalAccrualUsdc Pro-rata lifetime VPI accrual removed with the closed size.
     /// @param vpiDeltaUsdc VPI charged for this close after the lifetime-negative clamp; positive is a trader charge.
     /// @param executionFeeUsdc Execution fee on closed notional.
@@ -68,13 +71,14 @@ library CloseAccountingLib {
 
     /// @notice Builds the pro-rata remaining-position state and pre-carry settlement for a close.
     /// @dev Reverts through Solidity arithmetic if `position.size == 0`, `sizeDelta > position.size`, products
-    ///      overflow, or downstream PnL/VPI preconditions are violated. Pro-rata margin and max-profit calculations
-    ///      round down, leaving any division remainder on the open position. Signed VPI proration rounds toward zero.
+    ///      overflow, or downstream PnL/VPI preconditions are violated. Partial-close margin and entry-basis allocation
+    ///      round down, leaving division remainders on the open position. The max-profit reduction is recomputed from
+    ///      the closed lots and allocated basis; signed VPI proration rounds toward zero.
     ///      Close VPI is clamped upward so `proportionalAccrualUsdc + vpiDeltaUsdc` cannot be negative. Canonical size
     ///      and USDC values converted to `int256` must fit its positive range; explicit casts otherwise follow
     ///      fixed-width conversion semantics.
     /// @param inputs Position, price, skew, pool-depth, fee, and frozen-market inputs.
-    /// @return state Close accounting before pending carry and collateral-availability settlement.
+    /// @return state Close economics excluding carry and collateral-availability settlement.
     function buildCloseState(
         CloseInputs memory inputs
     ) internal pure returns (CloseState memory state) {
@@ -101,8 +105,8 @@ library CloseAccountingLib {
         state.vpiDeltaUsdc =
             CfdMath.calculateVPI(inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.vpiFactor);
         // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
-        // where an attacker opens at high depth, donates to shrink depth, then closes to extract a
-        // net-negative VPI rebate. This rule is identical in live and oracle-frozen markets; frozen-market
+        // where an attacker opens at high depth, reduces pool depth, then closes to extract a
+        // net-negative lifetime VPI rebate. This rule is identical in live and oracle-frozen markets; frozen-market
         // stale-price risk is priced separately through frozenSpreadUsdc.
         if (state.proportionalAccrualUsdc + state.vpiDeltaUsdc < 0) {
             state.vpiDeltaUsdc = -state.proportionalAccrualUsdc;

@@ -6,7 +6,7 @@ const hash = `0x${"11".repeat(32)}` as const;
 const request: OrderRequestV3 = {
   clientOrderId: hash, side: 0, sizeDelta: 10_000n * 10n ** 18n, marginDelta: 0n,
   targetPrice: 100_000_000n, isClose: true, closeMode: CloseMode.Standard,
-  bounds: { validUntil: 1_900_000_000n, allowedExecutionModes: 7, expectedConfigHash: hash,
+  bounds: { submitBy: 1_900_000_000n, executionWindowSeconds: 60, allowedExecutionModes: 7, expectedConfigHash: hash,
     maxExecutionBountyUsdc: 200_000n, maxExecutionNotionalUsdc: 10_000_000_000n,
     maxGrossAccountDebitUsdc: 1_000_000n, maxActionChargeUsdc: 500_000n, maxExplicitFeesUsdc: 400_000n,
     maxPostPositionSize: 0n, minPostSettlementBalanceUsdc: 0n, minPostPositionEquityUsdc: 0n,

@@ -1,6 +1,7 @@
 # Perps Invariant Suites
 
-This directory contains stateful Foundry invariant suites for the perps system.
+This directory contains handler-driven Foundry invariant campaigns and bounded state-machine fuzz tests for the
+perps system. Coverage descriptions below refer to the assertions and actor domains in each harness.
 
 ## Suites
 
@@ -9,7 +10,7 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies clearinghouse-reserved execution bounty value reconciles with live orders
   - Verifies liquidated accounts cannot keep pending orders, live reserves, or recover value later
   - Verifies ghost-tracked committed margin and reserved execution bounty stay aligned with protocol state
-  - Verifies a stricter per-order committed-margin state machine across commit, execution, cancellation, failure, and liquidation
+  - Verifies a stricter per-order committed-margin state machine across commit, execution, terminal failure, and liquidation
   - Verifies pending-order and margin-order FIFO queues keep consistent head/tail pointers, links, counts, and ordering
 
 - `PerpPreviewInvariant.t.sol`
@@ -31,10 +32,9 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies oracle-frozen boundary logic matches the intended weekend/admin-day formula
   - Verifies house-pool freshness limits switch correctly between weekday and frozen-oracle modes
   - Verifies maintenance margin switches cleanly between weekday and FAD settings
-  - Verifies stale live marks do not silently keep advancing weekday carry policy
 
 - `PerpMultiAccountInvariant.t.sol`
-  - Catches cross-account contamination bugs under overlapping commits, cancels, executions, liquidations, and claims
+  - Catches cross-account contamination bugs under overlapping commits, executions, liquidations, and claims
   - Verifies per-account pending counts and margin-order counts aggregate cleanly into live global order ownership
   - Verifies trader claim obligations remain isolated per account while still reconciling globally
 
@@ -57,7 +57,8 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies per-account settlement buckets reconcile with clearinghouse storage
   - Verifies the canonical protocol accounting snapshot stays aligned with accessors and house-pool snapshots
   - Verifies house-pool input/status snapshots stay aligned with physical assets, exact terminal NAV, trader claim liabilities, and engine status
-  - Verifies withdrawal reserves use maximum directional liability, trader claims, and the supplemental slot
+  - Verifies withdrawal reserves include maximum directional liability, trader claims, and the liability-scaled
+    settlement buffer
   - Verifies terminal price loss never exceeds same-account claim plus PnL-pledge collection; any excess is a diagnostic write-off rather than protocol debt or terminal deficit
   - Verifies ghost-tracked trader claims match engine storage and totals
 
@@ -68,9 +69,10 @@ This directory contains stateful Foundry invariant suites for the perps system.
 
 - `PerpClosePreviewParityInvariant.t.sol`
   - Catches drift between close previews and canonical-depth simulations
-  - Verifies valid partial closes conserve exact entry cost, PnL pledge, and residual terminal curves
-  - Restricts partial-close invalidity to documented shape and separate action-charge failures; price loss above the account cap is write-off eligible
-  - Verifies the immediate-payout versus trader-claim split uses adjusted pool cash
+  - Verifies valid sampled partial closes preserve the minimum residual-margin floor
+  - When a full close is valid, restricts invalid sampled partial closes to `PartialCloseUnderwater` or `DustPosition`
+  - Verifies fresh payout is either immediately credited or added to the remaining existing trader claim, with the
+    two fresh-payout modes mutually exclusive
   - Note: the currently named carry-accrual invariant performs no time warp or
     carry assertion; timed carry conservation is covered by
     `PerpValueConservationInvariant.t.sol`
@@ -88,6 +90,12 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Verifies seed floors, withdrawal caps, and share-transfer cooldown
     propagation
   - Verifies raw assets split into canonical assets plus excess
+  - Verifies asynchronous USDC/share escrow conservation, request/claim capacity, direct routing from deposit-claim
+    escrow into redemption, and held-settlement rollback
+  - Also contains `PerpHousePoolMaintenanceFeeInvariantTest`, a companion campaign with a nonzero Junior fee:
+    effective supply includes pending dilution, fee materialization credits only the configured recipient, and
+    fee-only checkpoints preserve pool economics and escrows. It checks effective-supply deposit/redemption pricing,
+    redemption-before-deposit ordering, fee accrual during settlement holds, and raw supply across known holders
 
 - `PerpOraclePathInvariant.t.sol`
   - Catches state drift across successful and rejected mark-refresh paths
@@ -121,6 +129,20 @@ This directory contains stateful Foundry invariant suites for the perps system.
   - Reconciles the pool reservation counter with unfinalized epoch assets and checks
     vault escrow plus per-user pending-asset accounting
 
+- `EmergencyRiskOffInvariant.t.sol`
+  - Uses bounded `testFuzz_*` transition sequences, plus direct authority and liquidation tests
+  - Verifies monotonic risk-off cutoffs, permanent open invalidation, unpaid non-head cleanup, and exact internal
+    margin/bounty refunds across pause and recovery cycles
+  - Verifies queued closes and liquidations remain reachable, and repeated held LP settlement attempts preserve
+    accounting until owner release
+
+- `ProtectionBountyStateMachine.t.sol`
+  - Uses a bounded `testFuzz_*` campaign with an independent three-account bounty ledger and additional random steps
+  - Exercises attached parents, pre-trigger protection cancellation, successful and reverted triggers, expiry,
+    relatching, retry, execution, risk-off refunds, and liquidation of armed, triggered, and latched protection
+  - Reconciles reserved, paid, refunded, and forfeited bounty value across separate order/protection namespaces,
+    including numeric-id collisions, retained attempt bounties, parent margin, and exact-once keeper credits
+
 ## Coverage boundaries
 
 The stateful suites are high-signal conformance checks, not a complete proof of
@@ -133,7 +155,8 @@ the accounting specification.
   oracle-frozen voluntary close with a nonzero frozen spread. Dedicated
   frozen-close tests cover assessed/paid/waived allocation.
 - `PerpHousePoolLifecycleInvariant.t.sol` covers the active vault lifecycle,
-  seed floors, cooldowns, caps, and excess accounting. The separate
+  seed floors, cooldowns, caps, escrow routing, settlement holds, and excess accounting. Its maintenance-fee companion
+  covers active Junior dilution and settlement pricing. The separate
   `GovernedSeniorCapacityInvariant.t.sol` covers the bounded pending senior
   request/cancel/finalize/claim state machine, reservation conservation, and
   stateful reachability on both sides of the shared request cutoff; it does not
@@ -150,7 +173,8 @@ the accounting specification.
 - FIFO structure and reservation ownership are statefully checked. Binding
   order-field immutability and the first unique strictly post-commit historical
   Pyth tick are covered by direct `OrderRouter.t.sol` tests, not a dedicated
-  invariant.
+  invariant. Protection cancellation is separate from queued-order cleanup: ordinary FIFO orders have no user
+  cancellation path. `ProtectionBountyStateMachine.t.sol` checks the protection/attempt reservation state machine.
 - Timed carry ownership is statefully checked, while utilization-rate arithmetic
   and simultaneous carry on both sides remain direct-test/model properties.
 - Oracle/FAD boundary invariants do not span the complete two-axis authorization
@@ -171,6 +195,9 @@ the accounting specification.
 
 - `BasePerpInvariantTest.sol`
   - Shared invariant deployment harness using a deterministic mock HousePool
+  - Suites inheriting `../BasePerpTest.sol` instead exercise the full HousePool/vault stack. Both harness families
+    use `LegacyOrderRouterHarness` for test-only scalar-call adapters over production bounded-request logic; those
+    adapters are not production Router entrypoints
 
 - `handlers/PerpAccountingHandler.sol`
   - Stateful fuzz actor that performs deposits, withdrawals, order commits, execution, liquidation, payout claims, and HousePool mode changes
@@ -178,23 +205,33 @@ the accounting specification.
 - `ghost/PerpGhostLedger.sol`
   - Independent ghost model for liquidation snapshots, committed margin ownership, and execution bounty reservation tracking
 
+- `handlers/PerpOracleHandler.sol` and `handlers/PerpFeeHandler.sol`
+  - Dedicated oracle/calendar and protocol-fee fuzz actors; several full-stack suites define their handlers locally
+
 - `mocks/MockInvariantHousePool.sol`
-  - Deterministic test HousePool that can force router payout success or failure and directly control available HousePool liquidity
+  - Deterministic test HousePool whose token balance can be seeded or set directly to vary Engine/sidecar payout
+    liquidity; it does not model the production tranche waterfall
 
 ## Typical Commands
 
+Run from the repository root. The package root selects the perps test tree and compiler configuration:
+
 ```bash
-forge test --match-contract PerpAccountingInvariantTest
-forge test --match-contract PerpPreviewInvariantTest
-forge test --match-contract PerpTraderClaimInvariantTest
-forge test --match-contract PerpOracleBoundaryInvariantTest
-forge test --match-contract PerpMultiAccountInvariantTest
-forge test --match-contract PerpFeeFlowInvariantTest
-forge test --match-contract PerpEconomicConservationInvariantTest
-forge test --match-contract PerpValueConservationInvariantTest
-forge test --match-contract PerpClosePreviewParityInvariantTest
-forge test --match-contract PerpExplicitAccountingInvariantTest
-forge test --match-contract PerpHousePoolLifecycleInvariantTest
-forge test --match-contract PerpOraclePathInvariantTest
-forge test --match-contract PerpTerminalNavBruteForceInvariantTest
+forge test --root packages/perps --match-contract PerpAccountingInvariantTest
+forge test --root packages/perps --match-contract PerpPreviewInvariantTest
+forge test --root packages/perps --match-contract PerpTraderClaimInvariantTest
+forge test --root packages/perps --match-contract PerpOracleBoundaryInvariantTest
+forge test --root packages/perps --match-contract PerpMultiAccountInvariantTest
+forge test --root packages/perps --match-contract PerpFeeFlowInvariantTest
+forge test --root packages/perps --match-contract PerpEconomicConservationInvariantTest
+forge test --root packages/perps --match-contract PerpValueConservationInvariantTest
+forge test --root packages/perps --match-contract PerpClosePreviewParityInvariantTest
+forge test --root packages/perps --match-contract PerpExplicitAccountingInvariantTest
+forge test --root packages/perps --match-contract PerpHousePoolLifecycleInvariantTest
+forge test --root packages/perps --match-contract PerpHousePoolMaintenanceFeeInvariantTest
+forge test --root packages/perps --match-contract PerpOraclePathInvariantTest
+forge test --root packages/perps --match-contract PerpTerminalNavBruteForceInvariantTest
+forge test --root packages/perps --match-contract GovernedSeniorCapacityInvariantTest
+forge test --root packages/perps --match-contract EmergencyRiskOffInvariantTest
+forge test --root packages/perps --match-contract ProtectionBountyStateMachineTest
 ```

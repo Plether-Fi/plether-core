@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
-import {IOrderRouterV2ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV2ExecutionHost.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 
 interface IRecoveryEngineClaims {
 
@@ -18,6 +18,9 @@ interface IRecoveryEngineClaims {
 
 /// @notice Immutable, storage-free expiry and externally settled receipt logic delegated by the execution sidecar.
 contract OrderRecoverySidecar is IOrderRouterErrors {
+
+    error OrderRouterExecutionSidecar__InvalidSettledReason();
+    error OrderRouterExecutionSidecar__OrderIdentityMismatch(uint64 orderId);
 
     address private immutable SELF = address(this);
     error RecoveryUnauthorized();
@@ -39,61 +42,61 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
 
     function expireOrder(
         uint64 orderId
-    ) external delegated returns (OrderV2Types.ExecutionResult memory) {
-        IOrderRouterV2ExecutionHost host = IOrderRouterV2ExecutionHost(address(this));
-        OrderV2Types.PendingIntent memory pending = IOrderLifecycleBook(host.lifecycleBook()).pendingIntent(orderId);
+    ) external delegated returns (OrderV3Types.ExecutionResult memory) {
+        IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
+        OrderV3Types.PendingIntent memory pending = IOrderLifecycleBook(host.lifecycleBook()).pendingIntent(orderId);
         if (pending.account == address(0)) {
             revert OrderRouter__OrderNotPending();
         }
-        if (block.timestamp <= pending.bounds.validUntil) {
+        if (block.timestamp <= pending.timing.executionDeadline) {
             revert OrderRouter__OrderNotExpired();
         }
         // Solidity zero-initializes this memory struct; oracle/execution fields are intentionally absent for expiry.
         // slither-disable-next-line uninitialized-local
-        IOrderRouterV2ExecutionHost.ItemRequest memory request;
+        IOrderRouterExecutionHost.ItemRequest memory request;
         request.orderId = orderId;
-        request.action = IOrderRouterV2ExecutionHost.ItemAction.Expire;
+        request.action = IOrderRouterExecutionHost.ItemAction.Expire;
         request.executor = msg.sender;
-        return host.executeV2OrderItemFromSidecar(request);
+        return host.executeOrderItemFromSidecar(request);
     }
 
     function recoverExpiredItem(
         uint64 orderId,
         address executor
-    ) external routerSelf returns (OrderV2Types.ExecutionResult memory) {
-        IOrderRouterV2ExecutionHost host = IOrderRouterV2ExecutionHost(address(this));
+    ) external routerSelf returns (OrderV3Types.ExecutionResult memory) {
+        IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
         IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
-        OrderV2Types.PendingIntent memory pending = book.pendingIntent(orderId);
-        if (pending.account == address(0) || block.timestamp <= pending.bounds.validUntil) {
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
+        if (pending.account == address(0) || block.timestamp <= pending.timing.executionDeadline) {
             revert RecoveryIdentityMismatch();
         }
-        OrderV2Types.OrderReceipt memory receipt = _receipt(orderId, pending, executor);
-        receipt.reason = OrderV2Types.TerminalReason.ExpiredReservationMismatch;
+        OrderV3Types.OrderReceipt memory receipt = _receipt(orderId, pending, executor);
+        receipt.reason = OrderV3Types.TerminalReason.ExpiredReservationMismatch;
         _state(host, receipt, true);
         IMarginClearinghouse.BountyRecovery memory recovery = host.expireMismatchedOrderFromSidecar(orderId);
         receipt.bountyUsdc = recovery.freeUsdc + recovery.pledgeUsdc;
         receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
-        receipt.bounty.discrepancy = OrderV2Types.ReservationDiscrepancy(recovery.discrepancy);
+        receipt.bounty.discrepancy = OrderV3Types.ReservationDiscrepancy(recovery.discrepancy);
         if (receipt.bountyUsdc != 0) {
             receipt.bountyRecipient = pending.account;
-            receipt.bountyDisposition = OrderV2Types.BountyDisposition.RefundedToAccount;
+            receipt.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
         }
         _state(host, receipt, false);
         return _finalize(book, receipt);
     }
 
     function settleNonEngine(
-        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
-        OrderV2Types.TerminalReason reason,
-        OrderV2Types.FailureDetails calldata failure
-    ) external routerSelf returns (OrderV2Types.ExecutionResult memory) {
-        IOrderRouterV2ExecutionHost host = IOrderRouterV2ExecutionHost(address(this));
+        IOrderRouterExecutionHost.ItemRequest calldata request,
+        OrderV3Types.TerminalReason reason,
+        OrderV3Types.FailureDetails calldata failure
+    ) external routerSelf returns (OrderV3Types.ExecutionResult memory) {
+        IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
         IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
-        OrderV2Types.PendingIntent memory pending = book.pendingIntent(request.orderId);
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(request.orderId);
         if (pending.account == address(0)) {
             revert RecoveryIdentityMismatch();
         }
-        OrderV2Types.OrderReceipt memory receipt = _receipt(request.orderId, pending, request.executor);
+        OrderV3Types.OrderReceipt memory receipt = _receipt(request.orderId, pending, request.executor);
         receipt.reason = reason;
         receipt.observedConfigHash = request.observedConfigHash;
         receipt.executionMode = request.executionMode;
@@ -104,16 +107,16 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.oraclePublishTime = request.oraclePublishTime;
         receipt.failure = failure;
         _state(host, receipt, true);
-        IOrderRouterV2ExecutionHost.BountySettlement memory settled = _settle(host, request, reason);
+        IOrderRouterExecutionHost.BountySettlement memory settled = _settle(host, request, reason);
         if (settled.bountyUsdc != pending.executionBountyUsdc) {
             revert RecoveryIdentityMismatch();
         }
         receipt.bountyUsdc = settled.bountyUsdc;
         receipt.bountyDisposition = settled.bountyDisposition;
         receipt.bountyRecipient = settled.bountyRecipient;
-        if (settled.bountyDisposition == OrderV2Types.BountyDisposition.Paid) {
+        if (settled.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
             receipt.bounty.bountyPaidUsdc = settled.bountyUsdc;
-        } else if (settled.bountyDisposition == OrderV2Types.BountyDisposition.RetainedForProtectionRetry) {
+        } else if (settled.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
             receipt.bounty.bountyRetainedUsdc = settled.bountyUsdc;
         }
         _state(host, receipt, false);
@@ -121,11 +124,11 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
     }
 
     function _settle(
-        IOrderRouterV2ExecutionHost host,
-        IOrderRouterV2ExecutionHost.ItemRequest calldata request,
-        OrderV2Types.TerminalReason reason
-    ) private returns (IOrderRouterV2ExecutionHost.BountySettlement memory) {
-        return host.settleV2OrderFromSidecar(
+        IOrderRouterExecutionHost host,
+        IOrderRouterExecutionHost.ItemRequest calldata request,
+        OrderV3Types.TerminalReason reason
+    ) private returns (IOrderRouterExecutionHost.BountySettlement memory) {
+        return host.settleOrderFromSidecar(
             request.orderId,
             false,
             reason,
@@ -137,19 +140,22 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
     }
 
     function recordSettledTerminal(
-        IOrderRouterV2ExecutionHost.SettledTerminalInput calldata input
-    ) external routerSelf returns (OrderV2Types.ExecutionResult memory) {
-        IOrderRouterV2ExecutionHost host = IOrderRouterV2ExecutionHost(address(this));
-        IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
-        OrderV2Types.PendingIntent memory pending = book.pendingIntent(input.orderId);
+        IOrderRouterExecutionHost.SettledTerminalInput calldata input
+    ) external routerSelf returns (OrderV3Types.ExecutionResult memory) {
         if (
-            pending.account == address(0) || input.bountyUsdc != pending.executionBountyUsdc
-                || (input.reason != OrderV2Types.TerminalReason.RiskOff
-                    && input.reason != OrderV2Types.TerminalReason.AccountLiquidated)
+            input.reason != OrderV3Types.TerminalReason.RiskOff
+                && input.reason != OrderV3Types.TerminalReason.AccountLiquidated
         ) {
-            revert RecoveryIdentityMismatch();
+            revert OrderRouterExecutionSidecar__InvalidSettledReason();
         }
-        OrderV2Types.OrderReceipt memory receipt = _receipt(input.orderId, pending, input.executor);
+        IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
+        IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(input.orderId);
+        if (pending.account == address(0) || input.bountyUsdc != pending.executionBountyUsdc) {
+            revert OrderRouterExecutionSidecar__OrderIdentityMismatch(input.orderId);
+        }
+        _validateSettledTerminalInput(host, pending, input);
+        OrderV3Types.OrderReceipt memory receipt = _receipt(input.orderId, pending, input.executor);
         receipt.reason = input.reason;
         receipt.observedConfigHash = input.observedConfigHash;
         receipt.executionMode = input.executionMode;
@@ -163,7 +169,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.bountyRecipient = input.bountyRecipient;
         receipt.bountyDisposition = input.bountyDisposition;
         receipt.failure = input.failure;
-        if (input.reason == OrderV2Types.TerminalReason.RiskOff) {
+        if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
             receipt.bounty.bountyRefundedUsdc = input.bountyUsdc;
         } else {
             receipt.bounty.bountyForfeitedUsdc = input.bountyUsdc;
@@ -174,11 +180,55 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         return _finalize(book, receipt);
     }
 
+    // Retain the upstream settled-evidence checks at the delegated recovery boundary.
+    function _validateSettledTerminalInput(
+        IOrderRouterExecutionHost host,
+        OrderV3Types.PendingIntent memory pending,
+        IOrderRouterExecutionHost.SettledTerminalInput calldata input
+    ) private view {
+        bool failureIsEmpty = input.failure.selector == bytes4(0) && input.failure.category == 0
+            && input.failure.code == 0 && input.failure.constraint == OrderV3Types.ConstraintKind.None
+            && input.failure.actual == 0 && input.failure.limit == 0 && input.failure.revertDataHash == bytes32(0);
+        if (!failureIsEmpty) {
+            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+        }
+        if (input.bountyUsdc == 0) {
+            if (input.bountyDisposition != OrderV3Types.BountyDisposition.None || input.bountyRecipient != address(0)) {
+                revert OrderRouterExecutionSidecar__InvalidSettledReason();
+            }
+        } else if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
+            if (
+                input.bountyDisposition != OrderV3Types.BountyDisposition.RefundedToAccount
+                    || input.bountyRecipient != pending.account
+            ) {
+                revert OrderRouterExecutionSidecar__InvalidSettledReason();
+            }
+        } else if (
+            input.bountyDisposition != OrderV3Types.BountyDisposition.Forfeited
+                || input.bountyRecipient != ICfdEngineCore(host.engine()).protocolTreasury()
+        ) {
+            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+        }
+        if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
+            if (
+                input.executionMode != OrderV3Types.ExecutionMode.None
+                    || input.priceSource != OrderV3Types.PriceSource.None || input.executionPrice != 0
+                    || input.oraclePublishTime != 0 || input.priceReachedEngine
+            ) {
+                revert OrderRouterExecutionSidecar__InvalidSettledReason();
+            }
+            return;
+        }
+        if (input.priceSource != OrderV3Types.PriceSource.Liquidation || input.priceReachedEngine) {
+            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+        }
+    }
+
     function _receipt(
         uint64 id,
-        OrderV2Types.PendingIntent memory pending,
+        OrderV3Types.PendingIntent memory pending,
         address executor
-    ) private pure returns (OrderV2Types.OrderReceipt memory receipt) {
+    ) private pure returns (OrderV3Types.OrderReceipt memory receipt) {
         receipt.orderId = id;
         receipt.account = pending.account;
         receipt.clientOrderId = pending.clientOrderId;
@@ -186,14 +236,15 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.expectedConfigHash = pending.bounds.expectedConfigHash;
         receipt.closeMode = pending.closeMode;
         receipt.commitment = pending.commitment;
+        receipt.timing = pending.timing;
         receipt.bounty.bountyEntitlementUsdc = pending.executionBountyUsdc;
-        receipt.status = OrderV2Types.LifecycleStatus.Failed;
+        receipt.status = OrderV3Types.LifecycleStatus.Failed;
         receipt.executor = executor;
     }
 
     function _state(
-        IOrderRouterV2ExecutionHost host,
-        OrderV2Types.OrderReceipt memory receipt,
+        IOrderRouterExecutionHost host,
+        OrderV3Types.OrderReceipt memory receipt,
         bool beforeState
     ) private view {
         ICfdEngineCore engine = ICfdEngineCore(host.engine());
@@ -212,8 +263,8 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
 
     function _finalize(
         IOrderLifecycleBook book,
-        OrderV2Types.OrderReceipt memory receipt
-    ) private returns (OrderV2Types.ExecutionResult memory result) {
+        OrderV3Types.OrderReceipt memory receipt
+    ) private returns (OrderV3Types.ExecutionResult memory result) {
         result.orderId = receipt.orderId;
         result.status = receipt.status;
         result.terminalReason = receipt.reason;

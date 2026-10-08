@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0
-"""Reference arithmetic and empirical analysis for the Plether Perps white paper.
+"""Frozen research arithmetic and analysis for the Plether Perps white paper.
 
-The integer accounting helpers mirror the stage ordering and floor/ceiling rules
-used by the Solidity libraries named in each docstring. The empirical analysis
-uses ECB daily reference rates as a reproducible research proxy. It is not an
-execution-price replay and must not be used to infer production liquidation
-behavior.
+Solidity names in these docstrings refer to publication revision
+06d0ab451ad9bb42f4e9869fc94b0eeb1e88efe5. The helpers preserve that revision's
+integer accounting rules on valid inputs; Python does not emulate Solidity's
+fixed-width overflow checks. Legacy average-entry PnL, close collection,
+keeper-only liquidation, and conservative-MtM valuation are retained for
+reproducing the published results. They do not implement current V2 exact-lot
+PnL, isolated PnL/action settlement, split liquidation charges, or Terminal NAV.
+
+The empirical analysis uses ECB daily reference rates as a reproducible research
+proxy. It is not an execution-price replay and must not be used to infer current
+production liquidation behavior. Generated explanatory labels describe the
+published default scenario; explicit numeric assumption fields record overrides.
 """
 
 from __future__ import annotations
@@ -117,7 +124,7 @@ class FreshPayoutResult:
 
 @dataclass(frozen=True)
 class LiquidationState:
-    """Python form of LiquidationAccountingLib.LiquidationState."""
+    """Publication-era LiquidationState, with the whole charge paid to keepers."""
 
     equity_usdc: int
     reachable_collateral_usdc: int
@@ -188,10 +195,11 @@ def calculate_pnl(
     side: Side,
     cap_price_8: int = CAP_PRICE_8,
 ) -> tuple[bool, int]:
-    """Mirror CfdMath.calculatePnL.
+    """Reproduce the publication-era CfdMath.calculatePnL arithmetic.
 
     Returns (is_profit, absolute_pnl_usdc_6). Equality is classified as a
-    zero-valued profit for a nonzero position, matching Solidity.
+    zero-valued profit for a nonzero position. This uses a rounded average entry
+    price, unlike current V2's exact lots and accumulated entry cost.
     """
 
     if size_18 == 0:
@@ -213,7 +221,7 @@ def calculate_max_profit(
     side: Side,
     cap_price_8: int = CAP_PRICE_8,
 ) -> int:
-    """Mirror CfdMath.calculateMaxProfit."""
+    """Reproduce publication-era maximum profit from size and entry price."""
 
     if size_18 == 0:
         return 0
@@ -232,7 +240,10 @@ def weighted_entry_price(
     size_delta_18: int,
     execution_price_8: int,
 ) -> int:
-    """Mirror OpenAccountingLib's floor-rounded weighted entry price."""
+    """Reproduce publication-era OpenAccountingLib's rounded average entry.
+
+    Current V2 settlement uses exact accumulated entry cost instead.
+    """
 
     if current_size_18 == 0:
         return execution_price_8
@@ -297,7 +308,10 @@ def conservative_mtm_liability(
     price_8: int,
     cap_price_8: int = CAP_PRICE_8,
 ) -> int:
-    """Mirror CfdMath.conservativeMtmLiability, including upward rounding."""
+    """Reproduce publication-era conservative MtM with upward rounding.
+
+    This endpoint interpolation is not the current Terminal NAV valuation.
+    """
 
     if max_profit_usdc_6 == 0 or cap_price_8 == 0:
         return 0
@@ -364,13 +378,20 @@ def compute_borrow_utilization_bps(
 
 
 def compute_utilized_carry_rate_bps(base_carry_bps: int, utilization_bps: int) -> int:
-    """Mirror PositionRiskAccountingLib.computeUtilizedCarryRateBps."""
+    """Return the publication-era floor-rounded utilized rate in basis points.
+
+    This reporting helper is not used to accrue the current carry index; the
+    combined calculation in compute_current_carry_index preserves more precision.
+    """
 
     return base_carry_bps * min(utilization_bps, UTILIZATION_BPS) // UTILIZATION_BPS
 
 
 def compute_carry_index_increment(carry_rate_bps: int, elapsed_seconds: int) -> int:
-    """Mirror PositionRiskAccountingLib.computeCarryIndexIncrement."""
+    """Reproduce the publication-era increment from an already-rounded bps rate.
+
+    The replay accrues through compute_current_carry_index instead.
+    """
 
     if carry_rate_bps == 0 or elapsed_seconds == 0:
         return 0
@@ -440,11 +461,12 @@ def close_settlement_result(
     execution_fee_usdc_6: int,
     frozen_spread_usdc_6: int,
 ) -> CloseSettlementResult:
-    """Mirror CfdEngineSettlementLib.closeSettlementResult.
+    """Reproduce publication-era CfdEngineSettlementLib.closeSettlementResult.
 
     Execution fee has first priority within seized collateral, base loss has
     second priority, and frozen spread is junior. Frozen-spread shortfall is
-    excluded from bad debt.
+    excluded from bad debt. Current V2 settles price PnL and action charges
+    separately; this helper preserves the historical net-loss allocation.
     """
 
     seized = min(available_usdc_6, owed_usdc_6)
@@ -478,7 +500,12 @@ def plan_close_claim_consumption(
     loss_result: CloseSettlementResult,
     execution_fee_usdc_6: int,
 ) -> ClaimConsumptionResult:
-    """Mirror CfdEnginePlanLib._planCloseTraderClaimConsumption."""
+    """Reproduce publication-era claim netting against a close shortfall.
+
+    The historical CfdEnginePlanLib._planCloseTraderClaimConsumption allocates
+    claims to unpaid execution fees before base debt. Current V2 does not use
+    this combined price/action allocation.
+    """
 
     if trader_claim_balance_usdc_6 == 0 or loss_result.shortfall_usdc == 0:
         return ClaimConsumptionResult(
@@ -537,7 +564,11 @@ def build_liquidation_state(
     minimum_bounty_usdc_6: int,
     bounty_bps: int,
 ) -> LiquidationState:
-    """Mirror LiquidationAccountingLib.buildLiquidationState."""
+    """Reproduce publication-era maintenance and keeper-only charge arithmetic.
+
+    Current LiquidationAccountingLib.buildLiquidationState instead splits the
+    collectible charge among keeper, protocol, and LP allocations.
+    """
 
     notional = size_18 * oracle_price_8 // USDC_TO_TOKEN_SCALE
     maintenance = notional * maintenance_margin_bps // 10_000
@@ -554,10 +585,12 @@ def build_liquidation_state(
 def liquidation_settlement_for_state(
     state: LiquidationState,
 ) -> LiquidationSettlementResult:
-    """Mirror planLiquidationResidual for a single reachable balance.
+    """Reproduce publication-era residual settlement for one reachable balance.
 
-    The returned debt follows the planner's keeper-subsidy adjustment: bounty
-    above nonnegative equity is not recognized as trading bad debt.
+    This combines MarginClearinghouseAccountingLib.planLiquidationResidual with
+    the historical engine planner's keeper-subsidy adjustment: bounty above
+    nonnegative equity is not recognized as trading bad debt. It omits current
+    V2's separate price-loss and action-charge allocations.
     """
 
     residual = state.equity_usdc - state.keeper_bounty_usdc
@@ -871,23 +904,25 @@ def run_historical_replay(
 ) -> dict[str, object]:
     """Run a deterministic, stylized stateful replay over ECB observations.
 
-    The replay uses exact integer kernels for capped PnL, carry, close
-    collection, cash-priority claims, liquidation bounty, and tranche
-    accounting after prices and parameter ratios have been quantized. It is
-    deliberately not a transaction-level backtest: daily ECB fixes stand in
-    for executable marks; VPI, confidence shifts, the frozen state, keeper
-    latency, cross-account free collateral, and pending deposit epochs are held
-    outside the replay.
+    The replay uses publication-era integer kernels for capped PnL, carry,
+    close collection, cash-priority claims, keeper-only liquidation, and tranche
+    accounting after prices and parameter ratios have been quantized. It omits
+    current V2 lot alignment, isolated PnL/action buckets, split liquidation
+    charges, settlement-buffer admission, and Terminal NAV. Daily ECB fixes
+    stand in for executable marks; VPI, confidence shifts, the frozen state,
+    keeper latency, extra account collateral, and pending deposit epochs are
+    also held outside this stylized replay.
 
-    Each first observation of a calendar month opens a 63-calendar-day cohort.
-    The side aligned with a 20-fix move known at the previous observation
-    receives
-    ``momentum_share`` of target entry notional; the other side receives the
-    remainder. The next observation is the entry-price proxy. Admission scales
-    the paired cohort on an integer 1e18 grid until the endpoint and final-skew
-    predicates pass. Claims are serviced at the first strictly later
-    observation on which aggregate claim liabilities are fully cash covered,
-    assuming beneficiaries call immediately.
+    After signal warm-up, the first eligible observation of each calendar month
+    attempts to open a cohort with a configurable holding period (default 63
+    calendar days); the final observation never opens a cohort. The side aligned
+    with the configured lookback move (default 20 fixes), ending at the previous
+    observation, receives ``momentum_share`` of target entry notional. The other
+    side receives the remainder, and the current observation is the entry-price
+    proxy. Admission scales the paired cohort on an integer 1e18 grid until the
+    endpoint and final-skew predicates pass, or rejects it. Claims are serviced
+    at the first strictly later observation on which aggregate claim liabilities
+    are fully cash covered, assuming beneficiaries call immediately.
     """
 
     if not 0.5 <= momentum_share <= 1.0:
@@ -1058,7 +1093,7 @@ def run_historical_replay(
         minimum_junior = min(minimum_junior, waterfall.junior_principal_usdc)
 
     def reconcile_conservative_waterfall(price_8: int) -> None:
-        """Apply one end-of-observation HousePool-style MtM shadow reconcile."""
+        """Apply the publication-era conservative-MtM shadow reconciliation."""
 
         nonlocal conservative_waterfall
         nonlocal conservative_minimum_senior, conservative_minimum_junior

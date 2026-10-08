@@ -63,7 +63,7 @@ contract HistoricalCloseRegressionTest is Test {
         request.sizeDelta = size;
         request.isClose = true;
         request.targetPrice = side == CfdTypes.Side.LONG ? type(uint256).max : 1;
-        request.bounds.validUntil = uint64(block.timestamp + ROUTER.maxOrderAge());
+        request.bounds.validUntil = uint64(block.timestamp + ILegacyCloseRouter(address(ROUTER)).maxOrderAge());
         request.bounds.expectedConfigHash = ROUTER.lifecycleBook().currentExecutionConfigHash();
         request.bounds.allowedExecutionModes = 7;
         request.bounds.maxExecutionBountyUsdc = type(uint256).max;

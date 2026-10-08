@@ -44,12 +44,12 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @dev Callable only by the configured router. Reverts with `CfdEngine__TypedOrderFailure` for expected order
-    ///      invalidations so the router can apply deterministic bounty policy without selector matching. Successful
+    ///      invalidations so the router can classify the exact typed selector and payload. Successful
     ///      execution delegates the planned clearinghouse, HousePool, aggregate-side, and position mutations.
     /// @param order Queued order being executed by the router
     /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
     /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
-    /// @param publishTime Execution-price publish time, cached only when it is not older than `lastMarkTime`
+    /// @param publishTime Router-validated execution publish time; the Engine caches the execution price only when strictly newer
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,

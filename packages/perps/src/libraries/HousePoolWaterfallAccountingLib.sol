@@ -109,9 +109,9 @@ library HousePoolWaterfallAccountingLib {
     }
 
     /// @notice Removes funded senior principal and the redeemed shares' pro-rata high-water-mark entitlement.
-    /// @dev Requires `fundedAssetsUsdc <= state.seniorPrincipal`, nonzero `preBurnSupply`, and
-    ///      `fundedShares <= preBurnSupply`; otherwise Solidity subtraction or division reverts. The HWM entitlement
-    ///      removed for the funded shares rounds down. Junior principal is unchanged.
+    /// @dev Callers must supply `fundedAssetsUsdc <= state.seniorPrincipal`, nonzero `preBurnSupply`, and
+    ///      `fundedShares <= preBurnSupply`. Arithmetic rejects an excessive principal debit or HWM reduction, but does
+    ///      not independently validate the share bound. The removed HWM entitlement rounds down; junior is unchanged.
     /// @param state Waterfall state before withdrawal.
     /// @param fundedAssetsUsdc Net senior principal funded in 6-decimal USDC.
     /// @param fundedShares Senior shares funded and burned by the vault.

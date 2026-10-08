@@ -8,7 +8,7 @@ export const orderRouterV3Abi = [
       {
         "name": "request",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.OrderRequest",
+        "internalType": "struct OrderV3Types.OrderRequest",
         "components": [
           {
             "name": "clientOrderId",
@@ -43,17 +43,22 @@ export const orderRouterV3Abi = [
           {
             "name": "closeMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.CloseMode"
+            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "bounds",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.ExecutionBounds",
+            "internalType": "struct OrderV3Types.ExecutionBounds",
             "components": [
               {
-                "name": "validUntil",
+                "name": "submitBy",
                 "type": "uint64",
                 "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
               },
               {
                 "name": "allowedExecutionModes",
@@ -143,7 +148,7 @@ export const orderRouterV3Abi = [
       {
         "name": "result",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.ExecutionResult",
+        "internalType": "struct OrderV3Types.ExecutionResult",
         "components": [
           {
             "name": "orderId",
@@ -153,17 +158,17 @@ export const orderRouterV3Abi = [
           {
             "name": "status",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.LifecycleStatus"
+            "internalType": "enum OrderV3Types.LifecycleStatus"
           },
           {
             "name": "terminalReason",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.TerminalReason"
+            "internalType": "enum OrderV3Types.TerminalReason"
           },
           {
             "name": "pendingReason",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.PendingReason"
+            "internalType": "enum OrderV3Types.PendingReason"
           },
           {
             "name": "receiptHash",
@@ -189,7 +194,7 @@ export const orderRouterV3Abi = [
       {
         "name": "",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.ExecutionResult",
+        "internalType": "struct OrderV3Types.ExecutionResult",
         "components": [
           {
             "name": "orderId",
@@ -199,17 +204,17 @@ export const orderRouterV3Abi = [
           {
             "name": "status",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.LifecycleStatus"
+            "internalType": "enum OrderV3Types.LifecycleStatus"
           },
           {
             "name": "terminalReason",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.TerminalReason"
+            "internalType": "enum OrderV3Types.TerminalReason"
           },
           {
             "name": "pendingReason",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.PendingReason"
+            "internalType": "enum OrderV3Types.PendingReason"
           },
           {
             "name": "receiptHash",
@@ -380,6 +385,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__InvalidExecutionWindow",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__InvalidKeeperSidecar",
     "inputs": []
   },
@@ -420,7 +430,7 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InvalidValidUntil",
+    "name": "OrderRouter__InvalidSubmitBy",
     "inputs": []
   },
   {
@@ -689,7 +699,7 @@ export const closePreviewV3Abi = [
       {
         "name": "request",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.OrderRequest",
+        "internalType": "struct OrderV3Types.OrderRequest",
         "components": [
           {
             "name": "clientOrderId",
@@ -724,17 +734,22 @@ export const closePreviewV3Abi = [
           {
             "name": "closeMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.CloseMode"
+            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "bounds",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.ExecutionBounds",
+            "internalType": "struct OrderV3Types.ExecutionBounds",
             "components": [
               {
-                "name": "validUntil",
+                "name": "submitBy",
                 "type": "uint64",
                 "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
               },
               {
                 "name": "allowedExecutionModes",
@@ -872,12 +887,12 @@ export const closePreviewV3Abi = [
           {
             "name": "assessment",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.ExecutionAssessment",
+            "internalType": "struct OrderV3Types.ExecutionAssessment",
             "components": [
               {
                 "name": "mode",
                 "type": "uint8",
-                "internalType": "enum OrderV2Types.ExecutionMode"
+                "internalType": "enum OrderV3Types.ExecutionMode"
               },
               {
                 "name": "executionNotionalUsdc",
@@ -972,7 +987,7 @@ export const closePreviewV3Abi = [
               {
                 "name": "close",
                 "type": "tuple",
-                "internalType": "struct OrderV2Types.CloseEconomics",
+                "internalType": "struct OrderV3Types.CloseEconomics",
                 "components": [
                   {
                     "name": "postFreeSettlementUsdc",
@@ -1175,7 +1190,7 @@ export const closePreviewV3Abi = [
       {
         "name": "constraint",
         "type": "uint8",
-        "internalType": "enum OrderV2Types.ConstraintKind"
+        "internalType": "enum OrderV3Types.ConstraintKind"
       },
       {
         "name": "actual",
@@ -1196,7 +1211,7 @@ export const closePreviewV3Abi = [
       {
         "name": "mode",
         "type": "uint8",
-        "internalType": "enum OrderV2Types.ExecutionMode"
+        "internalType": "enum OrderV3Types.ExecutionMode"
       },
       {
         "name": "allowedExecutionModes",
@@ -1279,12 +1294,12 @@ export const committedOrderV3Abi = [
       {
         "name": "assessment",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.ExecutionAssessment",
+        "internalType": "struct OrderV3Types.ExecutionAssessment",
         "components": [
           {
             "name": "mode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.ExecutionMode"
+            "internalType": "enum OrderV3Types.ExecutionMode"
           },
           {
             "name": "executionNotionalUsdc",
@@ -1379,7 +1394,7 @@ export const committedOrderV3Abi = [
           {
             "name": "close",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.CloseEconomics",
+            "internalType": "struct OrderV3Types.CloseEconomics",
             "components": [
               {
                 "name": "postFreeSettlementUsdc",
@@ -1482,7 +1497,7 @@ export const committedOrderV3Abi = [
       {
         "name": "constraint",
         "type": "uint8",
-        "internalType": "enum OrderV2Types.ConstraintKind"
+        "internalType": "enum OrderV3Types.ConstraintKind"
       },
       {
         "name": "actual",
@@ -1503,7 +1518,7 @@ export const committedOrderV3Abi = [
       {
         "name": "mode",
         "type": "uint8",
-        "internalType": "enum OrderV2Types.ExecutionMode"
+        "internalType": "enum OrderV3Types.ExecutionMode"
       },
       {
         "name": "allowedExecutionModes",
@@ -1624,7 +1639,48 @@ export const orderLifecycleV5Abi = [
       {
         "name": "status",
         "type": "uint8",
-        "internalType": "enum OrderV2Types.LifecycleStatus"
+        "internalType": "enum OrderV3Types.LifecycleStatus"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "orderTiming",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct OrderV3Types.OrderTiming",
+        "components": [
+          {
+            "name": "submitBy",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "executionWindowSeconds",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "commitTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "executionDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
       }
     ],
     "stateMutability": "view"
@@ -1643,7 +1699,7 @@ export const orderLifecycleV5Abi = [
       {
         "name": "intent",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.PendingIntent",
+        "internalType": "struct OrderV3Types.PendingIntent",
         "components": [
           {
             "name": "account",
@@ -1668,7 +1724,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "closeMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.CloseMode"
+            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "positionEpoch",
@@ -1730,12 +1786,17 @@ export const orderLifecycleV5Abi = [
           {
             "name": "bounds",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.ExecutionBounds",
+            "internalType": "struct OrderV3Types.ExecutionBounds",
             "components": [
               {
-                "name": "validUntil",
+                "name": "submitBy",
                 "type": "uint64",
                 "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
               },
               {
                 "name": "allowedExecutionModes",
@@ -1793,6 +1854,33 @@ export const orderLifecycleV5Abi = [
                 "internalType": "uint32"
               }
             ]
+          },
+          {
+            "name": "timing",
+            "type": "tuple",
+            "internalType": "struct OrderV3Types.OrderTiming",
+            "components": [
+              {
+                "name": "submitBy",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "commitTimestamp",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "executionDeadline",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
           }
         ]
       }
@@ -1813,7 +1901,7 @@ export const orderLifecycleV5Abi = [
       {
         "name": "",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.TerminalOutcome",
+        "internalType": "struct OrderV3Types.TerminalOutcome",
         "components": [
           {
             "name": "account",
@@ -1828,12 +1916,12 @@ export const orderLifecycleV5Abi = [
           {
             "name": "status",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.LifecycleStatus"
+            "internalType": "enum OrderV3Types.LifecycleStatus"
           },
           {
             "name": "reason",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.TerminalReason"
+            "internalType": "enum OrderV3Types.TerminalReason"
           },
           {
             "name": "receiptHash",
@@ -1852,7 +1940,7 @@ export const orderLifecycleV5Abi = [
       {
         "name": "receipt",
         "type": "tuple",
-        "internalType": "struct OrderV2Types.OrderReceipt",
+        "internalType": "struct OrderV3Types.OrderReceipt",
         "components": [
           {
             "name": "orderId",
@@ -1887,17 +1975,17 @@ export const orderLifecycleV5Abi = [
           {
             "name": "status",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.LifecycleStatus"
+            "internalType": "enum OrderV3Types.LifecycleStatus"
           },
           {
             "name": "reason",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.TerminalReason"
+            "internalType": "enum OrderV3Types.TerminalReason"
           },
           {
             "name": "executionMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.ExecutionMode"
+            "internalType": "enum OrderV3Types.ExecutionMode"
           },
           {
             "name": "executor",
@@ -1907,7 +1995,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "priceSource",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.PriceSource"
+            "internalType": "enum OrderV3Types.PriceSource"
           },
           {
             "name": "executionPrice",
@@ -1947,12 +2035,12 @@ export const orderLifecycleV5Abi = [
           {
             "name": "bountyDisposition",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.BountyDisposition"
+            "internalType": "enum OrderV3Types.BountyDisposition"
           },
           {
             "name": "failure",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.FailureDetails",
+            "internalType": "struct OrderV3Types.FailureDetails",
             "components": [
               {
                 "name": "selector",
@@ -1972,7 +2060,7 @@ export const orderLifecycleV5Abi = [
               {
                 "name": "constraint",
                 "type": "uint8",
-                "internalType": "enum OrderV2Types.ConstraintKind"
+                "internalType": "enum OrderV3Types.ConstraintKind"
               },
               {
                 "name": "actual",
@@ -1994,7 +2082,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "economics",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.OrderEconomics",
+            "internalType": "struct OrderV3Types.OrderEconomics",
             "components": [
               {
                 "name": "executionNotionalUsdc",
@@ -2084,7 +2172,7 @@ export const orderLifecycleV5Abi = [
               {
                 "name": "close",
                 "type": "tuple",
-                "internalType": "struct OrderV2Types.CloseEconomics",
+                "internalType": "struct OrderV3Types.CloseEconomics",
                 "components": [
                   {
                     "name": "postFreeSettlementUsdc",
@@ -2143,7 +2231,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "closeMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.CloseMode"
+            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "commitment",
@@ -2190,7 +2278,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "bounty",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.BountyAccounting",
+            "internalType": "struct OrderV3Types.BountyAccounting",
             "components": [
               {
                 "name": "bountyEntitlementUsdc",
@@ -2220,7 +2308,34 @@ export const orderLifecycleV5Abi = [
               {
                 "name": "discrepancy",
                 "type": "uint8",
-                "internalType": "enum OrderV2Types.ReservationDiscrepancy"
+                "internalType": "enum OrderV3Types.ReservationDiscrepancy"
+              }
+            ]
+          },
+          {
+            "name": "timing",
+            "type": "tuple",
+            "internalType": "struct OrderV3Types.OrderTiming",
+            "components": [
+              {
+                "name": "submitBy",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "commitTimestamp",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "executionDeadline",
+                "type": "uint64",
+                "internalType": "uint64"
               }
             ]
           }
@@ -2279,7 +2394,7 @@ export const orderLifecycleV5Abi = [
         "name": "request",
         "type": "tuple",
         "indexed": false,
-        "internalType": "struct OrderV2Types.OrderRequest",
+        "internalType": "struct OrderV3Types.OrderRequest",
         "components": [
           {
             "name": "clientOrderId",
@@ -2314,17 +2429,22 @@ export const orderLifecycleV5Abi = [
           {
             "name": "closeMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.CloseMode"
+            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "bounds",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.ExecutionBounds",
+            "internalType": "struct OrderV3Types.ExecutionBounds",
             "components": [
               {
-                "name": "validUntil",
+                "name": "submitBy",
                 "type": "uint64",
                 "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
               },
               {
                 "name": "allowedExecutionModes",
@@ -2384,6 +2504,34 @@ export const orderLifecycleV5Abi = [
             ]
           }
         ]
+      },
+      {
+        "name": "timing",
+        "type": "tuple",
+        "indexed": false,
+        "internalType": "struct OrderV3Types.OrderTiming",
+        "components": [
+          {
+            "name": "submitBy",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "executionWindowSeconds",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "commitTimestamp",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "executionDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
       }
     ],
     "anonymous": false
@@ -2432,7 +2580,7 @@ export const orderLifecycleV5Abi = [
         "name": "receipt",
         "type": "tuple",
         "indexed": false,
-        "internalType": "struct OrderV2Types.OrderReceipt",
+        "internalType": "struct OrderV3Types.OrderReceipt",
         "components": [
           {
             "name": "orderId",
@@ -2467,17 +2615,17 @@ export const orderLifecycleV5Abi = [
           {
             "name": "status",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.LifecycleStatus"
+            "internalType": "enum OrderV3Types.LifecycleStatus"
           },
           {
             "name": "reason",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.TerminalReason"
+            "internalType": "enum OrderV3Types.TerminalReason"
           },
           {
             "name": "executionMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.ExecutionMode"
+            "internalType": "enum OrderV3Types.ExecutionMode"
           },
           {
             "name": "executor",
@@ -2487,7 +2635,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "priceSource",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.PriceSource"
+            "internalType": "enum OrderV3Types.PriceSource"
           },
           {
             "name": "executionPrice",
@@ -2527,12 +2675,12 @@ export const orderLifecycleV5Abi = [
           {
             "name": "bountyDisposition",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.BountyDisposition"
+            "internalType": "enum OrderV3Types.BountyDisposition"
           },
           {
             "name": "failure",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.FailureDetails",
+            "internalType": "struct OrderV3Types.FailureDetails",
             "components": [
               {
                 "name": "selector",
@@ -2552,7 +2700,7 @@ export const orderLifecycleV5Abi = [
               {
                 "name": "constraint",
                 "type": "uint8",
-                "internalType": "enum OrderV2Types.ConstraintKind"
+                "internalType": "enum OrderV3Types.ConstraintKind"
               },
               {
                 "name": "actual",
@@ -2574,7 +2722,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "economics",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.OrderEconomics",
+            "internalType": "struct OrderV3Types.OrderEconomics",
             "components": [
               {
                 "name": "executionNotionalUsdc",
@@ -2664,7 +2812,7 @@ export const orderLifecycleV5Abi = [
               {
                 "name": "close",
                 "type": "tuple",
-                "internalType": "struct OrderV2Types.CloseEconomics",
+                "internalType": "struct OrderV3Types.CloseEconomics",
                 "components": [
                   {
                     "name": "postFreeSettlementUsdc",
@@ -2723,7 +2871,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "closeMode",
             "type": "uint8",
-            "internalType": "enum OrderV2Types.CloseMode"
+            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "commitment",
@@ -2770,7 +2918,7 @@ export const orderLifecycleV5Abi = [
           {
             "name": "bounty",
             "type": "tuple",
-            "internalType": "struct OrderV2Types.BountyAccounting",
+            "internalType": "struct OrderV3Types.BountyAccounting",
             "components": [
               {
                 "name": "bountyEntitlementUsdc",
@@ -2800,7 +2948,34 @@ export const orderLifecycleV5Abi = [
               {
                 "name": "discrepancy",
                 "type": "uint8",
-                "internalType": "enum OrderV2Types.ReservationDiscrepancy"
+                "internalType": "enum OrderV3Types.ReservationDiscrepancy"
+              }
+            ]
+          },
+          {
+            "name": "timing",
+            "type": "tuple",
+            "internalType": "struct OrderV3Types.OrderTiming",
+            "components": [
+              {
+                "name": "submitBy",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "commitTimestamp",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "executionDeadline",
+                "type": "uint64",
+                "internalType": "uint64"
               }
             ]
           }
@@ -2858,7 +3033,7 @@ export const orderLifecycleV5Abi = [
       {
         "name": "constraint",
         "type": "uint8",
-        "internalType": "enum OrderV2Types.ConstraintKind"
+        "internalType": "enum OrderV3Types.ConstraintKind"
       },
       {
         "name": "actual",
@@ -3000,3 +3175,5 @@ export const orderLifecycleV5Abi = [
     ]
   }
 ] as const;
+
+export const orderRouterV3TraderAbi = orderRouterV3Abi;

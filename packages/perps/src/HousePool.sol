@@ -169,7 +169,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     PoolConfig internal poolConfig;
     /// @notice Maximum configurable frozen-oracle LP fee, in basis points (10%).
     uint256 public constant MAX_FROZEN_LP_FEE_BPS = 1000;
-    /// @notice Minimum ordinary tranche deposit or delayed-deposit request, in 6-decimal USDC (1 USDC).
+    /// @notice Minimum asynchronous tranche deposit request, in 6-decimal USDC (1 USDC).
     uint256 public constant MIN_TRANCHE_DEPOSIT_USDC = 1e6;
     /// @notice Duration shared by delayed LP deposit and redemption epochs.
     uint256 public constant LP_EPOCH_DURATION = 1 hours;
@@ -371,13 +371,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         pauser = newPauser;
     }
 
-    /// @notice Pauses immediate and delayed deposits into both tranches.
-    /// @dev Callable by the owner or dedicated pauser. Does not pause withdrawals, reconciliation, or trading.
+    /// @notice Pauses new deposit requests and defers deposit activation in both tranches.
+    /// @dev Callable by the owner or dedicated pauser. Does not pause redemption funding, escrowed claims,
+    ///      reconciliation, or trading.
     function pause() external onlyPauserOrOwner {
         _pause();
     }
 
-    /// @notice Unpauses immediate and delayed deposits into both tranches.
+    /// @notice Reopens deposit requests and activation, subject to the other lifecycle and settlement gates.
     /// @dev Only the owner may call.
     function unpause() external onlyOwner {
         _unpause();
@@ -1380,7 +1381,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return isSenior ? poolConfig.seniorFrozenLpFeeBps : poolConfig.juniorFrozenLpFeeBps;
     }
 
-    /// @notice Returns the minimum assets accepted by ordinary immediate or delayed tranche deposits.
+    /// @notice Returns the minimum assets accepted by asynchronous tranche deposit requests.
     /// @return Minimum deposit in 6-decimal USDC (1 USDC)
     function minTrancheDepositUsdc() external pure override returns (uint256) {
         return MIN_TRANCHE_DEPOSIT_USDC;

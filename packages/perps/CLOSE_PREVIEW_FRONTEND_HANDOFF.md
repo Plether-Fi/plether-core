@@ -2,7 +2,11 @@
 
 # Frontend handoff: reservation-aware close review
 
-Status: lens deployed and source-verified on Arbitrum Sepolia on 2026-09-14. The deployment packet below is complete; frontend implementation and acceptance checks remain pending.
+Recorded status as of 2026-09-14: lens deployed and source-verified on Arbitrum Sepolia; frontend implementation and
+acceptance checks were pending. This is the original v1.2.3 integration handoff, not a current frontend status report.
+Frontend paths and existing behavior below refer to the pinned frontend revision. The
+[2026-09-15 sponsored-close release](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/README.md)
+preserves this ordinary preview API and adds a separate assistance flow; see [current API and release boundaries](CLOSE_PREVIEW.md).
 
 `CfdClosePreview` is deployed alongside perps v1.2.3. Route prospective close/reduce reviews through its `previewClose` method. It projects commitment carry and reserves the new close bounty before assessing execution. This corrects the current frontend's use of unreserved account state with `CfdOrderPolicyEvaluator.assessOrder`.
 
@@ -30,7 +34,7 @@ The existing release is pinned in [the v1.2.3 manifest](../../deployments/releas
 
 For this additive rollout, deploy only the constructor-free preview. The full protocol deployment script creates an entire new deployment and is not the rollout command for the existing v1.2.3 graph. Publish a supplemental lens deployment record; preserve the historical v1.2.3 artifact and its provenance hash.
 
-The frontend must verify chain ID, nonempty runtime bytecode, and its exact expected runtime hash before enabling this close-review route. Keep existing engine/router/evaluator binding checks. Also reject an address equal to the router's execution evaluator. The preview inherits `assessOrder`, `evaluateOpen`, and `evaluateClose`; none of those inherited methods is the prospective-close API. There is no router rebinding or state migration in this rollout.
+The frontend must verify chain ID, nonempty runtime bytecode, and its exact expected runtime hash before enabling this close-review route. Keep existing engine/router/evaluator binding checks. Also reject an address equal to the router's execution evaluator. This 2026-09-14 deployed preview inherits `assessOrder`, `evaluateOpen`, and `evaluateClose`; none of those inherited methods is the prospective-close API. The later sponsored deployment and current source omit these public wrappers. There is no router rebinding or state migration in this rollout; do not mix the two deployments' ABI artifacts or runtime pins.
 
 ## 2. Frontend implementation map
 
@@ -99,7 +103,10 @@ Run this for every deduplicated current/midpoint/adverse price and again with fi
 
 Always preserve `simulateReviewedPerpsOrderV2` against the actual `commitOrder(request)`, with the canonical account and reviewed block. Refresh context, preview and simulation before submission when the reviewed state is stale. The preview omits queue admission, deadline/config-hash enforcement, future carry and oracle refresh during commitment. Its side/dust checks use the live position; the router uses queued position state after preceding orders. Pending opens or closes can make their answers differ, so preview success alone cannot authorize submission.
 
-This API always projects one **new** bounty reservation, even if pending orders already reserve bounties. Use it only before commitment. Existing committed-order assessment/execution routes remain on the execution-state API.
+For a nonzero configured bounty, this API always projects one **new** bounty reservation, even if pending orders
+already reserve bounties. A zero bounty skips commitment carry and funding projection, matching the engine; execution
+planning still runs. Use it only before commitment. Existing committed-order assessment/execution routes remain on
+the execution-state API.
 
 ## 4. Accounting rules for review and funding UI
 
@@ -153,10 +160,10 @@ The core fixture [test_AdverseFullConsumptionRegression](test/perps/CfdClosePrev
 
 ## 7. Activation and completion record
 
-1. Complete: deployment packet and verified ABI published above; three live read-only preview samples passed. Actual fork commitment/execution parity remains part of frontend acceptance.
+1. Recorded complete on 2026-09-14: deployment packet and verified ABI published above; three live read-only preview samples passed. Actual fork commitment/execution parity was left as part of this frontend acceptance checklist. The later sponsored release records its own fork tests separately.
 2. Frontend PR implements the route, decoding and UI changes, with all acceptance checks recorded.
 3. Verify a production frontend build points to the supplemental lens and the original v1.2.3 graph; deploy through the frontend repository's existing workflow.
 4. Smoke-test close/reduce reviews on the target chain and check error diagnostics. Record the frontend commit/build and smoke-test block alongside the deployment packet.
 5. If the new route is unavailable or fails verification, disable close confirmation with a refresh/unavailable message while investigating. Reverting to the old unreserved review would restore the accounting bug and is not a validated fallback.
 
-Completion means the deployed frontend uses this lens for every prospective-close review pass, displays carry/bounty once, and still simulates router commitment. The protocol execution evaluator remains v1.2.3; hardening or refactoring it belongs to a separate protocol release.
+Completion of this handoff means the deployed frontend uses the selected, verified lens for every prospective-close review pass, displays carry/bounty once, and still simulates router commitment. The recorded protocol execution evaluator is v1.2.3; hardening or refactoring it belongs to a separate protocol release. Confirm frontend completion from its own integration/build records rather than inferring it from these historical unchecked items.

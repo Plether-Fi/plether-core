@@ -12,7 +12,7 @@ const receiptTypeHash = keccak256(toBytes(
   "PletherOrderReceiptV4(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,OrderReceipt receipt)",
 ));
 
-/** The V5 read API retains the V4 receipt hash domain and complete event schema. */
+/** The V5 read API retains the V4 hash domain; the merged receipt includes authenticated timing. */
 export function hashOrderReceiptV4(input: {
   chainId: bigint; book: Address; router: Address; terminalBlock: bigint; terminalTime: bigint; receipt: OrderReceiptV4;
 }): Hex {

@@ -32,14 +32,17 @@ function logFor(value = receipt) {
 }
 const input = { ...context, summary, log: logFor() };
 describe("authenticated terminal history", () => {
-  it("retains the historical read ABI and unchanged V4 event", () => {
+  it("retains the historical ABI and appends authenticated timing to the new receipt", () => {
     expect(orderLifecycleV4Abi.some((x) => x.type === "function" && x.name === "outcome")).toBe(true);
     expect(orderLifecycleV5Abi.some((x) => x.type === "function" && (x.name as string) === "outcome")).toBe(false);
     expect(sha256(toHex(JSON.stringify(orderLifecycleV4Abi)))).toBe("0x63e62da0b44d682fb7528a7a6b21b49854ae60f4e3e5c34f1c8ce94b4390bfc1");
-    expect(event).toEqual(orderLifecycleV4Abi.find((x) => x.type === "event" && x.name === "OrderFinalized"));
+    const historical = orderLifecycleV4Abi.find((x) => x.type === "event" && x.name === "OrderFinalized")!;
+    expect(event.inputs[6].components.map((x) => x.name)).toEqual([
+      ...historical.inputs[6].components.map((x) => x.name), "timing",
+    ]);
   });
   it("matches the independent Solidity golden receipt hash", () => {
-    expect(receiptHash).toBe("0xca7de82d4a264ebae62485a3db72e94cff8d7ca629914cfa5fd9df75c3c4d07b");
+    expect(receiptHash).toBe("0x174a7dfedc5c5cbdbbf19cfe9319e51754d1d66ddd611f93df6e63c8c27c39fa");
   });
   it("returns complete receipt history after verification", () => {
     // RPC/L2 log position can differ from the Solidity/ancestor-chain receipt clock.
@@ -51,6 +54,7 @@ describe("authenticated terminal history", () => {
       { ...receipt, economics: { ...receipt.economics, postSettlementBalanceUsdc: 1n } },
       { ...receipt, commitment: { ...receipt.commitment, carryCollectedUsdc: 1n } },
       { ...receipt, bounty: { ...receipt.bounty, bountyRefundedUsdc: 1n } },
+      { ...receipt, timing: { ...receipt.timing, executionDeadline: 1n } },
     ]) expect(() => decodeVerifiedOrderFinalized({ ...input, log: logFor(changed) })).toThrow(/authenticated history/);
     const log = logFor();
     log.topics[1] = `0x${"00".repeat(31)}08`;

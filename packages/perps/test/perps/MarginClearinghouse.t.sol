@@ -1624,8 +1624,4 @@ contract NonUsdcCollateralTest is Test {
         _open(account, side, size, margin, price, depth);
     }
 
-    // Regression: H-02 — non-USDC collateral blocks overleveraged position
-    // Regression: H-02 — lockMargin accepts non-USDC equity
-
-
 }

@@ -500,7 +500,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @notice Applies the live close/decrease settlement plan produced by the planner.
     /// @dev Callable only by `ENGINE`. The host must supply a valid delta consistent
     ///      with `currentPosition`; this function does not inspect `delta.valid` or recompute it. It advances carry/mark
-    ///      state, updates aggregate side accounting, unlocks proportional margin, pays or records trader gains,
+    ///      state, updates aggregate side accounting, unlocks only terminal-cap-preserving excess pledge, pays or records
+    ///      net price gains, pays affordable action rebates without creating claims,
     ///      consumes eligible collateral and claims for collectible losses, and consumes or releases negative-VPI
     ///      reserve while preserving the residual target. It records LP revenue, funds collectible protocol fees from
     ///      unreserved pool cash, and writes or deletes the position. When a frozen spread was assessed it emits

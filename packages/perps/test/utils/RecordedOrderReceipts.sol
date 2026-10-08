@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -17,8 +17,8 @@ abstract contract RecordedOrderReceipts is Test {
     ) private {
         for (uint256 i; i < logs.length; ++i) {
             if (logs[i].topics.length == 4 && logs[i].topics[0] == IOrderLifecycleBook.OrderFinalized.selector) {
-                (,,, OrderV2Types.OrderReceipt memory receipt) =
-                    abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV2Types.OrderReceipt));
+                (,,, OrderV3Types.OrderReceipt memory receipt) =
+                    abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
                 assertEq(uint256(logs[i].topics[1]), receipt.orderId);
                 assertEq(address(uint160(uint256(logs[i].topics[2]))), receipt.account);
                 assertEq(logs[i].topics[3], receipt.clientOrderId);
@@ -43,16 +43,16 @@ abstract contract RecordedOrderReceipts is Test {
     function _verifiedOutcome(
         IOrderLifecycleBook book,
         uint64 orderId
-    ) internal returns (OrderV2Types.CompactOutcome memory outcome) {
-        OrderV2Types.TerminalOutcome memory summary = book.terminalOutcome(orderId);
-        if (summary.status == OrderV2Types.LifecycleStatus.None) {
+    ) internal returns (OrderV3Types.CompactOutcome memory outcome) {
+        OrderV3Types.TerminalOutcome memory summary = book.terminalOutcome(orderId);
+        if (summary.status == OrderV3Types.LifecycleStatus.None) {
             return outcome;
         }
         _cacheReceiptLogs(vm.getRecordedLogs());
         bytes memory data = _recordedReceipts[address(book)][orderId];
         assertGt(data.length, 0, "missing terminal receipt event");
-        (bytes32 receiptHash, uint64 terminalBlock, uint64 terminalTime, OrderV2Types.OrderReceipt memory receipt) =
-            abi.decode(data, (bytes32, uint64, uint64, OrderV2Types.OrderReceipt));
+        (bytes32 receiptHash, uint64 terminalBlock, uint64 terminalTime, OrderV3Types.OrderReceipt memory receipt) =
+            abi.decode(data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
         assertTrue(book.verifyReceipt(receipt, terminalTime), "unauthenticated terminal receipt");
         assertEq(summary.account, receipt.account);
         assertEq(summary.terminalBlock, terminalBlock);
@@ -82,6 +82,7 @@ abstract contract RecordedOrderReceipts is Test {
         outcome.terminalBlock = terminalBlock;
         outcome.terminalTime = terminalTime;
         outcome.receiptHash = receiptHash;
+        outcome.timing = receipt.timing;
     }
 
 }

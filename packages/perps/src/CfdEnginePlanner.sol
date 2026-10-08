@@ -78,7 +78,8 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
     ///      current pure planner does not use it. Expected business-rule failures are encoded in `delta.revertCode`
     ///      rather than reverted; arithmetic violations or inconsistent inputs can still revert.
     /// @param snap Trusted account, side, pool, collateral, claim, carry, and risk snapshot.
-    /// @param order Open/increase order. The planner does not require `order.account == snap.account`, nonzero size/price,
+    /// @param order Open/increase order. Size must be nonzero and quantum-aligned. The planner does not require
+    ///        `order.account == snap.account`, a nonzero price,
     ///        `isClose == false`, valid timestamps/target price, or router authorization; it copies `order.account` to
     ///        the result while using collateral and position state from `snap`.
     /// @param executionPrice Candidate execution price, with 8 decimals.
@@ -94,10 +95,10 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
     }
 
     /// @notice Plans a close or same-side decrease without reading or mutating protocol state.
-    /// @dev The execution price is capped at `snap.capPrice`. A zero size against a live position can produce a valid
-    ///      no-op plan; the caller must reject that when its entrypoint policy requires it. A zero-size snapshot position
-    ///      combined with a zero close size can divide by zero, and other malformed combinations can also revert.
-    ///      `publishTime` is retained for interface parity but the current pure planner does not use it.
+    /// @dev The execution price is capped at `snap.capPrice`. Zero or non-quantized close sizes return
+    ///      `INVALID_SIZE_QUANTUM`; a close larger than the snapshot position returns `CLOSE_SIZE_EXCEEDS`. Inconsistent
+    ///      snapshots or arithmetic violations can still revert. `publishTime` is retained for interface parity but
+    ///      the current pure planner does not use it.
     /// @param snap Trusted account, side, pool, collateral, claim, carry, and risk snapshot.
     /// @param order Close/decrease order. The planner does not require `order.account == snap.account`, `isClose == true`,
     ///        matching side, valid timestamps/target price, or router authorization; it uses `order.account` and size

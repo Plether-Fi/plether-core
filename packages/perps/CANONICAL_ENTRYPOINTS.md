@@ -10,14 +10,14 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 ## Traders
 
 - Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Ordinary trade action: `OrderRouter.commitOrder(OrderV2Types.OrderRequest request)`
-- Fresh external V2 requests must set `expectedConfigHash` to the current nonzero value returned by
+- Ordinary trade action: `OrderRouter.commitOrder(OrderV3Types.OrderRequest request)`
+- Fresh external V3 requests must set `expectedConfigHash` to the current nonzero value returned by
   `OrderLifecycleBook.currentExecutionConfigHash()`; the public commit path rejects zero for a new intent.
 - Emergency policy note: committed orders remain user-uncancellable. If RouterAdmin enters risk-off, each pre-cutoff
   open is instead terminally invalidated by protocol policy and its remaining reservations are refunded to the
   trader's internal clearinghouse balance.
 - Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
-- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV2Types.OrderRequest,PositionProtectionParams)`
+- Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
 - Existing-position protection creation locks both bounties first, then applies the canonical V2 exact-price safety
   gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
@@ -39,7 +39,11 @@ For autonomous trading-account and AI-agent integration, including bounded autho
   withdrawal capacity.
 - Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
   `PositionProtectionBook.getPositionProtection(uint64)`
-- Trade-ticket previews: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.previewClose(...)`
+- Open-ticket planning: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.quoteMaxOpen(...)`; these exclude Router
+  admission, bounty-reservation, and oracle-validation checks.
+- Pre-commit close review: `CfdClosePreview.previewClose(...)`, which projects commitment carry and the new order's
+  execution-bounty reservation before assessing execution. See [`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md). Continue to
+  simulate the actual Router commitment for queue, deadline, configuration, and other admission checks.
 
 Use these interfaces:
 
@@ -48,9 +52,12 @@ Use these interfaces:
 - `IPositionProtectionActions`
 - `IPositionProtectionViews`
 - `IPerpsTraderViews`
-- `ICfdEngineLens` for `previewOpen(...)` / `previewClose(...)` only
+- `ICfdEngineLens` for open-ticket previews and maximum-open quotes
+- The deployed `CfdClosePreview` ABI for reservation-aware close review
 
-Do not use the wide clearinghouse reservation API or detailed accounting lenses as the canonical trader integration surface, except for `CfdEngineLens` trade-ticket previews.
+Do not use the wide clearinghouse reservation API or detailed accounting lenses as the canonical trader integration
+surface. `CfdEngineLens.previewClose(...)` remains a planner diagnostic; it does not project a new close commitment's
+carry and bounty reservation.
 
 ## LPs
 
@@ -59,6 +66,10 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
   only to claim an activated request.
 - LP exits are asynchronous. A holder calls `requestRedeem(shares, controller, owner)`; funded requests are exposed by
   `pendingRedeemRequest` / `claimableRedeemRequest` and claimed through ERC-4626 `redeem` or `withdraw`.
+- An activated, unclaimed deposit can route shares directly into redemption through
+  `requestRedeemFromClaimableDeposit(depositRequestId,shares,controller)`. Read
+  `maxRequestRedeemFromClaimableDeposit(depositRequestId,controller)` first. The controller or its approved operator
+  must call, the source lot's activation-aged cooldown must have elapsed, and the redemption keeps the same controller.
 - Canonical request timing: call `TrancheVault.getRequestEpochWindow()` for
   `(nextRequestEpoch, nextRequestCutoffTime)`. `PerpsPublicLens.getTrancheQueues(bool)` relays the same pair in
   `TrancheQueueView`; Senior and Junior values must match at the same block. `nextRequestCutoffTime` is always the next
@@ -75,7 +86,8 @@ Do not use the wide clearinghouse reservation API or detailed accounting lenses 
 - A share-delivering claim, redemption cancellation, or redemption refund may target the controller or an account with
   no existing vault shares. This prevents unsolicited dust from resetting another holder's whole-balance cooldown;
   `maxDeposit(controller)` and `maxMint(controller)` remain receiver-independent controller limits.
-- Epoch clearing is permissionless through the route reported by `SettlementMonitorLens.requiredExecutionPath`.
+- Epoch clearing is permissionless through the `requiredExecutionPath` field returned by
+  `SettlementMonitorLens.getSettlementStatus(observedEpoch)`.
   `CachedMark` calls `HousePool.settleLpEpoch(uint256,uint256)` directly; `AtomicOracleRefresh` calls
   `OrderRouter.settleLpEpoch(bytes[])`. On the atomic route, the Router validates one `PoolReconcile` mark under the
   reported minimum-publish-time policy, installs it in the Engine, and reaches the Router-only HousePool callback in
@@ -94,6 +106,7 @@ Use these interfaces:
 
 - `IPerpsLPViews`
 - `IAsyncTrancheVault`
+- `IAsyncTrancheVaultClaimableRedeem` for direct routing of activated deposit claims into redemption
 - `IERC7540` and `IERC7575` for standard-compatible integrations
 
 `IPerpsLPActions` describes configured-vault-to-`HousePool` mutation hooks. It is not a direct user surface. Senior
@@ -116,7 +129,7 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 - Risk-off queue cleanup: `OrderRouter.clearRiskOffOrder(uint64)`; permissionless, oracle-free, and unpaid. The caller
   funds gas while the trader receives the full internal margin, execution-bounty, and attached `PendingOpen`
   protection-bounty refund.
-- LP epoch clearing: follow `SettlementMonitorLens.requiredExecutionPath`; use direct
+- LP epoch clearing: follow `getSettlementStatus(observedEpoch).requiredExecutionPath` on `SettlementMonitorLens`; use direct
   `HousePool.settleLpEpoch(uint256,uint256)` for `CachedMark` and `OrderRouter.settleLpEpoch(bytes[])` for
   `AtomicOracleRefresh`
 - LP epoch preflight and health: `SettlementMonitorLens`; select the epoch to observe explicitly, remember that the
@@ -203,7 +216,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `IMarginClearinghouse`
 - `ICfdEngineAccountLens`
 - `ICfdEngineProtocolLens`
-- Non-preview `ICfdEngineLens` diagnostics such as simulation helpers and legacy open failure probes
+- `ICfdEngineLens` close/liquidation diagnostics, simulation helpers, and legacy open failure probes
 - `IOrderRouterAccounting`
 - `IHousePool`
 
@@ -213,11 +226,13 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `CfdEngineSettlementSidecar`: externalized close/liquidation settlement orchestration used by `CfdEngine`; not a product-facing surface.
 - `CfdOrderPolicyEvaluator`: fixed permissionless stateless policy dependency used to assess authoritative Engine
   state against caller-pinned financial bounds; applications do not use it as an execution or custody surface.
+- `CfdClosePreview`: separately deployed stateless pre-commit close-review surface; projects commitment carry and a
+  new bounty reservation and does not replace or reconfigure the Router's immutable execution evaluator.
 - `OrderLifecycleBook`: independently predeployed canonical permanent order-identity and terminal-outcome reader. It
   is immutable-bound to the predicted Router, Engine, Clearinghouse, and HousePool; the Router constructor validates
   all four bindings before accepting it. Only that Router may register or finalize lifecycle state, and the Book owns
   no funds or execution authority.
-- `OrderRouterV2ExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
+- `OrderRouterExecutionSidecar`: fixed stateless Router delegate implementation for oracle preparation, bounded
   execution, failure classification, and receipts. Direct stateful calls are rejected; integrations call the Router.
 - `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, exactly Router-bound stateless
   implementation detail for mark refresh, protection-trigger oracle/orchestration, single and batch liquidation, and

@@ -133,7 +133,7 @@ Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and cont
 
 The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
 `terminalOutcome(orderId)`: account, terminal block, status, reason and receipt
-hash. Full details come from the unchanged V4 `OrderFinalized` event. Use the
+hash. Full details come from the V4-domain `OrderFinalized` event, now including the merged timing tuple. Use the
 trusted deployment's chain, Book and Router addresses; do not take those or the
 summary from an untrusted indexer.
 
@@ -159,7 +159,8 @@ if (summary.status === 2 || summary.status === 3) {
 The helper authenticates the event, clocks and full receipt against the summary;
 `hashOrderReceiptV4` exposes the same digest separately. Solidity consumers can
 call `verifyReceipt(receipt, terminalTime)` on the Book. The V4 receipt and V3
-intent domains are unchanged; V5 is the read API version.
+intent domain labels are unchanged; V5 is the read API version. The merged tuples include both close mode and timing,
+so earlier candidate event and request encodings must not be reused on the merged graph.
 
 Cache history by chain/Book/order ID and invalidate it on reorg. If a log cannot
 be retrieved, report history as unavailable instead of assuming zero fees or
@@ -177,3 +178,16 @@ RPC log queries over the known L2 deployment-to-head range. Keep transport
 `blockNumber`/`blockHash` separately for indexing and reorg handling; hash the
 event's authenticated `terminalBlock` as emitted. See [Arbitrum block-number
 documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time).
+## V3 order timing (0.2.0 source release)
+
+`buildPlaceOrderV3Action` and `buildProtectedOpenAction` encode `submitBy` and
+`executionWindowSeconds`. A fresh web review uses 120 seconds for submission
+and 60 seconds for execution after commitment. Both builders expose
+`submissionDeadline`; `sendSponsoredAction` rejects stub or final sponsorship
+that extends beyond it before requesting the owner signature. The contract
+resolves the execution deadline at commitment, so execution requires no new
+client signature. V2 signed calldata cannot be reinterpreted as V3.
+
+This is a breaking order ABI release. No package publication or deployment is
+included. See `packages/perps/ORDER_V3_TIMING.md` in the repository for activation
+requirements and the canonical lifecycle timing tuple.

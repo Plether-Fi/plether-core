@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 /// @notice Trader-facing action surface aligned with the current delayed-order router model.
 interface IPerpsTraderActions {
@@ -12,10 +12,10 @@ interface IPerpsTraderActions {
     ///      different request field reverts. Fresh requests must pin the active execution-config hash and a finite
     ///      deadline no later than the router's current maximum order age. The `0x504c455448455221` client-id prefix
     ///      is reserved for protocol-generated protection orders and must not be used by fresh public requests.
-    /// @param request Canonical V2 order request and caller-authorized execution bounds.
+    /// @param request Canonical V3 order request and caller-authorized execution bounds.
     /// @return orderId Newly assigned order id or the original id for an exact replay.
     function commitOrder(
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) external returns (uint64 orderId);
 
 }

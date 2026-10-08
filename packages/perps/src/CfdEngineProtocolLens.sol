@@ -141,7 +141,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     /// @notice Reconstructs one aggregate side-state tuple from the engine getter.
     /// @param side Side to inspect.
     /// @return state Maximum profit and aggregate margin in 6-decimal USDC, open interest with 18 decimals, and raw
-    ///         `size * entryPrice` notional with 26 decimals.
+    ///         exact entry cost scaled by `1e20`, with 26-decimal precision.
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngineTypes.SideState memory state) {

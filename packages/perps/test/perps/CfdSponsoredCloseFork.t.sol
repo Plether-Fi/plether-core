@@ -5,7 +5,7 @@ import {
     ILegacyClosePolicy,
     ILegacyClosePreview,
     ILegacyCloseRouter,
-    LegacyCloseTypes as OrderV2Types
+    LegacyCloseTypes as OrderV3Types
 } from "../fixtures/LegacyCloseV2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
@@ -56,7 +56,7 @@ contract CfdSponsoredCloseForkTest is Test {
 
     function _request(
         bool isPartial
-    ) internal view returns (OrderV2Types.OrderRequest memory r) {
+    ) internal view returns (OrderV3Types.OrderRequest memory r) {
         (uint256 size,,,, CfdTypes.Side side,,) = ENGINE.positions(ACCOUNT);
         require(size > 0, "Fork fixture position no longer live");
         r.clientOrderId = keccak256(abi.encode("sponsored-fork", isPartial, block.number));
@@ -64,7 +64,7 @@ contract CfdSponsoredCloseForkTest is Test {
         r.sizeDelta = isPartial ? size / 2 / CfdTypes.SIZE_QUANTUM * CfdTypes.SIZE_QUANTUM : size;
         r.targetPrice = side == CfdTypes.Side.LONG ? type(uint256).max : 1;
         r.isClose = true;
-        r.bounds.validUntil = uint64(block.timestamp + ROUTER.maxOrderAge());
+        r.bounds.validUntil = uint64(block.timestamp + ILegacyCloseRouter(address(ROUTER)).maxOrderAge());
         r.bounds.expectedConfigHash = ROUTER.lifecycleBook().currentExecutionConfigHash();
         r.bounds.allowedExecutionModes = 1;
         r.bounds.maxExecutionBountyUsdc = 200_000;
@@ -77,7 +77,7 @@ contract CfdSponsoredCloseForkTest is Test {
     }
 
     function _calls(
-        OrderV2Types.OrderRequest memory r,
+        OrderV3Types.OrderRequest memory r,
         uint256 amount
     ) internal view returns (ISponsoredSimpleAccount.Call[] memory c) {
         c = new ISponsoredSimpleAccount.Call[](5);
@@ -93,7 +93,7 @@ contract CfdSponsoredCloseForkTest is Test {
     function _commit(
         bool isPartial
     ) internal {
-        OrderV2Types.OrderRequest memory r = _request(isPartial);
+        OrderV3Types.OrderRequest memory r = _request(isPartial);
         uint256 free = IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         require(free < 200_000, "Fork fixture no longer needs assistance");
         uint256 amount = 200_000 - free;
@@ -111,7 +111,7 @@ contract CfdSponsoredCloseForkTest is Test {
         CfdTypes.Order memory order = CfdTypes.Order(
             ACCOUNT, r.sizeDelta, 0, r.targetPrice, uint64(block.timestamp), uint64(block.number), 0, r.side, true
         );
-        OrderV2Types.ExecutionAssessment memory actual = ILegacyClosePolicy(
+        OrderV3Types.ExecutionAssessment memory actual = ILegacyClosePolicy(
                 address(bytes20(hex"43c93d3028fcd4c1f578a50639750b8fbfdee799"))
             )
             .assessOrder(
@@ -151,7 +151,7 @@ contract CfdSponsoredCloseForkTest is Test {
     }
 
     function testFork_DeployedAccountRollsBackMintOnCommitFailure() public {
-        OrderV2Types.OrderRequest memory r = _request(false);
+        OrderV3Types.OrderRequest memory r = _request(false);
         uint256 free = IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         uint256 supply = IERC20(TOKEN).totalSupply();
         vm.mockCallRevert(

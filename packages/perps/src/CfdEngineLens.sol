@@ -47,13 +47,14 @@ contract CfdEngineLens is ICfdEngineLens {
 
     /// @notice Previews a close/decrease using current pool assets as both accounting depth and available cash.
     /// @dev The oracle price is capped at `CAP_PRICE`. This performs no oracle freshness, publish-time, target-price, or
-    ///      router authorization check. No-position, zero/oversized close, dust remainder, and underwater partial-close
-    ///      failures are reported through `invalidReason`; invalid results can contain economics calculated before the
-    ///      failing check. Frozen-market spread fields distinguish assessed, collectible, and waived amounts.
+    ///      router authorization check. No position, invalid size quantum, zero/oversized close, underfunded VPI reserve,
+    ///      and uncollectible partial-close action charges are reported through `invalidReason`. Invalid results can
+    ///      contain economics calculated before the failing check. Frozen-market spread fields distinguish assessed,
+    ///      collectible, and waived amounts.
     /// @param account Account whose current position is hypothetically reduced.
     /// @param sizeDelta Position size to close, with 18 decimals.
     /// @param oraclePrice Candidate close price, with 8 decimals.
-    /// @return preview Close economics, settlement routing, claim/bad-debt effects, and projected solvency.
+    /// @return preview Close economics, settlement routing, claim effects, and projected solvency; legacy bad debt is zero.
     function previewClose(
         address account,
         uint256 sizeDelta,
@@ -173,7 +174,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param sizeDelta Position size to close, with 18 decimals.
     /// @param oraclePrice Candidate close price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
-    /// @return preview Close economics, settlement routing, claim/bad-debt effects, and projected solvency.
+    /// @return preview Close economics, settlement routing, claim effects, and projected solvency; legacy bad debt is zero.
     function simulateClose(
         address account,
         uint256 sizeDelta,
@@ -190,8 +191,8 @@ contract CfdEngineLens is ICfdEngineLens {
     ///      preview with only the capped oracle price populated.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
-    /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, diagnostic price write-off,
-    ///         and projected solvency.
+    /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, and projected solvency.
+    ///         Legacy `badDebtUsdc` remains zero; price write-offs are reported by the settlement event.
     function previewLiquidation(
         address account,
         uint256 oraclePrice
@@ -205,8 +206,8 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
-    /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, diagnostic price write-off,
-    ///         and projected solvency.
+    /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, and projected solvency.
+    ///         Legacy `badDebtUsdc` remains zero; price write-offs are reported by the settlement event.
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
@@ -412,7 +413,7 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
     }
 
-    /// @notice Derives the portion of assessed frozen-market spread recovered by settlement and claim netting.
+    /// @notice Derives assessed frozen-market spread recovered from new price gain and eligible action collateral.
     /// @param delta Planned close result.
     /// @return paidUsdc Collectible frozen spread in 6-decimal USDC units.
     function _frozenSpreadPaidUsdc(
@@ -477,7 +478,7 @@ contract CfdEngineLens is ICfdEngineLens {
     ///      position is never liquidatable within `[0, capPrice]`, the boolean is false and price is zero.
     /// @param projected Position whose threshold is searched.
     /// @param capPrice Inclusive upper price bound, with 8 decimals.
-    /// @param reachableCollateralUsdc Projected generic collateral in 6-decimal USDC units.
+    /// @param reachableCollateralUsdc Projected PnL pledge plus same-account claim, in 6-decimal USDC units.
     /// @param maintenanceBps Active maintenance or FAD margin rate.
     /// @return hasLiquidationPrice Whether a liquidation boundary exists in the searched domain.
     /// @return liquidationPrice Integer boundary price, with 8 decimals.
@@ -542,7 +543,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param projected Position to test.
     /// @param price Candidate price, with 8 decimals.
     /// @param capPrice Engine price cap, with 8 decimals.
-    /// @param reachableCollateralUsdc Projected collateral in 6-decimal USDC units.
+    /// @param reachableCollateralUsdc Projected PnL pledge plus same-account claim, in 6-decimal USDC units.
     /// @param maintenanceBps Active maintenance or FAD margin rate.
     /// @return Whether equity is at or below the requirement.
     function _isProjectedLiquidatable(
@@ -563,7 +564,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account whose position is tested.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @param poolDepthUsdc Pool assets and cash used by the plan, in 6-decimal USDC units.
-    /// @return preview Eligibility, settlement routing, claims, diagnostic price write-off, and projected solvency.
+    /// @return preview Eligibility, settlement routing, claims, and projected solvency; legacy bad debt remains zero.
     function _previewLiquidation(
         address account,
         uint256 oraclePrice,

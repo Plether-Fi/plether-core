@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEngineView} from "@plether/perps/CfdOrderPolicyEvaluatorBase.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
@@ -35,10 +35,10 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         address executor,
         uint256 executionPrice,
         uint64 publishTime
-    ) external view returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) external view returns (OrderV3Types.ExecutionAssessment memory assessment) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
         address router = engine.orderRouter();
-        OrderV2Types.PendingIntent memory pending = _pending(router, orderId);
+        OrderV3Types.PendingIntent memory pending = _pending(router, orderId);
         IMarginClearinghouse(engine.clearinghouse())
             .validateBountyReservation(
                 pending.account, IMarginClearinghouse.BountyKind.Order, orderId, pending.executionBountyUsdc
@@ -64,7 +64,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             publishTime,
             pending.executionBountyUsdc
         );
-        if (pending.closeMode == OrderV2Types.CloseMode.CallerPaidFullExit) {
+        if (pending.closeMode == OrderV3Types.CloseMode.CallerPaidFullExit) {
             (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(pending.account);
             if (
                 IPositionEpoch(engineAddress).positionEpoch(pending.account) != pending.positionEpoch
@@ -93,14 +93,14 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
     function _pending(
         address router,
         uint64 orderId
-    ) private view returns (OrderV2Types.PendingIntent memory pending) {
+    ) private view returns (OrderV3Types.PendingIntent memory pending) {
         IOrderLifecycleBook book = ICommittedPolicyRouter(router).lifecycleBook();
         pending = book.pendingIntent(orderId);
         if (pending.account == address(0)) {
             revert CfdOrderPolicyEvaluator__ReservationMismatch(orderId);
         }
         if (
-            block.timestamp > pending.bounds.validUntil
+            block.timestamp > pending.timing.executionDeadline
                 || (pending.bounds.expectedConfigHash != bytes32(0)
                     && book.currentExecutionConfigHash() != pending.bounds.expectedConfigHash)
         ) {
@@ -116,9 +116,9 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         uint256 currentOraclePrice,
         uint256 poolDepthUsdc,
         uint64 publishTime,
-        OrderV2Types.ExecutionBounds calldata bounds,
+        OrderV3Types.ExecutionBounds calldata bounds,
         uint256 executionBountyUsdc
-    ) external view returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) external view returns (OrderV3Types.ExecutionAssessment memory assessment) {
         AssessmentContext memory context;
         context.engineAddress = engineAddress;
         context.executor = executor;
@@ -133,12 +133,12 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
     function evaluateOpen(
         CfdEnginePlanTypes.RawSnapshot calldata snapshot,
         CfdEnginePlanTypes.OpenDelta calldata delta,
-        OrderV2Types.ExecutionBounds calldata bounds,
+        OrderV3Types.ExecutionBounds calldata bounds,
         uint256 executionBountyUsdc
-    ) external pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) external pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.OpenDelta memory deltaCopy = delta;
-        OrderV2Types.ExecutionBounds memory boundsCopy = bounds;
+        OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
         return _evaluateOpen(snapshotCopy, deltaCopy, boundsCopy, executionBountyUsdc, false);
     }
 
@@ -146,12 +146,12 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
     function evaluateClose(
         CfdEnginePlanTypes.RawSnapshot calldata snapshot,
         CfdEnginePlanTypes.CloseDelta calldata delta,
-        OrderV2Types.ExecutionBounds calldata bounds,
+        OrderV3Types.ExecutionBounds calldata bounds,
         uint256 executionBountyUsdc
-    ) external pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) external pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         CfdEnginePlanTypes.RawSnapshot memory snapshotCopy = snapshot;
         CfdEnginePlanTypes.CloseDelta memory deltaCopy = delta;
-        OrderV2Types.ExecutionBounds memory boundsCopy = bounds;
+        OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
         return _evaluateClose(snapshotCopy, deltaCopy, boundsCopy, executionBountyUsdc, false);
     }
 

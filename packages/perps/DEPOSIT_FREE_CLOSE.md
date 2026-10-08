@@ -26,7 +26,7 @@ PendingOpen protection can be explicitly cancelled without cancelling its parent
 
 The clearinghouse owns backing and provenance; the lifecycle book owns intent and frozen entitlement. Bounty records have explicit None/Active/Settled/Moved/Quarantined state, account association through authenticated namespaces and IDs, free/pledge funding, and source position epoch. `positionEpoch` increments only on flat-to-open transitions.
 
-Execution validates reservation identity, active state, entitlement, provenance totals, protected-reserve floor, and custody. A mismatch is retryable and leaves the whole item unchanged. `expireOrder(orderId)` is permissionless after `block.timestamp > validUntil`, requires no oracle update, and can unlink an expired later entry without executing it ahead of FIFO.
+Execution validates reservation identity, active state, entitlement, provenance totals, protected-reserve floor, and custody. A mismatch is retryable and leaves the whole item unchanged. `expireOrder(orderId)` is permissionless after `block.timestamp > orderTiming(orderId).executionDeadline`, requires no oracle update, and can unlink an expired later entry without executing it ahead of FIFO. The submission deadline `submitBy` does not shorten a committed order's execution window.
 
 | Expired record | Disposition |
 | --- | --- |
@@ -42,7 +42,7 @@ Automatic queue recovery assumes authenticated identities and valid aggregate ac
 
 ## ABI and consumer migration
 
-Intent domain is V3. Receipt and execution-configuration domains are V4. Solidity's `OrderV2Types` name remains for source continuity; it does **not** imply ABI compatibility. Regenerate all tuple consumers together. Archived release ABIs remain the historical decoders.
+Intent domain is V3. Receipt and execution-configuration domains are V4. The merged `OrderV3Types` schema combines close mode with `submitBy` and `executionWindowSeconds`; receipts append authenticated timing. Regenerate all tuple consumers together. Archived release ABIs remain the historical decoders.
 
 Use the new request-taking overload:
 
@@ -138,6 +138,11 @@ Engine runtime is **24,430 bytes**, below both EIP-170 (24,576) and the existing
 
 
 ## Smaller terminal records and consumer migration
+
+The measurements in this section describe the pre-timing candidate. Merging commitment-relative timing preserves
+the two-slot summary and adds one packed terminal timing slot for the upstream `orderTiming` API. Requests now include
+both close mode and timing bounds, and full receipt events append authenticated timing. The historical release
+artifact and gas measurements below remain tied to their recorded source; export new artifacts before activation.
 
 The new candidate stores only account, terminal block, lifecycle status, terminal reason and receipt hash: **two slots instead of eleven**. Complete terminal receipt data remains in the unchanged `OrderFinalized` event. Finalization validates the same identity, bounds, entitlement, commitment and receipt semantics before persisting the summary and deleting pending state. Client-ID replay records remain permanent. No settlement, funding, protection or recovery policy is relaxed.
 

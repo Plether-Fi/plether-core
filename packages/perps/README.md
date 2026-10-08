@@ -1,5 +1,7 @@
 # Plether Perps
 
+V3 order timing is a fresh-stack breaking change. See [V3 timing integration](ORDER_V3_TIMING.md).
+
 ## Close review before commitment
 
 Use `CfdClosePreview.previewClose` to project commitment carry and reserve the prospective close bounty before
@@ -7,8 +9,11 @@ planning. `CfdOrderPolicyEvaluator.assessOrder` expects execution state with tha
 [`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) for the API, accounting baseline, error decoding, and additive deployment path.
 The [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) contains the post-deployment configuration packet,
 implementation file map, accounting display rules, and activation checks.
-The standalone lens is [deployed and verified on Arbitrum Sepolia](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md)
-alongside v1.2.3; frontend cutover remains pending.
+The [September 14 release record](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md)
+documents the original standalone lens alongside v1.2.3. The
+[September 15 sponsored-close release](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/README.md)
+preserves `previewClose` and adds `previewSponsoredClose` plus `validateSponsoredClose`. These are historical testnet
+release records; the handoff's frontend activation status is not a live deployment check.
 
 ## Next release: unused perps API cleanup
 
@@ -87,7 +92,7 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 ### Core product rules
 
 - Delayed orders only. There is no same-tx trader market-order path.
-- Every externally committed ordinary order and attached protection parent is a caller-bounded V2 request. It pins an
+- Every externally committed ordinary order and attached protection parent is a caller-bounded V3 request. It pins an
   exact target, deadline, allowed execution regimes, execution configuration, and financial limits before capital is
   reserved. The only configuration-unpinned requests are internally constructed TP/SL trigger closes authenticated by
   the Router's immutable position-protection path.
@@ -124,15 +129,15 @@ In practice, the compact public API is:
   - `MarginClearinghouse.depositMargin(uint256)`
   - `MarginClearinghouse.withdrawMargin(uint256)`
 - Ordinary trade actions:
-  - `OrderRouter.commitOrder(OrderV2Types.OrderRequest)`
+  - `OrderRouter.commitOrder(OrderV3Types.OrderRequest)`
 - Protection actions, called directly on the immutable Book returned by `OrderRouter.positionProtectionBook()`:
-  - `PositionProtectionBook.commitOpenOrderWithProtection(OrderV2Types.OrderRequest,PositionProtectionParams)`
+  - `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
   - `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
   - `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`
   - `PositionProtectionBook.cancelPositionProtection(uint64)`
 - Keepers:
-  - `OrderRouter.executeOrder(uint64,bytes[]) -> OrderV2Types.ExecutionResult`
-  - `OrderRouter.executeOrderBatch(uint64,bytes[]) -> OrderV2Types.BatchResult`
+  - `OrderRouter.executeOrder(uint64,bytes[]) -> OrderV3Types.ExecutionResult`
+  - `OrderRouter.executeOrderBatch(uint64,bytes[]) -> OrderV3Types.BatchResult`
   - `OrderRouter.updateMarkPrice(bytes[])`
   - `PositionProtectionBook.triggerPositionProtection(uint64,bytes[])`
   - `PositionProtectionBook.retryPositionProtectionClose(uint64)`
@@ -189,7 +194,7 @@ The simplified public interfaces live in `packages/perps/src/interfaces/`:
   advertise its ERC-165 id separately so the existing `IAsyncTrancheVault` id remains stable
 - `IERC7540.sol` and `IERC7575.sol` for the standard operator/request/claim and vault-entry fragments
 - `IPerpsKeeper.sol`
-- `IOrderLifecycleBook.sol` and `OrderV2Types.sol` for V2 intent policy, lifecycle state, receipts, and
+- `IOrderLifecycleBook.sol` and `OrderV3Types.sol` for V3 intent policy, lifecycle state, receipts, and
   machine-readable execution results
 - `IProtocolViews.sol`
 - `PerpsViewTypes.sol`
@@ -249,7 +254,7 @@ The main runtime and read surfaces are:
   and exact Engine, Clearinghouse, and HousePool dependencies.
 - `CfdOrderPolicyEvaluator`: separately deployed stateless coordinator that rebuilds the Engine's authoritative
   snapshot, calls the configured planner, and applies the order's financial bounds before Engine mutation.
-- `OrderRouterV2ExecutionSidecar`: separately deployed stateless delegate module for single/batch oracle
+- `OrderRouterExecutionSidecar`: separately deployed stateless delegate module for single/batch oracle
   orchestration, policy classification, Engine execution, and receipt construction.
 - `PositionProtectionBook`: stateful Router-deployed action/view surface and retained TP/SL lifecycle store.
 - `OrderRouterLiquidationBatchSidecar`: separately predeployed, immutable, stateless keeper implementation for mark
@@ -298,13 +303,13 @@ The main runtime and read surfaces are:
   selectors: clients call the discovered protection Book directly. That Book has no token custody and cannot mutate
   FIFO by itself; it invokes narrow Router host paths for the parent open, trigger mark refresh, and close-attempt
   append.
-- `CfdOrderPolicyEvaluator` and `OrderRouterV2ExecutionSidecar` are deployed separately and supplied to a fresh
+- `CfdOrderPolicyEvaluator` and `OrderRouterExecutionSidecar` are deployed separately and supplied to a fresh
   Router. The execution sidecar is fixed by the Router, has no mutable storage or upgrade path, and rejects direct
   stateful calls. Router execution entrypoints delegate to it so external Clearinghouse, lifecycle Book, Oracle, and
   Engine calls retain the Router as caller. The reusable sidecar does not claim that every delegatecaller is the
   protocol Router; lifecycle Book, Clearinghouse, and Engine caller checks prevent another host context from acquiring
   protocol authority.
-- Each prepared V2 execution item crosses a Router self-call boundary before the Router delegates back to the
+- Each prepared V3 execution item crosses a Router self-call boundary before the Router delegates back to the
   execution sidecar. The callback is self-only. This creates an item-local rollback frame: retryable Engine, policy,
   or receipt failures leave that order and its reservation pending without undoing earlier terminal items. Oracle/Pyth
   preparation and the Engine mark update remain the explicitly documented outer transaction boundary.
@@ -340,11 +345,11 @@ The main runtime and read surfaces are:
 1. Deposit USDC into `MarginClearinghouse`.
 2. Read `OrderLifecycleBook.currentExecutionConfigHash()` and the Engine, Clearinghouse, Pool, and Oracle state needed
    to choose an exact target and financial policy.
-3. Submit `OrderRouter.commitOrder(OrderV2Types.OrderRequest)`. The request carries a nonzero account-scoped
+3. Submit `OrderRouter.commitOrder(OrderV3Types.OrderRequest)`. The request carries a nonzero account-scoped
    `clientOrderId`, the trade fields, and mandatory `ExecutionBounds`.
 4. For a new id, the Book permanently binds the full intent hash, the Router records a live FIFO order, and
    `MarginClearinghouse` reserves committed margin plus the quoted keeper bounty. The transaction is atomic.
-5. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data. The V2 execution
+5. A keeper later calls `executeOrder(...)` or `executeOrderBatch(...)` with Pyth update data. The V3 execution
    sidecar resolves the first valid post-commit tick in live/FAD-only markets, or the validated stored basket under
    oracle-frozen policy, then checks queue, deadline, configuration, mode, slippage, gas, and financial policy.
 6. Inside an item-local rollback frame, the Clearinghouse releases the order reservation without checkpointing carry,
@@ -356,7 +361,7 @@ The main runtime and read surfaces are:
 
 Important details:
 
-- `targetPrice` is mandatory and cannot be zero. V2 has no zero-target market-order sentinel.
+- `targetPrice` is mandatory and cannot be zero. V3 has no zero-target market-order sentinel.
 - Client ids are permanent per account. Exact replay is resolved before deadline, configuration, market-state, or
   lifecycle validation, so replay still returns the original id after execution or failure and never creates a
   second reservation, queue entry, counter increment, or event. A same-account id with any changed request field is
@@ -364,7 +369,7 @@ Important details:
 - There is no user cancellation path.
 - Non-lot sizes are rejected at commit, before any order id or margin/bounty reservation is created.
 - Open orders are rejected during degraded mode and close-only windows.
-- Deadline equality is valid. An order expires only when `block.timestamp > validUntil`.
+- Deadline equality is valid. An order expires only when `block.timestamp > executionDeadline`.
 - Typed planner rejections, typed policy violations, slippage, expiry, and pinned-configuration mismatch are
   terminal. Close-only, same-block/MEV boundaries, unavailable historical data, insufficient execution gas,
   mark-price ordering, and unknown, panic, out-of-gas, empty, or malformed dependency failures are retryable and
@@ -451,11 +456,11 @@ commit open with protection
 - `retryPositionProtectionClose(...)` is permissionless and nonpayable. It is valid only for a `Latched` protection,
   requires that the exact protected side and size still exist and that the account has no pending Router order, does
   not refresh or re-evaluate the trigger, and appends a fresh attempt at the current FIFO tail with a new order id,
-  commit timestamp, deadline, and live/FAD historical-oracle window. Retry remains available while protection commits
-  are disabled, the Router is paused, the Engine is degraded, or the oracle is frozen; a frozen attempt executes under
-  the ordinary frozen-close policy rather than the live/FAD historical window.
-- The attached parent is a caller-authored public V2 request with the same nonzero configuration pin and financial
-  bounds as `OrderRouter.commitOrder(...)`. Triggered and retried protection close attempts are typed V2 requests
+  commit timestamp, deadline, and live/FAD historical-oracle window. Retry remains available while the Router is
+  paused, the Engine is degraded, or the oracle is frozen; a frozen attempt executes under the ordinary frozen-close
+  policy rather than the live/FAD historical window.
+- The attached parent is a caller-authored public V3 request with the same nonzero configuration pin and financial
+  bounds as `OrderRouter.commitOrder(...)`. Triggered and retried protection close attempts are typed V3 requests
   constructed inside the authenticated protection path; only those attempts use
   `expectedConfigHash == bytes32(0)` as an internal unpinned marker. Fresh external commits reject zero, and no external
   caller can opt an ordinary or protected-parent order out of configuration pinning.
@@ -479,24 +484,25 @@ The raw basket-price conditions follow the protocol's position sides:
 Frontends that display the inverse dollar-oriented price must convert both values and inequalities before submitting
 the 8-decimal raw basket triggers.
 
-### V2 execution authority
+### V3 execution authority
 
 `ExecutionBounds` defines the complete financial authority granted to a keeper. Every comparison is inclusive. Zero
 is a real zero allowance, not an unbounded sentinel; use the relevant integer type's maximum when an application
 intends no practical ceiling. Fields that are independently required nonzero on fresh external requests, including
-`validUntil`, `expectedConfigHash`, `allowedExecutionModes`, and `maxPostLeverageBps`, cannot use zero. The sole
-`expectedConfigHash` exception is a Router-authenticated trigger-generated TP/SL close.
+`submitBy` and `executionWindowSeconds`, `expectedConfigHash`, `allowedExecutionModes`, and `maxPostLeverageBps`, cannot use zero. The sole
+`expectedConfigHash` exception is a Router-authenticated triggered or retried TP/SL close.
 
 | Field | Meaning |
 |-------|---------|
-| `validUntil` | Absolute execution deadline; fresh commits require it after the current time and no later than the Router's current `maxOrderAge` |
+| `submitBy` | Latest permitted fresh commitment timestamp; equality is accepted |
+| `executionWindowSeconds` | Positive duration, bounded by `maxExecutionWindowSeconds`; execution expires after commitment time plus this duration |
 | `allowedExecutionModes` | Bitmask authorizing `Live`, `Fad`, and/or `Frozen` execution |
-| `expectedConfigHash` | Exact execution-critical configuration digest that must still be active for an external request; zero is reserved for authenticated trigger-generated TP/SL closes |
+| `expectedConfigHash` | Exact execution-critical configuration digest that must still be active for an external request; zero is reserved for authenticated triggered or retried TP/SL closes |
 | `maxExecutionBountyUsdc` | Maximum quoted keeper bounty reserved at commit |
 | `maxExecutionNotionalUsdc` | Maximum execution notional assessed by the canonical planner |
 | `maxGrossAccountDebitUsdc` | Maximum evaluator-reported gross account debit, including settlement debit, consumed trader claims, and the reserved execution bounty |
 | `maxActionChargeUsdc` | Maximum net planner-assessed action charge across carry, VPI, fee, and frozen spread as applicable |
-| `maxExplicitFeesUsdc` | Maximum explicit execution fees |
+| `maxExplicitFeesUsdc` | Maximum execution fee plus any assessed frozen-close spread |
 | `maxPostPositionSize` | Maximum live size after execution |
 | `minPostSettlementBalanceUsdc` | Minimum total internal settlement balance after execution and bounty disposition, including value classified in locked buckets |
 | `minPostPositionEquityUsdc` | Minimum resulting live-position equity |
@@ -534,7 +540,7 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
   latched protection. That relatching cleanup is intentionally unpaid; retry moves the retained amount into the fresh
   attempt without reserving or charging the trader again. Position mismatch instead uses ordinary paid cleanup.
 - Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
-- The configured liquidation charge is capped by liquidation-reachable collateral, then allocated using timelocked
+- The configured liquidation charge is capped by the dedicated liquidation reserve, then allocated using timelocked
   `keeperShareBps` and `protocolShareBps` values whose sum cannot exceed `10_000`.
 - The rounded-down keeper and protocol shares are credited directly inside `MarginClearinghouse`; the protocol share
   goes to `protocolTreasury`, while the exact remainder, including division dust, is transferred to `HousePool` as
@@ -762,7 +768,9 @@ Operationally:
 
 - Senior principal is restored before junior receives surplus if senior has been impaired.
 - `seniorHighWaterMark` is a compounded protected senior claim watermark, not a principal-only watermark.
-- When the junior-funded coupon increases `seniorPrincipal`, the paid coupon also ratchets `seniorHighWaterMark` upward and remains senior-protected after later losses.
+- A junior-funded coupon first restores any gap between `seniorPrincipal` and `seniorHighWaterMark`. Only the
+  remainder above that protected watermark increases both values, so newly compounded coupon remains protected
+  after later losses.
 - The mark increases additively on deposits. When an epoch funds `fundedShares` of Senior redemptions against the
   pre-burn Senior share supply `preBurnSupply`, it removes the same pro-rata protected claim:
   `H' = H - floor(H * fundedShares / preBurnSupply)`. This is share-based and therefore independent of any frozen exit
@@ -883,9 +891,11 @@ mechanism.
 
 ```text
 borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)
-sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)
+sideUtilizationBps = min(floor(sideBorrowBaseUsdc * 10_000 / poolAssetsUsdc), 10_000)
 positionCarryUsdc = unsettledCarryUsdc + floor(borrowBaseUsdc * (sideCarryIndex - positionLastCarryIndex) / 1e18)
 ```
+
+Zero borrow base has zero utilization; a nonzero borrow base with zero pool assets uses `10_000` bps.
 
 Carry behavior:
 
@@ -971,8 +981,8 @@ The perps system intentionally splits accounting into separate kernels:
 - `TerminalNavBookV2`: exact account-capped terminal price-PnL aggregation for symmetric LP share pricing.
 - `OrderReservationAccounting`: clearinghouse-reserved execution bounty accounting and margin-queue bookkeeping.
 - `OrderRouterBase` / `OrderCommitHandler` / Router handler modules: live queue storage, bounded commit validation,
-  authenticated V2 sidecar callbacks, liquidation, bounty accounting, mark refresh, LP settlement, and emergency
-  cleanup. `OrderRouterV2ExecutionSidecar`, `CfdOrderPolicyEvaluator`, and `OrderLifecycleBook` own V2 single/batch
+  authenticated V3 sidecar callbacks, liquidation, bounty accounting, mark refresh, LP settlement, and emergency
+  cleanup. `OrderRouterExecutionSidecar`, `CfdOrderPolicyEvaluator`, and `OrderLifecycleBook` own V3 single/batch
   orchestration, financial-policy assessment, and permanent lifecycle evidence respectively.
 - `HousePool.recordClaimantInflow(amount, kind, cashMode)`: claimant-owned value routing for both revenue and recapitalization, with explicit cash-arrival vs retained-value modes.
 
@@ -984,15 +994,15 @@ These domains answer different questions. They should not silently share assumpt
 
 ### Commit rules
 
-- The only production Router order-commit ABI is `commitOrder(OrderV2Types.OrderRequest)`; attached opens use the
+- The only production Router order-commit ABI is `commitOrder(OrderV3Types.OrderRequest)`; attached opens use the
   bounded Book entrypoint documented above.
-- `clientOrderId`, `targetPrice`, `validUntil`, `allowedExecutionModes`, a nonzero `expectedConfigHash`, and a nonzero
+- `clientOrderId`, `targetPrice`, `submitBy` and `executionWindowSeconds`, `allowedExecutionModes`, a nonzero `expectedConfigHash`, and a nonzero
   `maxPostLeverageBps` are mandatory for fresh external commits, including attached parent opens. Only the
   authenticated TP/SL trigger and retry paths construct the internal zero-config marker.
 - An exact account-scoped replay is returned before any current-state validation. Conflicting reuse of a client id
   reverts, and the binding is never cleared.
 - Fresh external commits must pin `OrderLifecycleBook.currentExecutionConfigHash()` and choose a deadline inside the
-  current `maxOrderAge`.
+  current `maxExecutionWindowSeconds`.
 - All financial maxima are inclusive ceilings and all minima are inclusive floors. Zero is meaningful rather than
   shorthand for unbounded authority.
 - Opens are blocked while paused, degraded, or close-only.
@@ -1006,7 +1016,7 @@ These domains answer different questions. They should not silently share assumpt
 ### Authoritative execution configuration
 
 `OrderLifecycleBook.currentExecutionConfigHash()` commits to the schema, chain, lifecycle Book, Router, Engine,
-Clearinghouse, HousePool, V2 execution sidecar, policy evaluator, Plether oracle, RouterAdmin and its
+Clearinghouse, HousePool, V3 execution sidecar, policy evaluator, Plether oracle, RouterAdmin and its
 `activeConfigVersion`, Engine planner, Engine settlement sidecar, EngineAdmin and its `activeConfigVersion`, protocol
 treasury, terminal NAV book, and HousePool mark staleness policy. Both admin versions start at one and advance only
 after a successful applicable configuration finalization.
@@ -1030,7 +1040,7 @@ authorizes settlement.
 - Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.01 USDC, 0.20 USDC]`.
 - Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
 - Position protection reserves a governance-configured trigger bounty capped at `1 USDC` plus the snapshotted close
-  bounty. Both come from free settlement; the protection path never uses the active-position-margin close fallback.
+  bounty. Both come from free settlement, as do ordinary close execution bounties.
 - Partial close size is floored by the engine `minBountyUsdc / bountyBps` notional threshold at the commit reference price, preventing dust closes from occupying the FIFO queue for a flat bounty.
 - Open bounties come from free settlement.
 - Close bounties also come exclusively from free settlement after the engine attempts to collect carry. PnL pledge is never reclassified to keep a close intent committable.
@@ -1197,7 +1207,8 @@ risk or move the system back toward solvency.
 
 ### Liquidations
 
-- Liquidations are proportional and bounded by actually reachable collateral.
+- Liquidations close the full position. Their charge is proportional to notional, subject to a floor, and capped by
+  the account's dedicated liquidation reserve.
 - Liquidations are designed to avoid price-impact-driven cascades: positions settle against an external bounded oracle mark, not forced selling into an AMM or order book, so one liquidation does not mechanically move the execution price for the next. Large oracle moves can still make many positions independently liquidatable.
 - The total liquidation charge is proportional with a floor and is allocated using the configured keeper and protocol
   shares; LPs receive the exact remainder after both rounded-down allocations.
@@ -1232,10 +1243,12 @@ after Sunday's open:
 Friday and Sunday can use different UTC offsets on the weekends when daylight saving starts or ends. Governance
 override days and their optional runway remain keyed to UTC days.
 
-| Window | Margin basis | Max leverage |
-|--------|--------------|--------------|
-| Normal | `maintMarginBps = 1%` | 100x |
-| FAD | `fadMarginBps = 3%` | 33x |
+Normal maintenance uses the configured `maintMarginBps`; FAD maintenance uses `fadMarginBps`, which cannot be
+configured below normal maintenance. New exposure must also satisfy `initMarginBps`, and the Router blocks opens
+throughout FAD.
+The common test fixture uses 100/150/300 bps for maintenance/initial/FAD margins; the Sepolia deployment script uses
+10/20/300 bps. Reciprocal margin ratios are health thresholds, not guaranteed available leverage: fees, carry,
+liquidation reserves, skew, and pool solvency can reduce capacity.
 
 The owner can also add admin FAD days for expected FX-market holidays.
 
@@ -1284,17 +1297,16 @@ only one field must repeat the desired active values for the other five.
 `CfdEngineAdmin.activeConfigVersion` and `OrderRouterAdmin.activeConfigVersion` start at one. The Engine version
 increments after successful risk, calendar, or freshness finalization; the Router version increments after successful
 router-policy or oracle-address finalization. These counters are monotonic inputs to the execution-config digest, so a
-finalized change invalidates the pinned configuration of an otherwise pending V2 order. The request ABI and intent
-hash remain V2; the latched-retry release bumps the receipt type and execution-config schema domains to V3 because
-protection-attempt registration and `RetainedForProtectionRetry` change authenticated terminal meaning.
+finalized change invalidates the pinned configuration of an otherwise pending V3 order. The request and intent domain are V3, with signed submission and execution timing. Receipt and execution-config
+domains are V4. Timing is retained in terminal receipts alongside protection-attempt and bounty disposition evidence.
 
-### Fresh V2 deployment boundary
+### Fresh V3 deployment boundary
 
-V2 is a fresh-stack architecture, not an in-place migration. Deploy and verify the evaluator and execution sidecar;
+V3 is a fresh-stack architecture, not an in-place migration. Deploy and verify the evaluator and execution sidecar;
 predict the Router; deploy its empty lifecycle Book and keeper sidecar against that prediction; then construct the
 Router with the lifecycle Book as its eighth and final dependency. Complete the normal one-time Engine,
 Clearinghouse, Pool, vault, monitor, and emergency-coordinator wiring, and activate trading only after every reciprocal
-binding is correct. Do not mix a V2 Router/Book with legacy Router queue state or reuse an already-wired Engine; V1
+binding is correct. Do not mix a V3 Router/Book with legacy Router queue state or reuse an already-wired Engine; V1
 pending orders, client ids, and outcomes are not imported. Recovery from a Book or immutable-binding fault likewise
 requires containment and a new compatible stack rather than storage repair.
 
@@ -1338,11 +1350,16 @@ pending order; then deploy and verify the complete new graph and start its index
 
 ## Default Parameters
 
+The table distinguishes constructor defaults from values supplied by the current
+[`DeployPerpsArbitrumSepolia.s.sol`](../../script/DeployPerpsArbitrumSepolia.s.sol) release script. `riskParams` and
+`frozenCloseSpreadBps` are constructor arguments, so the Engine does not define universal defaults for them. Read
+the active deployment before constructing orders; many unit-test fixtures intentionally use different risk settings.
+
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `maintMarginBps` | 100 (1%) | Maintenance margin requirement |
-| `initMarginBps` | 150 (1.5%) | Initial margin requirement |
-| `fadMarginBps` | 300 (3%) | FAD margin requirement |
+| `maintMarginBps` | 10 (0.10%) | Sepolia script maintenance margin requirement |
+| `initMarginBps` | 20 (0.20%) | Sepolia script initial margin requirement |
+| `fadMarginBps` | 300 (3%) | Sepolia script FAD margin requirement |
 | `baseCarryBps` | 500 (5%) | Annualized carry on LP-backed notional |
 | `bountyBps` | 10 (0.10%) | Total liquidation-charge rate |
 | `minBountyUsdc` | 1,000,000 ($1) | Total liquidation-charge floor |
@@ -1360,14 +1377,14 @@ pending order; then deploy and verify the complete new graph and start its index
 | Order settlement window | 15s | Historical Pyth search window after order commit |
 | Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
 | `basketMaxConfidenceRatioBps` | 10 (0.10%) | Maximum weighted aggregate confidence relative to the neutral pre-cap basket price |
-| Adverse confidence multiplier | 2,000 (0.2x) | Applied to live/FAD order execution and liquidation marks; waived for oracle-frozen voluntary closes |
+| Adverse confidence multiplier | 2,000 (0.2x) constructor; 2,500 (0.25x) Sepolia release | Applied to live/FAD order execution and liquidation marks; waived for oracle-frozen voluntary closes |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
 | `engineMarkStalenessLimit` | 60s | Engine-side mark freshness |
 | `markStalenessLimit` | 60s | HousePool mark freshness |
 | FAD override days | empty | Admin-set calendar override set |
 | `fadMaxStaleness` | 3 days | Frozen-market max staleness |
-| `fadRunwaySeconds` | 3 hours | Admin FAD pre-close runway |
-| `seniorRateBps` | 800 (8% APY) | Senior target coupon rate funded from junior NAV |
+| `fadRunwaySeconds` | 1 hour | Runway before a governance-overridden UTC day; recurring weekend shoulders use separate fixed durations |
+| `seniorRateBps` | 800 (8% nominal annual rate) | Senior target coupon funded from junior NAV; paid coupon compounds at checkpoints |
 | `maxSeniorExposureUsdc` | Timelocked, finite | Absolute counted-admission limit (`E +` pending senior reservations) |
 | `maxSeniorShareBps` | Timelocked, <10,000 | Maximum counted senior admission share; active `E` also governs Junior redemption funding |
 | `LP_REQUEST_CUTOFF_DURATION` | 5 minutes | Shared deposit/redemption roll-forward cutoff before each round-hour boundary |
@@ -1378,7 +1395,7 @@ use the neutral constructor sentinels `type(uint256).max` and `10,000` bps, whic
 
 OrderRouter also exposes timelocked admin control over `positionProtectionTriggerBountyUsdc`, `maxPendingOrders`,
 `minEngineGas`, and `maxPruneOrdersPerCall`.
-`maxOrderAge` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
+`maxExecutionWindowSeconds` must stay nonzero and cannot exceed one hour, so close-only windows cannot be indefinitely pinned by an old FIFO head.
 
 `frozenCloseSpreadBps` is timelocked with the rest of `EngineRiskConfig`, must remain nonzero, and is hard-capped at `1,000` bps (10%).
 
@@ -1402,11 +1419,12 @@ The product applications and supporting services live in the [`plether-app`](htt
   the Router's ordinary `OrderCommitted` event.
 - Position-protection retry worker: discovers `Latched` records, reconciles the most recent attempt's terminal receipt,
   confirms the exact position and zero pending-order preconditions, and submits
-  `retryPositionProtectionClose(...)` without Pyth data. The protocol-operated worker automatically retries only
+  `retryPositionProtectionClose(...)` without Pyth data. The recommended worker policy is to retry automatically only
   `Expired` attempts, only when live Pyth data (or frozen-close execution) is available, and only when projected
-  head-arrival is at most `maxOrderAge - 15 seconds` (45 seconds under defaults). Other terminal reasons stay latched
-  and raise an operator alert keyed by reason plus failure fingerprint; they are retried only after remediation. The
-  worker budget pays for any otherwise-unrewarded expiry-pruning transaction. It must tolerate races because retry is
+  head-arrival is at most `maxExecutionWindowSeconds - 15 seconds` (45 seconds under the 60-second Router default). Other terminal
+  reasons should stay latched and raise an operator alert keyed by reason plus failure fingerprint until remediation.
+  The worker budget must cover any otherwise-unrewarded expiry-pruning transaction. This is an off-chain operating
+  policy; the contract permits any valid permissionless retry. The worker must tolerate races because retry is
   permissionless and only the first caller can create the next live attempt. Indexers must model one protection to
   many attempt order ids rather than overwriting history when `linkedOrderId` advances, and retain lifecycle-Book
   `ProtectionAttemptRegistered` evidence after its pending marker is deleted at finalization.

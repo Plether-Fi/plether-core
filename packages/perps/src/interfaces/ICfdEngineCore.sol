@@ -57,7 +57,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return initMarginBps Initial-margin ratio in basis points
     /// @return fadMarginBps Maintenance-margin ratio during FAD in basis points
     /// @return baseCarryBps Annualized base carry rate in basis points
-    /// @return minBountyUsdc Minimum total liquidation charge and position-margin floor in USDC
+    /// @return minBountyUsdc Minimum total liquidation charge, also used with bountyBps to derive the economic notional floor, in USDC
     /// @return bountyBps Variable total liquidation-charge rate in basis points
     /// @return keeperShareBps Keeper share of the collected liquidation charge in basis points
     /// @return protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points
@@ -91,7 +91,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @param order Queued order being executed by the router
     /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
     /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
-    /// @param publishTime Execution-price publish time, cached only when it is not older than `lastMarkTime`
+    /// @param publishTime Router-validated execution publish time; the Engine caches the execution price only when strictly newer
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,

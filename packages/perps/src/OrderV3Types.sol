@@ -4,10 +4,10 @@ pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
-/// @title Canonical delayed-order types (V3 intent / V4 receipts)
-/// @notice Versioned request, policy, assessment, and receipt tuples. The library name is retained for source continuity.
+/// @title Canonical V3 delayed-order types
+/// @notice Fixed-width request, policy, assessment, and receipt types shared by the V3 order pipeline.
 /// @custom:security-contact contact@plether.com
-library OrderV2Types {
+library OrderV3Types {
 
     enum CloseMode {
         Standard,
@@ -133,12 +133,15 @@ library OrderV2Types {
         CleanupLimit
     }
 
-    /// @notice Mandatory financial authority supplied with every V2 order.
+    /// @notice Mandatory financial authority supplied with every V3 order.
     /// @dev Maximum values are inclusive and zero is a real zero allowance. Minimum values are inclusive.
     ///      `maxGrossAccountDebitUsdc` covers settlement debit, trader-claim consumption, and the reserved bounty;
     ///      `minPostSettlementBalanceUsdc` refers to total internal settlement custody, including locked value.
+    ///      Full closes skip the post-position equity and leverage checks; fresh public requests still require a
+    ///      nonzero `maxPostLeverageBps`. Execution modes use bits 1 (Live), 2 (Fad), and 4 (Frozen).
     struct ExecutionBounds {
-        uint64 validUntil;
+        uint64 submitBy;
+        uint32 executionWindowSeconds;
         uint8 allowedExecutionModes;
         bytes32 expectedConfigHash;
         uint256 maxExecutionBountyUsdc;
@@ -152,7 +155,15 @@ library OrderV2Types {
         uint32 maxPostLeverageBps;
     }
 
-    /// @notice Canonical, idempotent V2 order submission.
+    /// @notice Immutable timing evidence for a committed V3 order.
+    struct OrderTiming {
+        uint64 submitBy;
+        uint32 executionWindowSeconds;
+        uint64 commitTimestamp;
+        uint64 executionDeadline;
+    }
+
+    /// @notice Canonical, idempotent V3 order submission.
     struct OrderRequest {
         bytes32 clientOrderId;
         CfdTypes.Side side;
@@ -182,6 +193,7 @@ library OrderV2Types {
         uint256 positionSize;
         CfdEnginePlanTypes.CloseCommitment commitment;
         ExecutionBounds bounds;
+        OrderTiming timing;
     }
 
     /// @notice Normalized economic assessment produced before Engine state is applied.
@@ -219,7 +231,9 @@ library OrderV2Types {
         bytes32 revertDataHash;
     }
 
-    /// @notice Complete normalized economics emitted for a terminal order.
+    /// @notice Normalized economic evidence emitted for a terminal order.
+    /// @dev Executed receipts include the assessment; failed receipts contain observed account/position states and
+    ///      leave unapplied trade economics zero. Liquidation cleanup records state after liquidation.
     struct OrderEconomics {
         uint256 executionNotionalUsdc;
         int256 realizedPnlUsdc;
@@ -267,6 +281,7 @@ library OrderV2Types {
         CloseMode closeMode;
         CfdEnginePlanTypes.CloseCommitment commitment;
         BountyAccounting bounty;
+        OrderTiming timing;
     }
 
     /// @notice Two-slot durable terminal summary. Full history is carried by the authenticated receipt event.
@@ -303,6 +318,7 @@ library OrderV2Types {
         ConstraintKind failedConstraint;
         bytes32 revertDataHash;
         bytes32 receiptHash;
+        OrderTiming timing;
     }
 
     /// @notice Machine-readable result of one Router execution request.

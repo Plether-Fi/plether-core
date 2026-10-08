@@ -5,7 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -448,10 +448,10 @@ contract PositionProtectionTest is BasePerpTest {
         uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
         uint256 cleanerBalanceBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
 
-        OrderV2Types.ExecutionResult memory result = _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "expiry lifecycle status");
-        assertEq(uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.Expired), "expiry reason");
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "expiry lifecycle status");
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired), "expiry reason");
         assertEq(
             clearinghouse.balanceUsdc(EXECUTION_KEEPER),
             cleanerBalanceBefore,
@@ -481,12 +481,12 @@ contract PositionProtectionTest is BasePerpTest {
             "expiry should not change the underlying action reserve"
         );
 
-        OrderV2Types.CompactOutcome memory outcome =
+        OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired), "receipt expiry reason");
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired), "receipt expiry reason");
         assertEq(
             uint8(outcome.bountyDisposition),
-            uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
+            uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry),
             "receipt should authenticate retained retry funding"
         );
         assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt should preserve the bounty amount");
@@ -499,7 +499,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
         CfdTypes.Order memory firstOrder = _orderRecord(firstOrderId).core;
-        uint64 firstValidUntil = router.lifecycleBook().pendingPolicy(firstOrderId).validUntil;
+        uint64 firstValidUntil = router.lifecycleBook().orderTiming(firstOrderId).executionDeadline;
         PositionProtectionTypes.PositionProtectionView memory triggered =
             protectionViews.getPositionProtection(protectionId);
 
@@ -527,14 +527,18 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(_orderRecord(retryOrderId).prevGlobalOrderId, foreignOrderId, "retry should point to prior tail");
 
         CfdTypes.Order memory retryOrder = _orderRecord(retryOrderId).core;
-        OrderV2Types.ExecutionBounds memory retryBounds = router.lifecycleBook().pendingPolicy(retryOrderId);
+        OrderV3Types.ExecutionBounds memory retryBounds = router.lifecycleBook().pendingPolicy(retryOrderId);
         assertGt(retryOrder.commitTime, firstOrder.commitTime, "retry should use a fresh commit clock");
         assertEq(retryOrder.commitTime, block.timestamp, "retry commit time");
         assertEq(retryOrder.commitBlock, block.number, "retry commit block");
-        assertGt(retryBounds.validUntil, firstValidUntil, "retry should receive a fresh validity window");
+        assertGt(
+            router.lifecycleBook().orderTiming(retryOrderId).executionDeadline,
+            firstValidUntil,
+            "retry should receive a fresh validity window"
+        );
         assertEq(
-            retryBounds.validUntil,
-            retryOrder.commitTime + uint64(router.maxOrderAge()),
+            router.lifecycleBook().orderTiming(retryOrderId).executionDeadline,
+            retryOrder.commitTime + uint64(router.maxExecutionWindowSeconds()),
             "retry deadline should derive from its own commit time"
         );
         assertTrue(
@@ -578,7 +582,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.startPrank(address(router));
         protectionBook.afterOrderTerminal(oldOrderId, ALICE, IOrderRouterAccounting.OrderStatus.Executed);
         bool retained = protectionBook.handleFailedProtectionAttempt(
-            oldOrderId, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc
+            oldOrderId, ALICE, OrderV3Types.TerminalReason.Expired, executionBountyUsdc
         );
         vm.stopPrank();
 
@@ -725,10 +729,10 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "success should clear bounty reserve");
         assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "success should consume the action reserve");
-        OrderV2Types.CompactOutcome memory outcome =
+        OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Executed), "successful retry receipt");
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "paid disposition");
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Executed), "successful retry receipt");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid), "paid disposition");
         assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "receipt bounty recipient");
         assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt bounty amount");
         assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "success should clear attempt marker");
@@ -779,10 +783,10 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "mismatch should clear reserve view");
         assertEq(clearinghouse.actionReserveUsdc(ALICE), 0, "mismatch payout should consume the action reserve");
 
-        OrderV2Types.CompactOutcome memory outcome =
+        OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
-        assertEq(uint8(outcome.reason), uint8(OrderV2Types.TerminalReason.Expired), "mismatch receipt reason");
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "paid receipt");
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired), "mismatch receipt reason");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid), "paid receipt");
         assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "cleaner receipt recipient");
         assertEq(outcome.bountyUsdc, executionBountyUsdc, "cleaner receipt bounty");
         assertFalse(router.lifecycleBook().isProtectionAttempt(linkedOrderId), "mismatch should clear attempt marker");
@@ -831,7 +835,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
-        uint64 linkedValidUntil = router.lifecycleBook().pendingPolicy(linkedOrderId).validUntil;
+        uint64 linkedValidUntil = router.lifecycleBook().orderTiming(linkedOrderId).executionDeadline;
 
         vm.warp(block.timestamp + 30);
         vm.prank(BOB);
@@ -863,16 +867,16 @@ contract PositionProtectionTest is BasePerpTest {
             router.closeOrderExecutionBountyUsdc(),
             "batch cleanup should retain protection bounty"
         );
-        OrderV2Types.CompactOutcome memory protectionOutcome =
+        OrderV3Types.CompactOutcome memory protectionOutcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(
             uint8(protectionOutcome.bountyDisposition),
-            uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
+            uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry),
             "batch head receipt should retain bounty"
         );
         assertEq(
             uint8(_verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), bobOrderId).status),
-            uint8(OrderV2Types.LifecycleStatus.Executed),
+            uint8(OrderV3Types.LifecycleStatus.Executed),
             "later target should execute in the same batch"
         );
         assertEq(router.nextExecuteId(), 0, "batch should advance beyond both orders");
@@ -963,10 +967,10 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(EXECUTION_KEEPER);
         router.executeOrder(retryOrderId, _priceData(MARK_PRICE));
 
-        OrderV2Types.CompactOutcome memory outcome =
+        OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
-        assertEq(uint8(outcome.executionMode), uint8(OrderV2Types.ExecutionMode.Frozen), "frozen execution mode");
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV2Types.BountyDisposition.Paid), "frozen payout");
+        assertEq(uint8(outcome.executionMode), uint8(OrderV3Types.ExecutionMode.Frozen), "frozen execution mode");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid), "frozen payout");
         assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "frozen executor should receive bounty");
         assertEq(
             clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executorBalanceBefore,
@@ -1211,7 +1215,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.expectRevert(Pausable.EnforcedPause.selector);
         protectionActions.replacePositionProtection(cancelledProtectionId, _params(LONG_TAKE_PROFIT - 1, 0));
 
-        OrderV2Types.OrderRequest memory pausedRequest =
+        OrderV3Types.OrderRequest memory pausedRequest =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(CAROL);
         vm.expectRevert(Pausable.EnforcedPause.selector);
@@ -1248,7 +1252,7 @@ contract PositionProtectionTest is BasePerpTest {
             "fresh deployment must allow replacement"
         );
 
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(CAROL);
         (, uint64 attachedProtectionId) =
@@ -1305,7 +1309,7 @@ contract PositionProtectionTest is BasePerpTest {
     function test_ProtectionBook_NonTriggerActionsRejectEthAndNeverCustodyIt() public {
         _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         bytes[] memory calls = new bytes[](4);
         calls[0] = abi.encodeCall(IPositionProtectionActions.createPositionProtection, (params));
@@ -1335,7 +1339,7 @@ contract PositionProtectionTest is BasePerpTest {
         protectionBook.afterOrderTerminal(1, ALICE, IOrderRouterAccounting.OrderStatus.Failed);
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
-        protectionBook.handleFailedProtectionAttempt(1, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc);
+        protectionBook.handleFailedProtectionAttempt(1, ALICE, OrderV3Types.TerminalReason.Expired, executionBountyUsdc);
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         protectionBook.failPendingOpenForRiskOff(1, ALICE);
@@ -1354,7 +1358,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(address(router));
         assertFalse(
             protectionBook.handleFailedProtectionAttempt(
-                404, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc
+                404, ALICE, OrderV3Types.TerminalReason.Expired, executionBountyUsdc
             ),
             "unknown attempts should be ignored"
         );
@@ -1365,19 +1369,19 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(address(router));
         vm.expectRevert(IOrderRouterErrors.OrderRouter__PositionChanged.selector);
         protectionBook.handleFailedProtectionAttempt(
-            linkedOrderId, BOB, OrderV2Types.TerminalReason.Expired, executionBountyUsdc
+            linkedOrderId, BOB, OrderV3Types.TerminalReason.Expired, executionBountyUsdc
         );
 
         vm.prank(address(router));
         vm.expectRevert(PositionProtectionBook.PositionProtectionBook__InvalidTerminalReason.selector);
         protectionBook.handleFailedProtectionAttempt(
-            linkedOrderId, ALICE, OrderV2Types.TerminalReason.Executed, executionBountyUsdc
+            linkedOrderId, ALICE, OrderV3Types.TerminalReason.Executed, executionBountyUsdc
         );
 
         vm.prank(address(router));
         vm.expectRevert(PositionProtectionBook.PositionProtectionBook__BountyMismatch.selector);
         protectionBook.handleFailedProtectionAttempt(
-            linkedOrderId, ALICE, OrderV2Types.TerminalReason.Expired, executionBountyUsdc + 1
+            linkedOrderId, ALICE, OrderV3Types.TerminalReason.Expired, executionBountyUsdc + 1
         );
 
         assertTrue(
@@ -1392,7 +1396,7 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_Router_RejectsUntrustedProtectionHostMetadata() public {
         _startRecordingLogs();
-        OrderV2Types.OrderRequest memory protectedOpenRequest;
+        OrderV3Types.OrderRequest memory protectedOpenRequest;
         vm.prank(BOB);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         router.commitProtectedOpen(ALICE, protectedOpenRequest);
@@ -1456,7 +1460,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
 
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(ALICE);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
@@ -1568,11 +1572,11 @@ contract PositionProtectionTest is BasePerpTest {
             router.closeOrderExecutionBountyUsdc(),
             "retained bounty should be forfeited exactly once"
         );
-        OrderV2Types.CompactOutcome memory expiredOutcome =
+        OrderV3Types.CompactOutcome memory expiredOutcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(
             uint8(expiredOutcome.bountyDisposition),
-            uint8(OrderV2Types.BountyDisposition.RetainedForProtectionRetry),
+            uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry),
             "liquidation must not rewrite the prior attempt receipt"
         );
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
@@ -1623,16 +1627,16 @@ contract PositionProtectionTest is BasePerpTest {
             "live retry bounty should be forfeited exactly once"
         );
 
-        OrderV2Types.CompactOutcome memory retryOutcome =
+        OrderV3Types.CompactOutcome memory retryOutcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
         assertEq(
             uint8(retryOutcome.reason),
-            uint8(OrderV2Types.TerminalReason.AccountLiquidated),
+            uint8(OrderV3Types.TerminalReason.AccountLiquidated),
             "latest child should receive liquidation terminal evidence"
         );
         assertEq(
             uint8(retryOutcome.bountyDisposition),
-            uint8(OrderV2Types.BountyDisposition.Forfeited),
+            uint8(OrderV3Types.BountyDisposition.Forfeited),
             "latest child receipt should authenticate forfeiture"
         );
         assertEq(retryOutcome.bountyRecipient, engine.protocolTreasury(), "forfeiture recipient");
@@ -1665,7 +1669,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
 
         uint256 freeBefore = _freeSettlementUsdc(ALICE);
-        OrderV2Types.OrderRequest memory request = _boundedOpenRequest(CfdTypes.Side.LONG, size, marginUsdc, 0);
+        OrderV3Types.OrderRequest memory request = _boundedOpenRequest(CfdTypes.Side.LONG, size, marginUsdc, 0);
         vm.prank(ALICE);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1825,20 +1829,21 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_RetainsCallerBoundedRequestAndPublicIdentity() public {
         _startRecordingLogs();
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         request.clientOrderId = keccak256("bounded-protected-parent");
-        request.bounds.validUntil = uint64(block.timestamp + 1);
+        request.bounds.submitBy = uint64(block.timestamp + 1);
+        request.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
         request.bounds.allowedExecutionModes = 1;
 
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) =
             protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
-        OrderV2Types.ClientIntent memory intent = router.lifecycleBook().clientIntent(ALICE, request.clientOrderId);
-        OrderV2Types.PendingIntent memory pending = router.lifecycleBook().pendingIntent(parentOrderId);
+        OrderV3Types.ClientIntent memory intent = router.lifecycleBook().clientIntent(ALICE, request.clientOrderId);
+        OrderV3Types.PendingIntent memory pending = router.lifecycleBook().pendingIntent(parentOrderId);
         (IOrderRouterAccounting.PendingOrderView memory parent,) = router.getPendingOrderView(parentOrderId);
-        assertFalse(OrderV2Types.isProtocolClientOrderId(request.clientOrderId), "parent must use public id namespace");
+        assertFalse(OrderV3Types.isProtocolClientOrderId(request.clientOrderId), "parent must use public id namespace");
         assertEq(intent.orderId, parentOrderId, "client id must resolve to parent");
         assertEq(intent.intentHash, router.lifecycleBook().hashOrderRequest(ALICE, request), "caller request hash");
         assertEq(pending.account, ALICE, "pending account");
@@ -1858,7 +1863,7 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_RejectsMalformedOrUnboundedParentAndRollsBack() public {
         _startRecordingLogs();
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         bytes32 currentConfigHash = request.bounds.expectedConfigHash;
 
@@ -1883,7 +1888,7 @@ contract PositionProtectionTest is BasePerpTest {
         );
 
         request = _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
-        request.clientOrderId = OrderV2Types.protocolClientOrderId(keccak256("protected-parent"));
+        request.clientOrderId = OrderV3Types.protocolClientOrderId(keccak256("protected-parent"));
         _expectAttachedOpenCommitRevert(
             request,
             abi.encodeWithSelector(
@@ -1906,12 +1911,14 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_RejectsStaleConfigAtCommitAndRollsBack() public {
         _startRecordingLogs();
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         bytes32 staleConfigHash = request.bounds.expectedConfigHash;
         _setRouterConfig(_routerConfig());
         _refreshMark(MARK_PRICE);
-        request.bounds.validUntil = uint64(block.timestamp + router.maxOrderAge());
+        request.bounds.submitBy = uint64(block.timestamp + router.maxExecutionWindowSeconds());
+        request.bounds.executionWindowSeconds =
+            uint32(uint256(uint64(block.timestamp + router.maxExecutionWindowSeconds())) - block.timestamp);
         bytes32 currentConfigHash = router.lifecycleBook().currentExecutionConfigHash();
         assertTrue(staleConfigHash != currentConfigHash, "finalized config must change the digest");
 
@@ -1931,7 +1938,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.warp(activationTime - 1);
         _refreshMark(MARK_PRICE);
 
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         vm.prank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) =
@@ -1945,18 +1952,18 @@ contract PositionProtectionTest is BasePerpTest {
         );
 
         vm.prank(EXECUTION_KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(parentOrderId, new bytes[](0));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(parentOrderId, new bytes[](0));
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "parent lifecycle");
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "parent lifecycle");
         assertEq(
-            uint8(result.terminalReason), uint8(OrderV2Types.TerminalReason.ConfigMismatch), "parent failure reason"
+            uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ConfigMismatch), "parent failure reason"
         );
         _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
     }
 
     function test_AttachedOpen_DisallowedExecutionModeFailsParentAndProtection() public {
         _startRecordingLogs();
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         request.bounds.allowedExecutionModes = 2;
 
@@ -1968,12 +1975,12 @@ contract PositionProtectionTest is BasePerpTest {
         vm.warp(block.timestamp + 1);
         assertFalse(engine.isFadWindow(), "execution must occur in live mode");
         vm.prank(EXECUTION_KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(parentOrderId, _mockPythUpdateData(MARK_PRICE));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(parentOrderId, _mockPythUpdateData(MARK_PRICE));
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "parent lifecycle");
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "parent lifecycle");
         assertEq(
             uint8(result.terminalReason),
-            uint8(OrderV2Types.TerminalReason.ExecutionModeDisallowed),
+            uint8(OrderV3Types.TerminalReason.ExecutionModeDisallowed),
             "parent failure reason"
         );
         _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
@@ -1981,7 +1988,7 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_FinancialBoundFailureFailsParentAndProtection() public {
         _startRecordingLogs();
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         uint256 executionNotionalUsdc = (POSITION_SIZE * MARK_PRICE) / 1e20;
         request.bounds.maxExecutionNotionalUsdc = executionNotionalUsdc - 1;
@@ -1991,19 +1998,19 @@ contract PositionProtectionTest is BasePerpTest {
             protectionActions.commitOpenOrderWithProtection(request, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
 
         vm.prank(EXECUTION_KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(parentOrderId, _mockPythUpdateData(MARK_PRICE));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(parentOrderId, _mockPythUpdateData(MARK_PRICE));
 
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Failed), "parent lifecycle");
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "parent lifecycle");
         assertEq(
             uint8(result.terminalReason),
-            uint8(OrderV2Types.TerminalReason.ConstraintViolation),
+            uint8(OrderV3Types.TerminalReason.ConstraintViolation),
             "parent failure reason"
         );
         assertEq(
             uint8(
                 _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), parentOrderId).failedConstraint
             ),
-            uint8(OrderV2Types.ConstraintKind.ExecutionNotional),
+            uint8(OrderV3Types.ConstraintKind.ExecutionNotional),
             "failed bound"
         );
         _assertAttachedOpenTerminalFailure(parentOrderId, protectionId);
@@ -2011,7 +2018,7 @@ contract PositionProtectionTest is BasePerpTest {
 
     function test_AttachedOpen_ExactReplayAndClientIdConflictAreRejectedWithoutMutation() public {
         _startRecordingLogs();
-        OrderV2Types.OrderRequest memory request =
+        OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         vm.prank(ALICE);
@@ -2026,7 +2033,7 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(ALICE);
         protectionActions.commitOpenOrderWithProtection(request, params);
 
-        OrderV2Types.OrderRequest memory conflict =
+        OrderV3Types.OrderRequest memory conflict =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
         conflict.clientOrderId = request.clientOrderId;
         conflict.bounds.maxExplicitFeesUsdc -= 1;
@@ -2088,7 +2095,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 predictedLinkedOrderId = poisonOrderId + 1;
         bytes32 rawTriggerDigest = keccak256(
             abi.encode(
-                "PLETHER_POSITION_PROTECTION_TRIGGER_V2",
+                "PLETHER_POSITION_PROTECTION_TRIGGER_V3",
                 block.chainid,
                 address(router),
                 ALICE,
@@ -2096,17 +2103,18 @@ contract PositionProtectionTest is BasePerpTest {
                 predictedLinkedOrderId
             )
         );
-        bytes32 protocolClientOrderId = OrderV2Types.protocolClientOrderId(rawTriggerDigest);
+        bytes32 protocolClientOrderId = OrderV3Types.protocolClientOrderId(rawTriggerDigest);
 
-        OrderV2Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawTriggerDigest, true);
-        poisonRequest.bounds.validUntil = uint64(block.timestamp + 1);
+        OrderV3Types.OrderRequest memory poisonRequest = _publicBoundedRequest(rawTriggerDigest, true);
+        poisonRequest.bounds.submitBy = uint64(block.timestamp + 1);
+        poisonRequest.bounds.executionWindowSeconds = uint32(uint256(uint64(block.timestamp + 1)) - block.timestamp);
         vm.prank(ALICE);
         assertEq(router.commitOrder(poisonRequest), poisonOrderId, "public preclaim order id");
 
-        vm.warp(uint256(poisonRequest.bounds.validUntil) + 1);
+        vm.warp(uint256(poisonRequest.bounds.submitBy) + 1);
         vm.prank(EXECUTION_KEEPER);
-        OrderV2Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
-        assertEq(uint8(poisonResult.terminalReason), uint8(OrderV2Types.TerminalReason.Expired));
+        OrderV3Types.ExecutionResult memory poisonResult = router.executeOrder(poisonOrderId, new bytes[](0));
+        assertEq(uint8(poisonResult.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
         _refreshMark(MARK_PRICE);
 
         vm.prank(ALICE);
@@ -2118,7 +2126,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
 
         assertEq(linkedOrderId, predictedLinkedOrderId, "fixture must target the formerly colliding close");
-        assertTrue(OrderV2Types.isProtocolClientOrderId(protocolClientOrderId));
+        assertTrue(OrderV3Types.isProtocolClientOrderId(protocolClientOrderId));
         assertEq(router.lifecycleBook().clientIntent(ALICE, rawTriggerDigest).orderId, poisonOrderId);
         assertEq(router.lifecycleBook().clientIntent(ALICE, protocolClientOrderId).orderId, linkedOrderId);
         _assertTriggered(
@@ -2415,7 +2423,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(aliceParentId, 1, "Alice parent queue id");
         assertEq(bobParentId, 2, "Bob parent queue id");
 
-        vm.warp(block.timestamp + router.maxOrderAge() + 1);
+        vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
         bytes[] memory empty = new bytes[](0);
         vm.prank(EXECUTION_KEEPER);
         router.executeOrderBatch(bobParentId, empty);
@@ -2470,10 +2478,10 @@ contract PositionProtectionTest is BasePerpTest {
     function _expireProtectionAttempt(
         uint64 orderId,
         address cleaner
-    ) internal returns (OrderV2Types.ExecutionResult memory result) {
-        uint64 validUntil = router.lifecycleBook().pendingPolicy(orderId).validUntil;
-        assertGt(validUntil, block.timestamp, "fixture requires a live attempt before expiry");
-        vm.warp(uint256(validUntil) + 1);
+    ) internal returns (OrderV3Types.ExecutionResult memory result) {
+        uint64 submitBy = router.lifecycleBook().orderTiming(orderId).executionDeadline;
+        assertGt(submitBy, block.timestamp, "fixture requires a live attempt before expiry");
+        vm.warp(uint256(submitBy) + 1);
         vm.prank(cleaner);
         result = router.executeOrder(orderId, new bytes[](0));
     }
@@ -2531,15 +2539,18 @@ contract PositionProtectionTest is BasePerpTest {
     function _publicBoundedRequest(
         bytes32 clientOrderId,
         bool isClose
-    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+    ) internal view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = clientOrderId;
         request.side = CfdTypes.Side.LONG;
         request.sizeDelta = POSITION_SIZE;
         request.marginDelta = isClose ? 0 : POSITION_MARGIN_USDC;
         request.targetPrice = isClose ? engine.CAP_PRICE() : 1;
         request.isClose = isClose;
-        request.bounds = OrderV2Types.ExecutionBounds({
-            validUntil: uint64(block.timestamp + router.maxOrderAge()),
+        request.bounds = OrderV3Types.ExecutionBounds({
+            submitBy: uint64(block.timestamp + router.maxExecutionWindowSeconds()),
+            executionWindowSeconds: uint32(
+                uint256(uint64(block.timestamp + router.maxExecutionWindowSeconds())) - block.timestamp
+            ),
             allowedExecutionModes: 1 | 2 | 4,
             expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
             maxExecutionBountyUsdc: type(uint256).max,
@@ -2559,7 +2570,7 @@ contract PositionProtectionTest is BasePerpTest {
         uint256 sizeDelta,
         uint256 marginDelta,
         uint256 targetPrice
-    ) internal view returns (OrderV2Types.OrderRequest memory request) {
+    ) internal view returns (OrderV3Types.OrderRequest memory request) {
         request = _publicBoundedRequest(bytes32(uint256(router.nextCommitId())), false);
         request.side = side;
         request.sizeDelta = sizeDelta;
@@ -2568,7 +2579,7 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function _expectAttachedOpenCommitRevert(
-        OrderV2Types.OrderRequest memory request,
+        OrderV3Types.OrderRequest memory request,
         bytes memory revertData
     ) internal {
         uint256 freeBefore = _freeSettlementUsdc(ALICE);

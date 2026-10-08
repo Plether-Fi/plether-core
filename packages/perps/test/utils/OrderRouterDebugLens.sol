@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -93,11 +93,11 @@ library OrderRouterDebugLens {
         if (rawStatus != IOrderRouterAccounting.OrderStatus.None) {
             return rawStatus;
         }
-        OrderV2Types.LifecycleStatus lifecycleStatus = router.lifecycleBook().lifecycleStatus(orderId);
-        if (lifecycleStatus == OrderV2Types.LifecycleStatus.Executed) {
+        OrderV3Types.LifecycleStatus lifecycleStatus = router.lifecycleBook().lifecycleStatus(orderId);
+        if (lifecycleStatus == OrderV3Types.LifecycleStatus.Executed) {
             return IOrderRouterAccounting.OrderStatus.Executed;
         }
-        if (lifecycleStatus == OrderV2Types.LifecycleStatus.Failed) {
+        if (lifecycleStatus == OrderV3Types.LifecycleStatus.Failed) {
             return IOrderRouterAccounting.OrderStatus.Failed;
         }
         return rawStatus;

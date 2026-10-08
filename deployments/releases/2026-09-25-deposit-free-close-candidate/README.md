@@ -1,5 +1,9 @@
 # Deposit-free close release candidate — 2026-09-25
 
+This frozen artifact predates the merge of commitment-relative V3 timing. It remains available for its recorded source
+commit; build a new versioned bundle before deploying the merged close-mode and timing schema. See
+[ORDER_V3_TIMING.md](../../../packages/perps/ORDER_V3_TIMING.md).
+
 Candidate source: `f7e8714c20f3f6d449d4d6ef87d0e4b852562389`. This packet is for a **fresh stack**. The 83 consumer/interface ABIs and generated `build.json` are distributed in the [versioned prerelease artifact](https://github.com/Plether-Fi/plether-core/releases/tag/perps-deposit-free-close-v0.1.0-rc.1). Git retains the download/provenance manifest (`manifest.json`), payload checksums (`SHA256SUMS`), verification evidence (`verification.json`), and this guide. The archive preserves the original bundle bytes, including its historical README and evidence, from repository snapshot `131276fdd7af5a0e99a0d33a50127e8759ade9f3`; moving it does not imply fresh contract validation. It contains no production deployment addresses and does not authorize broadcast or migration of existing positions.
 
 The implementation and migration contract is [DEPOSIT_FREE_CLOSE.md](../../../packages/perps/DEPOSIT_FREE_CLOSE.md). Intent domain V3 and receipt/configuration domains V4 must be activated together. Keep historical ABI exports, old-stack app/keeper bindings, subsidy servicing, and already-authorized sponsored-operation reconciliation intact. New request builders perform a single commitment call without USDC assistance.

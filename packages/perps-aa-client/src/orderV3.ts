@@ -1,6 +1,6 @@
 import { decodeErrorResult, encodeFunctionData, getAddress, parseAbi, type Hex, type Address, type ContractFunctionArgs } from "viem";
-import { orderRouterV3Abi } from "./orderV3Abi.js";
-import type { SmartAccountCall } from "./types.js";
+import { orderRouterV3Abi, orderRouterV3TraderAbi } from "./orderV3Abi.js";
+import type { SmartAccountCall, PerpsActionPlan } from "./types.js";
 
 export const CloseMode = { Standard: 0, CallerPaidFullExit: 1 } as const;
 export type OrderRequestV3 = ContractFunctionArgs<typeof orderRouterV3Abi, "nonpayable", "commitOrder">[0];
@@ -64,4 +64,24 @@ export function classifyCloseFailureV3(data: Hex): "bountyFunding" | "carryFundi
       default: return "reservationMismatch";
     }
   } catch { return undefined; }
+}
+
+/** Encodes the complete immutable V3 order, including its submission and execution authority. */
+export function buildPlaceOrderV3Action(input: {
+  account: Address;
+  orderRouter: Address;
+  request: OrderRequestV3;
+}): PerpsActionPlan {
+  const { request } = input;
+  if (request.bounds.submitBy <= 0n || request.bounds.submitBy >= 1n << 64n ||
+      !Number.isInteger(request.bounds.executionWindowSeconds) || request.bounds.executionWindowSeconds <= 0 ||
+      request.bounds.executionWindowSeconds > 3600 || request.sizeDelta <= 0n || request.targetPrice <= 0n ||
+      (request.isClose && request.marginDelta !== 0n)) {
+    throw new Error("Invalid V3 order timing or economic terms");
+  }
+  return Object.freeze({ kind: "place-order", account: getAddress(input.account), submissionDeadline: request.bounds.submitBy,
+    calls: Object.freeze([Object.freeze({ to: getAddress(input.orderRouter), value: 0n,
+      data: encodeFunctionData({ abi: orderRouterV3TraderAbi, functionName: "commitOrder", args: [request] }),
+    })]),
+  });
 }

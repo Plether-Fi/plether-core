@@ -3,7 +3,9 @@
 This directory contains the machine-readable accounting model and empirical
 analysis used by `packages/perps/WHITEPAPER.md`.
 
-The Python module mirrors selected integer accounting kernels from:
+The Python module preserves selected integer accounting kernels from the
+original publication revision `06d0ab451ad9bb42f4e9869fc94b0eeb1e88efe5`,
+including historical versions of:
 
 - `CfdMath`
 - `PositionRiskAccountingLib`
@@ -13,8 +15,15 @@ The Python module mirrors selected integer accounting kernels from:
 - `LiquidationAccountingLib`
 - `HousePoolWaterfallAccountingLib`
 
-It also reconstructs Plether's six-FX normalized basket from official ECB daily
-reference rates and runs the deterministic monthly-cohort scenarios reported in
+These are frozen research helpers, not current Solidity parity implementations.
+The close-loss and liquidation helpers retain legacy collateral/claim ordering
+and uncovered-loss accounting. They do not implement current exact-lot entry
+costs, claim-first capped price collection, margin-first carry checkpoints,
+separate action and liquidation reserves, or TerminalNavBookV2 curves. The
+model's solvency helper also omits the production settlement buffer.
+
+The module also reconstructs Plether's six-FX normalized basket from official
+ECB daily reference rates and runs the deterministic monthly-cohort scenarios reported in
 the paper. The ECB series is an information-only, daily research proxy. The
 replay does not reproduce Pyth ticks, oracle confidence intervals, executable
 weekend prices, intraday paths, VPI, frozen execution, keeper latency, or
@@ -22,7 +31,8 @@ pending-deposit epochs. Signals are formed one fix before the entry proxy; the
 reference 40% final-skew wall is enforced on paired cohorts using exact
 integer/rational admission scaling. Paired legs are assumed to be interleaved,
 so this is not a transaction-level order simulation. LP capital is static:
-the scenarios include no LP deposits, withdrawals, or recapitalizations.
+the scenarios include no LP deposits, withdrawals, or recapitalizations, and do
+not simulate governed Senior capacity or Junior maintenance-fee dilution.
 
 The replay reports two non-production tranche views. The realized-cash overlay
 applies cash/claim changes and observed-interval coupon checkpoints. The
@@ -72,12 +82,17 @@ Generated outputs are:
 - `cap_sensitivity.svg`: stylized reserve sensitivity to the cap
 - `replay_summary.svg`: scenario capital, carry, and cap-sensitivity summary
 
-Render the publication PDF (requires Pandoc, `rsvg-convert`, and the bundled
-ReportLab runtime):
+Render the publication PDF using a Python environment with ReportLab and
+Pillow, plus Pandoc and `rsvg-convert` on `PATH`. The renderer also requires the
+macOS Times New Roman fonts at `/System/Library/Fonts/Supplemental`:
 
 ```bash
 python3 packages/perps/whitepaper/render_whitepaper.py
 ```
+
+The renderer preserves the original publication cover metadata and renders the
+maintained Markdown body. Layout depends on installed tools and fonts; PDF
+bytes are not deterministic.
 
 The stable output path is
 [`output/pdf/plether-perps-bounded-credit-whitepaper.pdf`](../../../output/pdf/plether-perps-bounded-credit-whitepaper.pdf).

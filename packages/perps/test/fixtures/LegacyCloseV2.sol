@@ -88,6 +88,8 @@ interface ILegacyClosePreview {
 
 interface ILegacyCloseRouter {
 
+    function maxOrderAge() external view returns (uint256);
+
     function commitOrder(
         LegacyCloseTypes.OrderRequest calldata request
     ) external returns (uint64);
