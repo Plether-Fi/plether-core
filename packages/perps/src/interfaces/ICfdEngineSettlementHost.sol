@@ -84,6 +84,7 @@ interface ICfdEngineSettlementHost {
     ///      senior claim liability. Zero is a no-op.
     /// @param account Claim beneficiary
     /// @param amountUsdc Fresh payout amount to pay or record in USDC
+    /// @param positionRemainsOpen Whether immediate cash is credited to PnL pledge rather than free settlement
     function settlementRecordTraderClaim(
         address account,
         uint256 amountUsdc,

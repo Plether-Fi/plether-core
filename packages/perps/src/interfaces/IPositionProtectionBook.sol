@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
@@ -43,7 +43,7 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
     function handleFailedProtectionAttempt(
         uint64 orderId,
         address account,
-        OrderV2Types.TerminalReason reason,
+        OrderV3Types.TerminalReason reason,
         uint256 executionBountyUsdc
     ) external returns (bool retained);
 

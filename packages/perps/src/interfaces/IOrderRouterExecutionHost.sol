@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
-/// @title V2 execution-sidecar host surface
-/// @notice Minimal Router callbacks used by the stateless V2 order-execution delegate module.
-interface IOrderRouterV2ExecutionHost {
+/// @title Execution-sidecar host surface
+/// @notice Minimal Router callbacks used by the stateless order-execution delegate module.
+interface IOrderRouterExecutionHost {
 
     /// @notice Operation isolated by the Router's self-call rollback boundary.
     enum ItemAction {
@@ -23,14 +24,14 @@ interface IOrderRouterV2ExecutionHost {
         bool pending;
     }
 
-    /// @notice Complete input for one independently revertible V2 order attempt.
+    /// @notice Complete input for one independently revertible order attempt.
     struct ItemRequest {
         uint64 orderId;
         ItemAction action;
         address executor;
         bytes32 observedConfigHash;
-        OrderV2Types.ExecutionMode executionMode;
-        OrderV2Types.PriceSource priceSource;
+        OrderV3Types.ExecutionMode executionMode;
+        OrderV3Types.PriceSource priceSource;
         uint256 executionPrice;
         uint256 neutralMarkPrice;
         uint256 poolDepthUsdc;
@@ -47,9 +48,9 @@ interface IOrderRouterV2ExecutionHost {
         uint64 orderId;
         address executor;
         bytes32 observedConfigHash;
-        OrderV2Types.TerminalReason reason;
-        OrderV2Types.ExecutionMode executionMode;
-        OrderV2Types.PriceSource priceSource;
+        OrderV3Types.TerminalReason reason;
+        OrderV3Types.ExecutionMode executionMode;
+        OrderV3Types.PriceSource priceSource;
         uint256 executionPrice;
         uint256 neutralMarkPrice;
         uint256 poolDepthUsdc;
@@ -57,8 +58,8 @@ interface IOrderRouterV2ExecutionHost {
         bool priceReachedEngine;
         uint256 bountyUsdc;
         address bountyRecipient;
-        OrderV2Types.BountyDisposition bountyDisposition;
-        OrderV2Types.FailureDetails failure;
+        OrderV3Types.BountyDisposition bountyDisposition;
+        OrderV3Types.FailureDetails failure;
     }
 
     /// @notice Canonical execution-bounty outcome returned by Router accounting.
@@ -66,8 +67,12 @@ interface IOrderRouterV2ExecutionHost {
     struct BountySettlement {
         uint256 bountyUsdc;
         address bountyRecipient;
-        OrderV2Types.BountyDisposition bountyDisposition;
+        OrderV3Types.BountyDisposition bountyDisposition;
     }
+
+    function expireMismatchedOrderFromSidecar(
+        uint64 orderId
+    ) external returns (IMarginClearinghouse.BountyRecovery memory);
 
     function engine() external view returns (address);
 
@@ -89,23 +94,23 @@ interface IOrderRouterV2ExecutionHost {
 
     /// @notice Returns the Router's canonical live queue record for `orderId`.
     /// @dev The Router may restrict this callback to `msg.sender == address(this)`.
-    function getV2OrderForSidecar(
+    function getOrderForSidecar(
         uint64 orderId
     ) external view returns (OrderView memory orderView);
 
     /// @notice Executes one item in a Router self-call rollback frame.
     /// @dev The Router implementation delegates this exact calldata to the immutable execution sidecar.
-    function executeV2OrderItemFromSidecar(
+    function executeOrderItemFromSidecar(
         ItemRequest calldata request
-    ) external returns (OrderV2Types.ExecutionResult memory result);
+    ) external returns (OrderV3Types.ExecutionResult memory result);
 
     /// @notice Releases remaining order margin, settles or retains its bounty, and unlinks its Router record.
     /// @dev `bountyRecipient` is explicit because a Router self-call changes `msg.sender`. Failed protection attempts
     ///      return a retained disposition with a zero recipient so their one reserved bounty can fund a fresh retry.
-    function settleV2OrderFromSidecar(
+    function settleOrderFromSidecar(
         uint64 orderId,
         bool success,
-        OrderV2Types.TerminalReason reason,
+        OrderV3Types.TerminalReason reason,
         address bountyRecipient,
         uint256 executionPrice,
         uint256 accountingPrice,
@@ -121,7 +126,7 @@ interface IOrderRouterV2ExecutionHost {
     /// @notice Finalizes lifecycle evidence after risk-off or liquidation accounting has already settled an order.
     function recordSettledTerminal(
         SettledTerminalInput calldata input
-    ) external returns (OrderV2Types.ExecutionResult memory result);
+    ) external returns (OrderV3Types.ExecutionResult memory result);
 
     /// @notice Refunds or defers unused execution-call ETH using the Router's canonical policy.
     function sendEthFromSidecar(

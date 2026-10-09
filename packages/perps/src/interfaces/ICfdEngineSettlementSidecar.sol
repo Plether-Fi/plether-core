@@ -13,8 +13,8 @@ interface ICfdEngineSettlementSidecar {
     /// @notice Records the LP-owned frozen-market spread assessed and settled by a voluntary close/reduce.
     /// @param account Account whose close was charged.
     /// @param assessedUsdc Total frozen spread assessed in 6-decimal USDC.
-    /// @param paidUsdc Spread recovered from retained value, physical collateral, or existing-claim netting, in
-    ///        6-decimal USDC.
+    /// @param paidUsdc Spread recovered from fresh price-gain withholding or eligible action collateral, in 6-decimal
+    ///        USDC; existing trader claims may net only price loss and cannot pay the spread.
     /// @param waivedUsdc Assessed spread left uncollected, in 6-decimal USDC; it does not become bad debt.
     event FrozenCloseSpreadSettled(address indexed account, uint256 assessedUsdc, uint256 paidUsdc, uint256 waivedUsdc);
 
@@ -46,12 +46,12 @@ interface ICfdEngineSettlementSidecar {
         address account
     ) external;
 
-    /// @notice Realizes carry and reserves one close-order bounty exclusively from free settlement.
+    /// @notice Realizes carry and reserves one close bounty from free settlement, then eligible pledge.
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
         uint256 amountUsdc
-    ) external;
+    ) external returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Applies an open/increase settlement delta through the host hooks.
     /// @dev Advances carry and mark state, settles any pool rebate and clearinghouse trade cost, then locks the gross

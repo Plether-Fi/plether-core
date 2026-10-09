@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
+import {RecordedOrderReceipts} from "../utils/RecordedOrderReceipts.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -20,8 +21,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
@@ -43,7 +44,7 @@ import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
-abstract contract BasePerpTest is Test {
+abstract contract BasePerpTest is RecordedOrderReceipts {
 
     struct CloseParitySnapshot {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;
@@ -101,7 +102,7 @@ abstract contract BasePerpTest is Test {
     TrancheVault juniorVault;
     LegacyOrderRouterHarness router;
     CfdOrderPolicyEvaluator policyEvaluator;
-    OrderRouterV2ExecutionSidecar orderExecutionSidecar;
+    OrderRouterExecutionSidecar orderExecutionSidecar;
     OrderRouterAdmin routerAdmin;
     PletherOracle pletherOracle;
     PerpsPublicLens publicLens;
@@ -833,7 +834,7 @@ abstract contract BasePerpTest is Test {
     }
 
     function _routerConfig() internal view returns (IOrderRouterAdminHost.RouterConfig memory config) {
-        config.maxOrderAge = router.maxOrderAge();
+        config.maxExecutionWindowSeconds = router.maxExecutionWindowSeconds();
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
@@ -883,7 +884,7 @@ abstract contract BasePerpTest is Test {
         address oracle_
     ) internal returns (LegacyOrderRouterHarness deployedRouter) {
         policyEvaluator = new CfdOrderPolicyEvaluator();
-        orderExecutionSidecar = new OrderRouterV2ExecutionSidecar();
+        orderExecutionSidecar = new OrderRouterExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, engine_, address(clearinghouse), pool_);

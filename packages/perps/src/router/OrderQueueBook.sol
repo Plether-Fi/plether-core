@@ -9,7 +9,7 @@ import {OrderReservationAccounting} from "@plether/perps/router/OrderReservation
 /// @notice Maintains the Router's global FIFO list and pending-order accessors.
 abstract contract OrderQueueBook is OrderReservationAccounting {
 
-    /// @notice Current head order id of the global execution queue, or zero when the queue is empty.
+    /// @notice Current global FIFO head; initialized to one before the first commit and zero after the queue drains.
     uint64 public nextExecuteId = 1;
     /// @notice Current tail order id of the global execution queue, or zero when the queue is empty.
     uint64 public globalTailOrderId;

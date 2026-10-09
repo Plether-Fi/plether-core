@@ -2,19 +2,19 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
-import {IOrderRouterV2ExecutionHost} from "@plether/perps/interfaces/IOrderRouterV2ExecutionHost.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
 /// @title OrderLiquidationHandler
-/// @notice Prices and executes account liquidation, forfeits queued bounties, and clears the account's live orders.
+/// @notice Executes priced account liquidations, forfeits order/protection bounties, and clears live orders.
 abstract contract OrderLiquidationHandler is OrderValidation {
 
-    /// @notice Processes one batch account inside its own rollback frame.
-    /// @dev Callable only by this router through its immutable liquidation-batch sidecar. This function deliberately
-    ///      has no reentrancy modifier because the outer public batch call already holds the router's transient guard.
+    /// @notice Processes one single-call or batch liquidation account inside its own rollback frame.
+    /// @dev Callable only by this Router through its immutable keeper sidecar. This function deliberately has no
+    ///      reentrancy modifier because the outer public liquidation call already holds the Router's transient guard.
     /// @param account Candidate liquidation account.
     /// @param longPrice Shared oracle price adverse to LONG positions.
     /// @param shortPrice Shared oracle price adverse to SHORT positions.
@@ -87,8 +87,8 @@ abstract contract OrderLiquidationHandler is OrderValidation {
     }
 
     /// @notice Releases margin and terminally fails every live order belonging to a liquidated account.
-    /// @dev Traverses the account queue using the successor cached before deletion and emits
-    ///      `OrderFailed(AccountLiquidated)` for each order. Bounties are expected to have been forfeited first.
+    /// @dev Uses the order ids and bounty amounts snapshotted during forfeiture, emits
+    ///      `OrderFailed(AccountLiquidated)`, and finalizes a canonical receipt for each order.
     /// @param account Liquidated account whose live queue is cleared.
     function _clearLiquidatedAccountOrders(
         address account,
@@ -115,13 +115,13 @@ abstract contract OrderLiquidationHandler is OrderValidation {
 
             // Solidity zero-initializes fields that are inapplicable to liquidation terminal evidence.
             // slither-disable-next-line uninitialized-local
-            IOrderRouterV2ExecutionHost.SettledTerminalInput memory receiptInput;
+            IOrderRouterExecutionHost.SettledTerminalInput memory receiptInput;
             receiptInput.orderId = orderId;
             receiptInput.executor = keeper;
             receiptInput.observedConfigHash = observedConfigHash;
-            receiptInput.reason = OrderV2Types.TerminalReason.AccountLiquidated;
-            receiptInput.executionMode = OrderV2Types.ExecutionMode.None;
-            receiptInput.priceSource = OrderV2Types.PriceSource.Liquidation;
+            receiptInput.reason = OrderV3Types.TerminalReason.AccountLiquidated;
+            receiptInput.executionMode = OrderV3Types.ExecutionMode.None;
+            receiptInput.priceSource = OrderV3Types.PriceSource.Liquidation;
             receiptInput.executionPrice = executionPrice;
             receiptInput.neutralMarkPrice = neutralMarkPrice;
             receiptInput.poolDepthUsdc = housePoolDepthUsdc;
@@ -130,7 +130,7 @@ abstract contract OrderLiquidationHandler is OrderValidation {
             receiptInput.bountyUsdc = orderBountiesUsdc[i];
             if (orderBountiesUsdc[i] != 0) {
                 receiptInput.bountyRecipient = protocolTreasury;
-                receiptInput.bountyDisposition = OrderV2Types.BountyDisposition.Forfeited;
+                receiptInput.bountyDisposition = OrderV3Types.BountyDisposition.Forfeited;
             }
             _recordSettledTerminalReceipt(receiptInput);
         }

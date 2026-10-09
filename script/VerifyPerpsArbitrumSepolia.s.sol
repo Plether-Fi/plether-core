@@ -18,8 +18,8 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
@@ -66,7 +66,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         CfdEngineLens engineLens;
         CfdOrderPolicyEvaluator orderPolicyEvaluator;
         CfdClosePreview closePreview;
-        OrderRouterV2ExecutionSidecar orderExecutionSidecar;
+        OrderRouterExecutionSidecar orderExecutionSidecar;
         OrderRouter router;
         OrderRouterLiquidationBatchSidecar liquidationBatchSidecar;
         OrderLifecycleBook lifecycleBook;
@@ -149,7 +149,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         deployed.engineLens = CfdEngineLens(vm.envAddress("PERPS_ENGINE_LENS"));
         deployed.orderPolicyEvaluator = CfdOrderPolicyEvaluator(vm.envAddress("PERPS_ORDER_POLICY_EVALUATOR"));
         deployed.closePreview = CfdClosePreview(vm.envAddress("PERPS_CLOSE_PREVIEW"));
-        deployed.orderExecutionSidecar = OrderRouterV2ExecutionSidecar(vm.envAddress("PERPS_ORDER_EXECUTION_SIDECAR"));
+        deployed.orderExecutionSidecar = OrderRouterExecutionSidecar(vm.envAddress("PERPS_ORDER_EXECUTION_SIDECAR"));
         deployed.router = OrderRouter(vm.envAddress("PERPS_ORDER_ROUTER"));
         deployed.liquidationBatchSidecar =
             OrderRouterLiquidationBatchSidecar(vm.envAddress("PERPS_LIQUIDATION_BATCH_SIDECAR"));
@@ -184,6 +184,11 @@ contract VerifyPerpsArbitrumSepolia is Script {
         _requireCode(address(deployed.orderPolicyEvaluator), "Order policy evaluator has no code");
         _requireCode(address(deployed.closePreview), "Close preview has no code");
         _requireCode(address(deployed.orderExecutionSidecar), "Order execution sidecar has no code");
+        _requireCode(deployed.orderExecutionSidecar.recoverySidecar(), "Order recovery sidecar has no code");
+        require(
+            deployed.orderExecutionSidecar.recoverySidecar() == vm.envAddress("PERPS_ORDER_RECOVERY_SIDECAR"),
+            "Order recovery sidecar mismatch"
+        );
         _requireCode(address(deployed.router), "Router has no code");
         _requireCode(address(deployed.liquidationBatchSidecar), "Liquidation sidecar has no code");
         _requireCode(address(deployed.lifecycleBook), "Order lifecycle book has no code");

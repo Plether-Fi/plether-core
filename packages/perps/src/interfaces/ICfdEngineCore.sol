@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -9,6 +11,15 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 /// @dev Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals,
 ///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngineCore is ICfdEngineTypes {
+
+    function refundCloseBounty(
+        address account,
+        uint256 freeUsdc,
+        uint256 pledgeUsdc
+    ) external;
+    function positionEpoch(
+        address account
+    ) external view returns (uint64);
 
     /// @notice Margin clearinghouse used for balances, locked margin, and settlement.
     /// @return Clearinghouse contract address
@@ -46,7 +57,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return initMarginBps Initial-margin ratio in basis points
     /// @return fadMarginBps Maintenance-margin ratio during FAD in basis points
     /// @return baseCarryBps Annualized base carry rate in basis points
-    /// @return minBountyUsdc Minimum total liquidation charge and position-margin floor in USDC
+    /// @return minBountyUsdc Minimum total liquidation charge, also used with bountyBps to derive the economic notional floor, in USDC
     /// @return bountyBps Variable total liquidation-charge rate in basis points
     /// @return keeperShareBps Keeper share of the collected liquidation charge in basis points
     /// @return protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points
@@ -80,7 +91,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @param order Queued order being executed by the router
     /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
     /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
-    /// @param publishTime Execution-price publish time, cached only when it is not older than `lastMarkTime`
+    /// @param publishTime Router-validated execution publish time; the Engine caches the execution price only when strictly newer
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -98,7 +109,7 @@ interface ICfdEngineCore is ICfdEngineTypes {
         address account,
         uint256 sizeDelta,
         uint256 amountUsdc
-    ) external;
+    ) external returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Moves forfeited reserved execution-bounty reservation into the protocol treasury account.
     /// @dev Callable only by the router. Reclassifies internal clearinghouse balances without moving ERC20 tokens;

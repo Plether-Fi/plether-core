@@ -28,7 +28,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @param price Weighted basket price in 8-decimal units
     /// @param confidence Sum of weighted component confidence contributions in 8-decimal price units
     /// @param publishTime Earliest component publish time as a Unix timestamp
-    /// @param pythFee Funding allocated to Pyth operations; refunded on unavailable history, zero for cache reuse
+    /// @param pythFee Funding allocated to Pyth operations in wei, also recorded when unavailable history refunds or
+    ///        defers it; zero for cache reuse
     struct BasketPrice {
         uint256 price;
         uint256 confidence;

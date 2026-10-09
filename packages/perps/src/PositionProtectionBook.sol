@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -17,7 +17,7 @@ import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProte
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 
-/// @notice Narrow engine view surface used by the passive position-protection state book.
+/// @notice Narrow engine view surface used by position-protection actions and lifecycle validation.
 interface IPositionProtectionEngine is ICfdEngineRiskParamsView {
 
     function clearinghouse() external view returns (address);
@@ -96,7 +96,7 @@ interface IPositionProtectionOrderCommitHost {
 
     function commitProtectedOpen(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) external returns (uint64 orderId);
 
 }
@@ -166,11 +166,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     /// @notice Deployment requires a nonzero router and engine.
     error PositionProtectionBook__ZeroAddress();
-    /// @notice Locally snapshotted bounties do not match the router's current timelocked configuration.
+    /// @notice Bounties disagree with current creation settings or the stored execution-bounty reserve snapshot.
     error PositionProtectionBook__BountyMismatch();
     /// @notice An activation supplied a zero or already-bound linked close id.
     error PositionProtectionBook__InvalidLinkedOrder();
-    /// @notice A reused router entrypoint returned data despite its canonical no-return ABI.
+    /// @notice A Router host returned an unexpected order id or data for a no-return entrypoint.
     error PositionProtectionBook__InvalidHostResponse();
     /// @notice The Router supplied a reason that cannot represent a failed retryable close attempt.
     error PositionProtectionBook__InvalidTerminalReason();
@@ -353,7 +353,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         }
 
         uint256 executionBountyUsdc = _executionBountySnapshots[protectionId];
-        if (executionBountyUsdc == 0 || _executionBounty(protection) != executionBountyUsdc) {
+        if (_executionBounty(protection) != executionBountyUsdc) {
             revert PositionProtectionBook__BountyMismatch();
         }
         if (protection.linkedOrderId == 0 || _attemptProtectionIds[protection.linkedOrderId] != 0) {
@@ -395,7 +395,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     /// @inheritdoc IPositionProtectionActions
     function commitOpenOrderWithProtection(
-        OrderV2Types.OrderRequest calldata request,
+        OrderV3Types.OrderRequest calldata request,
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external nonReentrant returns (uint64 parentOrderId, uint64 protectionId) {
         (uint256 triggerBountyUsdc, uint256 executionBountyUsdc) = _configuredBounties();
@@ -511,7 +511,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         plan.size = protection.size;
         plan.triggerBountyUsdc = _triggerBounty(protection);
         plan.executionBountyUsdc = _executionBounty(protection);
-        if (plan.executionBountyUsdc == 0 || plan.executionBountyUsdc != _executionBountySnapshots[protectionId]) {
+        if (plan.executionBountyUsdc != _executionBountySnapshots[protectionId]) {
             revert PositionProtectionBook__BountyMismatch();
         }
     }
@@ -622,7 +622,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     function handleFailedProtectionAttempt(
         uint64 orderId,
         address account,
-        OrderV2Types.TerminalReason reason,
+        OrderV3Types.TerminalReason reason,
         uint256 executionBountyUsdc
     ) external onlyRouter returns (bool retained) {
         uint64 protectionId = _attemptProtectionIds[orderId];
@@ -646,7 +646,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         }
 
         uint256 bountySnapshotUsdc = _executionBountySnapshots[protectionId];
-        if (bountySnapshotUsdc == 0 || executionBountyUsdc != bountySnapshotUsdc || _executionBounty(protection) != 0) {
+        if (executionBountyUsdc != bountySnapshotUsdc || _executionBounty(protection) != 0) {
             revert PositionProtectionBook__BountyMismatch();
         }
 
@@ -789,7 +789,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
     function _commitOpen(
         address account,
-        OrderV2Types.OrderRequest calldata request
+        OrderV3Types.OrderRequest calldata request
     ) private returns (uint64 parentOrderId) {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
         parentOrderId = router.nextCommitId();
@@ -986,10 +986,10 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     }
 
     function _isFailedProtectionAttemptReason(
-        OrderV2Types.TerminalReason reason
+        OrderV3Types.TerminalReason reason
     ) private pure returns (bool) {
-        return reason != OrderV2Types.TerminalReason.None && reason != OrderV2Types.TerminalReason.Executed
-            && reason != OrderV2Types.TerminalReason.RiskOff && reason != OrderV2Types.TerminalReason.AccountLiquidated;
+        return reason != OrderV3Types.TerminalReason.None && reason != OrderV3Types.TerminalReason.Executed
+            && reason != OrderV3Types.TerminalReason.RiskOff && reason != OrderV3Types.TerminalReason.AccountLiquidated;
     }
 
     function _triggeredLeg(

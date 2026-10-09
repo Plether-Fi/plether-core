@@ -19,14 +19,8 @@ contract TerminalNavCloseConservationTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(2, 1, CfdTypes.Side.LONG, 1, 0);
         CfdEnginePlanTypes.CloseDelta memory delta = _plan(snap, 1, 1);
 
-        assertTrue(delta.valid, "exact-atom partial close must be valid");
-        assertEq(delta.closeState.closedEntryCostUsdcAtoms, 0, "basis floor assigns no atom to first lot");
-        assertEq(delta.closeState.remainingEntryCostUsdcAtoms, 1, "basis remainder must stay on open lot");
-        assertEq(delta.closeState.marginToFreeUsdc, 0, "pro-rata pledge allocation rounds to zero");
-        assertEq(delta.pricePnlPledgeConsumedUsdc, 1, "conservation requires one atom above pro-rata allocation");
-        assertEq(delta.unlockMarginUsdc, 0, "no pledge atom remains available to unlock");
-        assertEq(delta.posMarginAfter, 0, "the remaining zero-loss curve needs no collectible cap");
-        _assertTerminalConservation(snap, delta, 1);
+        assertFalse(delta.valid, "a remainder at zero equity is no longer eligible");
+        assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNHEALTHY));
     }
 
     function test_MaterialClaimAndPledgeSplitMatchesOneShotTerminalRecovery() public pure {
@@ -39,8 +33,8 @@ contract TerminalNavCloseConservationTest is Test {
         assertEq(firstHalf.priceLossUsdc, 90, "first half must realize its exact basis loss");
         assertEq(firstHalf.pricePnlClaimConsumedUsdc, 90, "same-account claim must net first");
         assertEq(firstHalf.pricePnlPledgeConsumedUsdc, 0, "claim fully covers first-half loss");
-        assertEq(firstHalf.posMarginAfter, 80, "thirty atoms of closed pledge stay to cap the remainder");
-        assertEq(firstHalf.unlockMarginUsdc, 20, "only surplus pledge may unlock");
+        assertEq(firstHalf.posMarginAfter, 81, "strict residual health retains one additional atom");
+        assertEq(firstHalf.unlockMarginUsdc, 19, "only surplus pledge above strict health may unlock");
 
         uint256 splitRecovery =
             firstHalf.pricePnlClaimConsumedUsdc + firstHalf.pricePnlPledgeConsumedUsdc + _postTerminalLoss(firstHalf);
@@ -73,7 +67,8 @@ contract TerminalNavCloseConservationTest is Test {
             // SHORT loses when the mark falls; keep every lot at least one atom above the mark.
             entryCost = bound(uint256(entrySeed), lots * (price + 1), lots * CAP_PRICE);
         }
-        uint256 pledge = bound(uint256(pledgeSeed), 0, 1e12);
+        uint256 rawLoss = side == CfdTypes.Side.LONG ? lots * price - entryCost : entryCost - lots * price;
+        uint256 pledge = rawLoss + bound(uint256(pledgeSeed), 1, 1e12);
         uint256 claim = bound(uint256(claimSeed), 0, 1e12);
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(lots, entryCost, side, pledge, claim);

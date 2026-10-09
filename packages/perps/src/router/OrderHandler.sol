@@ -42,7 +42,7 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
         IOrderRouterAdminHost.RouterConfig calldata config
     ) internal {
         _onlyAdmin();
-        maxOrderAge = config.maxOrderAge;
+        maxExecutionWindowSeconds = config.maxExecutionWindowSeconds;
         minOpenNotionalUsdc = config.minOpenNotionalUsdc;
     }
 

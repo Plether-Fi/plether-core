@@ -5,16 +5,17 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
-/// @dev Exact permissionless Engine read surface needed to reproduce `CfdEngineSettlementSidecar.buildRawSnapshot`.
+/// @dev Permissionless Engine read surface used to build policy-evaluation snapshots.
 interface ICfdOrderPolicyEngineView {
 
     function positions(
@@ -85,6 +86,7 @@ interface ICfdOrderPolicyEngineView {
     function CAP_PRICE() external view returns (uint256);
 
     function executionFeeBps() external view returns (uint256);
+    function settlementBufferBps() external view returns (uint256);
 
     function isFadWindow() external view returns (bool);
 
@@ -94,12 +96,13 @@ interface ICfdOrderPolicyEngineView {
 
 }
 
-/// @title CfdOrderPolicyEvaluator
-/// @notice Stateless policy coordinator that derives an authoritative plan or evaluates a caller-supplied plan.
-/// @dev `assessOrder` reads only the supplied Engine and its configured dependencies, reproduces the settlement
-///      sidecar snapshot, and invokes exactly one open or close planning entrypoint. The pure entrypoints remain useful
-///      for deterministic simulation and parity testing. Bounds are evaluated in `ConstraintKind` order; equality
-///      passes. A full close checks every non-position bound but skips equity and leverage because no position remains.
+/// @title CfdOrderPolicyEvaluatorBase
+/// @notice Shared policy coordinator that derives a plan or evaluates a caller-supplied plan.
+/// @dev Provides internal snapshot, planner-call, and bound-check helpers for the public evaluator and close preview.
+///      `_assessOrder` reads the supplied Engine and its dependencies and invokes one open or close planner. Its
+///      snapshot leaves `settlementBufferBps` at zero; engine execution separately enforces the configured buffer.
+///      Pure helpers accept caller-supplied snapshots and deltas for deterministic simulation. Bounds follow
+///      `ConstraintKind` order and equality passes. Full closes skip post-position equity and leverage bounds.
 abstract contract CfdOrderPolicyEvaluatorBase {
 
     uint256 private constant BPS = 10_000;
@@ -128,15 +131,25 @@ abstract contract CfdOrderPolicyEvaluatorBase {
 
     function _assessOrder(
         AssessmentContext memory context,
-        CfdTypes.Order calldata order,
-        OrderV2Types.ExecutionBounds calldata bounds
-    ) internal view returns (OrderV2Types.ExecutionAssessment memory assessment) {
+        CfdTypes.Order memory order,
+        OrderV3Types.ExecutionBounds memory bounds
+    ) internal view returns (OrderV3Types.ExecutionAssessment memory assessment) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(context.engineAddress);
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc);
+        return _assessSnapshot(context, order, bounds, planner, snapshot);
+    }
+
+    function _assessSnapshot(
+        AssessmentContext memory context,
+        CfdTypes.Order memory order,
+        OrderV3Types.ExecutionBounds memory bounds,
+        ICfdEnginePlanner planner,
+        CfdEnginePlanTypes.RawSnapshot memory snapshot
+    ) internal view returns (OrderV3Types.ExecutionAssessment memory) {
         bool bountyReturnsToAccount = context.executor == order.account;
-        OrderV2Types.ExecutionBounds memory boundsCopy = bounds;
+        OrderV3Types.ExecutionBounds memory boundsCopy = bounds;
 
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
@@ -152,10 +165,10 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _evaluateOpen(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.OpenDelta memory delta,
-        OrderV2Types.ExecutionBounds memory bounds,
+        OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount
-    ) internal pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidOpenDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment = _buildOpenAssessment(snapshot, delta, executionBountyUsdc, bountyReturnsToAccount, assessment.mode);
@@ -165,10 +178,10 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _evaluateClose(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.CloseDelta memory delta,
-        OrderV2Types.ExecutionBounds memory bounds,
+        OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount
-    ) internal pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+    ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment =
@@ -181,6 +194,18 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         ICfdEnginePlanner planner,
         address account,
         uint256 poolDepthUsdc
+    ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
+        return _buildRawSnapshot(engine, planner, account, poolDepthUsdc, IHousePool(engine.pool()).totalAssets());
+    }
+
+    /// @dev Authoritative assessment already read canonical pool cash. Reuse that observation; simulation callers
+    ///      may supply a different pricing depth and must use the four-argument overload to read historical carry cash.
+    function _buildRawSnapshot(
+        ICfdOrderPolicyEngineView engine,
+        ICfdEnginePlanner planner,
+        address account,
+        uint256 poolDepthUsdc,
+        uint256 poolCashUsdc
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
         (
             snapshot.position.size,
@@ -201,7 +226,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.lastMarkTime = engine.lastMarkTime();
         snapshot.riskParams = engine.riskParams();
 
-        snapshot.poolCashUsdc = IHousePool(engine.pool()).totalAssets();
+        snapshot.poolCashUsdc = poolCashUsdc;
         snapshot.longSide =
             _sideSnapshot(engine, planner, CfdTypes.Side.LONG, snapshot.poolCashUsdc, snapshot.riskParams.baseCarryBps);
         snapshot.shortSide = _sideSnapshot(
@@ -210,14 +235,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.poolAssetsUsdc = poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
-        snapshot.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
-        snapshot.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
-        snapshot.liquidationReserveUsdc = clearinghouse.liquidationReserveUsdc(account);
-        snapshot.actionReserveUsdc = clearinghouse.actionReserveUsdc(account);
-        snapshot.vpiRebateReserveUsdc = clearinghouse.vpiRebateReserveUsdc(account);
-        snapshot.protectedExecutionBountyUsdc = clearinghouse.totalBountyReservationsUsdc(account);
-        // The clearinghouse bucket is the canonical active-margin source even if the Engine tuple was stale.
-        snapshot.position.margin = snapshot.lockedBuckets.positionMarginUsdc;
+        CfdEngineCollateralSnapshotLib.load(snapshot, clearinghouse, account, false);
 
         snapshot.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
         snapshot.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
@@ -225,6 +243,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.degradedMode = engine.degradedMode();
         snapshot.capPrice = engine.CAP_PRICE();
         snapshot.executionFeeBps = engine.executionFeeBps();
+        snapshot.settlementBufferBps = engine.settlementBufferBps();
         snapshot.isFadWindow = engine.isFadWindow();
         snapshot.oracleFrozen = engine.isOracleFrozen();
         snapshot.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
@@ -280,16 +299,16 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _requireAllowedMode(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         uint8 allowedExecutionModes
-    ) private pure returns (OrderV2Types.ExecutionMode mode) {
+    ) private pure returns (OrderV3Types.ExecutionMode mode) {
         if (snapshot.oracleFrozen) {
-            mode = OrderV2Types.ExecutionMode.Frozen;
+            mode = OrderV3Types.ExecutionMode.Frozen;
         } else if (snapshot.isFadWindow) {
-            mode = OrderV2Types.ExecutionMode.Fad;
+            mode = OrderV3Types.ExecutionMode.Fad;
         } else {
-            mode = OrderV2Types.ExecutionMode.Live;
+            mode = OrderV3Types.ExecutionMode.Live;
         }
 
-        uint8 modeBit = mode == OrderV2Types.ExecutionMode.Live ? 1 : mode == OrderV2Types.ExecutionMode.Fad ? 2 : 4;
+        uint8 modeBit = mode == OrderV3Types.ExecutionMode.Live ? 1 : mode == OrderV3Types.ExecutionMode.Fad ? 2 : 4;
         if (allowedExecutionModes & modeBit == 0) {
             revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ExecutionModeDisallowed(
                 mode, allowedExecutionModes
@@ -302,8 +321,8 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.OpenDelta memory delta,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount,
-        OrderV2Types.ExecutionMode mode
-    ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+        OrderV3Types.ExecutionMode mode
+    ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         uint256 positiveTradeCostUsdc = 0;
         uint256 tradeRebateUsdc = 0;
         if (delta.tradeCostUsdc >= 0) {
@@ -366,9 +385,21 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.CloseDelta memory delta,
         uint256 executionBountyUsdc,
         bool bountyReturnsToAccount,
-        OrderV2Types.ExecutionMode mode
-    ) private pure returns (OrderV2Types.ExecutionAssessment memory assessment) {
+        OrderV3Types.ExecutionMode mode
+    ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         assessment.mode = mode;
+        assessment.close = OrderV3Types.CloseEconomics({
+            postFreeSettlementUsdc: 0,
+            safeMarginReleaseUsdc: delta.safeMarginReleaseUsdc,
+            actionChargeFromReleasedMarginUsdc: delta.actionChargeFromReleasedMarginUsdc,
+            netReleasedMarginUsdc: delta.netReleasedMarginUsdc,
+            priceLossUsdc: delta.priceLossUsdc,
+            pricePnlClaimConsumedUsdc: delta.pricePnlClaimConsumedUsdc,
+            pricePnlPledgeConsumedUsdc: delta.pricePnlPledgeConsumedUsdc,
+            priceLossWrittenOffUsdc: delta.priceLossWrittenOffUsdc,
+            actionChargeWithheldUsdc: delta.actionChargeWithheldUsdc,
+            actionChargeWaivedUsdc: delta.actionChargeWaivedUsdc
+        });
         assessment.executionNotionalUsdc = CfdMath.sizeToLots(delta.sizeDelta) * delta.price;
         assessment.grossAccountDebitUsdc = delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc
             + delta.realizedCarryUsdc + delta.actionChargeCollectedUsdc + executionBountyUsdc;
@@ -400,6 +431,15 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         }
         assessment.postPositionSize = delta.closeState.remainingSize;
         assessment.postPositionMarginUsdc = delta.posMarginAfter;
+        uint256 actionReserveAfter = snapshot.actionReserveUsdc - delta.actionReserveConsumedUsdc
+            - (delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc);
+        // Pure simulation may omit the reservation; canonical close assessment always authenticates it.
+        actionReserveAfter = actionReserveAfter > executionBountyUsdc ? actionReserveAfter - executionBountyUsdc : 0;
+        uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveUsdc
+            - delta.liquidationReserveReleaseUsdc + snapshot.lockedBuckets.committedOrderMarginUsdc
+            - delta.actionCommittedMarginConsumedUsdc + actionReserveAfter;
+        assessment.close.postFreeSettlementUsdc =
+            assessment.postSettlementBalanceUsdc > lockedAfter ? assessment.postSettlementBalanceUsdc - lockedAfter : 0;
 
         if (delta.deletePosition) {
             return assessment;
@@ -424,35 +464,50 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalUsdc, riskState.equityUsdc);
     }
 
+    function _includeCommitment(
+        OrderV3Types.ExecutionAssessment memory assessment,
+        CfdEnginePlanTypes.CloseCommitment memory effects,
+        OrderV3Types.ExecutionBounds memory bounds,
+        uint256 bounty
+    ) internal pure {
+        assessment.grossAccountDebitUsdc += effects.carryCollectedUsdc;
+        assessment.actionChargeAssessedUsdc += effects.carryCollectedUsdc;
+        assessment.actionChargeCollectedUsdc += effects.carryCollectedUsdc;
+        assessment.carryUsdc += effects.carryCollectedUsdc;
+        // Zero residual size identifies a full close; strict partial bounds apply to every positive remainder.
+        // slither-disable-next-line incorrect-equality
+        _enforceBounds(assessment, bounds, bounty, assessment.postPositionSize == 0);
+    }
+
     /// @dev Bound precedence is deliberately identical to the order of `ConstraintKind` values.
     function _enforceBounds(
-        OrderV2Types.ExecutionAssessment memory assessment,
-        OrderV2Types.ExecutionBounds memory bounds,
+        OrderV3Types.ExecutionAssessment memory assessment,
+        OrderV3Types.ExecutionBounds memory bounds,
         uint256 executionBountyUsdc,
         bool fullClose
     ) private pure {
-        _requireMaximum(OrderV2Types.ConstraintKind.ExecutionBounty, executionBountyUsdc, bounds.maxExecutionBountyUsdc);
+        _requireMaximum(OrderV3Types.ConstraintKind.ExecutionBounty, executionBountyUsdc, bounds.maxExecutionBountyUsdc);
         _requireMaximum(
-            OrderV2Types.ConstraintKind.ExecutionNotional,
+            OrderV3Types.ConstraintKind.ExecutionNotional,
             assessment.executionNotionalUsdc,
             bounds.maxExecutionNotionalUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.GrossAccountDebit,
+            OrderV3Types.ConstraintKind.GrossAccountDebit,
             assessment.grossAccountDebitUsdc,
             bounds.maxGrossAccountDebitUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.ActionCharge, assessment.actionChargeAssessedUsdc, bounds.maxActionChargeUsdc
+            OrderV3Types.ConstraintKind.ActionCharge, assessment.actionChargeAssessedUsdc, bounds.maxActionChargeUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.ExplicitFees, assessment.explicitFeesUsdc, bounds.maxExplicitFeesUsdc
+            OrderV3Types.ConstraintKind.ExplicitFees, assessment.explicitFeesUsdc, bounds.maxExplicitFeesUsdc
         );
         _requireMaximum(
-            OrderV2Types.ConstraintKind.PostPositionSize, assessment.postPositionSize, bounds.maxPostPositionSize
+            OrderV3Types.ConstraintKind.PostPositionSize, assessment.postPositionSize, bounds.maxPostPositionSize
         );
         _requireMinimum(
-            OrderV2Types.ConstraintKind.PostSettlementBalance,
+            OrderV3Types.ConstraintKind.PostSettlementBalance,
             assessment.postSettlementBalanceUsdc,
             bounds.minPostSettlementBalanceUsdc
         );
@@ -465,14 +520,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
             assessment.postPositionEquityUsdc > 0 ? uint256(assessment.postPositionEquityUsdc) : 0;
         if (assessment.postPositionEquityUsdc < 0 || normalizedEquityUsdc < bounds.minPostPositionEquityUsdc) {
             revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation(
-                OrderV2Types.ConstraintKind.PostPositionEquity, normalizedEquityUsdc, bounds.minPostPositionEquityUsdc
+                OrderV3Types.ConstraintKind.PostPositionEquity, normalizedEquityUsdc, bounds.minPostPositionEquityUsdc
             );
         }
-        _requireMaximum(OrderV2Types.ConstraintKind.PostLeverage, assessment.postLeverageBps, bounds.maxPostLeverageBps);
+        _requireMaximum(OrderV3Types.ConstraintKind.PostLeverage, assessment.postLeverageBps, bounds.maxPostLeverageBps);
     }
 
     function _requireMaximum(
-        OrderV2Types.ConstraintKind constraint,
+        OrderV3Types.ConstraintKind constraint,
         uint256 actual,
         uint256 limit
     ) private pure {
@@ -482,7 +537,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     }
 
     function _requireMinimum(
-        OrderV2Types.ConstraintKind constraint,
+        OrderV3Types.ConstraintKind constraint,
         uint256 actual,
         uint256 limit
     ) private pure {

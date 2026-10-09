@@ -27,7 +27,7 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
         });
     }
 
-    function test_Invariant_FailedFullCloseCannotExtractActiveMarginAsKeeperBounty() public {
+    function test_Invariant_FailedFullClosePaysOnlyTheSnapshottedBackedBounty() public {
         _fundTrader(trader, 5000e6);
         _fundTrader(counterparty, 50_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
@@ -63,10 +63,14 @@ contract AuditValueConservationInvariant_FullCloseBounty is BasePerpTest {
         assertEq(sizeAfter, 100_000e18, "The slippage-failed full close leaves the position open");
         assertEq(
             clearinghouse.balanceUsdc(keeper),
-            keeperSettlementBefore,
-            "Failed closes must not convert active position margin into keeper-owned settlement"
+            keeperSettlementBefore + router.closeOrderExecutionBountyUsdc(),
+            "Existing terminal failure policy pays exactly the backed bounty"
         );
-        assertEq(marginAfter, marginBefore, "Failed closes must not reduce active position margin");
+        assertEq(
+            marginAfter,
+            marginBefore - router.closeOrderExecutionBountyUsdc(),
+            "No pledge beyond the reservation is consumed"
+        );
     }
 
 }

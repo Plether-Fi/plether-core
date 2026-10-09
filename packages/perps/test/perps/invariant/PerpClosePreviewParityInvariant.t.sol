@@ -15,8 +15,8 @@ import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.so
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -67,7 +67,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
             address(engine), address(housePool), address(mockPyth), feedIds, weights, basePrices, new bool[](1)
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(housePool));
@@ -244,8 +244,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     CfdTypes.CloseInvalidReason r = preview.invalidReason;
                     assertTrue(
                         r == CfdTypes.CloseInvalidReason.PartialCloseUnderwater
-                            || r == CfdTypes.CloseInvalidReason.DustPosition,
-                        "Partial close of valid-full-close position can only fail for shortfall or dust"
+                            || r == CfdTypes.CloseInvalidReason.DustPosition
+                            || r == CfdTypes.CloseInvalidReason.PartialActionChargeUncollectible
+                            || r == CfdTypes.CloseInvalidReason.PartialCloseUnhealthy,
+                        "Partial close may fail only for partial funding, health, or size constraints"
                     );
                 }
             }

@@ -24,20 +24,20 @@ library CfdTypes {
     ///      It is intentionally distinct from the clearinghouse custody bucket that holds the locked funds backing it.
     /// @param size Position notional in synthetic-token units (18 decimals).
     /// @param margin Isolated position margin in USDC units (6 decimals).
-    /// @param entryPrice Size-weighted raw FX-basket mark at execution (8 decimals).
+    /// @param entryPrice Display-only average entry mark, floored from exact remaining entry cost per lot (8 decimals).
     /// @param maxProfitUsdc Cumulative maximum-profit envelope used for solvency accounting (6-decimal USDC).
     /// @param side Direction of the position.
     /// @param lastUpdateTime Unix timestamp of the position's most recent state change.
-    /// @param lastCarryTimestamp Unix timestamp through which carry has been realized.
+    /// @param lastCarryTimestamp Unix timestamp through which carry has been checkpointed; unpaid carry may remain.
     /// @param vpiAccrued Signed cumulative VPI charged (positive) or rebated (negative), in 6-decimal USDC.
     struct Position {
         uint256 size; // [18 dec] Notional size in synthetic tokens
         uint256 margin; // [6 dec] Isolated margin backing this position
-        uint256 entryPrice; // [8 dec] Raw FX-basket mark at execution
+        uint256 entryPrice; // [8 dec] Display-only average; exact basis is stored separately
         uint256 maxProfitUsdc; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
         Side side; // [uint8] Trade direction
         uint64 lastUpdateTime; // [uint64] Timestamp of last modification
-        uint64 lastCarryTimestamp; // [uint64] Timestamp through which carry has been realized
+        uint64 lastCarryTimestamp; // [uint64] Last carry checkpoint; collection can be incomplete
         int256 vpiAccrued; // [6 dec] Cumulative VPI charges (+) and rebates (-) across the position's lifetime
     }
 
@@ -45,7 +45,7 @@ library CfdTypes {
     /// @param account Canonical clearinghouse account that submitted the order.
     /// @param sizeDelta Position-size change in synthetic-token units (18 decimals).
     /// @param marginDelta Margin committed by an open/increase order in 6-decimal USDC; close orders require zero.
-    /// @param targetPrice Direction-aware execution limit (8 decimals); production V2 commits require it nonzero.
+    /// @param targetPrice Direction-aware execution limit (8 decimals); production V3 commits require it nonzero.
     /// @param commitTime Unix timestamp at submission, used for expiry and post-commit oracle checks.
     /// @param commitBlock Block number at submission, used to block same-block execution outside frozen-oracle mode.
     /// @param orderId Monotonically increasing router order identifier.
@@ -54,7 +54,7 @@ library CfdTypes {
     struct Order {
         address account; // Maps to MarginClearinghouse unified account
         uint256 sizeDelta; // [18 dec] Amount of size to add/remove
-        uint256 marginDelta; // [6 dec] Amount of margin to add/remove
+        uint256 marginDelta; // [6 dec] Open/increase margin contribution; zero for closes
         uint256 targetPrice; // [8 dec] Slippage protection limit
         uint64 commitTime; // Timestamp of intent submission (MEV shield)
         uint64 commitBlock; // Block number of intent submission (same-block execution shield)
@@ -71,14 +71,16 @@ library CfdTypes {
         NoPosition,
         /// @notice The requested close size is zero or exceeds the live position.
         BadSize,
-        /// @notice The requested partial close would leave an undercollateralized position.
+        /// @notice The requested partial close cannot collect every assessed action charge from eligible collateral.
         PartialCloseUnderwater,
-        /// @notice The requested partial close would leave a position below protocol dust floors.
+        /// @notice Legacy dust-failure value retained for ABI compatibility; the current close planner does not emit it.
         DustPosition,
         /// @notice The requested close size is not divisible by the canonical 100-token position quantum.
         InvalidSizeQuantum,
         /// @notice The position's dedicated negative-VPI rebate reserve is below its required target.
-        VpiRebateReserveUnderfunded
+        VpiRebateReserveUnderfunded,
+        PartialActionChargeUncollectible,
+        PartialCloseUnhealthy
     }
 
     /// @notice Global risk parameters used by position, VPI, carry, margin, and liquidation accounting.
@@ -89,8 +91,8 @@ library CfdTypes {
     /// @param maintMarginBps Normal maintenance-margin ratio in basis points.
     /// @param initMarginBps Initial-margin ratio for opens and increases in basis points.
     /// @param fadMarginBps Maintenance-margin ratio used during the FAD window in basis points.
-    /// @param baseCarryBps Annualized base carry rate applied to LP-backed notional in basis points.
-    /// @param minBountyUsdc Minimum total liquidation charge and position-margin floor in 6-decimal USDC.
+    /// @param baseCarryBps Annualized rate at full side utilization, in basis points, applied to LP-backed profit exposure.
+    /// @param minBountyUsdc Minimum liquidation charge/reserve and initial-equity floor in 6-decimal USDC.
     /// @param bountyBps Variable total liquidation-charge rate applied to notional in basis points.
     /// @param keeperShareBps Keeper share of the collected liquidation charge in basis points.
     /// @param protocolShareBps Protocol-treasury share of the collected liquidation charge in basis points; LPs receive
@@ -101,7 +103,7 @@ library CfdTypes {
         uint256 maintMarginBps; // e.g., 100 (1%)
         uint256 initMarginBps; // e.g., 150 (1.5%)
         uint256 fadMarginBps; // e.g., 300 (3%)
-        uint256 baseCarryBps; // e.g., 500 (5% annualized carry on LP-backed notional)
+        uint256 baseCarryBps; // e.g., 500 (5% annualized on LP-backed profit exposure at full utilization)
         uint256 minBountyUsdc; // e.g., 1_000_000 ($1 USDC total charge floor)
         uint256 bountyBps; // e.g., 10 (0.10% of notional total charge)
         uint256 keeperShareBps; // e.g., 5_000 (50% of the collected charge)

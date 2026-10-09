@@ -29,7 +29,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         uint256 traderSettlementBefore = clearinghouse.balanceUsdc(traderAccount);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
 
-        vm.warp(block.timestamp + router.maxOrderAge() + 1);
+        vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
         bytes[] memory empty = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(1, empty);
@@ -58,7 +58,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         uint256 traderWalletBefore = usdc.balanceOf(ALICE);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
 
-        vm.warp(block.timestamp + router.maxOrderAge() + 1);
+        vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
         bytes[] memory empty = _mockPythUpdateData();
         vm.prank(KEEPER);
         router.executeOrder(1, empty);

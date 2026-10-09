@@ -4,7 +4,6 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "../../packages/perps/test/perps/BasePerpTest.sol";
 import {ArbitrumSepoliaReleaseOracle} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
@@ -12,6 +11,9 @@ import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 /// @notice Same test runs against baseline and candidate. No Pyth code/storage/signature substitution is permitted.
 /// @dev Missing fixture or RPC configuration fails; no skip or mock fallback qualifies this release gate.
 contract OracleSynchronizationForkTest is BasePerpTest {
+
+    // LifecycleStatus.Executed has value 2 in both the recorded V2 baseline and the current V3 interface.
+    uint256 internal constant EXECUTED_STATUS = 2;
 
     string internal fixture;
     address internal realPyth;
@@ -120,12 +122,9 @@ contract OracleSynchronizationForkTest is BasePerpTest {
         assertTrue(vm.revertToState(beforeResolution));
         uint256 beforeBalance = realPyth.balance;
         uint256 beforeGas = gasleft();
-        OrderV2Types.ExecutionResult memory result =
-            router.executeOrder{value: executionFunding, gas: 30_000_000}(id, data);
+        uint256 status = uint256(router.executeOrder{value: executionFunding, gas: 30_000_000}(id, data).status);
         emit log_named_uint("real Pyth execution call gas", beforeGas - gasleft());
-        assertEq(
-            uint256(result.status), uint256(OrderV2Types.LifecycleStatus.Executed), "must execute, not merely return"
-        );
+        assertEq(status, EXECUTED_STATUS, "must execute, not merely return");
         assertEq(engine.lastMarkTime(), tick);
         assertEq(engine.lastMarkPrice(), expected.markPrice);
         (,, uint256 entryPrice,,,,) = engine.positions(address(0xA11CE));

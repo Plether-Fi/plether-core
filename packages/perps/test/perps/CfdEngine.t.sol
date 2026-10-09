@@ -1449,7 +1449,7 @@ contract CfdEngineTest is BasePerpTest {
             lockedAfterOpen.reservedSettlementUsdc, 0, "Open positions should not leave reserved settlement behind"
         );
 
-        // Warp 30 days — accumulates legacy negative spread for lone LONG
+        // Warp 30 days before the next carry checkpoint; no legacy side-spread state exists.
         vm.warp(block.timestamp + 30 days);
 
         // Increase position — triggers carry realization in processOrder
@@ -2958,13 +2958,13 @@ contract CfdEngineTest is BasePerpTest {
         assertFalse(preview.valid, "Partial close must not evade an uncollectible frozen spread");
         assertEq(
             uint8(preview.invalidReason),
-            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnderwater),
-            "Gross frozen-close shortfall should use the partial-close underwater policy"
+            uint8(CfdTypes.CloseInvalidReason.PartialCloseUnhealthy),
+            "An unhealthy remainder is diagnosed before fee funding"
         );
         assertEq(preview.badDebtUsdc, 0, "Spread-only shortfall should remain distinct from base bad debt");
     }
 
-    function test_PreviewClose_UsesPostUnlockFreeSettlementForLosses() public {
+    function test_PreviewClose_RejectsUnhealthyReleaseWithoutTouchingQueuedBacking() public {
         address trader = address(0xAB1302);
         address account = trader;
         _fundTrader(trader, 5000e6);
@@ -2977,11 +2977,9 @@ contract CfdEngineTest is BasePerpTest {
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 110_000_000);
 
-        assertGt(
-            preview.seizedCollateralUsdc,
-            freeSettlementBeforePreview,
-            "Preview loss collection should include settlement freed by the partial close before applying close losses"
-        );
+        assertFalse(preview.valid, "pledge cannot unlock into an unhealthy remainder");
+        assertEq(uint8(preview.invalidReason), uint8(CfdTypes.CloseInvalidReason.PartialCloseUnhealthy));
+        assertEq(_freeSettlementUsdc(account), freeSettlementBeforePreview);
     }
 
     function test_PreviewClose_UnderwaterPartialMatchesLiveRevert() public {
@@ -2996,24 +2994,17 @@ contract CfdEngineTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000 * 1e18, 80_000_000);
         (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(account);
 
-        assertTrue(preview.valid, "Partial price loss above its collectible cap should remain live");
-        assertLt(preview.realizedPnlUsdc, 0, "Setup must realize a partial price loss");
-        assertLt(
-            preview.seizedCollateralUsdc,
-            uint256(-preview.realizedPnlUsdc),
-            "Only exact claim-plus-pledge collateral should be collected; the price tail is written off"
+        assertFalse(preview.valid);
+        assertEq(uint8(preview.invalidReason), uint8(CfdTypes.CloseInvalidReason.PartialCloseUnhealthy));
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert(
+            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, uint8(1), uint8(6), true)
         );
-        assertEq(preview.badDebtUsdc, 0, "Partial price writeoff must not create protocol debt");
-        assertLt(preview.remainingSize, sizeBefore, "Preview should reduce the live position");
-        assertLe(preview.remainingMargin, marginBefore, "Partial loss must not increase the surviving PnL pledge");
-
-        // This is Engine preview/apply parity. A V2 Router order intentionally rejects the same partial close at
-        // the mandatory nonnegative post-position-equity boundary before it can reach Engine apply.
-        _close(account, CfdTypes.Side.SHORT, 100_000 * 1e18, 0.8e8);
+        _close(account, CfdTypes.Side.SHORT, 100_000e18, 0.8e8, depth);
 
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(sizeAfter, preview.remainingSize, "Live partial writeoff should match previewed remaining size");
-        assertEq(marginAfter, preview.remainingMargin, "Live partial writeoff should match previewed surviving pledge");
+        assertEq(sizeAfter, sizeBefore, "Rejected close preserves size");
+        assertEq(marginAfter, marginBefore, "Rejected close preserves pledge");
         _assertTerminalCurveMatchesEngine(account);
     }
 
@@ -4244,7 +4235,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 7900e6, type(uint256).max, false);
 
-        // Make the terminal action charge large enough to exhaust margin and free settlement. This is deliberately separate from
+        // Make the terminal action charge large enough to exhaust spendable action reserve and free settlement. This is separate from
         // the adverse price move: only the action slice may reach the queued committed-margin bucket.
         stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(account)
             .checked_write(uint256(2500e6));
@@ -4846,9 +4837,9 @@ contract CfdEngineTest is BasePerpTest {
         address account = address(uint160(1));
         _fundTrader(account, 1000 * 1e6);
 
-        // notional = 100k * $1 = $100k. execFee = $60, VPI ~= $2.50
+        // The $100k notional requires $1500 of isolated initial margin before considering fees and reserve carve-outs.
         // MMR = 1% of $100k = $1000
-        // Even using full cross-margin equity, $1000 account collateral is below the configured $1500 initial margin requirement.
+        // Even the full $1000 account balance is below that requirement; the order supplies only $200 of margin.
         // Without the initial margin check, this would create an instantly-liquidatable position.
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
@@ -5469,7 +5460,7 @@ contract CfdEngineTest is BasePerpTest {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
 
         vm.prank(address(router));
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 1400e6);
     }
 
@@ -5529,7 +5520,7 @@ contract CfdEngineTest is BasePerpTest {
         );
     }
 
-    function test_ReserveCloseOrderExecutionBounty_RevertsFullCloseNearMaintenance() public {
+    function test_ReserveCloseOrderExecutionBounty_AllowsFullCloseNearMaintenance() public {
         address trader = address(0x515991);
         address account = trader;
         address counterparty = address(0x515992);
@@ -5547,8 +5538,8 @@ contract CfdEngineTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         engine.reserveCloseOrderExecutionBounty(account, size, 1e6);
+        assertEq(clearinghouse.actionReserveUsdc(account), 1e6);
     }
 
     function test_ReserveCloseOrderExecutionBounty_PartialCloseStillRevertsNearMaintenance() public {
@@ -5567,7 +5558,7 @@ contract CfdEngineTest is BasePerpTest {
         engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
 
         vm.prank(address(router));
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         engine.reserveCloseOrderExecutionBounty(account, size / 2, 1e6);
     }
 
@@ -5987,7 +5978,7 @@ contract CfdEngineAuditTest is BasePerpTest {
         (uint256 sizeBefore,,,,,,) = engine.positions(carolAccount);
 
         IOrderRouterAdminHost.RouterConfig memory config;
-        config.maxOrderAge = router.maxOrderAge();
+        config.maxExecutionWindowSeconds = router.maxExecutionWindowSeconds();
         config.orderExecutionStalenessLimit = router.pletherOracle().orderExecutionStalenessLimit();
         config.liquidationStalenessLimit = router.pletherOracle().liquidationStalenessLimit();
         config.basketMaxConfidenceRatioBps = router.pletherOracle().basketMaxConfidenceRatioBps();
@@ -6029,7 +6020,7 @@ contract CfdEngineAuditTest is BasePerpTest {
     }
 
     // Regression: C-01
-    function test_PartialClosePreservesLockedMarginForRemainingPosition() public {
+    function test_UnhealthyPartialClosePreservesAllBackingUntilLiquidation() public {
         _fundJunior(bob, 1_000_000 * 1e6);
         _fundTrader(alice, 22_000 * 1e6);
 
@@ -6044,23 +6035,22 @@ contract CfdEngineAuditTest is BasePerpTest {
         assertEq(openSize, 200_000 * 1e18);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000 * 1e18, 0.8e8);
-        assertTrue(preview.valid, "Engine partial-close plan should preserve its collateral-capped write-off path");
-        assertEq(preview.remainingSize, 100_000 * 1e18, "Preview must retain exactly half the position");
-        assertGt(preview.remainingMargin, 0, "Preview must preserve pledge for the surviving position");
-        assertLt(preview.remainingMargin, openMargin, "Partial close must release only the closed portion's pledge");
-        assertEq(preview.badDebtUsdc, 0, "Price loss above the collectible cap must remain an Engine write-off");
+        assertFalse(preview.valid, "unhealthy partial remainders must be rejected");
+        assertEq(uint8(preview.invalidReason), uint8(CfdTypes.CloseInvalidReason.PartialCloseUnhealthy));
 
         bytes[] memory priceData = _mockPythUpdateData(0.8e8);
         vm.warp(block.timestamp + 1);
         vm.roll(block.number + 1);
         preview = engineLens.previewClose(account, 100_000e18, 0.8e8);
-        // Preserve the original Engine C-01 regression independently of V2 policy. The V2 Router correctly
-        // terminalizes this underwater partial close because its surviving position has negative execution equity.
-        _close(account, CfdTypes.Side.SHORT, 100_000 * 1e18, 0.8e8);
+        uint256 depth = pool.totalAssets();
+        vm.expectRevert(
+            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, uint8(1), uint8(6), true)
+        );
+        _close(account, CfdTypes.Side.SHORT, 100_000e18, 0.8e8, depth);
 
         (uint256 remainingSize, uint256 remainingMargin,,,,,) = engine.positions(account);
-        assertEq(remainingSize, preview.remainingSize, "Live partial close size must match the preview");
-        assertEq(remainingMargin, preview.remainingMargin, "Live partial close must preserve the previewed pledge");
+        assertEq(remainingSize, openSize, "Rejected reduction leaves size unchanged");
+        assertEq(remainingMargin, openMargin, "Rejected reduction preserves pledge");
         assertEq(
             clearinghouse.pnlPledgeUsdc(account),
             remainingMargin,
@@ -6193,7 +6183,7 @@ contract CfdEngineAuditTest is BasePerpTest {
 }
 
 // ==========================================
-// MarginCappedMtmTest: per-side margin cap prevents phantom profits
+// MarginCappedMtmTest: exact account-local collectible caps prevent phantom LP profits
 // ==========================================
 
 contract MarginCappedMtmTest is BasePerpTest {

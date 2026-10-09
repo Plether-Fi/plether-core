@@ -15,8 +15,8 @@ import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
-import {OrderRouterV2ExecutionSidecar} from "@plether/perps/OrderRouterV2ExecutionSidecar.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -107,8 +107,8 @@ contract ControllablePythGas {
 }
 
 /// @notice Gas profiling for top 20 perps operations.
-/// Run: (source .env && forge test --match-contract GasProfileTest --fork-url $MAINNET_RPC_URL -vv)
-/// Or without fork: forge test --match-contract GasProfileTest -vv
+/// Run from the repository root: forge test --root packages/perps --match-contract GasProfileTest -vv
+/// An optional RPC fork can be selected with --fork-url "$MAINNET_RPC_URL"; this fixture deploys its own stack.
 contract GasProfileTest is Test {
 
     address constant USDC_MAINNET = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
@@ -191,7 +191,7 @@ contract GasProfileTest is Test {
         PletherOracle testOracle =
             new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
-        OrderRouterV2ExecutionSidecar executionSidecar = new OrderRouterV2ExecutionSidecar();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         OrderLifecycleBook lifecycleBook =
             new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));

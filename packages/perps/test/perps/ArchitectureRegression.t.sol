@@ -156,7 +156,7 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         router.commitOrder(CfdTypes.Side.SHORT, 100_001e18, 0, 0, true);
     }
 
-    function test_FullyMarginedCloseCommit_MustNotConsumePnlPledgeForBounty() public {
+    function test_FullyMarginedCloseCommit_ReservesPledgeWithoutCustodyDebit() public {
         address aliceAccount = alice;
         address bobAccount = bob;
         _fundTrader(alice, 5000e6);
@@ -168,17 +168,20 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         (, uint256 marginBefore,,,,,) = engine.positions(aliceAccount);
 
         vm.prank(alice);
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(aliceAccount);
-        assertEq(marginAfter, marginBefore, "rejected close bounty must preserve PnL pledge");
-        assertEq(router.pendingOrderCounts(aliceAccount), 0, "rejected close must not enter the FIFO queue");
-        assertEq(router.nextCommitId(), 1, "rejected close must not consume an order id");
+        assertEq(
+            marginAfter,
+            marginBefore - router.closeOrderExecutionBountyUsdc(),
+            "bounty must reclassify exactly its backing"
+        );
+        assertEq(router.pendingOrderCounts(aliceAccount), 1, "accepted close enters FIFO");
+        assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
         assertEq(
             clearinghouse.getLockedMarginBuckets(aliceAccount).reservedSettlementUsdc,
-            0,
-            "rejected close must not create an action reserve"
+            router.closeOrderExecutionBountyUsdc(),
+            "bounty is protected in action reserve"
         );
     }
 
