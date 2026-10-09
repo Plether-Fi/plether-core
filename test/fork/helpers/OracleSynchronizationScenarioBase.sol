@@ -71,6 +71,7 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
     address internal constant SCENARIO_BOB = address(0xB0B);
     uint256 internal constant SCENARIO_GAS_CAP = 30_000_000;
     uint256 internal constant SCENARIO_SIZE = 10_000e18;
+    uint256 internal constant SCENARIO_REFUND_SURPLUS = 1 gwei;
 
     struct SignedFixture {
         string json;
@@ -92,6 +93,7 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
         uint256 callGas;
         uint256 quoteWei;
         uint256 fundedWei;
+        uint256 surplusWei;
         uint256 pythFeeDeltaWei;
         uint256 immediateRefundWei;
         uint256 oracleCreditedWei;
@@ -104,6 +106,8 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
         uint256 expectedParseCalls;
         uint256 expectedUpdateCalls;
         bool liveReadChecked;
+        bool oracleRefundExercised;
+        bool routerRefundExercised;
         uint256[] requiredPublishTimes;
         uint256[] lifecycleStatuses;
         uint256[] orderIds;
@@ -175,7 +179,7 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
         vm.roll(f.forkNumber + 1);
         assertEq(blockhash(f.forkNumber), f.forkHash);
         vm.roll(f.forkNumber);
-        assertEq(block.timestamp, f.forkTime);
+        assertEq(vm.getBlockTimestamp(), f.forkTime);
         assertGt(REAL_PYTH.code.length, 0);
         scenarioFeedIds = f.ids;
         _assertStoredTimes(f.initialTimes);
@@ -193,7 +197,7 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
         );
         routerAdmin.proposeOracleConfig(IOrderRouterAdminHost.OracleConfig(address(pletherOracle)));
         vm.warp(f.forkTime);
-        assertGe(block.timestamp, routerAdmin.oracleConfigActivationTime());
+        assertGe(vm.getBlockTimestamp(), routerAdmin.oracleConfigActivationTime());
         routerAdmin.finalizeOracleConfig();
         _assertStoredTimes(f.initialTimes);
         vm.warp(f.commitTime);
@@ -240,7 +244,7 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
             targetPrice: target,
             isClose: close,
             bounds: OrderV3Types.ExecutionBounds({
-                submitBy: uint64(block.timestamp),
+                submitBy: uint64(vm.getBlockTimestamp()),
                 executionWindowSeconds: window,
                 allowedExecutionModes: 7,
                 expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
@@ -262,9 +266,9 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
     function _advanceScenario(
         uint256 timestamp
     ) internal {
-        assertGe(timestamp, block.timestamp, "scenario time must move forward");
+        assertGe(timestamp, vm.getBlockTimestamp(), "scenario time must move forward");
         vm.warp(timestamp);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
     }
 
     function _expectedHistorical(
@@ -310,7 +314,8 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
         uint64 commit
     ) internal view returns (uint64) {
         uint256 deadline = uint256(commit) + pletherOracle.orderSettlementWindow();
-        return uint64(deadline < block.timestamp ? deadline : block.timestamp);
+        uint256 timestamp = vm.getBlockTimestamp();
+        return uint64(deadline < timestamp ? deadline : timestamp);
     }
 
     function _expectHistoricalParse(
@@ -388,8 +393,8 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
             e.orderIds[i] = id;
             e.orderCommitTimes[i] = timing.commitTimestamp;
             e.executionDeadlines[i] = timing.executionDeadline;
-            assertLe(timing.commitTimestamp, block.timestamp);
-            assertLe(block.timestamp, timing.executionDeadline, "scenario order expired before execution");
+            assertLe(timing.commitTimestamp, vm.getBlockTimestamp());
+            assertLe(vm.getBlockTimestamp(), timing.executionDeadline, "scenario order expired before execution");
         }
     }
 
@@ -401,9 +406,10 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
     ) internal view returns (ScenarioEvidence memory e) {
         e.scenarioId = scenario;
         e.quoteWei = IPyth(REAL_PYTH).getUpdateFee(data);
-        require(e.quoteWei > 0, "real-Pyth funding tests require a nonzero fee");
         assertEq(pletherOracle.getOrderExecutionFee(data), pletherOracle.isOracleFrozen() ? e.quoteWei : 2 * e.quoteWei);
-        e.fundedWei = fundingMultiplier * e.quoteWei;
+        // Authentic Sepolia Pyth can quote zero. Preserve that policy and still exercise positive Router refunds.
+        e.surplusWei = SCENARIO_REFUND_SURPLUS;
+        e.fundedWei = fundingMultiplier * e.quoteWei + e.surplusWei;
         e.requiredPublishTimes = requiredTimes;
     }
 
@@ -442,6 +448,7 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
         vm.serializeUint(key, "gasCap", SCENARIO_GAS_CAP);
         vm.serializeUint(key, "quoteWei", e.quoteWei);
         vm.serializeUint(key, "fundedWei", e.fundedWei);
+        vm.serializeUint(key, "surplusWei", e.surplusWei);
         vm.serializeUint(key, "pythFeeDeltaWei", e.pythFeeDeltaWei);
         vm.serializeUint(key, "immediateRefundWei", e.immediateRefundWei);
         vm.serializeUint(key, "oracleCreditedWei", e.oracleCreditedWei);
@@ -454,10 +461,12 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
         vm.serializeUint(key, "expectedParseCalls", e.expectedParseCalls);
         vm.serializeUint(key, "expectedUpdateCalls", e.expectedUpdateCalls);
         vm.serializeBool(key, "liveReadChecked", e.liveReadChecked);
+        vm.serializeBool(key, "oracleRefundExercised", e.oracleRefundExercised);
+        vm.serializeBool(key, "routerRefundExercised", e.routerRefundExercised);
         vm.serializeUint(key, "markTime", engine.lastMarkTime());
         vm.serializeUint(key, "markPrice", engine.lastMarkPrice());
-        vm.serializeUint(key, "executionTimestamp", block.timestamp);
-        vm.serializeUint(key, "executionBlock", block.number);
+        vm.serializeUint(key, "executionTimestamp", vm.getBlockTimestamp());
+        vm.serializeUint(key, "executionBlock", vm.getBlockNumber());
         vm.serializeUint(key, "orderIds", e.orderIds);
         vm.serializeUint(key, "orderCommitTimes", e.orderCommitTimes);
         vm.serializeUint(key, "executionDeadlines", e.executionDeadlines);

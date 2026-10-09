@@ -20,14 +20,14 @@ contract OracleEthConservationInvariantTest is BasePerpTest {
             weights[i] = i == 5 ? 0.5e18 : 0.1e18;
             bases[i] = 1e8;
         }
-        baseMockPyth.setAllPrices(ids, 100_000_000, -8, block.timestamp);
+        baseMockPyth.setAllPrices(ids, 100_000_000, -8, vm.getBlockTimestamp());
         pletherOracle = new PletherOracle(
             address(engine), address(pool), address(baseMockPyth), ids, weights, bases, new bool[](6)
         );
         routerAdmin.proposeOracleConfig(IOrderRouterAdminHost.OracleConfig(address(pletherOracle)));
         vm.warp(routerAdmin.oracleConfigActivationTime());
         routerAdmin.finalizeOracleConfig();
-        baseMockPyth.setAllPrices(ids, 100_000_000, -8, block.timestamp);
+        baseMockPyth.setAllPrices(ids, 100_000_000, -8, vm.getBlockTimestamp());
         baseMockPyth.setSynchronizeLegacyUniquePrices(false);
         handler = new OracleEthConservationHandler(
             router, engine, clearinghouse, pletherOracle, routerAdmin, baseMockPyth, usdc, ids
@@ -47,12 +47,13 @@ contract OracleEthConservationInvariantTest is BasePerpTest {
 
     function _prelude() private {
         for (uint8 i; i < 11; ++i) {
+            // Scenario 9 forces q=0 while preserving the independently selected positive 3 gwei surplus.
             handler.exercise(i, i % 3, 1 gwei, 3, 0);
-            assertEq(handler.violation(), 0, "scenario prelude");
+            assertEq(handler.violation(), 0, string.concat("scenario prelude ", vm.toString(i)));
         }
         for (uint8 kind; kind < 5; ++kind) {
             handler.exercise(6, kind % 3, 1 gwei, kind, 0);
-            assertEq(handler.violation(), 0, "rollback prelude");
+            assertEq(handler.violation(), 0, string.concat("rollback prelude ", vm.toString(kind)));
         }
         // Independent Oracle/Admin deferrals, failed claims, reentrant claims, and repeated claims.
         handler.exercise(4, 0, 1 gwei, 3, 5);
@@ -88,6 +89,14 @@ contract OracleEthConservationInvariantTest is BasePerpTest {
             assertGt(handler.rollbackCases(i), 0, "missing rollback scenario");
         }
         assertGt(handler.executedRoundTrips(), 0, "missing actual order execution");
+        assertGt(handler.executedSharedBatches(), 0, "missing two executed orders sharing one basket");
+        assertGt(handler.executedMixedBatches(), 0, "missing two executed orders using separate baskets");
+        assertGt(handler.executedUnavailablePrefixes(), 0, "missing executed prefix before unavailable history");
+        assertGt(handler.executedRollbackPrefixes(1), 0, "missing executed prefix before underfunding rollback");
+        assertGt(handler.executedRollbackPrefixes(2), 0, "missing executed prefix before update failure rollback");
+        assertGt(handler.executedRollbackPrefixes(4), 0, "missing executed prefix before coverage failure rollback");
+        assertGt(handler.closedBatchPositions(), 0, "missing accounted closes of batch positions");
+        assertGt(handler.zeroFeeSurplusRefunds(), 0, "missing positive surplus refund with zero Pyth fee");
         assertGt(handler.caughtItemFailures(), 0, "missing caught item rollback");
         assertGt(handler.reentryAttempts(), 0, "missing observed reentry attempt");
         assertGt(handler.successfulOracleClaims(), 0, "missing Oracle claim");

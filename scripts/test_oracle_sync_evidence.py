@@ -16,15 +16,18 @@ from oracle_sync_evidence import (SCENARIOS, assert_unchanged, load_scenario_man
                                   validate_scenario_records)
 
 
-def valid_records():
+def valid_records(quote=3):
     records = []
     for name, (outcome, statuses, parses, updates, multiplier) in SCENARIOS.items():
-        funded = (6 if name == "distinct_basket_batch" else 5) * 3
+        surplus = 1_000_000_000
+        funded = (6 if name == "distinct_basket_batch" else 5) * quote + surplus
         record = dict(schemaVersion=1, scenarioId=name, callGas=1_000_000, gasCap=30_000_000,
-                      quoteWei=3, fundedWei=funded, pythFeeDeltaWei=multiplier * 3,
-                      immediateRefundWei=funded - multiplier * 3, oracleDeferredWei=0,
+                      quoteWei=quote, surplusWei=surplus, fundedWei=funded, pythFeeDeltaWei=multiplier * quote,
+                      immediateRefundWei=funded - multiplier * quote, oracleDeferredWei=0,
                       routerDeferredWei=0, oracleClaimedWei=0, routerClaimedWei=0,
                       oracleCreditedWei=0, routerCreditedWei=0,
+                      oracleRefundExercised=name.startswith("unavailable_") and quote > 0,
+                      routerRefundExercised=True,
                       terminalCount=sum(status != 1 for status in statuses), outcome=outcome,
                       markTime=1, markPrice=100, storedPublishTimes=[1] * 6,
                       requiredPublishTimes=[1] * 6, lifecycleStatuses=statuses,
@@ -34,13 +37,39 @@ def valid_records():
                       executionTimestamp=2, executionBlock=2, orderIds=list(range(1, len(statuses) + 1)),
                       orderCommitTimes=[1] * len(statuses), executionDeadlines=[61] * len(statuses))
         if name == "unavailable_deferred":
-            record.update(immediateRefundWei=0, oracleCreditedWei=6, routerCreditedWei=9,
-                          oracleClaimedWei=6, routerClaimedWei=9)
+            record.update(immediateRefundWei=0, oracleCreditedWei=2 * quote, routerCreditedWei=3 * quote + surplus,
+                          oracleClaimedWei=2 * quote, routerClaimedWei=3 * quote + surplus)
         records.append(record)
     return records
 
 
 class ScenarioEvidenceTests(unittest.TestCase):
+    def test_authentic_zero_quote_preserves_honest_refund_coverage(self):
+        records = valid_records(0)
+        validate_scenario_records(records)
+        self.assertTrue(all(not record["oracleRefundExercised"] for record in records))
+        self.assertEqual(records[-1]["oracleClaimedWei"], 0)
+        self.assertEqual(records[-1]["routerClaimedWei"], 1_000_000_000)
+
+    def test_zero_allocation_cannot_claim_oracle_refund_coverage(self):
+        records = valid_records(0)
+        records[-1]["oracleRefundExercised"] = True
+        with self.assertRaisesRegex(ValueError, "Zero Oracle allocation"):
+            validate_scenario_records(records)
+
+    def test_zero_quote_still_requires_positive_router_refund(self):
+        records = valid_records(0)
+        records[-1]["routerRefundExercised"] = False
+        with self.assertRaisesRegex(ValueError, "positive Router"):
+            validate_scenario_records(records)
+
+    def test_changed_surplus_or_funding_cannot_pass(self):
+        for field in ("surplusWei", "fundedWei"):
+            records = valid_records(0)
+            records[0][field] += 1
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "independent keeper surplus"):
+                validate_scenario_records(records)
+
     def test_complete_matrix(self):
         records = valid_records()
         output = "\n".join("  oracle-sync-evidence: " + json.dumps(record) for record in records)

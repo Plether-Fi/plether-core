@@ -176,6 +176,12 @@ contract OracleEthConservationHandler is Test {
     uint256 public successfulAdminClaims;
     uint256 public failedClaims;
     uint256 public executedRoundTrips;
+    uint256 public executedSharedBatches;
+    uint256 public executedMixedBatches;
+    uint256 public executedUnavailablePrefixes;
+    uint256[5] public executedRollbackPrefixes;
+    uint256 public closedBatchPositions;
+    uint256 public zeroFeeSurplusRefunds;
     uint256 public crossLedgerClaims;
     uint256 private expectedCrossAttempts;
     bool private expectedCrossSuccess;
@@ -200,6 +206,8 @@ contract OracleEthConservationHandler is Test {
         uint32 terminals;
         OrderV3Types.PendingReason stop;
         bool reverts;
+        bytes32 revertDataHash;
+        uint64 rollbackPrefix;
     }
 
     constructor(
@@ -281,7 +289,8 @@ contract OracleEthConservationHandler is Test {
         if (scenario == 6 && excessSeed % 5 == 1 && activeFee == 0) {
             activeFee = 1;
         }
-        excess = (excessSeed % 6) * activeFee;
+        // Surplus is independent of q, so even a zero-fee Pyth quote must return positive excess correctly.
+        excess = (excessSeed % 6) * MAX_FEE;
         activeOracleMode = OracleEthKeeper.Mode(modeSeed % 4);
         activeRouterMode = OracleEthKeeper.Mode((modeSeed / 4) % 4);
         actors[activeActor].configure(activeOracleMode, activeRouterMode, OracleEthKeeper.Mode.Accept);
@@ -298,9 +307,7 @@ contract OracleEthConservationHandler is Test {
         if (scenario == 0 || scenario == 3 || scenario == 10) {
             _roundTrip(scenario == 3 ? 1 : scenario == 10 ? 2 : 0);
         } else if (scenario == 1 || scenario == 2 || scenario == 9) {
-            _pair(scenario == 2, false);
-            uint256 baskets = scenario == 2 ? 2 : 1;
-            _batch(_data(true), (2 * baskets * activeFee) + excess, _expected(baskets, baskets, 0, 2));
+            _successfulBatch(scenario == 2);
         } else if (scenario == 4 || scenario == 5) {
             _unavailable(scenario == 5);
         } else if (scenario == 6) {
@@ -318,6 +325,9 @@ contract OracleEthConservationHandler is Test {
         }
         if (violation == 0) {
             ++scenarios[scenario];
+            if (scenario == 9 && excess != 0) {
+                ++zeroFeeSurplusRefunds;
+            }
         }
         _audit();
     }
@@ -404,7 +414,7 @@ contract OracleEthConservationHandler is Test {
         bool afterPrefix
     ) private {
         if (afterPrefix) {
-            _pair(true, false);
+            _pair(true, true, false);
         } else {
             _commit(false, false, address(0));
             _advance(commits[0] + 1);
@@ -419,8 +429,21 @@ contract OracleEthConservationHandler is Test {
         if (router.nextExecuteId() != orderIds[afterPrefix ? 1 : 0]) {
             _fail(7);
         }
-        // A retry in a new transaction has an empty Router cache and pays for its own fresh resolution.
-        _batch(_data(true), 2 * activeFee, _expected(1, 1, 0, 1));
+        address prefixTrader = traders[0];
+        if (afterPrefix) {
+            if (!_executedOpen(0)) {
+                return;
+            }
+            ++executedUnavailablePrefixes;
+        }
+        // A fresh Router call has an empty memory cache and pays for its own new resolution.
+        if (!_batch(_data(true), 2 * activeFee, _expected(1, 1, 0, 1))) {
+            return;
+        }
+        _requireFailed(afterPrefix ? 1 : 0);
+        if (afterPrefix) {
+            _closeBatchPosition(prefixTrader);
+        }
     }
 
     function _outerFailure(
@@ -428,7 +451,7 @@ contract OracleEthConservationHandler is Test {
     ) private {
         bool pair = kind == 1 || kind == 2 || kind == 4;
         if (pair) {
-            _pair(true, false);
+            _pair(true, true, false);
         } else {
             _commit(false, false, address(0));
             _advance(commits[0] + 1);
@@ -449,6 +472,10 @@ contract OracleEthConservationHandler is Test {
         }
         Expectation memory expectation;
         expectation.reverts = true;
+        expectation.revertDataHash = _expectedOuterRevert(kind);
+        // Foundry records logs even when the outer call rolls them back. Require a real executed receipt before
+        // the later failure, then independently require the tracked pre-call state and ETH to be restored.
+        expectation.rollbackPrefix = pair ? orderIds[0] : 0;
         bool matched = kind == 0 ? _single(orderIds[0], data, value, expectation) : _batch(data, value, expectation);
         pyth.setUpdateFailure(false, false, bytes32(0));
         pyth.setFailUpdateAtCall(0);
@@ -456,12 +483,21 @@ contract OracleEthConservationHandler is Test {
             return;
         }
         ++rollbackCases[kind];
+        if (pair) {
+            ++executedRollbackPrefixes[kind];
+        }
         uint256 baskets = pair ? 2 : 1;
-        _batch(_data(true), 2 * baskets * activeFee, _expected(baskets, baskets, 0, uint32(orderCount)));
+        if (!_batch(_data(true), 2 * baskets * activeFee, _expected(baskets, baskets, 0, uint32(orderCount)))) {
+            return;
+        }
+        _requireFailed(pair ? 1 : 0);
+        if (pair && _executedOpen(0)) {
+            _closeBatchPosition(traders[0]);
+        }
     }
 
     function _caughtFailure() private {
-        _pair(false, true);
+        _pair(false, false, true);
         bytes32 itemBefore = _itemHash(1);
         // Match finalize's first static tuple member (orderId), retaining the first item's real receipt path.
         vm.mockCallRevert(
@@ -488,11 +524,9 @@ contract OracleEthConservationHandler is Test {
         if (!_batch(_data(true), 2 * activeFee, _expected(1, 1, 0, 1))) {
             return;
         }
-        address trader = traders[1];
-        orderCount = 0;
-        _commit(true, true, trader);
-        _advance(commits[0] + 1);
-        _single(orderIds[0], _data(true), 2 * activeFee, _expected(1, 1, 0, 1));
+        if (_executedOpen(1)) {
+            _closeBatchPosition(traders[1]);
+        }
     }
 
     function _cleanup() private {
@@ -506,9 +540,10 @@ contract OracleEthConservationHandler is Test {
 
     function _pair(
         bool mixed,
+        bool firstValid,
         bool secondValid
     ) private {
-        _commit(false, false, address(0));
+        _commit(false, firstValid, address(0));
         if (mixed) {
             _advance(commits[0] + 2);
         }
@@ -516,12 +551,108 @@ contract OracleEthConservationHandler is Test {
         _advance(commits[1] + 1);
     }
 
+    function _successfulBatch(
+        bool mixed
+    ) private {
+        _pair(mixed, true, true);
+        uint256 baskets = mixed ? 2 : 1;
+        if (!_batch(_data(true), 2 * baskets * activeFee + excess, _expected(baskets, baskets, 0, 2))) {
+            return;
+        }
+        if (!_executedOpen(0) || !_executedOpen(1)) {
+            return;
+        }
+        if (mixed) {
+            ++executedMixedBatches;
+        } else {
+            ++executedSharedBatches;
+        }
+        address firstTrader = traders[0];
+        address secondTrader = traders[1];
+        if (_closeBatchPosition(firstTrader)) {
+            _closeBatchPosition(secondTrader);
+        }
+    }
+
+    function _executedOpen(
+        uint256 index
+    ) private returns (bool) {
+        (uint256 size,,,,,,) = engine.positions(traders[index]);
+        if (
+            size != SIZE
+                || router.lifecycleBook().lifecycleStatus(orderIds[index]) != OrderV3Types.LifecycleStatus.Executed
+        ) {
+            _fail(31);
+            return false;
+        }
+        return true;
+    }
+
+    function _requireFailed(
+        uint256 index
+    ) private {
+        if (router.lifecycleBook().lifecycleStatus(orderIds[index]) != OrderV3Types.LifecycleStatus.Failed) {
+            _fail(32);
+        }
+    }
+
+    function _closeBatchPosition(
+        address trader
+    ) private returns (bool) {
+        orderCount = 0;
+        _commit(true, true, trader);
+        _advance(commits[0] + 1);
+        if (!_single(orderIds[0], _data(true), 2 * activeFee, _expected(1, 1, 0, 1))) {
+            return false;
+        }
+        (uint256 size,,,,,,) = engine.positions(trader);
+        if (size != 0 || router.lifecycleBook().lifecycleStatus(orderIds[0]) != OrderV3Types.LifecycleStatus.Executed) {
+            _fail(33);
+            return false;
+        }
+        ++closedBatchPositions;
+        return true;
+    }
+
+    function _expectedOuterRevert(
+        uint256 kind
+    ) private view returns (bytes32) {
+        bytes memory reason;
+        if (kind == 0) {
+            reason = abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__StalePrice.selector,
+                IPletherOracle.PriceMode.OrderExecution,
+                bytes32(0),
+                uint256(commits[0] + 1),
+                oracle.orderExecutionStalenessLimit(),
+                uint256(commits[0] + 1)
+            );
+        } else if (kind == 1) {
+            reason = abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__InsufficientFee.selector, 3 * activeFee, 4 * activeFee
+            );
+        } else if (kind == 2) {
+            reason = abi.encodeWithSignature("Error(string)", "storage update failed");
+        } else {
+            uint256 index = kind == 3 ? 0 : 1;
+            reason = abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__StoredFeedBehind.selector,
+                feeds[kind == 3 ? 0 : feeds.length - 1],
+                uint256(commits[index]),
+                uint256(commits[index] + 1)
+            );
+        }
+        return keccak256(reason);
+    }
+
     function _commit(
         bool close,
         bool valid,
         address existingTrader
     ) private {
-        pyth.setAllPrices(feeds, int64(uint64(PRICE)), -8, block.timestamp);
+        // Read through Vm because viaIR may reuse block.timestamp across earlier vm.warp calls.
+        uint64 timestamp = uint64(vm.getBlockTimestamp());
+        pyth.setAllPrices(feeds, int64(uint64(PRICE)), -8, timestamp);
         address trader = existingTrader;
         if (!close) {
             trader = address(uint160(0xE70000 + ++traderNonce));
@@ -535,7 +666,7 @@ contract OracleEthConservationHandler is Test {
         uint64 id = router.commitOrder(CfdTypes.Side.LONG, SIZE, close ? 0 : MARGIN, valid ? 0 : 110_000_000, close);
         orderIds[orderCount] = id;
         traders[orderCount] = trader;
-        commits[orderCount] = uint64(block.timestamp);
+        commits[orderCount] = timestamp;
         ++orderCount;
     }
 
@@ -627,12 +758,20 @@ contract OracleEthConservationHandler is Test {
         vm.recordLogs();
         (bool success, bytes memory returned) = actors[activeActor].execute(callData, value);
         if (success == e.reverts) {
+            unexpectedRevertData = returned;
             _checkReentryLogs(activeActor, 0);
             _fail(10);
             return false;
         }
         if (e.reverts) {
-            _checkReentryLogs(activeActor, 0);
+            Vm.Log[] memory logs = _checkReentryLogs(activeActor, 0);
+            if (keccak256(returned) != e.revertDataHash) {
+                unexpectedRevertData = returned;
+                _fail(34);
+            }
+            if (e.rollbackPrefix != 0 && !_recordedExecutedPrefix(logs, e.rollbackPrefix)) {
+                _fail(35);
+            }
             if (_ethHash() != beforeEth || _stateHash() != beforeState) {
                 _fail(11);
             }
@@ -686,8 +825,8 @@ contract OracleEthConservationHandler is Test {
     function _checkReentryLogs(
         uint256 actorIndex,
         uint256 expected
-    ) private {
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+    ) private returns (Vm.Log[] memory logs) {
+        logs = vm.getRecordedLogs();
         uint256 found;
         uint256 crossFound;
         for (uint256 i; i < logs.length; ++i) {
@@ -721,6 +860,27 @@ contract OracleEthConservationHandler is Test {
         }
         expectedCrossAttempts = 0;
         expectedCrossSuccess = false;
+    }
+
+    function _recordedExecutedPrefix(
+        Vm.Log[] memory logs,
+        uint64 orderId
+    ) private view returns (bool) {
+        for (uint256 i; i < logs.length; ++i) {
+            if (
+                logs[i].emitter == address(router.lifecycleBook()) && logs[i].topics.length == 4
+                    && logs[i].topics[0] == IOrderLifecycleBook.OrderFinalized.selector
+                    && logs[i].topics[1] == bytes32(uint256(orderId))
+            ) {
+                (,,, OrderV3Types.OrderReceipt memory receipt) =
+                    abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
+                return receipt.orderId == orderId && receipt.account == traders[0]
+                    && receipt.status == OrderV3Types.LifecycleStatus.Executed
+                    && receipt.reason == OrderV3Types.TerminalReason.Executed && receipt.priceReachedEngine
+                    && receipt.economics.postPositionSize == SIZE;
+            }
+        }
+        return false;
     }
 
     function _checkReentryReason(
@@ -847,7 +1007,7 @@ contract OracleEthConservationHandler is Test {
         uint64 timestamp
     ) private {
         vm.warp(timestamp);
-        vm.roll(block.number + 1);
+        vm.roll(vm.getBlockNumber() + 1);
     }
 
     function _accepts(

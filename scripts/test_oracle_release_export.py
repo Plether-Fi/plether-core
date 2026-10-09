@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -142,7 +143,10 @@ class ExportWorkflowTest(unittest.TestCase):
         self.assertEqual(report["contracts"]["Example"]["abiSha256"], hashlib.sha256(abi).hexdigest())
         self.assertEqual(report["contracts"]["Example"]["artifactSha256"], hashlib.sha256(self.artifact_path.read_bytes()).hexdigest())
         self.assertNotIn("qualified", report)
-        self.assertNotIn("--broadcast", " ".join(report["logs"]["deployment-sizes.log"]["command"]))
+        command = report["logs"]["deployment-sizes.log"]["command"]
+        self.assertNotIn("--broadcast", " ".join(command))
+        # Forge tests are matched by their canonical signature, including the parentheses.
+        self.assertTrue(re.fullmatch(command[command.index("--match-test") + 1], release.SIZE_TEST))
 
     def test_source_change_after_build_or_after_export_fails_closed(self):
         for fingerprints in ([self.fingerprint, dict(self.fingerprint, sha256="c" * 64)],

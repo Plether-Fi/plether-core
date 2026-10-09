@@ -156,7 +156,7 @@ def export_release(root, output, source_revision=None):
         run(["forge", "build", "--offline", "--skip", "test"], "build.log")
         size_output = run([
             "forge", "test", "--offline", "--match-path", SIZE_TEST_PATH,
-            "--match-test", "^" + SIZE_TEST.removesuffix("()") + "$", "--json", "-vv",
+            "--match-test", "^" + re.escape(SIZE_TEST) + "$", "--json", "-vv",
         ], "deployment-sizes.log")
         records = parse_size_records(size_output)
         manifest_path = root / "deployments/arbitrum-sepolia-perps.template.json"

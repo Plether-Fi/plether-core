@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {DeployPerpsArbitrumSepolia} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {Test} from "forge-std/Test.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 
 /// @dev Reuses the release's actual constructor configuration instead of duplicating economic values or feed arrays.
 contract PerpsReleaseSizeDeployment is DeployPerpsArbitrumSepolia {
@@ -38,13 +39,39 @@ contract PerpsReleaseDeploymentSizeTest is Test {
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint256 internal constant LOCAL_DEPLOYER_KEY = 0xA11CE;
 
+    struct CreationRecord {
+        bytes32 inputHash;
+        bytes32 runtimeHash;
+        uint256 inputLength;
+        bool measured;
+    }
+
+    mapping(address => CreationRecord) internal creations;
+    uint256 internal measuredCount;
+
     function test_AllReleaseContractsFitFullDeploymentLimits() public {
         vm.chainId(421_614);
         MockPyth pyth = new MockPyth();
         vm.etch(RELEASE_PYTH, address(pyth).code);
         vm.setEnv("TEST_PRIVATE_KEY", vm.toString(LOCAL_DEPLOYER_KEY));
         PerpsReleaseSizeDeployment deployment = new PerpsReleaseSizeDeployment();
+        vm.startStateDiffRecording();
         DeployPerpsArbitrumSepolia.DeployedContracts memory d = deployment.run();
+        VmSafe.AccountAccess[] memory accesses = vm.stopAndReturnStateDiff();
+        uint256 creationCount;
+        for (uint256 i; i < accesses.length; ++i) {
+            if (accesses[i].kind != VmSafe.AccountAccessKind.Create) {
+                continue;
+            }
+            assertFalse(accesses[i].reverted, "local release CREATE must succeed");
+            creations[accesses[i].account] = CreationRecord({
+                inputHash: sha256(accesses[i].data),
+                runtimeHash: sha256(accesses[i].deployedCode),
+                inputLength: accesses[i].data.length,
+                measured: false
+            });
+            ++creationCount;
+        }
         address owner = vm.addr(LOCAL_DEPLOYER_KEY);
 
         _measure("mockUsdc", string.concat(DEPLOY_SCRIPT, "MockUSDC"), address(d.usdc), "");
@@ -235,6 +262,7 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             abi.encode(d.routerAdmin, address(d.housePool), owner)
         );
         assertFalse(d.housePool.isTradingActive(), "local size fixture must remain inactive");
+        assertEq(measuredCount, creationCount, "every actual CREATE, including embedded contracts, must be measured");
     }
 
     function _measure(
@@ -246,6 +274,13 @@ contract PerpsReleaseDeploymentSizeTest is Test {
         bytes memory creationCode = vm.getCode(artifact);
         bytes memory creationInput = bytes.concat(creationCode, arguments);
         bytes memory runtime = deployed.code;
+        CreationRecord storage actual = creations[deployed];
+        assertFalse(actual.measured, string.concat(key, ": duplicate CREATE measurement"));
+        assertEq(actual.inputLength, creationInput.length, string.concat(key, ": actual CREATE input length mismatch"));
+        assertEq(actual.inputHash, sha256(creationInput), string.concat(key, ": actual constructor input differs"));
+        assertEq(actual.runtimeHash, sha256(runtime), string.concat(key, ": actual deployed runtime differs"));
+        actual.measured = true;
+        ++measuredCount;
         assertGt(runtime.length, 0, string.concat(key, ": missing deployed runtime"));
         assertLe(runtime.length, 24_576, string.concat(key, ": runtime exceeds EIP-170"));
         assertLe(creationInput.length, 49_152, string.concat(key, ": full creation input exceeds EIP-3860"));

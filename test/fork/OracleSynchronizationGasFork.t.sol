@@ -176,7 +176,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         SignedFixture memory f = _fixture("historicalA");
         _prepareScenario(f);
         _advanceScenario(f.executionTime);
-        uint64 commit = uint64(block.timestamp);
+        uint64 commit = uint64(vm.getBlockTimestamp());
         uint64 id = _commitScenarioOrder(SCENARIO_ALICE, false, 1);
         _advanceScenario(uint256(commit) + 1);
         uint64 markBefore = engine.lastMarkTime();
@@ -194,6 +194,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         _completeImmediateEvidence(e, payerBefore, pythBefore, 0);
         e.outcome = "pending";
         e.expectedParseCalls = 1;
+        e.oracleRefundExercised = e.quoteWei > 0;
         _setOrderEvidence(e, id, 1);
         _emitEvidence(e, f.data);
     }
@@ -202,7 +203,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         SignedFixture memory f = _fixture("historicalA");
         _prepareScenario(f);
         _advanceScenario(f.executionTime);
-        uint64 commit = uint64(block.timestamp);
+        uint64 commit = uint64(vm.getBlockTimestamp());
         uint64 id = _commitScenarioOrder(SCENARIO_ALICE, false, 1);
         _advanceScenario(uint256(commit) + 1);
         uint64 markBefore = engine.lastMarkTime();
@@ -221,12 +222,19 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         e.oracleCreditedWei = pletherOracle.claimableEth(address(keeper));
         e.routerCreditedWei = routerAdmin.claimableEth(address(keeper));
         assertEq(e.oracleCreditedWei, 2 * e.quoteWei);
-        assertEq(e.routerCreditedWei, 3 * e.quoteWei);
+        assertEq(e.routerCreditedWei, 3 * e.quoteWei + e.surplusWei);
         assertEq(address(pletherOracle).balance, e.oracleCreditedWei);
         assertEq(address(routerAdmin).balance, e.routerCreditedWei);
-        keeper.claimOracle(pletherOracle);
-        e.oracleClaimedWei = address(keeper).balance;
-        assertEq(e.oracleClaimedWei, e.oracleCreditedWei);
+        if (e.oracleCreditedWei > 0) {
+            keeper.claimOracle(pletherOracle);
+            e.oracleClaimedWei = address(keeper).balance;
+            assertEq(e.oracleClaimedWei, e.oracleCreditedWei);
+            e.oracleRefundExercised = true;
+        } else {
+            // Zero Pyth fees allocate no Oracle refund and must not create a claim.
+            vm.expectRevert();
+            keeper.claimOracle(pletherOracle);
+        }
         keeper.claimRouter(routerAdmin);
         e.routerClaimedWei = address(keeper).balance - e.oracleClaimedWei;
         assertEq(e.routerClaimedWei, e.routerCreditedWei);
@@ -241,6 +249,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         assertEq(address(keeper).balance, e.fundedWei);
         e.outcome = "pending";
         e.expectedParseCalls = 1;
+        e.routerRefundExercised = true;
         _setOrderEvidence(e, id, 1);
         _emitEvidence(e, f.data);
     }
@@ -284,6 +293,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         assertEq(e.pythFeeDeltaWei, feeMultiplier * e.quoteWei);
         assertEq(payerBefore - address(this).balance, e.pythFeeDeltaWei);
         e.immediateRefundWei = e.fundedWei - (payerBefore - address(this).balance);
+        e.routerRefundExercised = e.immediateRefundWei > 0;
         assertEq(pletherOracle.claimableEth(address(this)), 0);
         assertEq(routerAdmin.claimableEth(address(this)), 0);
     }

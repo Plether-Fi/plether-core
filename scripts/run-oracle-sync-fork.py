@@ -133,6 +133,10 @@ def main():
                 raise ValueError("V3 scenario suite failed or skipped a mandatory test")
             records = validate_scenario_records(parse_scenario_records(log), manifest)
             report["matrix"].update(passed=True, scenarios=records)
+            report["matrix"]["refundCoverage"] = dict(
+                nonzeroOracleRefundScenarios=[record["scenarioId"] for record in records if record["oracleRefundExercised"]],
+                zeroQuoteScenarios=[record["scenarioId"] for record in records if record["quoteWei"] == 0],
+                note="Authentic zero quotes cannot prove nonzero Oracle-allocation refunds on this fork; that path is covered by the separately required MockPyth ETH-conservation invariant. Positive keeper surplus still exercises Router refunds and claims.")
             report["releaseMatrixPassed"] = True
         after = source_fingerprint(root, candidate_commit)
         write_json(output_dir / "inputs.after.json", after)

@@ -216,7 +216,7 @@ def parse_scenario_records(output):
 def validate_scenario_records(records, manifest=None):
     """Do not accept success-looking gas numbers without receipts, coverage and ETH accounting."""
     seen = set()
-    fields = ("callGas", "gasCap", "quoteWei", "fundedWei", "pythFeeDeltaWei", "immediateRefundWei",
+    fields = ("callGas", "gasCap", "quoteWei", "surplusWei", "fundedWei", "pythFeeDeltaWei", "immediateRefundWei",
               "oracleDeferredWei", "routerDeferredWei", "oracleClaimedWei", "routerClaimedWei",
               "oracleCreditedWei", "routerCreditedWei", "terminalCount", "markTime", "markPrice",
               "expectedParseCalls", "expectedUpdateCalls", "payloadBytes", "executionTimestamp", "executionBlock")
@@ -252,6 +252,14 @@ def validate_scenario_records(records, manifest=None):
             raise ValueError("Unexpected Pyth resolution paths")
         if record["pythFeeDeltaWei"] != fee_multiplier * record["quoteWei"]:
             raise ValueError("Pyth fees do not match the quoted scenario allocation")
+        funding_multiplier = 6 if scenario == "distinct_basket_batch" else 5
+        if record["surplusWei"] != 1_000_000_000 or record["fundedWei"] != funding_multiplier * record["quoteWei"] + record["surplusWei"]:
+            raise ValueError("Scenario funding must use the exact quote plus the independent keeper surplus")
+        oracle_refund_exercised = scenario.startswith("unavailable_") and record["quoteWei"] > 0
+        if record.get("oracleRefundExercised") is not oracle_refund_exercised:
+            raise ValueError("Zero Oracle allocation must not be reported as exercised refund coverage")
+        if record.get("routerRefundExercised") is not True:
+            raise ValueError("Every scenario must exercise the positive Router surplus refund")
         accounted = sum(record[field] for field in ("pythFeeDeltaWei", "immediateRefundWei", "oracleDeferredWei",
                         "routerDeferredWei", "oracleClaimedWei", "routerClaimedWei"))
         if record["fundedWei"] != accounted:
@@ -278,8 +286,16 @@ def validate_scenario_records(records, manifest=None):
             raise ValueError("Unavailable history must forward its full allocation")
         if scenario == "unavailable_immediate" and record["immediateRefundWei"] != record["fundedWei"]:
             raise ValueError("Unavailable immediate must refund all supplied ETH")
-        if scenario == "unavailable_deferred" and (not record["oracleCreditedWei"] or not record["routerCreditedWei"]):
-            raise ValueError("Unavailable deferred must exercise both refund ledgers")
+        if record["oracleDeferredWei"] != 0 or record["routerDeferredWei"] != 0:
+            raise ValueError("Required scenarios must complete refund claims without outstanding liabilities")
+        if scenario == "unavailable_deferred":
+            if (record["oracleCreditedWei"] != 2 * record["quoteWei"]
+                    or record["routerCreditedWei"] != 3 * record["quoteWei"] + record["surplusWei"]
+                    or record["immediateRefundWei"] != 0):
+                raise ValueError("Deferred credits must match the real Oracle allocation and Router surplus")
+        elif (record["oracleCreditedWei"] != 0 or record["routerCreditedWei"] != 0
+              or record["immediateRefundWei"] != record["fundedWei"] - record["pythFeeDeltaWei"]):
+            raise ValueError("Immediate refund scenario must return all unconsumed ETH without deferred credits")
         if manifest is not None:
             fixture_name = "historicalB" if scenario == "distinct_basket_batch" else (
                 "fridayClosing" if scenario == "frozen_close" else "historicalA")

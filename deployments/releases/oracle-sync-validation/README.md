@@ -13,6 +13,8 @@ Qualification results belong to one committed source revision. The release index
 5. Without changing the source revision, run `python3 scripts/export-perps-release.py artifacts/oracle-sync/NEW_REVISION/bundle --source-revision FULL_SHA`. This is an offline local build/test export. It validates every deployable's runtime and full creation input, including constructor arguments and embedded sidecars.
 6. Collect the CI/deep results, static-analysis reports, fork evidence, ABIs and size evidence into a versioned bundle; hash every retained file. Treat static-analysis output as findings requiring interpretation, not as a clean result merely because the command succeeded.
 
+CI preserves the filtered coverage files and complete Slither SARIF reports as run artifacts. Qualification must retain these alongside the job results and sanitized logs, so command success cannot hide analyzer findings. The real-Pyth fixtures retain their actual zero-fee configuration; nonzero Oracle fees and claims are exercised by the randomized invariant, while a positive surplus proves real-Pyth RouterAdmin refund handling. See the fixture README for this measurement limitation.
+
 Local qualification requires every mandatory gate to pass. Existing optional unrelated fork skips must be identified separately; no synchronization scenario may skip. Source changes invalidate the old revision's qualification claim. Evidence-only commits must continue naming the actual tested source revision.
 
 Keeper monitoring, frontend integration, signing, remote deployment/simulation, activation and migration are outside this follow-up. The local Foundry fixtures create and exercise contracts only inside disposable test EVMs.
