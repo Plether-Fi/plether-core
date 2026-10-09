@@ -380,7 +380,7 @@ Important details:
   can never execute, even after governance unpauses. Permissionless cleanup returns their remaining committed margin
   and complete execution bounty to the trader's free internal settlement without an oracle or Engine checkpoint;
   the protocol incident keeper pays cleanup gas and receives no bounty.
-- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from reservation so FIFO cleanup remains incentive compatible.
+- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from their snapshotted reservation. Zero-bounty closes pay no reward; the protocol order keeper's operator funds expiry gas to preserve FIFO liveness. See [abandoned zero-bounty cleanup](DEPOSIT_FREE_CLOSE.md#abandoned-zero-bounty-orders-keeper-responsibility).
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules and the fixed LP-owned frozen-close spread.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 

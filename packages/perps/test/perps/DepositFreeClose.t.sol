@@ -314,6 +314,154 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         );
     }
 
+    function test_AbandonedCallerPaidExitsPermissionlessCleanupUnblocksFifo() public {
+        _abandonedZeroBountyQueue(true, false);
+    }
+
+    function test_AbandonedStandardZeroBountyClosesPermissionlessCleanupUnblocksFifo() public {
+        _abandonedZeroBountyQueue(false, false);
+    }
+
+    function test_AbandonedCallerPaidExitsAutoPruneUnblocksFifo() public {
+        _abandonedZeroBountyQueue(true, true);
+    }
+
+    function test_AbandonedStandardZeroBountyClosesAutoPruneUnblocksFifo() public {
+        _abandonedZeroBountyQueue(false, true);
+    }
+
+    function _abandonedZeroBountyQueue(
+        bool callerPaid,
+        bool autoPrune
+    ) private {
+        if (!callerPaid) {
+            IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+            config.closeOrderExecutionBountyUsdc = 0;
+            _setRouterConfig(config);
+        }
+        _openNormally(CfdTypes.Side.LONG, 0);
+        // The same position can submit another attempt after expiry. Each round must unblock another account.
+        for (uint256 round; round < 3; ++round) {
+            _abandonedZeroBountyRound(callerPaid, autoPrune, address(uint160(0xF0110 + round)));
+        }
+    }
+
+    function _abandonedZeroBountyRound(
+        bool callerPaid,
+        bool autoPrune,
+        address follower
+    ) private {
+        _fundTrader(follower, 1000e6);
+        OrderV3Types.OrderRequest memory abandoned = _request(CfdTypes.Side.LONG, SIZE, callerPaid);
+        abandoned.bounds.executionWindowSeconds = 5;
+        vm.prank(ACCOUNT);
+        uint64 head = router.commitOrder(abandoned);
+        assertEq(router.lifecycleBook().pendingIntent(head).executionBountyUsdc, 0);
+        assertEq(
+            uint8(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, head).state),
+            uint8(IMarginClearinghouse.BountyReservationState.Active)
+        );
+        uint256 custody = clearinghouse.balanceUsdc(ACCOUNT);
+        uint256 margin = clearinghouse.pnlPledgeUsdc(ACCOUNT);
+        uint256 keeperBalance = clearinghouse.balanceUsdc(KEEPER);
+        uint64 next;
+        {
+            OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE, false);
+            request.isClose = false;
+            request.marginDelta = 250e6;
+            request.targetPrice = PRICE;
+            vm.prank(follower);
+            next = router.commitOrder(request);
+        }
+        uint256 followerBounty = router.lifecycleBook().pendingIntent(next).executionBountyUsdc;
+        assertGt(followerBounty, 0, "an abandoned zero-bounty head blocks a rewarded order");
+        assertEq(router.nextExecuteId(), head);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotQueueHead.selector);
+        router.executeOrder(next, new bytes[](0));
+        uint64 deadline = router.lifecycleBook().orderTiming(head).executionDeadline;
+        vm.warp(deadline);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotExpired.selector);
+        router.expireOrder(head);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotQueueHead.selector);
+        router.executeOrder(next, new bytes[](0));
+        assertEq(router.nextExecuteId(), head, "deadline equality cannot skip the head");
+        vm.warp(deadline + 1);
+
+        if (!autoPrune) {
+            // Explicit expiry must work even when every oracle call fails, with no update data or ETH attached.
+            vm.mockCallRevert(
+                address(router.pletherOracle()), new bytes(0), abi.encodeWithSignature("OracleUnavailable()")
+            );
+            vm.recordLogs();
+            vm.prank(address(0xC1EA));
+            OrderV3Types.ExecutionResult memory expired = router.expireOrder(head);
+            assertEq(uint8(expired.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
+            _assertZeroBountyExpiryReceipt(vm.getRecordedLogs(), head);
+            vm.clearMockedCalls();
+            assertEq(router.nextExecuteId(), next);
+            assertEq(clearinghouse.balanceUsdc(address(0xC1EA)), 0, "cleanup caller earns no reward");
+            assertEq(router.pendingOrderCounts(follower), 1, "expiry does not consume the follower");
+        }
+        bytes[] memory update = _mockPythUpdateData(PRICE);
+        vm.recordLogs();
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(next, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        if (autoPrune) {
+            _assertZeroBountyExpiryReceipt(vm.getRecordedLogs(), head);
+        }
+        assertEq(clearinghouse.balanceUsdc(KEEPER) - keeperBalance, followerBounty, "only follower pays a reward");
+        assertEq(clearinghouse.balanceUsdc(ACCOUNT), custody, "expiry does not collect more funds");
+        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin);
+        (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(remaining, SIZE, "abandoned close did not execute");
+        (uint256 followerSize,,,,,,) = engine.positions(follower);
+        assertEq(followerSize, SIZE);
+        assertEq(router.nextExecuteId(), 0);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(
+            uint8(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, head).state),
+            uint8(IMarginClearinghouse.BountyReservationState.Settled)
+        );
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotPending.selector);
+        router.expireOrder(head);
+        vm.prank(ACCOUNT);
+        assertEq(router.commitOrder(abandoned), head, "exact replay cannot recreate an expired queue entry");
+        assertEq(router.nextExecuteId(), 0);
+    }
+
+    function _assertZeroBountyExpiryReceipt(
+        Vm.Log[] memory logs,
+        uint64 id
+    ) private view {
+        for (uint256 i; i < logs.length; ++i) {
+            if (
+                logs[i].emitter == address(router.lifecycleBook()) && logs[i].topics.length == 4
+                    && logs[i].topics[0] == IOrderLifecycleBook.OrderFinalized.selector
+                    && uint64(uint256(logs[i].topics[1])) == id
+            ) {
+                (,, uint64 terminalTime, OrderV3Types.OrderReceipt memory receipt) =
+                    abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
+                assertTrue(router.lifecycleBook().verifyReceipt(receipt, terminalTime));
+                assertEq(uint8(receipt.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+                assertEq(uint8(receipt.reason), uint8(OrderV3Types.TerminalReason.Expired));
+                assertEq(receipt.bountyUsdc, 0);
+                assertEq(receipt.bounty.bountyEntitlementUsdc, 0);
+                assertEq(
+                    receipt.bounty.bountyPaidUsdc + receipt.bounty.bountyRefundedUsdc
+                        + receipt.bounty.bountyRetainedUsdc + receipt.bounty.bountyForfeitedUsdc,
+                    0
+                );
+                assertEq(receipt.bountyRecipient, address(0));
+                assertEq(receipt.economics.preSettlementBalanceUsdc, receipt.economics.postSettlementBalanceUsdc);
+                return;
+            }
+        }
+        revert("missing zero-bounty expiry receipt");
+    }
+
     function test_CallerPaidExpiryUsesCommittedDeadlineAfterSubmitBy() public {
         _openNormally(CfdTypes.Side.LONG, 0);
         OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);

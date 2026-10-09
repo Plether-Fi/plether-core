@@ -42,6 +42,22 @@ Mismatch cleanup emits `ExpiredReservationMismatch`. Its receipt reports the act
 
 Automatic queue recovery assumes authenticated identities and valid aggregate accounting. Arbitrary synthetic custody/ownership corruption is not automatically repaired. There is no administrative balance-repair endpoint.
 
+## Abandoned zero-bounty orders: keeper responsibility
+
+The protocol-operated order keeper owns FIFO liveness, including unpaid cleanup. Its operator must fund native gas for `expireOrder`; the protocol pays no bounty for a zero-entitlement order and does not mint a cleanup subsidy. This applies both to CallerPaidFullExit and to Standard closes committed while the configured close bounty is zero. Any account may perform the same cleanup as a fallback. The app is responsible for guiding a caller-paid user through commitment and execution, but keeper cleanup must not depend on that user returning.
+
+The external keeper must implement this policy before activation:
+
+1. Monitor `nextExecuteId()` and read the head's stored `pendingIntent` / `orderTiming`, including its bounty entitlement and committed execution deadline. A zero bounty must not remove the head from monitoring.
+2. While the head is live, preserve FIFO. Do not attempt to skip it or expire it at deadline equality. A user may execute it; operator-funded execution is an explicit operational choice, not a promised keeper reward.
+3. Once a fresh chain timestamp is strictly greater than `executionDeadline`, submit permissionless `expireOrder(head)` without oracle data or an oracle fee. Do not wait for an oracle service to recover. The transaction sender pays native gas.
+4. Confirm the terminal receipt and queue advancement before moving on. If another actor executed, expired or liquidated the order first, reread state and continue; do not repeatedly retry a stale ID. Verify terminal-lock and reservation cleanup from canonical state/events.
+5. `executeOrder(laterId, updateData)` can also prune expired heads before executing the next eligible order, subject to the existing cleanup/gas limits. Recheck progress and continue in bounded transactions if cleanup stops early. Explicit expiry remains the oracle-independent fallback.
+
+Monitor overdue head age, queue progress, failed cleanup transactions, and the cleanup wallet's native balance. Escalate persistent lack of progress or ledger-invariant evidence to the protocol incident operator. Do not depend solely on economically motivated third-party keepers for unpaid work. This repository supplies the contract entrypoints and regression tests; the separately deployed keeper service must implement and fund this responsibility.
+
+An account may submit another attempt after expiry, and multiple accounts can create additional heads. Per-account locks and bounded deadlines therefore provide recoverability, not a global spam-prevention guarantee. The regressions deliberately abandon three successive orders, with another account's rewarded order behind each, and verify explicit expiry and automatic pruning. They do not claim a bound on aggregate delay without a functioning cleanup operator.
+
 ## ABI and consumer migration
 
 Intent domain is V3. Receipt and execution-configuration domains are V4. The merged `OrderV3Types` schema combines close mode with `submitBy` and `executionWindowSeconds`; receipts append authenticated timing. Regenerate all tuple consumers together. Archived release ABIs remain the historical decoders.
