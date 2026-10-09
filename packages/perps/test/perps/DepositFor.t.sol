@@ -290,12 +290,24 @@ contract DepositForCarryTest is BasePerpTest {
     }
 
     function _unchangedState() private view returns (bytes32) {
+        // Keep each encoder bounded so this snapshot also compiles in the non-IR fast-test profile.
+        return keccak256(abi.encode(_positionState(), _carryState(), _reservationState(), _navAndPoolState()));
+    }
+
+    function _positionState() private view returns (bytes32) {
         return keccak256(
             abi.encode(
                 _raw(address(engine), abi.encodeWithSelector(engine.positions.selector, ACCOUNT)),
                 _raw(address(engine), abi.encodeWithSelector(engine.positionCarryState.selector, ACCOUNT)),
                 _raw(address(engine), abi.encodeWithSelector(engine.sides.selector, 0)),
-                _raw(address(engine), abi.encodeWithSelector(engine.sides.selector, 1)),
+                _raw(address(engine), abi.encodeWithSelector(engine.sides.selector, 1))
+            )
+        );
+    }
+
+    function _carryState() private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
                 engine.sideCarryIndex(0),
                 engine.sideCarryIndex(1),
                 engine.sideCarryTimestamp(0),
@@ -303,11 +315,25 @@ contract DepositForCarryTest is BasePerpTest {
                 engine.sideBorrowBaseUsdc(0),
                 engine.sideBorrowBaseUsdc(1),
                 engine.unsettledCarryUsdc(ACCOUNT),
-                engine.traderClaimBalanceUsdc(ACCOUNT),
+                engine.traderClaimBalanceUsdc(ACCOUNT)
+            )
+        );
+    }
+
+    function _reservationState() private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
                 clearinghouse.getLockedMarginBuckets(ACCOUNT),
                 clearinghouse.getOrderReservation(type(uint64).max),
                 clearinghouse.vpiRebateReserveUsdc(ACCOUNT),
-                clearinghouse.totalBountyReservationsUsdc(ACCOUNT),
+                clearinghouse.totalBountyReservationsUsdc(ACCOUNT)
+            )
+        );
+    }
+
+    function _navAndPoolState() private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
                 terminalNavBook.curveHashOf(ACCOUNT),
                 terminalNavBook.bookState(),
                 usdc.balanceOf(address(pool)),
