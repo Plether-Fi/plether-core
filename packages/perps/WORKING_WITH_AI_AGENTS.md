@@ -35,7 +35,7 @@ not perps directions. Bind the intended market through the Router's verified Ora
 | Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV3Types.ExecutionBounds`, `IPositionProtectionActions` |
 | Financial policy | The evaluator reconstructs authoritative Engine state and checks the registered intent's limits before the Engine applies the transition | `CfdOrderPolicyEvaluator`, configured Engine planner |
 | Composable execution | Bounded-order submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
-| Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.outcome`, `IPositionProtectionViews` |
+| Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.terminalOutcome`, `IPositionProtectionViews` |
 
 The practical result is that an agent can separate three questions that are often conflated:
 
@@ -135,7 +135,7 @@ durable order state:
 - `isProtectionAttempt(orderId)` identifies the Router-registered close-attempt marker while that order is pending;
   `ProtectionAttemptRegistered` is the permanent event evidence after finalization removes the transient marker.
 - `lifecycleStatus(orderId)` returns `None`, `Pending`, `Executed`, or `Failed`.
-- `outcome(orderId)` returns the permanent compact terminal outcome and receipt hash.
+- `terminalOutcome(orderId)` returns account, terminal block, status, reason, and receipt hash. Fetch detailed history from `OrderFinalized`; `verifyReceipt(receipt, terminalTime)` authenticates a supplied receipt.
 
 The Book owns no funds and has no owner, upgrade, migration, or arbitrary mutation path. Only its immutable Router may
 register and finalize records.
@@ -195,11 +195,14 @@ The submitting agent does not have to be the executor. Any keeper may execute an
 bounded-order request, including an attached protection parent, execution remains inside the limits pinned by the
 account. Only triggered and retried protection close orders use the documented protocol-synthesized envelope; they
 remain subject to ordinary Router, evaluator, Engine, and protection-state checks. Self-execution releases the stored
-order bounty to the account's free settlement; an external keeper receives a clearinghouse credit instead. Receipts
-encode self-execution as `Paid` to `executor == account`; `RefundedToAccount` is reserved for risk-off cleanup. A failed registered protection attempt records
+order bounty to the account's free settlement; an external keeper receives a clearinghouse credit instead. For a
+nonzero bounty, receipts encode self-execution as `Paid` to `executor == account`; ordinary zero-bounty execution uses
+`None`. `RefundedToAccount` applies to risk-off cleanup and recoverable backing returned by
+`ExpiredReservationMismatch`. A failed registered protection attempt records
 `RetainedForProtectionRetry`, pays no cleaner, and rolls the same reserved amount back to the latched protection only
-while the exact protected position still matches. A missing or mismatched position instead uses `Paid` cleanup and
-terminally resolves the protection as `Failed`.
+while the exact protected position still matches, including an explicitly active zero reservation. A missing or
+mismatched position instead uses ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally
+resolves the protection as `Failed`.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
@@ -345,10 +348,9 @@ HousePool redemption-math sidecar because that module affects LP redemption budg
 domains contribute their finalized active configuration versions; pending timelock proposals are not active execution
 policy and therefore are not committed.
 
-The bounded request ABI and intent-hash domain remain V2. The latched-retry release uses the V3 execution-config and
-receipt domains because a Router-authenticated protection-attempt marker and the retained-for-retry bounty disposition
-change authenticated terminal semantics. Never compare a V2 deployment's digest or receipt hash with V3 as if the
-domain were unchanged.
+The bounded request ABI and intent-hash domain are V3, including `submitBy` and `executionWindowSeconds`.
+Execution-config and receipt domains are V4. Use the matching request, receipt, and lifecycle interfaces for this
+release; historical V2 request or V3 receipt/config encodings are not interchangeable with the current domains.
 
 For a nonzero externally pinned expectation, a later mismatch terminalizes as `ConfigMismatch` unless risk-off,
 expiry, account liquidation, or another terminal cleanup path finalizes the order first. Authenticated protection
@@ -413,11 +415,12 @@ For an externally submitted bounded order, use both on-chain state and the canon
 1. Resolve `(account, clientOrderId)` with `clientIntent` and compare the stored intent hash with
    `hashOrderRequest(account, request)`.
 2. While pending, compare `pendingIntent` and `pendingPolicy` with the instruction approved by the account layer.
-3. On terminal status, read `outcome(orderId)` from the Book.
+3. On terminal status, read `terminalOutcome(orderId)` from the Book. Its terminal block is the Solidity receipt clock, not an RPC log locator on Arbitrum; executor, price, bounty and failure details are event history.
 4. Fetch the corresponding `OrderFinalized` event using the Book address and indexed order/account/client-id fields.
 5. Recompute
    `keccak256(abi.encode(RECEIPT_TYPEHASH, chainId, book, router, terminalBlock, terminalTime, receipt))` and compare it
-   with both the event and `outcome(orderId).receiptHash`.
+   with both the event and `terminalOutcome(orderId).receiptHash`.
+   Alternatively, use `verifyReceipt(receipt, terminalTime)` on the Book; still compare the event hash and indexed identity to the stored summary. The SDK `decodeVerifiedOrderFinalized` performs these checks locally.
 6. Independently reconcile the receipt economics with Engine, Clearinghouse, and pool events when the strategy's risk
    policy requires deeper accounting assurance.
 
@@ -433,7 +436,9 @@ original protection action.
 - lifecycle status, terminal reason, execution regime, executor, and price source;
 - adverse execution price, neutral mark, pool depth, and oracle publish time;
 - whether the price reached the Engine;
-- that queued order's exact stored execution bounty, recipient, and disposition;
+- the queued order's bounty entitlement, actual paid/refunded/retained/forfeited amounts, recipient, disposition, and
+  any reservation discrepancy; `ExpiredReservationMismatch` reports the actual recoverable refund, which can differ
+  from the stored entitlement;
 - typed failure evidence and revert-data hash;
 - normalized execution economics and post-state summaries.
 
@@ -451,7 +456,7 @@ For TP/SL, also reconcile the retained protection record and `PositionProtection
 thresholds, protection status, triggered leg, trigger mark and publish time, and
 `parentOrderId`/latest-`linkedOrderId` association that an order receipt does not contain. Retry events and lifecycle
 receipts form the complete one-to-many attempt history; never treat the mutable latest id as the whole history. The
-receipt bounty covers only that attempt's stored execution bounty. Protection trigger bounties and protection reserves
+receipt bounty fields cover only that attempt's entitlement and actual settlement. Protection trigger bounties and protection reserves
 that are separately retained, refunded, or forfeited require the protection and Clearinghouse/Engine evidence. A
 failed attempt with `RetainedForProtectionRetry` has a zero recipient because the value moves from Router attribution
 back to Book attribution rather than being paid.

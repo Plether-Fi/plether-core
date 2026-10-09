@@ -134,6 +134,19 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         return _commitOrder(IOrderLiquidationBatchHost(address(this)), msg.sender, request, true);
     }
 
+    /// @notice Applies the same prospective admission checks as fresh public close commitment.
+    function previewCloseAdmission(
+        address account,
+        OrderV3Types.OrderRequest calldata request
+    ) external view returns (uint256) {
+        IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(_delegatedLogicRouter());
+        if (!request.isClose) {
+            revert OrderRouter__NotCloseOrder();
+        }
+        _validateFreshRequest(host, account, request, true);
+        return _validatedCloseBounty(host, account, request.side, request.sizeDelta);
+    }
+
     /// @notice Resolves or submits a caller-authored bounded open through the Router's immutable protection Book.
     function commitProtectedOpen(
         address account,

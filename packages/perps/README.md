@@ -172,7 +172,7 @@ In practice, the compact public API is:
     `currentExecutionConfigHash()`,
     `resolveClientIntent(...)`, `clientIntent(...)`, `pendingIntent(...)`, `pendingPolicy(...)`,
     `isProtectionAttempt(...)`,
-    `lifecycleStatus(...)`, and `outcome(...)`
+    `lifecycleStatus(...)`, and `terminalOutcome(...)`
   - the read-only `IHousePool` capacity getters exposed by `HousePool`:
     `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
     `areSeniorDepositReservationsWithinLimits()`
@@ -406,7 +406,7 @@ Important details:
   can never execute, even after governance unpauses. Permissionless cleanup returns their remaining committed margin
   and complete execution bounty to the trader's free internal settlement without an oracle or Engine checkpoint;
   the protocol incident keeper pays cleanup gas and receives no bounty.
-- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from reservation so FIFO cleanup remains incentive compatible.
+- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from their snapshotted reservation. Zero-bounty closes pay no reward; the protocol order keeper's operator funds expiry gas to preserve FIFO liveness. See [abandoned zero-bounty cleanup](DEPOSIT_FREE_CLOSE.md#abandoned-zero-bounty-orders-keeper-responsibility).
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules and the fixed LP-owned frozen-close spread.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -553,8 +553,10 @@ Profitable closes and some liquidation residuals can create a trader claim balan
 
 Order and liquidation bounties are margin transfers inside `MarginClearinghouse`.
 
-- Open and close execution bounties are locked from eligible free settlement as action reserve at commit time; they
-  do not increase or consume the position's PnL pledge.
+- Open execution bounties are locked from free settlement as action reserve. Close commitment first collects carry,
+  then funds the bounty from free settlement followed by eligible position pledge. Pledge-funded reservation reduces
+  position margin and updates its borrow base without moving custody; partial commitments must retain strict
+  maintenance/FAD health for the exposed position.
 - Live-position custody is split between a price-PnL pledge and a dedicated liquidation-charge reserve. Pending-order
   and action reserves are separate again; only the PnL pledge enters the terminal price-loss cap.
 - Position protection snapshots and reserves a trigger bounty plus a linked-close execution bounty at creation. The
@@ -1067,10 +1069,11 @@ authorizes settlement.
 - Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.01 USDC, 0.20 USDC]`.
 - Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
 - Position protection reserves a governance-configured trigger bounty capped at `1 USDC` plus the snapshotted close
-  bounty. Both come from free settlement, as do ordinary close execution bounties.
+  bounty. Both protection bounties come from free settlement.
 - Partial close size is floored by the engine `minBountyUsdc / bountyBps` notional threshold at the commit reference price, preventing dust closes from occupying the FIFO queue for a flat bounty.
 - Open bounties come from free settlement.
-- Close bounties also come exclusively from free settlement after the engine attempts to collect carry. PnL pledge is never reclassified to keep a close intent committable.
+- Ordinary close bounties use free settlement after carry collection, then eligible position pledge if needed. Claims,
+  unrealized gains, liquidation reserve, VPI backing, and other orders' reservations cannot fund them.
 - Failed-order rewards stay independent from pool liquidity because they are paid from clearinghouse-reserved trader value rather than LP cash.
 
 ### Execute rules
@@ -1115,7 +1118,7 @@ authorizes settlement.
 - `pendingIntent(orderId)` and `pendingPolicy(orderId)` expose the identity, actual reserved bounty, and caller bounds
   while the order is live.
 - `lifecycleStatus(orderId)` returns `None`, `Pending`, `Executed`, or `Failed`.
-- `outcome(orderId)` keeps the compact permanent terminal result and the hash of the complete receipt.
+- `terminalOutcome(orderId)` keeps account, terminal block, status, reason, and the hash of the complete receipt in two storage slots. Detailed history requires the `OrderFinalized` event. `verifyReceipt(receipt, terminalTime)` verifies a supplied receipt against stored authority.
 - `OrderFinalized` emits the complete fixed-shape receipt. Its hash also commits to the chain, Book, Router, terminal
   block, and terminal time.
 
@@ -1133,12 +1136,13 @@ Pre-oracle expiry and config-mismatch receipts use `PriceSource.None`, zero exec
 Risk-off receipts likewise use `RiskOff`, execution mode and price source `None`, and the permissionless cleaner as
 executor. A nonzero reserved bounty is returned to the account with `RefundedToAccount`; the cleaner receives
 nothing. Liquidation cleanup records `AccountLiquidated`, retains the original keeper as executor, and marks a
-nonzero remaining queued-order bounty `Forfeited` to the Engine's protocol-treasury account. On every terminal path,
-a zero bounty requires `BountyDisposition.None` and the zero recipient rather than a paid/refunded/forfeited label.
-A failed registered protection attempt records its nonzero bounty as
+nonzero remaining queued-order bounty `Forfeited` to the Engine's protocol-treasury account. A zero bounty ordinarily
+uses `BountyDisposition.None` and the zero recipient; an authenticated protection attempt may instead retain an
+explicitly active zero reservation for retry.
+A failed registered protection attempt records its retained bounty, including an active zero reservation, as
 `BountyDisposition.RetainedForProtectionRetry` with a zero recipient only while the exact protected position still
 matches, because custody remains reserved for the next attempt. A missing or mismatched position instead records
-ordinary `Paid` cleanup and terminally resolves the protection as `Failed`.
+ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally resolves the protection as `Failed`.
 
 ### Basket oracle and publish-time checks
 

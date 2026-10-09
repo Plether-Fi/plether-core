@@ -1,3 +1,5 @@
+> Historical/additive-preview documentation. For the fresh-stack V3 intent / V4 receipt implementation, use [Deposit-free close migration](DEPOSIT_FREE_CLOSE.md). Keep this historical integration bound to its archived deployment; the new planner tuples are incompatible with v1.2.3.
+
 # Reservation-aware close review
 
 `CfdClosePreview.previewClose` is the pre-commit close-review API. `CfdOrderPolicyEvaluator.assessOrder` remains the execution-state API: its supplied bounty must already have been reserved by commitment.

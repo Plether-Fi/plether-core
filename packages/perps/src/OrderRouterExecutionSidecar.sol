@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRecoverySidecar} from "@plether/perps/OrderRecoverySidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -47,7 +48,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     uint256 internal constant MAX_RISK_OFF_REFUNDS_PER_CALL = 64;
     uint256 internal constant POST_ENGINE_GAS_RESERVE = 1_000_000;
     uint256 internal constant EVALUATOR_RETURN_GAS_RESERVE = 250_000;
-    uint256 internal constant EXECUTION_ASSESSMENT_ABI_LENGTH = 19 * 32;
+    uint256 internal constant EXECUTION_ASSESSMENT_ABI_LENGTH = 29 * 32;
 
     /// @notice The separately deployed sidecar address used only to distinguish direct calls from delegatecalls.
     address public immutable SELF;
@@ -95,7 +96,10 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         uint256 minimumEngineGas;
     }
 
+    address public immutable recoverySidecar;
+
     constructor() {
+        recoverySidecar = address(new OrderRecoverySidecar());
         SELF = address(this);
     }
 
@@ -318,6 +322,22 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         _refundEth(host, state.executor, msg.value - state.pythFeeTotal);
     }
 
+    function expireOrder(
+        uint64
+    ) external onlyDelegateCall returns (OrderV3Types.ExecutionResult memory) {
+        return _delegateRecovery(msg.data);
+    }
+
+    function _delegateRecovery(
+        bytes memory data
+    ) private returns (OrderV3Types.ExecutionResult memory) {
+        (bool success, bytes memory result) = recoverySidecar.delegatecall(data);
+        if (!success) {
+            assembly ("memory-safe") { revert(add(result, 32), mload(result)) }
+        }
+        return abi.decode(result, (OrderV3Types.ExecutionResult));
+    }
+
     /// @notice Executes or terminally settles one order inside a Router self-call rollback frame.
     /// @dev The Router callback bearing this selector must delegate the exact calldata back to this sidecar.
     function executeOrderItemFromSidecar(
@@ -330,6 +350,22 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(request.orderId);
         if (pending.account == address(0) || pending.account != orderView.order.account) {
             revert OrderRouterExecutionSidecar__OrderIdentityMismatch(request.orderId);
+        }
+
+        {
+            IMarginClearinghouse reservations = IMarginClearinghouse(ICfdEngineCore(host.engine()).clearinghouse());
+            if (block.timestamp > pending.timing.executionDeadline) {
+                try reservations.validateBountyReservation(
+                    pending.account, IMarginClearinghouse.BountyKind.Order, request.orderId, pending.executionBountyUsdc
+                ) {}
+                catch {
+                    return _recoverExpired(host, book, pending, request);
+                }
+            } else {
+                reservations.validateBountyReservation(
+                    pending.account, IMarginClearinghouse.BountyKind.Order, request.orderId, pending.executionBountyUsdc
+                );
+            }
         }
 
         uint64 riskOffCutoff = _riskOffCutoff(host);
@@ -352,7 +388,14 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             );
         }
 
-        bytes32 observedConfigHash = book.currentExecutionConfigHash();
+        // Execute requests carry the digest read after oracle/mark updates by _executionItem. Only static
+        // dependency reads and Router self-calls occur between that observation and this check. Reuse it inside
+        // this authenticated item; public committed assessment still validates configuration independently.
+        // Cleanup requests may originate without an observation (for example permissionless expiry).
+        bytes32 observedConfigHash = request.action == IOrderRouterExecutionHost.ItemAction.Execute
+            && request.observedConfigHash != bytes32(0)
+            ? request.observedConfigHash
+            : book.currentExecutionConfigHash();
         bytes32 expectedConfigHash = pending.bounds.expectedConfigHash;
         // Zero is reserved for Router-created trigger closes whose intent is deliberately unpinned.
         if (expectedConfigHash != bytes32(0) && observedConfigHash != expectedConfigHash) {
@@ -375,33 +418,22 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         return _executePrepared(host, book, orderView.order, pending, request, observedConfigHash);
     }
 
-    /// @notice Records a receipt after a Router risk-off or liquidation path already settled the order.
-    /// @dev Book finalization is deliberately last and is not caught; any failure rolls back the enclosing item frame.
-    function recordSettledTerminal(
-        IOrderRouterExecutionHost.SettledTerminalInput calldata input
-    ) external onlyRouterSelf returns (OrderV3Types.ExecutionResult memory result) {
-        if (
-            input.reason != OrderV3Types.TerminalReason.RiskOff
-                && input.reason != OrderV3Types.TerminalReason.AccountLiquidated
-        ) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
-        }
-        IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
-        IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
-        OrderV3Types.PendingIntent memory pending = book.pendingIntent(input.orderId);
-        if (pending.account == address(0) || input.bountyUsdc != pending.executionBountyUsdc) {
-            revert OrderRouterExecutionSidecar__OrderIdentityMismatch(input.orderId);
-        }
-        _validateSettledTerminalInput(host, pending, input);
+    function _recoverExpired(
+        IOrderRouterExecutionHost,
+        IOrderLifecycleBook,
+        OrderV3Types.PendingIntent memory,
+        IOrderRouterExecutionHost.ItemRequest calldata request
+    ) private returns (OrderV3Types.ExecutionResult memory) {
+        return
+            _delegateRecovery(
+                abi.encodeCall(OrderRecoverySidecar.recoverExpiredItem, (request.orderId, request.executor))
+            );
+    }
 
-        AccountState memory state = _accountState(ICfdEngineCore(host.engine()), pending.account);
-        OrderV3Types.OrderReceipt memory receipt = _settledTerminalBaseReceipt(pending, input);
-        receipt.bountyUsdc = input.bountyUsdc;
-        receipt.bountyRecipient = input.bountyRecipient;
-        receipt.bountyDisposition = input.bountyDisposition;
-        receipt.failure = input.failure;
-        receipt.economics = _stateOnlyEconomics(state, state);
-        return _finalizeReceipt(book, receipt);
+    function recordSettledTerminal(
+        IOrderRouterExecutionHost.SettledTerminalInput calldata
+    ) external onlyRouterSelf returns (OrderV3Types.ExecutionResult memory) {
+        return _delegateRecovery(msg.data);
     }
 
     function _executePrepared(
@@ -586,18 +618,10 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         IOrderRouterExecutionHost.ItemRequest calldata request,
         OrderV3Types.PendingIntent memory pending
     ) private pure returns (bytes memory) {
+        pending;
         return abi.encodeCall(
-            ICfdOrderPolicyEvaluator.assessOrder,
-            (
-                engineAddress,
-                order,
-                request.executor,
-                request.executionPrice,
-                request.poolDepthUsdc,
-                request.oraclePublishTime,
-                pending.bounds,
-                pending.executionBountyUsdc
-            )
+            ICfdOrderPolicyEvaluator.assessCommittedOrder,
+            (engineAddress, order.orderId, request.executor, request.executionPrice, request.oraclePublishTime)
         );
     }
 
@@ -629,33 +653,15 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     }
 
     function _settleNonEngine(
-        IOrderRouterExecutionHost host,
-        IOrderLifecycleBook book,
-        CfdTypes.Order memory order,
-        OrderV3Types.PendingIntent memory pending,
+        IOrderRouterExecutionHost,
+        IOrderLifecycleBook,
+        CfdTypes.Order memory,
+        OrderV3Types.PendingIntent memory,
         IOrderRouterExecutionHost.ItemRequest memory request,
         OrderV3Types.TerminalReason reason,
         OrderV3Types.FailureDetails memory failure
-    ) private returns (OrderV3Types.ExecutionResult memory result) {
-        ICfdEngineCore engine_ = ICfdEngineCore(host.engine());
-        AccountState memory preState = _accountState(engine_, order.account);
-        IOrderRouterExecutionHost.BountySettlement memory bountySettlement = host.settleOrderFromSidecar(
-            order.orderId,
-            false,
-            reason,
-            request.executor,
-            request.executionPrice,
-            request.bountyAccountingPrice,
-            request.bountyAccountingPublishTime
-        );
-        _requireBounty(pending.executionBountyUsdc, bountySettlement.bountyUsdc);
-        AccountState memory postState = _accountState(engine_, order.account);
-
-        OrderV3Types.OrderReceipt memory receipt = _memoryRequestBaseReceipt(order.orderId, pending, request, reason);
-        _setBountySettlement(receipt, bountySettlement);
-        receipt.failure = failure;
-        receipt.economics = _stateOnlyEconomics(preState, postState);
-        return _finalizeReceipt(book, receipt);
+    ) private returns (OrderV3Types.ExecutionResult memory) {
+        return _delegateRecovery(abi.encodeCall(OrderRecoverySidecar.settleNonEngine, (request, reason, failure)));
     }
 
     function _settleRiskOff(
@@ -710,6 +716,8 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         uint64 oraclePublishTime,
         bool priceReachedEngine
     ) private pure returns (OrderV3Types.OrderReceipt memory receipt) {
+        receipt.commitment = pending.commitment;
+        receipt.bounty.bountyEntitlementUsdc = pending.executionBountyUsdc;
         receipt.orderId = orderId;
         receipt.account = pending.account;
         receipt.clientOrderId = pending.clientOrderId;
@@ -727,48 +735,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         receipt.poolDepthUsdc = poolDepthUsdc;
         receipt.oraclePublishTime = oraclePublishTime;
         receipt.priceReachedEngine = priceReachedEngine;
-    }
-
-    function _settledTerminalBaseReceipt(
-        OrderV3Types.PendingIntent memory pending,
-        IOrderRouterExecutionHost.SettledTerminalInput calldata input
-    ) private pure returns (OrderV3Types.OrderReceipt memory receipt) {
-        return _baseReceipt(
-            input.orderId,
-            pending,
-            input.executor,
-            input.observedConfigHash,
-            input.reason,
-            input.executionMode,
-            input.priceSource,
-            input.executionPrice,
-            input.neutralMarkPrice,
-            input.poolDepthUsdc,
-            input.oraclePublishTime,
-            input.priceReachedEngine
-        );
-    }
-
-    function _memoryRequestBaseReceipt(
-        uint64 orderId,
-        OrderV3Types.PendingIntent memory pending,
-        IOrderRouterExecutionHost.ItemRequest memory request,
-        OrderV3Types.TerminalReason reason
-    ) private pure returns (OrderV3Types.OrderReceipt memory receipt) {
-        return _baseReceipt(
-            orderId,
-            pending,
-            request.executor,
-            request.observedConfigHash,
-            reason,
-            request.executionMode,
-            request.priceSource,
-            request.executionPrice,
-            request.neutralMarkPrice,
-            request.poolDepthUsdc,
-            request.oraclePublishTime,
-            false
-        );
     }
 
     function _preparedBaseReceipt(
@@ -798,6 +764,17 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         IOrderLifecycleBook book,
         OrderV3Types.OrderReceipt memory receipt
     ) private returns (OrderV3Types.ExecutionResult memory result) {
+        if (receipt.reason != OrderV3Types.TerminalReason.ExpiredReservationMismatch) {
+            if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
+                receipt.bounty.bountyPaidUsdc = receipt.bountyUsdc;
+            } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Forfeited) {
+                receipt.bounty.bountyForfeitedUsdc = receipt.bountyUsdc;
+            } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RefundedToAccount) {
+                receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+            } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
+                receipt.bounty.bountyRetainedUsdc = receipt.bountyUsdc;
+            }
+        }
         bytes32 receiptHash = book.finalize(receipt);
         result.orderId = receipt.orderId;
         result.status = receipt.status;
@@ -810,6 +787,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         AccountState memory preState,
         AccountState memory postState
     ) private pure returns (OrderV3Types.OrderEconomics memory economics) {
+        economics.close = assessment.close;
         economics.executionNotionalUsdc = assessment.executionNotionalUsdc;
         economics.realizedPnlUsdc = assessment.realizedPnlUsdc;
         economics.vpiUsdc = assessment.vpiUsdc;
@@ -861,7 +839,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             uint256 category = _word(revertData, 4);
             uint256 code = _word(revertData, 36);
             uint256 isClose = _word(revertData, 68);
-            bool knownCode = isClose == 0 ? code > 0 && code <= 10 : isClose == 1 && code > 0 && code <= 5;
+            bool knownCode = isClose == 0 ? code > 0 && code <= 10 : isClose == 1 && code > 0 && code <= 6;
             CfdEnginePlanTypes.ExecutionFailurePolicyCategory expectedCategory =
             CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None;
             if (knownCode) {
@@ -1268,51 +1246,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     ) private pure {
         if (actual != expected) {
             revert OrderRouterExecutionSidecar__BountyMismatch(expected, actual);
-        }
-    }
-
-    function _validateSettledTerminalInput(
-        IOrderRouterExecutionHost host,
-        OrderV3Types.PendingIntent memory pending,
-        IOrderRouterExecutionHost.SettledTerminalInput calldata input
-    ) private view {
-        bool failureIsEmpty = input.failure.selector == bytes4(0) && input.failure.category == 0
-            && input.failure.code == 0 && input.failure.constraint == OrderV3Types.ConstraintKind.None
-            && input.failure.actual == 0 && input.failure.limit == 0 && input.failure.revertDataHash == bytes32(0);
-        if (!failureIsEmpty) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
-        }
-
-        if (input.bountyUsdc == 0) {
-            if (input.bountyDisposition != OrderV3Types.BountyDisposition.None || input.bountyRecipient != address(0)) {
-                revert OrderRouterExecutionSidecar__InvalidSettledReason();
-            }
-        } else if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
-            if (
-                input.bountyDisposition != OrderV3Types.BountyDisposition.RefundedToAccount
-                    || input.bountyRecipient != pending.account
-            ) {
-                revert OrderRouterExecutionSidecar__InvalidSettledReason();
-            }
-        } else if (
-            input.bountyDisposition != OrderV3Types.BountyDisposition.Forfeited
-                || input.bountyRecipient != ICfdEngineCore(host.engine()).protocolTreasury()
-        ) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
-        }
-
-        if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
-            if (
-                input.executionMode != OrderV3Types.ExecutionMode.None
-                    || input.priceSource != OrderV3Types.PriceSource.None || input.executionPrice != 0
-                    || input.oraclePublishTime != 0 || input.priceReachedEngine
-            ) {
-                revert OrderRouterExecutionSidecar__InvalidSettledReason();
-            }
-            return;
-        }
-        if (input.priceSource != OrderV3Types.PriceSource.Liquidation || input.priceReachedEngine) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
         }
     }
 

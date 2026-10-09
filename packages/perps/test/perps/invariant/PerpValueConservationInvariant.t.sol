@@ -80,7 +80,6 @@ contract PerpValueConservationHandler is Test {
         vm.prank(address(router));
         engine.updateMarkPrice(executionPrice, uint64(block.timestamp));
 
-        (, uint256 marginBefore,,,,,) = engine.positions(FULL_CLOSE_TRADER);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(FAILED_CLOSE_KEEPER);
         uint256 targetPrice = executionPrice - 1;
 
@@ -97,13 +96,22 @@ contract PerpValueConservationHandler is Test {
                 )
             );
         if (committed) {
+            (, uint256 marginAfterCommit,,,,,) = engine.positions(FULL_CLOSE_TRADER);
+            IMarginClearinghouse.BountyReservation memory reservation =
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, 1);
             bytes[] memory priceData = _mockPythUpdateData(executionPrice);
             vm.prank(FAILED_CLOSE_KEEPER);
             (bool executed,) = address(router).call(abi.encodeCall(router.executeOrder, (uint64(1), priceData)));
             if (executed) {
                 (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(FULL_CLOSE_TRADER);
                 keeperGain = clearinghouse.balanceUsdc(FAILED_CLOSE_KEEPER) - keeperSettlementBefore;
-                violation = sizeAfter > 0 && (keeperGain > 0 || marginAfter < marginBefore);
+                // Commitment may reclassify pledge into the authenticated bounty. A failed
+                // execution may pay that bounty, but cannot consume any additional pledge.
+                violation = sizeAfter > 0
+                    && (keeperGain > reservation.amountUsdc
+                        || marginAfter != marginAfterCommit
+                        || reservation.account != FULL_CLOSE_TRADER
+                        || reservation.state != IMarginClearinghouse.BountyReservationState.Active);
             }
         }
 
@@ -463,7 +471,9 @@ contract PerpValueConservationInvariantTest is BasePerpTest {
     }
 
     function _assertInvariant_FailedExecutionCannotExtractActiveMargin() internal view {
-        assertFalse(handler.failedCloseExtractedMargin(), "Failed close execution extracted active position margin");
+        assertFalse(
+            handler.failedCloseExtractedMargin(), "Failed close extracted value beyond its authenticated bounty"
+        );
     }
 
     function _assertInvariant_NeutralMtmCannotCreateLpProfit() internal view {

@@ -153,6 +153,11 @@ contract VerifyPerpsArbitrumSepolia is Script {
         _requireCode(address(deployed.orderPolicyEvaluator), "Order policy evaluator has no code");
         _requireCode(address(deployed.closePreview), "Close preview has no code");
         _requireCode(address(deployed.orderExecutionSidecar), "Order execution sidecar has no code");
+        _requireCode(deployed.orderExecutionSidecar.recoverySidecar(), "Order recovery sidecar has no code");
+        require(
+            deployed.orderExecutionSidecar.recoverySidecar() == vm.envAddress("PERPS_ORDER_RECOVERY_SIDECAR"),
+            "Order recovery sidecar mismatch"
+        );
         _requireCode(address(deployed.router), "Router has no code");
         _requireCode(address(deployed.liquidationBatchSidecar), "Liquidation sidecar has no code");
         _requireCode(address(deployed.lifecycleBook), "Order lifecycle book has no code");

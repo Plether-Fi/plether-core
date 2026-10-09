@@ -121,6 +121,8 @@ provide receiver flush/recovery operations. See the repository's
 
 Builders are provided for deposit, commit order, add margin, withdraw, and settle claim. `addMargin(account, amount)` and `settleTraderClaim(account)` always encode the smart-account address as the account argument.
 
+`buildPlaceOrderAction` retains the historical scalar-router ABI. Use `buildPlaceOrderV3Action` for V3 deployments.
+
 `buildWithdrawAction` calls `withdrawMargin`, so the clearinghouse sends USDC to
 the smart account (`msg.sender`). It does not silently append a transfer to the
 owner EOA. `buildWithdrawToOwnerAction` provides the explicit atomic alternative:
@@ -135,25 +137,86 @@ Committed delayed orders are binding in the current perps protocol; there is no 
 
 ## Position protection
 
-`buildProtectedOpenAction` builds an atomic bounded V2 opening order with TP/SL.
+`buildProtectedOpenAction` builds an atomic bounded V3 opening order with TP/SL.
 `buildCreateProtectionAction`, `buildReplaceProtectionAction`, and
 `buildCancelProtectionAction` manage account-owned protection records. Every
 builder targets the configured PositionProtectionBook with zero native value;
-the exported `positionProtectionBookAbi` is the complete reviewed v1.2.1 ABI.
+the exported `positionProtectionBookAbi` is generated for the current source and must match the target deployment.
 Reject empty triggers, invalid uint64 protection IDs, and unbounded/closing
 requests before asking for sponsorship. Pass these plans through the same
 manifest validation and durable journaling flow as other native AA actions.
 
-The package combines the self-hosted-AA source patch (SHA-256
+The package originated from the self-hosted-AA source patch (SHA-256
 `d1c6941c03f37cc9a93b35b95dc73a876ee87dab624524ed9c4d6336022f2955`,
 base `bc8f6290c540665e4ff61328ea83a4c3d421a8d4`) with protection source
-`3472427ed15b0a478248af7d025535da349a8592`. Core source and immutable package
-releases are authoritative for future changes. Tests freeze the app's previous
-encodings and hashes; `RELEASING.md` describes the artifact compatibility gate.
+`3472427ed15b0a478248af7d025535da349a8592`. Those references record its historical
+origins; current source and release evidence define the updated order and protection ABIs.
+Compatibility tests preserve the retained action encodings and hashes while explicitly recording
+the new order ABI. `RELEASING.md` describes the artifact compatibility gate.
 
 ## UI errors and fallback
 
 Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and contract failures into stable codes and user-safe messages. Do not silently fall back to an EOA transaction: it would create protocol state under a different `msg.sender` and split the user's account. If sponsorship is unavailable, show a retry/support state unless the product has explicitly implemented and disclosed user-paid smart-account gas.
+
+`buildCloseOrderV3` uses the same request shape for full closes and partial
+reductions. The protocol reserves the configured keeper bounty from free USDC,
+then eligible position margin. There is no mode selector or per-order bounty
+waiver. Admin configuration may set the close bounty to zero for all new closes;
+existing orders retain their snapshotted bounty. `classifyCloseFailureV3` keeps
+bounty funding, carry funding, action funding, and residual health failures
+distinct. `buildExpireOrderV3` encodes permissionless cleanup after the order's
+execution deadline without oracle data.
+
+## Terminal history on the new stack (0.2.0)
+
+The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
+`terminalOutcome(orderId)`: account, terminal block, status, reason and receipt
+hash. Full details come from the V4-domain `OrderFinalized` event, now including the merged timing tuple. Use the
+trusted deployment's chain, Book and Router addresses; do not take those or the
+summary from an untrusted indexer.
+
+```ts
+import { decodeVerifiedOrderFinalized, orderLifecycleV5Abi } from "@plether-fi/perps-aa-client";
+
+const summary = await publicClient.readContract({
+  address: book, abi: orderLifecycleV5Abi, functionName: "terminalOutcome", args: [orderId],
+});
+// None/Pending has no terminal history. Wait for finality before caching.
+if (summary.status === 2 || summary.status === 3) {
+  // Fetch by chain + Book + order ID from your receipt index, or select the
+  // event from the known execution transaction receipt. The helper checks it.
+  const matchingFinalizedLog = await history.getFinalizedLog({ chainId, book, orderId });
+  const verified = decodeVerifiedOrderFinalized({
+    chainId: BigInt(chainId), book, router, summary, log: matchingFinalizedLog,
+  });
+  displayReceipt(verified.receipt);
+}
+```
+
+`history.getFinalizedLog` represents the application's event retrieval layer; it is not an SDK method. `matchingFinalizedLog` includes its emitter address, data, and nonempty topics.
+The helper authenticates the event, clocks and full receipt against the summary;
+`hashOrderReceiptV4` exposes the same digest separately. Solidity consumers can
+call `verifyReceipt(receipt, terminalTime)` on the Book. The V4 receipt and V3
+intent domain labels are unchanged; V5 is the read API version. Requests use one close flow,
+and the receipt includes authenticated timing. Earlier candidate event and request
+encodings must not be reused on the final graph.
+
+Cache history by chain/Book/order ID and invalidate it on reorg. If a log cannot
+be retrieved, report history as unavailable instead of assuming zero fees or
+bounty. Verification proves authenticity, not availability. Detailed on-chain
+reads now require a supplied full receipt. The archived `orderLifecycleV4Abi`
+export and old-stack action/assistance bindings remain available; choose ABI by
+deployment, and migrate external app/keeper reads before new-stack activation.
+Commitment history remains stored and does not require an event join.
+
+On Arbitrum, the authenticated `terminalBlock` retains Solidity `block.number`
+semantics (an approximate ancestor-chain block); it is **not** the RPC/L2 log
+block number. Never use it directly as an `eth_getLogs` block range. Use the
+execution transaction receipt, an index keyed by chain/Book/order ID, or paginated
+RPC log queries over the known L2 deployment-to-head range. Keep transport
+`blockNumber`/`blockHash` separately for indexing and reorg handling; hash the
+event's authenticated `terminalBlock` as emitted. See [Arbitrum block-number
+documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time).
 
 ## V3 order timing (0.2.0 source release)
 

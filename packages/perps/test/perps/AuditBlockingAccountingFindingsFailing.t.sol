@@ -214,7 +214,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         uint256 freeSettlement = _freeSettlementUsdc(account);
         assertLt(freeSettlement, 1100e6, "Free settlement should be small after committing margin");
 
-        _close(account, CfdTypes.Side.LONG, 50_000e18, 1.05e8);
+        _close(account, CfdTypes.Side.LONG, 50_000e18, 1.02e8);
 
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 50_000e18, "Partial close should leave half the position");
@@ -236,10 +236,10 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
         uint256 pnlPledgeBefore = clearinghouse.pnlPledgeUsdc(account);
 
-        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.08e8);
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.02e8);
 
         assertTrue(preview.valid, "Dedicated price collateral should fund the partial-close loss");
-        assertEq(preview.realizedPnlUsdc, -4000e6, "Fixture should realize a four-thousand USDC price loss");
+        assertEq(preview.realizedPnlUsdc, -1000e6, "Fixture should realize a one-thousand USDC price loss");
         assertEq(
             preview.remainingMargin,
             pnlPledgeBefore / 2,
@@ -247,7 +247,7 @@ contract AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin 
         );
         assertEq(preview.badDebtUsdc, 0, "Any price-loss tail beyond the close slice's cap is a writeoff, not debt");
 
-        _close(account, CfdTypes.Side.LONG, 50_000e18, 1.08e8);
+        _close(account, CfdTypes.Side.LONG, 50_000e18, 1.02e8);
 
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(account);
         assertEq(sizeAfter, preview.remainingSize, "Live partial close should match the accepted preview");
@@ -293,19 +293,18 @@ contract AuditBlockingAccountingFindingsFailing_ReservedBounty is BasePerpTest {
         );
     }
 
-    function test_H2_FullyUtilizedTraderCannotFundCloseOrderFromPositionMargin() public {
+    function test_H2_FullyUtilizedTraderCanFundCloseOrderFromPositionMargin() public {
         (address account,) = _setupFullyUtilized();
 
         (, uint256 marginBefore,,,,,) = engine.positions(account);
 
         vm.prank(trader);
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(marginAfter, marginBefore, "Rejected close order must preserve the account's PnL pledge");
-        assertEq(router.pendingOrderCounts(account), 0, "Rejected close order must not enter the FIFO queue");
-        assertEq(router.nextCommitId(), 1, "Rejected close order must not consume an order id");
+        assertEq(marginAfter, marginBefore - router.closeOrderExecutionBountyUsdc(), "bounty reclassification is exact");
+        assertEq(router.pendingOrderCounts(account), 1, "accepted close enters FIFO");
+        assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
     }
 
     function test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit() public {

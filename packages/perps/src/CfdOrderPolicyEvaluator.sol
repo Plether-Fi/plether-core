@@ -5,10 +5,91 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEngineView} from "@plether/perps/CfdOrderPolicyEvaluatorBase.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
+import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+
+interface ICommittedPolicyRouter {
+
+    function lifecycleBook() external view returns (IOrderLifecycleBook);
+
+}
 
 /// @notice Public policy evaluator; internal snapshot and assessment logic is shared with read-only lenses.
 contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEvaluator {
+
+    function assessCommittedOrder(
+        address engineAddress,
+        uint64 orderId,
+        address executor,
+        uint256 executionPrice,
+        uint64 publishTime
+    ) external view returns (OrderV3Types.ExecutionAssessment memory assessment) {
+        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
+        address router = engine.orderRouter();
+        OrderV3Types.PendingIntent memory pending = _pending(router, orderId);
+        IMarginClearinghouse(engine.clearinghouse())
+            .validateBountyReservation(
+                pending.account, IMarginClearinghouse.BountyKind.Order, orderId, pending.executionBountyUsdc
+            );
+        (IOrderRouterAccounting.PendingOrderView memory viewOrder,) =
+            IOrderRouterAccounting(router).getPendingOrderView(orderId);
+        CfdTypes.Order memory order = CfdTypes.Order({
+            account: pending.account,
+            sizeDelta: viewOrder.sizeDelta,
+            marginDelta: viewOrder.marginDelta,
+            targetPrice: viewOrder.targetPrice,
+            commitTime: viewOrder.commitTime,
+            commitBlock: viewOrder.commitBlock,
+            orderId: orderId,
+            side: viewOrder.side,
+            isClose: viewOrder.isClose
+        });
+        AssessmentContext memory context = AssessmentContext(
+            engineAddress,
+            executor,
+            executionPrice,
+            IHousePool(engine.pool()).totalAssets(),
+            publishTime,
+            pending.executionBountyUsdc
+        );
+        ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
+        CfdEnginePlanTypes.RawSnapshot memory snapshot =
+            _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc, context.poolDepthUsdc);
+        // Execution releases this order's classification before assessment. A public read projects the same
+        // release; a call inside execution observes zero and does not release it twice.
+        uint256 release = viewOrder.committedMarginUsdc;
+        snapshot.lockedBuckets.committedOrderMarginUsdc -= release;
+        snapshot.lockedBuckets.totalLockedMarginUsdc -= release;
+        snapshot.accountBuckets.otherLockedMarginUsdc -= release;
+        snapshot.accountBuckets.totalLockedMarginUsdc -= release;
+        snapshot.accountBuckets.freeSettlementUsdc += release;
+        assessment = _assessSnapshot(context, order, pending.bounds, planner, snapshot);
+        if (order.isClose) {
+            _includeCommitment(assessment, pending.commitment, pending.bounds, pending.executionBountyUsdc);
+        }
+    }
+
+    function _pending(
+        address router,
+        uint64 orderId
+    ) private view returns (OrderV3Types.PendingIntent memory pending) {
+        IOrderLifecycleBook book = ICommittedPolicyRouter(router).lifecycleBook();
+        pending = book.pendingIntent(orderId);
+        if (pending.account == address(0)) {
+            revert CfdOrderPolicyEvaluator__ReservationMismatch(orderId);
+        }
+        if (
+            block.timestamp > pending.timing.executionDeadline
+                || (pending.bounds.expectedConfigHash != bytes32(0)
+                    && book.currentExecutionConfigHash() != pending.bounds.expectedConfigHash)
+        ) {
+            revert CfdOrderPolicyEvaluator__CommittedPolicyChanged(orderId);
+        }
+    }
 
     /// @inheritdoc ICfdOrderPolicyEvaluator
     function assessOrder(

@@ -684,32 +684,19 @@ contract CfdOrderPolicyEvaluatorTest is Test {
 
         vm.mockCall(POOL, abi.encodeWithSignature("totalAssets()"), abi.encode(2_000_000e6));
 
-        IMarginClearinghouse.AccountUsdcBuckets memory accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = IMarginClearinghouse.PnlIsolationBuckets({
             settlementBalanceUsdc: 20_000e6,
-            totalLockedMarginUsdc: BOUNTY,
-            activePositionMarginUsdc: 0,
-            otherLockedMarginUsdc: BOUNTY,
+            pnlPledgeUsdc: 0,
+            liquidationReserveUsdc: 0,
+            orderMarginUsdc: 0,
+            actionReserveUsdc: BOUNTY,
+            vpiRebateReserveUsdc: 0,
+            totalLockedUsdc: BOUNTY,
             freeSettlementUsdc: 20_000e6 - BOUNTY
         });
-        IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 0,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: BOUNTY,
-            totalLockedMarginUsdc: BOUNTY
-        });
         vm.mockCall(
-            CLEARINGHOUSE,
-            abi.encodeWithSignature("getAccountUsdcBuckets(address)", ACCOUNT),
-            abi.encode(accountBuckets)
+            CLEARINGHOUSE, abi.encodeWithSignature("getPnlIsolationBuckets(address)", ACCOUNT), abi.encode(buckets)
         );
-        vm.mockCall(
-            CLEARINGHOUSE,
-            abi.encodeWithSignature("getLockedMarginBuckets(address)", ACCOUNT),
-            abi.encode(lockedBuckets)
-        );
-        vm.mockCall(CLEARINGHOUSE, abi.encodeWithSignature("liquidationReserveUsdc(address)", ACCOUNT), abi.encode(0));
-        vm.mockCall(CLEARINGHOUSE, abi.encodeWithSignature("actionReserveUsdc(address)", ACCOUNT), abi.encode(BOUNTY));
-        vm.mockCall(CLEARINGHOUSE, abi.encodeWithSignature("vpiRebateReserveUsdc(address)", ACCOUNT), abi.encode(0));
 
         vm.mockCall(
             CLEARINGHOUSE, abi.encodeWithSignature("totalBountyReservationsUsdc(address)", ACCOUNT), abi.encode(BOUNTY)
@@ -724,6 +711,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("CAP_PRICE()"), abi.encode(2e8));
         vm.mockCall(ENGINE, abi.encodeWithSignature("executionFeeBps()"), abi.encode(4));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("settlementBufferBps()"), abi.encode(0));
         vm.mockCall(ENGINE, abi.encodeWithSignature("isFadWindow()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("isOracleFrozen()"), abi.encode(false));
         vm.mockCall(ENGINE, abi.encodeWithSignature("frozenCloseSpreadBps()"), abi.encode(0));

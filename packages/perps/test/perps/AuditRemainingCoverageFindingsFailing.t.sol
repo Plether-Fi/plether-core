@@ -12,7 +12,7 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
 
     address trader = address(0xC10A);
 
-    function test_C1_FullCloseMustConsumeQueuedCommittedMarginBeforeWaivingActionCharge() public {
+    function test_C1_FullCloseUsesReleasedPledgeBeforeQueuedCommittedMargin() public {
         address account = trader;
         _fundTrader(trader, 10_000e6);
 
@@ -33,10 +33,10 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 1e8);
 
-        assertLt(
+        assertEq(
             router.getAccountReservations(account).committedMarginUsdc,
             committedBefore,
-            "Full close should consume queued committed margin before waiving terminal carry"
+            "Released pledge covers the charges before queued margin"
         );
         assertEq(_executionBountyReserve(queuedOrderId), 200_000, "Queued execution bounty should remain reserved");
         assertEq(

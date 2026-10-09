@@ -1,8 +1,62 @@
-import { encodeFunctionData, getAddress, type Address, type ContractFunctionArgs } from "viem";
-import { orderRouterV3TraderAbi } from "./orderV3Abi.js";
-import type { PerpsActionPlan } from "./types.js";
+import { decodeErrorResult, encodeFunctionData, getAddress, parseAbi, type Hex, type Address, type ContractFunctionArgs } from "viem";
+import { orderRouterV3Abi, orderRouterV3TraderAbi } from "./orderV3Abi.js";
+import type { SmartAccountCall, PerpsActionPlan } from "./types.js";
 
-export type OrderRequestV3 = ContractFunctionArgs<typeof orderRouterV3TraderAbi, "nonpayable", "commitOrder">[0];
+export type OrderRequestV3 = ContractFunctionArgs<typeof orderRouterV3Abi, "nonpayable", "commitOrder">[0];
+
+/** Builds one ordinary commitment call; no token approval, transfer, deposit or subsidy is included. */
+export function buildCloseOrderV3(router: Address, request: OrderRequestV3): SmartAccountCall {
+  if (!request.isClose || request.marginDelta !== 0n || request.sizeDelta <= 0n || request.sizeDelta % (100n * 10n ** 18n) !== 0n) {
+    throw new Error("A close requires a positive lot-aligned size and zero marginDelta.");
+  }
+  return Object.freeze({ to: getAddress(router), value: 0n, data: encodeFunctionData({
+    abi: orderRouterV3Abi, functionName: "commitOrder", args: [request],
+  }) });
+}
+
+export function buildExpireOrderV3(router: Address, orderId: bigint): SmartAccountCall {
+  if (orderId <= 0n) throw new Error("Order ID must be positive.");
+  return Object.freeze({ to: getAddress(router), value: 0n, data: encodeFunctionData({
+    abi: orderRouterV3Abi, functionName: "expireOrder", args: [orderId],
+  }) });
+}
+
+/** Stable consumer copy; funding and health failures must not share the old 'underwater' message. */
+export const closeFailureMessages = {
+  bountyFunding: "Free USDC and eligible position margin cannot back the configured keeper reward.",
+  carryFunding: "Accrued carry must be fully collected before a partial reduction. Review a full exit.",
+  actionFunding: "This reduction cannot fund its charges while preserving the remaining position. Review a full exit.",
+  residualHealth: "This reduction would leave the remaining position below its required margin.",
+  reservationMismatch: "The order remains pending because its reservation does not match. After its deadline, expire it to resolve the queue entry.",
+} as const;
+
+const closeErrors = parseAbi([
+  "error CfdEngine__InsufficientCloseOrderBountyBacking(uint256 required,uint256 available,uint256 unpaidCarry)",
+  "error CfdEngine__PartialCloseCarryUnfunded(uint256 unpaidCarry)",
+  "error CfdEngine__PartialCloseUnhealthy()",
+  "error CfdEngine__TypedOrderFailure(uint8 category,uint8 code,bool isClose)",
+  "error MarginClearinghouse__InvalidBountyReservation()",
+  "error MarginClearinghouse__ActionReserveMismatch()",
+  "error CfdEngineSettlementSidecar__SettlementMismatch()",
+]);
+
+/** Returns undefined for unrecognized data: unknown failures must never be treated as safe to consume. */
+export function classifyCloseFailureV3(data: Hex): "bountyFunding" | "carryFunding" | "actionFunding" | "residualHealth" | "reservationMismatch" | undefined {
+  try {
+    const error = decodeErrorResult({ abi: closeErrors, data });
+    switch (error.errorName) {
+      case "CfdEngine__InsufficientCloseOrderBountyBacking": return "bountyFunding";
+      case "CfdEngine__PartialCloseCarryUnfunded": return "carryFunding";
+      case "CfdEngine__PartialCloseUnhealthy": return "residualHealth";
+      case "CfdEngine__TypedOrderFailure":
+        if (data.length !== 202 || error.args[0] !== 1 || !error.args[2]) return undefined;
+        if (error.args[1] === 4) return "actionFunding";
+        if (error.args[1] === 6) return "residualHealth";
+        return undefined;
+      default: return "reservationMismatch";
+    }
+  } catch { return undefined; }
+}
 
 /** Encodes the complete immutable V3 order, including its submission and execution authority. */
 export function buildPlaceOrderV3Action(input: {

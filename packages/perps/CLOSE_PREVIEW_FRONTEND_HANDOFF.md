@@ -1,3 +1,5 @@
+> Historical/additive-preview documentation. For the fresh-stack V3 intent / V4 receipt implementation, use [Deposit-free close migration](DEPOSIT_FREE_CLOSE.md). Keep this historical integration bound to its archived deployment; the new planner tuples are incompatible with v1.2.3.
+
 # Frontend handoff: reservation-aware close review
 
 Recorded status as of 2026-09-14: lens deployed and source-verified on Arbitrum Sepolia; frontend implementation and

@@ -17,8 +17,11 @@ The lifecycle Book atomically stores an `OrderTiming` tuple in this exact order:
 `(uint64 submitBy,uint32 executionWindowSeconds,uint64 commitTimestamp,uint64 executionDeadline)`.
 The resolved deadline is commitment time plus the requested duration. `orderTiming(orderId)` returns that tuple for
 both pending and terminal orders, or zeros for an unknown order. `IntentRegistered` appends the timing tuple after the
-request. Pending intents, full receipts and compact outcomes append `timing`; the Book authenticates receipt timing
-against its pending record. The intent domain is V3; receipt and execution-config domains are V4.
+request. Pending intents and full receipts append `timing`; the Book authenticates receipt timing
+against its pending record. The two-slot `terminalOutcome` summary remains unchanged, with terminal timing retained
+separately in one packed slot for `orderTiming`. All closes use the configured close bounty. The intent domain is V3;
+receipt and execution-config domains are V4. Event tuples and selectors differ from the earlier close-only schema;
+consumers must use interfaces generated from the merged schema.
 
 Execution, single-head cleanup and batch preparation compare chain time with the stored deadline, expiring strictly
 after it. Exact replay remains unconditional and side-effect-free, including after expiry. Changing either timing

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
@@ -89,14 +91,54 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     mapping(address account => mapping(bytes32 clientOrderId => OrderV3Types.ClientIntent intent)) private
         _clientIntents;
 
+    /// @dev Bounties already fit uint96 in the clearinghouse. Other amounts retain their full uint256 domain.
+    ///      Pre-commitment custody is exactly post-commitment custody plus collected carry.
+    struct StoredCommitment {
+        uint256 carryCollectedUsdc;
+        uint256 carryOutstandingUsdc;
+        uint96 bountyFromFreeUsdc;
+        uint96 bountyFromPledgeUsdc;
+        uint256 settlementAfterUsdc;
+        uint256 freeSettlementAfterUsdc;
+    }
+
+    /// @dev Reorders the three narrow policy fields into one slot without narrowing any public bound.
+    struct StoredExecutionBounds {
+        uint64 submitBy;
+        uint32 executionWindowSeconds;
+        uint8 allowedExecutionModes;
+        uint32 maxPostLeverageBps;
+        bytes32 expectedConfigHash;
+        uint256 maxExecutionBountyUsdc;
+        uint256 maxExecutionNotionalUsdc;
+        uint256 maxGrossAccountDebitUsdc;
+        uint256 maxActionChargeUsdc;
+        uint256 maxExplicitFeesUsdc;
+        uint256 maxPostPositionSize;
+        uint256 minPostSettlementBalanceUsdc;
+        uint256 minPostPositionEquityUsdc;
+    }
+
+    /// @dev Packed storage representation expanded into the public PendingIntent tuple on reads.
+    struct StoredPendingIntent {
+        address account;
+        bytes32 clientOrderId;
+        bytes32 intentHash;
+        uint256 executionBountyUsdc;
+        StoredCommitment commitment;
+        StoredExecutionBounds bounds;
+        OrderV3Types.OrderTiming timing;
+    }
+
     /// @notice Ephemeral policy and identity required to authenticate terminal settlement.
-    mapping(uint64 orderId => OrderV3Types.PendingIntent intent) private _pendingIntents;
+    mapping(uint64 orderId => StoredPendingIntent intent) private _pendingIntents;
 
     /// @notice Ephemeral Router-authenticated marker for retryable position-protection child orders.
     mapping(uint64 orderId => bool registered) private _protectionAttempts;
 
     /// @notice Permanent compact terminal outcomes.
-    mapping(uint64 orderId => OrderV3Types.CompactOutcome terminalOutcome) private _outcomes;
+    mapping(uint64 orderId => OrderV3Types.TerminalOutcome terminalOutcome) private _outcomes;
+    mapping(uint64 orderId => OrderV3Types.OrderTiming timing) private _terminalTiming;
 
     modifier onlyRouter() {
         if (msg.sender != ROUTER) {
@@ -165,7 +207,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     ) public view override returns (bytes32 intentHash) {
         // OrderRequest and its nested ExecutionBounds contain only static ABI values in the canonical field order.
         // Encoding the tuple directly therefore produces the same flat words named by INTENT_TYPEHASH without keeping
-        // all twenty-three values live on the compiler stack.
+        // every individual field live on the compiler stack.
         return keccak256(abi.encode(INTENT_TYPEHASH, block.chainid, ROUTER, account, request));
     }
 
@@ -248,13 +290,26 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         });
         _clientIntents[account][request.clientOrderId] =
             OrderV3Types.ClientIntent({orderId: proposedOrderId, intentHash: intentHash});
-        _pendingIntents[proposedOrderId] = OrderV3Types.PendingIntent({
-            account: account,
-            clientOrderId: request.clientOrderId,
-            intentHash: intentHash,
-            executionBountyUsdc: executionBountyUsdc,
-            bounds: request.bounds,
-            timing: timing
+        StoredPendingIntent storage pending = _pendingIntents[proposedOrderId];
+        pending.account = account;
+        pending.clientOrderId = request.clientOrderId;
+        pending.intentHash = intentHash;
+        pending.executionBountyUsdc = executionBountyUsdc;
+        pending.timing = timing;
+        pending.bounds = StoredExecutionBounds({
+            submitBy: request.bounds.submitBy,
+            executionWindowSeconds: request.bounds.executionWindowSeconds,
+            allowedExecutionModes: request.bounds.allowedExecutionModes,
+            maxPostLeverageBps: request.bounds.maxPostLeverageBps,
+            expectedConfigHash: request.bounds.expectedConfigHash,
+            maxExecutionBountyUsdc: request.bounds.maxExecutionBountyUsdc,
+            maxExecutionNotionalUsdc: request.bounds.maxExecutionNotionalUsdc,
+            maxGrossAccountDebitUsdc: request.bounds.maxGrossAccountDebitUsdc,
+            maxActionChargeUsdc: request.bounds.maxActionChargeUsdc,
+            maxExplicitFeesUsdc: request.bounds.maxExplicitFeesUsdc,
+            maxPostPositionSize: request.bounds.maxPostPositionSize,
+            minPostSettlementBalanceUsdc: request.bounds.minPostSettlementBalanceUsdc,
+            minPostPositionEquityUsdc: request.bounds.minPostPositionEquityUsdc
         });
 
         emit IntentRegistered(
@@ -263,11 +318,46 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         return (proposedOrderId, intentHash, false);
     }
 
+    function recordCommitment(
+        uint64 orderId,
+        CfdEnginePlanTypes.CloseCommitment calldata effects
+    ) external onlyRouter {
+        StoredPendingIntent storage pending = _pendingIntents[orderId];
+        if (pending.account == address(0)) {
+            revert OrderLifecycleBook__OrderNotPending(orderId);
+        }
+        uint256 gross = effects.carryCollectedUsdc + pending.executionBountyUsdc;
+        if (gross > pending.bounds.maxGrossAccountDebitUsdc) {
+            revert OrderLifecycleBook__CommitmentBoundExceeded(
+                OrderV3Types.ConstraintKind.GrossAccountDebit, gross, pending.bounds.maxGrossAccountDebitUsdc
+            );
+        }
+        if (effects.carryCollectedUsdc > pending.bounds.maxActionChargeUsdc) {
+            revert OrderLifecycleBook__CommitmentBoundExceeded(
+                OrderV3Types.ConstraintKind.ActionCharge, effects.carryCollectedUsdc, pending.bounds.maxActionChargeUsdc
+            );
+        }
+        if (
+            effects.settlementBeforeUsdc != effects.settlementAfterUsdc + effects.carryCollectedUsdc
+                || effects.bountyFromFreeUsdc + effects.bountyFromPledgeUsdc != pending.executionBountyUsdc
+        ) {
+            revert OrderLifecycleBook__InvalidCommitmentEffects();
+        }
+        pending.commitment = StoredCommitment({
+            carryCollectedUsdc: effects.carryCollectedUsdc,
+            carryOutstandingUsdc: effects.carryOutstandingUsdc,
+            bountyFromFreeUsdc: SafeCast.toUint96(effects.bountyFromFreeUsdc),
+            bountyFromPledgeUsdc: SafeCast.toUint96(effects.bountyFromPledgeUsdc),
+            settlementAfterUsdc: effects.settlementAfterUsdc,
+            freeSettlementAfterUsdc: effects.freeSettlementAfterUsdc
+        });
+    }
+
     /// @inheritdoc IOrderLifecycleBook
     function registerProtectionAttempt(
         uint64 orderId
     ) external override onlyRouter {
-        OrderV3Types.PendingIntent storage pending = _pendingIntents[orderId];
+        StoredPendingIntent storage pending = _pendingIntents[orderId];
         if (pending.account == address(0) || pending.bounds.expectedConfigHash != bytes32(0)) {
             revert OrderLifecycleBook__InvalidProtectionAttempt(orderId);
         }
@@ -289,7 +379,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function finalize(
         OrderV3Types.OrderReceipt calldata receipt
     ) external override onlyRouter returns (bytes32 receiptHash) {
-        OrderV3Types.PendingIntent storage pending = _pendingIntents[receipt.orderId];
+        StoredPendingIntent storage pending = _pendingIntents[receipt.orderId];
         if (pending.account == address(0)) {
             revert OrderLifecycleBook__OrderNotPending(receipt.orderId);
         }
@@ -297,7 +387,11 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             receipt.account != pending.account || receipt.clientOrderId != pending.clientOrderId
                 || receipt.intentHash != pending.intentHash
                 || receipt.expectedConfigHash != pending.bounds.expectedConfigHash
-                || receipt.bountyUsdc != pending.executionBountyUsdc
+                || keccak256(abi.encode(receipt.commitment))
+                    != keccak256(abi.encode(_expandCommitment(pending.commitment)))
+                || receipt.bounty.bountyEntitlementUsdc != pending.executionBountyUsdc
+                || (receipt.reason != OrderV3Types.TerminalReason.ExpiredReservationMismatch
+                    && receipt.bountyUsdc != pending.executionBountyUsdc)
                 || keccak256(abi.encode(receipt.timing)) != keccak256(abi.encode(pending.timing))
         ) {
             revert OrderLifecycleBook__ReceiptIdentityMismatch(receipt.orderId);
@@ -313,33 +407,14 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             abi.encode(RECEIPT_TYPEHASH, block.chainid, address(this), ROUTER, terminalBlock, terminalTime, receipt)
         );
 
-        OrderV3Types.FailureDetails calldata failure = receipt.failure;
-        _outcomes[receipt.orderId] = OrderV3Types.CompactOutcome({
+        _outcomes[receipt.orderId] = OrderV3Types.TerminalOutcome({
             account: receipt.account,
-            clientOrderId: receipt.clientOrderId,
-            intentHash: receipt.intentHash,
-            expectedConfigHash: receipt.expectedConfigHash,
-            observedConfigHash: receipt.observedConfigHash,
+            terminalBlock: terminalBlock,
             status: receipt.status,
             reason: receipt.reason,
-            executionMode: receipt.executionMode,
-            priceSource: receipt.priceSource,
-            bountyDisposition: receipt.bountyDisposition,
-            terminalBlock: terminalBlock,
-            terminalTime: terminalTime,
-            oraclePublishTime: receipt.oraclePublishTime,
-            executor: receipt.executor,
-            bountyRecipient: receipt.bountyRecipient,
-            executionPrice: receipt.executionPrice,
-            bountyUsdc: receipt.bountyUsdc,
-            failureSelector: failure.selector,
-            failureCategory: failure.category,
-            failureCode: failure.code,
-            failedConstraint: failure.constraint,
-            revertDataHash: failure.revertDataHash,
-            receiptHash: receiptHash,
-            timing: pending.timing
+            receiptHash: receiptHash
         });
+        _terminalTiming[receipt.orderId] = pending.timing;
         delete _pendingIntents[receipt.orderId];
         delete _protectionAttempts[receipt.orderId];
 
@@ -360,7 +435,26 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function pendingIntent(
         uint64 orderId
     ) external view override returns (OrderV3Types.PendingIntent memory intent) {
-        return _pendingIntents[orderId];
+        StoredPendingIntent storage stored = _pendingIntents[orderId];
+        intent.account = stored.account;
+        intent.clientOrderId = stored.clientOrderId;
+        intent.intentHash = stored.intentHash;
+        intent.executionBountyUsdc = stored.executionBountyUsdc;
+        intent.commitment = _expandCommitment(stored.commitment);
+        intent.bounds = _expandBounds(stored.bounds);
+        intent.timing = stored.timing;
+    }
+
+    function _expandCommitment(
+        StoredCommitment storage stored
+    ) private view returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
+        effects.carryCollectedUsdc = stored.carryCollectedUsdc;
+        effects.carryOutstandingUsdc = stored.carryOutstandingUsdc;
+        effects.bountyFromFreeUsdc = stored.bountyFromFreeUsdc;
+        effects.bountyFromPledgeUsdc = stored.bountyFromPledgeUsdc;
+        effects.settlementAfterUsdc = stored.settlementAfterUsdc;
+        effects.settlementBeforeUsdc = effects.settlementAfterUsdc + effects.carryCollectedUsdc;
+        effects.freeSettlementAfterUsdc = stored.freeSettlementAfterUsdc;
     }
 
     /// @inheritdoc IOrderLifecycleBook
@@ -370,14 +464,32 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         if (_pendingIntents[orderId].account != address(0)) {
             return _pendingIntents[orderId].timing;
         }
-        return _outcomes[orderId].timing;
+        return _terminalTiming[orderId];
     }
 
     /// @inheritdoc IOrderLifecycleBook
     function pendingPolicy(
         uint64 orderId
     ) external view override returns (OrderV3Types.ExecutionBounds memory bounds) {
-        return _pendingIntents[orderId].bounds;
+        return _expandBounds(_pendingIntents[orderId].bounds);
+    }
+
+    function _expandBounds(
+        StoredExecutionBounds storage stored
+    ) private view returns (OrderV3Types.ExecutionBounds memory bounds) {
+        bounds.submitBy = stored.submitBy;
+        bounds.executionWindowSeconds = stored.executionWindowSeconds;
+        bounds.allowedExecutionModes = stored.allowedExecutionModes;
+        bounds.expectedConfigHash = stored.expectedConfigHash;
+        bounds.maxExecutionBountyUsdc = stored.maxExecutionBountyUsdc;
+        bounds.maxExecutionNotionalUsdc = stored.maxExecutionNotionalUsdc;
+        bounds.maxGrossAccountDebitUsdc = stored.maxGrossAccountDebitUsdc;
+        bounds.maxActionChargeUsdc = stored.maxActionChargeUsdc;
+        bounds.maxExplicitFeesUsdc = stored.maxExplicitFeesUsdc;
+        bounds.maxPostPositionSize = stored.maxPostPositionSize;
+        bounds.minPostSettlementBalanceUsdc = stored.minPostSettlementBalanceUsdc;
+        bounds.minPostPositionEquityUsdc = stored.minPostPositionEquityUsdc;
+        bounds.maxPostLeverageBps = stored.maxPostLeverageBps;
     }
 
     /// @inheritdoc IOrderLifecycleBook
@@ -391,18 +503,63 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     /// @inheritdoc IOrderLifecycleBook
-    function outcome(
+    function terminalOutcome(
         uint64 orderId
-    ) external view override returns (OrderV3Types.CompactOutcome memory terminalOutcome) {
+    ) external view override returns (OrderV3Types.TerminalOutcome memory) {
         return _outcomes[orderId];
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function verifyReceipt(
+        OrderV3Types.OrderReceipt calldata receipt,
+        uint64 terminalTime
+    ) external view override returns (bool) {
+        OrderV3Types.TerminalOutcome storage stored = _outcomes[receipt.orderId];
+        if (stored.status == OrderV3Types.LifecycleStatus.None || stored.account != receipt.account) {
+            return false;
+        }
+        bytes32 suppliedHash = keccak256(
+            abi.encode(
+                RECEIPT_TYPEHASH, block.chainid, address(this), ROUTER, stored.terminalBlock, terminalTime, receipt
+            )
+        );
+        return stored.receiptHash == suppliedHash;
     }
 
     /// @notice Enforces monotonic and semantically valid terminal transitions.
     function _validateTerminalOutcome(
         OrderV3Types.OrderReceipt calldata receipt,
-        OrderV3Types.ExecutionBounds storage bounds
+        StoredExecutionBounds storage bounds
     ) private view {
         if (receipt.executor == address(0)) {
+            revert OrderLifecycleBook__InvalidTerminalOutcome();
+        }
+        if (receipt.reason == OrderV3Types.TerminalReason.ExpiredReservationMismatch) {
+            if (
+                receipt.status != OrderV3Types.LifecycleStatus.Failed
+                    || block.timestamp <= receipt.timing.executionDeadline
+                    || receipt.bounty.discrepancy == OrderV3Types.ReservationDiscrepancy.None
+                    || receipt.bounty.bountyPaidUsdc != 0 || receipt.bounty.bountyRetainedUsdc != 0
+                    || receipt.bounty.bountyForfeitedUsdc != 0
+                    || receipt.bountyUsdc != receipt.bounty.bountyRefundedUsdc || !_isEmptyFailure(receipt.failure)
+            ) {
+                revert OrderLifecycleBook__InvalidTerminalOutcome();
+            }
+            if (receipt.bountyUsdc == 0
+                    ? (receipt.bountyRecipient != address(0)
+                            || receipt.bountyDisposition != OrderV3Types.BountyDisposition.None)
+                    : (receipt.bountyRecipient != receipt.account
+                            || receipt.bountyDisposition != OrderV3Types.BountyDisposition.RefundedToAccount)) {
+                revert OrderLifecycleBook__InvalidTerminalOutcome();
+            }
+            _validateNoPriceEvidence(receipt);
+            return;
+        }
+        if (
+            receipt.bounty.discrepancy != OrderV3Types.ReservationDiscrepancy.None
+                || receipt.bounty.bountyPaidUsdc + receipt.bounty.bountyRefundedUsdc + receipt.bounty.bountyRetainedUsdc
+                        + receipt.bounty.bountyForfeitedUsdc != receipt.bountyUsdc
+        ) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
         }
         _validateBountyDisposition(receipt);
@@ -510,10 +667,23 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function _validateBountyDisposition(
         OrderV3Types.OrderReceipt calldata receipt
     ) private view {
+        OrderV3Types.BountyDisposition disposition = receipt.bountyDisposition;
+        if (
+            (disposition == OrderV3Types.BountyDisposition.Paid && receipt.bounty.bountyPaidUsdc != receipt.bountyUsdc)
+                || (disposition == OrderV3Types.BountyDisposition.RefundedToAccount
+                    && receipt.bounty.bountyRefundedUsdc != receipt.bountyUsdc)
+                || (disposition == OrderV3Types.BountyDisposition.Forfeited
+                    && receipt.bounty.bountyForfeitedUsdc != receipt.bountyUsdc)
+                || (disposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry
+                    && receipt.bounty.bountyRetainedUsdc != receipt.bountyUsdc)
+        ) {
+            revert OrderLifecycleBook__InvalidTerminalOutcome();
+        }
         if (receipt.bountyUsdc == 0) {
             if (
-                receipt.bountyDisposition != OrderV3Types.BountyDisposition.None
-                    || receipt.bountyRecipient != address(0)
+                (receipt.bountyDisposition != OrderV3Types.BountyDisposition.None
+                        && !(receipt.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry
+                            && _protectionAttempts[receipt.orderId])) || receipt.bountyRecipient != address(0)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
@@ -592,7 +762,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     }
 
     function _constraintLimit(
-        OrderV3Types.ExecutionBounds storage bounds,
+        StoredExecutionBounds storage bounds,
         OrderV3Types.ConstraintKind constraint
     ) private view returns (uint256 limit) {
         if (constraint == OrderV3Types.ConstraintKind.ExecutionBounty) {
