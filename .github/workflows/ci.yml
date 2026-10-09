@@ -4,7 +4,6 @@ on:
   push:
     branches: [master, main]
   pull_request:
-    branches: [master, main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -31,6 +30,9 @@ jobs:
 
       - name: Check package boundaries
         run: bash scripts/check-package-boundaries.sh
+
+      - name: Test oracle release evidence tooling
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_oracle*.py' -v
 
       - name: Build
         run: forge build --sizes --skip test
