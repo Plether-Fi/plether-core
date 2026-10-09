@@ -8,6 +8,10 @@ import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtect
 /// @notice Canonical custom errors and commit event shared by the delayed-order router stack.
 interface IOrderRouterErrors {
 
+    /// @notice Close admission was requested for an opening order.
+    error OrderRouter__NotCloseOrder();
+    error OrderRouter__OrderNotExpired();
+
     /// @notice Terminal result of one independently isolated liquidation-batch item.
     enum LiquidationBatchResult {
         Liquidated,

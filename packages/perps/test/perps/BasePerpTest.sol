@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../utils/LegacyOrderRouterHarness.sol";
 import {OrderRouterDebugLens} from "../utils/OrderRouterDebugLens.sol";
+import {RecordedOrderReceipts} from "../utils/RecordedOrderReceipts.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -43,7 +44,7 @@ import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
-abstract contract BasePerpTest is Test {
+abstract contract BasePerpTest is RecordedOrderReceipts {
 
     struct CloseParitySnapshot {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot protocol;

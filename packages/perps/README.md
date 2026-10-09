@@ -171,7 +171,7 @@ In practice, the compact public API is:
     `currentExecutionConfigHash()`,
     `resolveClientIntent(...)`, `clientIntent(...)`, `pendingIntent(...)`, `pendingPolicy(...)`,
     `isProtectionAttempt(...)`,
-    `lifecycleStatus(...)`, and `outcome(...)`
+    `lifecycleStatus(...)`, and `terminalOutcome(...)`
   - the read-only `IHousePool` capacity getters exposed by `HousePool`:
     `getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
     `areSeniorDepositReservationsWithinLimits()`
@@ -380,7 +380,7 @@ Important details:
   can never execute, even after governance unpauses. Permissionless cleanup returns their remaining committed margin
   and complete execution bounty to the trader's free internal settlement without an oracle or Engine checkpoint;
   the protocol incident keeper pays cleanup gas and receives no bounty.
-- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from reservation so FIFO cleanup remains incentive compatible.
+- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from their snapshotted reservation. Zero-bounty closes pay no reward; the protocol order keeper's operator funds expiry gas to preserve FIFO liveness. See [abandoned zero-bounty cleanup](DEPOSIT_FREE_CLOSE.md#abandoned-zero-bounty-orders-keeper-responsibility).
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules and the fixed LP-owned frozen-close spread.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -1088,7 +1088,7 @@ authorizes settlement.
 - `pendingIntent(orderId)` and `pendingPolicy(orderId)` expose the identity, actual reserved bounty, and caller bounds
   while the order is live.
 - `lifecycleStatus(orderId)` returns `None`, `Pending`, `Executed`, or `Failed`.
-- `outcome(orderId)` keeps the compact permanent terminal result and the hash of the complete receipt.
+- `terminalOutcome(orderId)` keeps account, terminal block, status, reason, and the hash of the complete receipt in two storage slots. Detailed history requires the `OrderFinalized` event. `verifyReceipt(receipt, terminalTime)` verifies a supplied receipt against stored authority.
 - `OrderFinalized` emits the complete fixed-shape receipt. Its hash also commits to the chain, Book, Router, terminal
   block, and terminal time.
 

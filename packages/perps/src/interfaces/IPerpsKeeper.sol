@@ -6,6 +6,10 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 /// @notice Keeper-facing order, liquidation, and LP epoch settlement surface for the simplified product API.
 interface IPerpsKeeper {
 
+    function expireOrder(
+        uint64 orderId
+    ) external returns (OrderV3Types.ExecutionResult memory);
+
     /// @notice Permissionlessly executes an eligible delayed order using router-validated oracle data.
     /// @dev Risk-off, expiry, and pinned-config mismatch are checked before oracle work. Slippage and exact-shape typed
     ///      planner/policy rejections terminally fail with canonical receipts. Close-only, MEV, gas, mark ordering, and

@@ -10,6 +10,12 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 ///      8 decimals, position sizes use 18 decimals, and timestamps are Unix seconds.
 interface ICfdEnginePlanner {
 
+    function planCloseCommit(
+        CfdEnginePlanTypes.RawSnapshot memory snapshot,
+        uint256 size,
+        uint256 bounty
+    ) external pure returns (CfdEnginePlanTypes.CloseCommitment memory effects);
+
     /// @notice Classifies the recurring and governance-override market-calendar regimes.
     /// @dev The recurring schedule follows the 17:00 New York FX boundary and its US daylight-saving transitions.
     /// @param timestamp Unix timestamp to classify

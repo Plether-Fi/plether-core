@@ -8,6 +8,20 @@ pragma solidity 0.8.35;
 ///      monetary amounts use the settlement token's native units, expected to be 6-decimal USDC.
 interface IMarginClearinghouse {
 
+    function unlockCloseMargin(
+        address account,
+        uint256 safeRelease,
+        uint256 fromReleased,
+        uint256 netRelease,
+        uint256 cashChargeAfterVpi,
+        uint256 vpiRelease
+    ) external;
+    function reserveCloseBounty(
+        address account,
+        uint256 fromFreeUsdc,
+        uint256 fromPledgeUsdc
+    ) external;
+
     /// @notice The caller is not the engine or the engine-derived router or settlement sidecar required by the call.
     error MarginClearinghouse__NotOperator();
     /// @notice A user attempted to deposit to or withdraw from an account other than its own address.
@@ -52,10 +66,51 @@ interface IMarginClearinghouse {
         ProtectionExecution
     }
 
+    struct BountyRecovery {
+        uint256 freeUsdc;
+        uint256 pledgeUsdc;
+        uint64 sourcePositionEpoch;
+        uint8 discrepancy;
+    }
+    function recoverExpiredBounty(
+        address account,
+        uint64 orderId
+    ) external returns (BountyRecovery memory);
+    function refundReservedBounty(
+        address account,
+        uint256 freeUsdc,
+        uint256 pledgeUsdc
+    ) external;
+    enum BountyReservationState {
+        None,
+        Active,
+        Settled,
+        Moved,
+        Quarantined
+    }
+
     struct BountyReservation {
         address account;
         uint96 amountUsdc;
+        BountyReservationState state;
+        uint96 freeFundedUsdc;
+        uint96 pledgeFundedUsdc;
+        uint64 sourcePositionEpoch;
     }
+    function recordFundedBountyReservation(
+        address account,
+        BountyKind kind,
+        uint64 id,
+        uint256 amountUsdc,
+        uint256 pledgeFundedUsdc,
+        uint64 sourcePositionEpoch
+    ) external;
+    function validateBountyReservation(
+        address account,
+        BountyKind kind,
+        uint64 id,
+        uint256 entitlementUsdc
+    ) external view;
 
     /// @notice Classifies already-locked action reserve. Orders are Router-owned; protection records are Book-owned.
     function recordBountyReservation(

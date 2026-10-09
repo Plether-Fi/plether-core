@@ -51,7 +51,9 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     }
 
     function test_MalformedAssessmentPreservesIntentAndCanRetry() public {
-        vm.mockCall(address(policyEvaluator), abi.encodeWithSelector(policyEvaluator.assessOrder.selector), hex"01");
+        vm.mockCall(
+            address(policyEvaluator), abi.encodeWithSelector(policyEvaluator.assessCommittedOrder.selector), hex"01"
+        );
         _assertPendingThenRecover(OrderV3Types.PendingReason.EngineFailure);
     }
 
@@ -62,7 +64,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         assessment.mode = OrderV3Types.ExecutionMode.Live;
         vm.mockCall(
             address(policyEvaluator),
-            abi.encodeWithSelector(policyEvaluator.assessOrder.selector),
+            abi.encodeWithSelector(policyEvaluator.assessCommittedOrder.selector),
             abi.encode(assessment)
         );
         _assertPendingThenRecover(OrderV3Types.PendingReason.EngineFailure);
@@ -194,10 +196,11 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         _assertPreserved();
         // Failed evidence must not prevent the real risk-off path from refunding and finalizing.
         routerAdmin.pause();
+        _startRecordingLogs();
         vm.prank(KEEPER);
         router.clearRiskOffOrder(orderId);
-        assertEq(uint8(book.outcome(orderId).reason), uint8(OrderV3Types.TerminalReason.RiskOff));
-        assertEq(book.outcome(orderId).bountyRecipient, ALICE);
+        assertEq(uint8(book.terminalOutcome(orderId).reason), uint8(OrderV3Types.TerminalReason.RiskOff));
+        assertEq(_verifiedOutcome(book, orderId).bountyRecipient, ALICE);
         assertEq(router.nextExecuteId(), 0);
     }
 
@@ -234,7 +237,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     function _assertPreserved() internal view {
         assertEq(keccak256(abi.encode(book.pendingIntent(orderId))), pendingHash, "intent and timing must survive");
         assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
-        assertEq(book.outcome(orderId).receiptHash, bytes32(0), "no false terminal evidence");
+        assertEq(book.terminalOutcome(orderId).receiptHash, bytes32(0), "no false terminal evidence");
         assertEq(_remainingCommittedMargin(orderId), 1000e6);
         assertEq(_freeSettlementUsdc(ALICE), freeSettlement);
         assertEq(_settlementBalance(KEEPER), keeperSettlement, "no failed-attempt bounty");
@@ -260,7 +263,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         vm.prank(KEEPER);
         result = router.executeOrder(orderId, updates);
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
-        assertEq(book.outcome(orderId).timing.executionDeadline, deadline, "recovery must not restart the clock");
+        assertEq(book.orderTiming(orderId).executionDeadline, deadline, "recovery must not restart the clock");
         assertEq(router.nextExecuteId(), 0);
         (uint256 size,,,,,,) = engine.positions(ALICE);
         assertEq(size, 10_000e18);

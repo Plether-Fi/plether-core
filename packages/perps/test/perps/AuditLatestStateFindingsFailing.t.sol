@@ -15,7 +15,7 @@ contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTe
 
     address trader = address(0xA11CE);
 
-    function test_C1_KeeperReserveMustNotComeFromLockedPositionMargin() public {
+    function test_C1_KeeperReserveUsesPledgeButProtectsLiquidationReserve() public {
         address account = trader;
         _fundTrader(trader, 175e6);
         _open(account, CfdTypes.Side.LONG, 10_000e18, 175e6, 1e8);
@@ -25,20 +25,19 @@ contract AuditLatestStateFindingsFailing_KeeperReserveStripsMargin is BasePerpTe
         assertEq(_freeSettlementUsdc(account), 0, "Setup must leave no free settlement for a close bounty");
 
         vm.prank(trader);
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         assertEq(
             clearinghouse.pnlPledgeUsdc(account),
-            pledgeBefore,
-            "Failed bounty reservation must not consume protected PnL pledge"
+            pledgeBefore - router.closeOrderExecutionBountyUsdc(),
+            "Only the exact configured bounty leaves pledge"
         );
         assertEq(
             clearinghouse.liquidationReserveUsdc(account),
             liquidationReserveBefore,
             "Failed bounty reservation must not consume the dedicated liquidation reserve"
         );
-        assertEq(router.pendingOrderCounts(account), 0, "Failed bounty reservation must not enqueue a close");
+        assertEq(router.pendingOrderCounts(account), 1, "Funded reservation enqueues a close");
     }
 
 }

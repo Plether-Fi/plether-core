@@ -243,8 +243,10 @@ contract PerpClosePreviewParityInvariantTest is Test {
                     CfdTypes.CloseInvalidReason r = preview.invalidReason;
                     assertTrue(
                         r == CfdTypes.CloseInvalidReason.PartialCloseUnderwater
-                            || r == CfdTypes.CloseInvalidReason.DustPosition,
-                        "Partial close of valid-full-close position can only fail for shortfall or dust"
+                            || r == CfdTypes.CloseInvalidReason.DustPosition
+                            || r == CfdTypes.CloseInvalidReason.PartialActionChargeUncollectible
+                            || r == CfdTypes.CloseInvalidReason.PartialCloseUnhealthy,
+                        "Partial close may fail only for partial funding, health, or size constraints"
                     );
                 }
             }
