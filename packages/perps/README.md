@@ -248,8 +248,6 @@ Close previews expose frozen-market pricing separately from VPI. `frozenSpreadUs
 The main runtime and read surfaces are:
 
 - `MarginClearinghouse`: trader custody and typed margin buckets.
-- Optional `BridgeDepositReceiver` / `BridgeDepositReceiverFactory`: deterministic, fixed-beneficiary USDC funding
-  receivers that call `depositFor`; they do not implement a bridge or hold trader positions.
 - `OrderRouter`: thin external shell for bounded delayed-order commits, queue custody, authenticated sidecar
   callbacks, and clearinghouse-reserved keeper bounties.
 - `OrderLifecycleBook`: independently predeployed source for permanent account-scoped idempotency, pending execution
@@ -357,11 +355,16 @@ rules; an account owner must use the ordinary margin-allocation flow to increase
 A successful call emits `Deposit` for the settlement credit and `DepositFor` for payer attribution. Count the two
 logs as one deposit.
 
-The optional bridge receiver/factory forwards canonical destination USDC into this credit-only path for a fixed
-beneficiary. It does not validate source-chain payments or implement a bridge. See
-[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for address binding, finality, recovery, and provider-availability
-requirements. The source integration does not imply a deployed receiver or an enabled bridge provider. Existing
-immutable clearinghouses do not gain `depositFor` by deploying a receiver; the destination must support this API.
+The Across funding integration uses its existing destination handler to approve the clearinghouse and call
+`depositFor` with the actual canonical-USDC balance and the user's verified trading-account beneficiary. The same
+call sequence clears the allowance and emits the quote's unique marker. The beneficiary is also the explicit
+fallback recipient if the destination calls fail. Tokens returned to that account remain
+wallet USDC in a `needs-deposit` state; they are not clearinghouse margin. See
+[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for route validation and confirmed fill/credit evidence requirements.
+The integration deploys no per-intent receiver or factory and requires no bridge-specific signing/flush worker.
+No compatible live clearinghouse is currently asserted. A new funding route does not upgrade an immutable
+clearinghouse or establish active V3 trading/AA compatibility; deployment and application release checks remain
+required before enabling it.
 
 ## Trader Lifecycle
 

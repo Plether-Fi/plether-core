@@ -93,22 +93,29 @@ The smart account is both the EIP-3009 recipient and the caller of `depositMargi
 
 ## Bridge funding
 
-The source package also exports destination-chain bridge-funding primitives. They require a separately verified
-release with `MarginClearinghouse.depositFor(address,uint256)`; deploying a receiver cannot upgrade an old
-clearinghouse. Existing published package versions may not contain these additive exports.
+The source package exports funding primitives for a separately verified release with
+`MarginClearinghouse.depositFor(address,uint256)`. Existing immutable clearinghouses without that method require a
+new compatible core deployment. Existing published package versions may not contain these exports.
 
-`buildDepositForCalls` builds payer approval plus free-settlement credit for a fixed beneficiary.
-`buildCreateBridgeDepositReceiverCall`, `buildFlushBridgeDepositReceiverCall`, and the two receiver-recovery builders
-encode the deterministic receiver lifecycle. `resolveBridgeDepositReceiver` checks the destination chain, pinned
-code hashes, factory/clearinghouse bindings, and any deployed receiver's beneficiary at one block. Its input profile
-must come from a trusted release whose full graph and actual `depositFor` behavior have already been verified.
+`buildDepositForCalls` builds an exact payer approval plus free-settlement credit for a fixed beneficiary. Both calls
+must execute from the same payer; use an atomic batch when the account supports it, or confirm approval before the
+deposit. The beneficiary receives no authority over the payer, and the payer receives no authority over the beneficiary.
 
-These return raw destination calls, not `PerpsActionPlan` objects approved for existing sponsorship. Anyone may flush
-the receiver's canonical USDC into its immutable beneficiary; only that beneficiary may recover unflushed tokens.
-Provider completion and receiver token balance do not establish margin credit: confirm the clearinghouse receipt and
-count its `Deposit`/`DepositFor` pair once. Provider route selection, gas funding, durable intent tracking, and source
-allowlists remain application responsibilities. See the repository's
-[bridge-funding guide](../perps/BRIDGE_FUNDING.md) for release and recovery requirements.
+`verifyBridgeFundingDeployment` checks the destination chain, pinned USDC/clearinghouse/SpokePool/implementation/handler
+code, the SpokePool's EIP-1967 implementation slot, and the clearinghouse settlement token at one block. Supply
+`chainId`, `usdc`, `clearinghouse`, `destinationSpokePool`, `destinationSpokePoolImplementation`, `multicallHandler`, and
+each contract's corresponding `RuntimeCodeHash` from a trusted release. The full core graph and actual `depositFor` behavior must
+already have passed release verification. The shared Across handler is permissionless; it has no immutable binding
+to a SpokePool or beneficiary, and these identity checks do not authorize arbitrary handler calldata.
+
+The builder returns raw zero-native-value destination calls, not sponsored `PerpsActionPlan` objects. Across
+quotes, destination message construction, source allowlists, and durable source/fill correlation remain application
+responsibilities. A handler address, provider status, or token balance alone does not prove margin credit. Match the
+specific source deposit and destination fill/message to the beneficiary's confirmed clearinghouse credit, and count
+the `Deposit`/`DepositFor` pair once. If Across returns USDC to the intended fallback beneficiary after a destination
+call fails, that wallet balance still needs a separate authorized deposit. This SDK does not create receivers or
+provide receiver flush/recovery operations. See the repository's
+[bridge-funding guide](../perps/BRIDGE_FUNDING.md) for release and fallback requirements.
 
 ## Trader actions and cancellation
 

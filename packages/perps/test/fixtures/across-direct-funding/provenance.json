@@ -1,0 +1,56 @@
+{
+  "purpose": "Offline validation fixture for the exact deployed Across Arbitrum MulticallHandler. No production configuration or deployment claim for Plether.",
+  "chainId": 42161,
+  "address": "0x0F7Ae28dE1C8532170AD4ee566B5801485c13a0E",
+  "runtimeCodeHash": "0x2a70f9d1b1c80cc0430bbffe16283cf067d915bee05f9812715cd94ad082b76a",
+  "runtimeBytes": 3758,
+  "observedBlock": 513212465,
+  "observedBlockHash": "0x8e8ddbe6f595d1cdfb50e2d41cccf4adef6b685756cd25b46ebaac9dca4715b8",
+  "rpc": "https://arb1.arbitrum.io/rpc",
+  "deployment": {
+    "transactionHash": "0x8355ca9dbd557e2944ed4de4d4bbe3439d5b78401bb0931205f2d6c994965d2d",
+    "blockNumber": "360020909",
+    "transactionIndex": "1",
+    "deployer": "0x9A8f92a830A5cB89a3816e3D267CB7791c16b04D"
+  },
+  "sourcify": {
+    "url": "https://sourcify.dev/server/v2/contract/42161/0x0F7Ae28dE1C8532170AD4ee566B5801485c13a0E?fields=all",
+    "matchId": "32359823",
+    "runtimeMatch": "exact_match",
+    "creationMatch": "exact_match",
+    "verifiedAt": "2026-06-17T21:16:36Z"
+  },
+  "source": {
+    "url": "https://github.com/across-protocol/contracts/blob/d7c441300c65a4590d1b0288cbe4eb97c4eea549/contracts/handlers/MulticallHandler.sol",
+    "commit": "d7c441300c65a4590d1b0288cbe4eb97c4eea549",
+    "sha256": "c5cc07bd7a035cc0a0f9a08b521a4e022b63017e8466591ffd47ddab22f084de",
+    "file": "MulticallHandler.deployed.sol.txt",
+    "equalsVerifiedSource": true
+  },
+  "officialDeploymentRegistry": {
+    "url": "https://github.com/across-protocol/contracts/blob/950e9154f3d61e59590eb7d4403fae5d3cae84f8/broadcast/deployed-addresses.json",
+    "commit": "950e9154f3d61e59590eb7d4403fae5d3cae84f8"
+  },
+  "compiler": {
+    "language": "Solidity",
+    "compiler": "solc",
+    "compilerVersion": "0.8.23+commit.f704f362",
+    "compilerSettings": {
+      "debug": {
+        "revertStrings": "strip"
+      },
+      "viaIR": true,
+      "metadata": {
+        "useLiteralContent": true
+      },
+      "libraries": {},
+      "optimizer": {
+        "runs": 1000000,
+        "enabled": true
+      }
+    },
+    "name": "MulticallHandler",
+    "fullyQualifiedName": "contracts/handlers/MulticallHandler.sol:MulticallHandler"
+  },
+  "testInitialization": "vm.etch installs exact runtime at deployed address; vm.store initializes ReentrancyGuard _status slot 0 to constructor value 1. Token is a local USDC-behavior mock and clearinghouse is current local implementation. This is not a mainnet fork or bridge fill simulation."
+}

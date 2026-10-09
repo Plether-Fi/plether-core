@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.35;
+
+/// @dev Exact deployed Across Arbitrum emitter runtime, not a reimplementation. See emitter-provenance.json.
+library ArbitrumEventEmitterRuntime {
+
+    address internal constant DEPLOYED_ADDRESS = 0xBF75133b48b0a42AB9374027902E83C5E2949034;
+    bytes32 internal constant CODE_HASH = 0x833b49ceddf001f197603e23297ddc21147b7d9e61adbe812e1167b3a7fe2fe5;
+
+    function runtimeCode() internal pure returns (bytes memory) {
+        return hex"60808060405260043610156011575f80fd5b5f3560e01c63d836083e146023575f80fd5b3460f45760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011260f4576004359067ffffffffffffffff80831160f4573660238401121560f457826004013590811160f457366024828501011160f457801560f457817fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0601f8360409460247fc28009f405f9b451f5155492167b1ad5ab376d991bea880cb5049e924e5b823c986020875282602088015201868601375f85828601015201168101030190a1005b5f80fdfea2646970667358221220a2c7a0f09e981d67663b05d824037d0d54404d85e8c1debac93ab835ff1790aa64736f6c63430008170033";
+    }
+
+}

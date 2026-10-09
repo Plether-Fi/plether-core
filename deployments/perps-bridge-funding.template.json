@@ -6,8 +6,12 @@
   "clearinghouse": null,
   "clearinghouseCodeHash": null,
   "token": null,
-  "receiverFactory": null,
-  "factoryCodeHash": null,
+  "destinationSpokePool": null,
+  "destinationSpokePoolCodeHash": null,
+  "destinationSpokePoolImplementation": null,
+  "destinationSpokePoolImplementationCodeHash": null,
+  "multicallHandler": null,
+  "multicallHandlerCodeHash": null,
   "confirmations": null,
   "startBlock": null,
   "sources": [
@@ -27,8 +31,6 @@
     "schema": "plether-perps-bridge-funding",
     "schemaVersion": 1,
     "sourceCommit": null,
-    "deployer": null,
-    "factoryDeploymentTransaction": null,
     "contracts": {
       "settlementToken": {
         "address": null,
@@ -59,7 +61,15 @@
         "address": null,
         "runtimeCodeHash": null
       },
-      "receiverFactory": {
+      "destinationSpokePool": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "destinationSpokePoolImplementation": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "multicallHandler": {
         "address": null,
         "runtimeCodeHash": null
       }

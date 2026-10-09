@@ -459,10 +459,13 @@ The credit is recorded by `Deposit(account, asset, amount)`. `DepositFor(payer, 
 of that same credit and must not be summed as a second deposit. Existing owner-only `deposit(account, amount)` and
 `depositMargin(amount)` retain their post-credit carry behavior.
 
-A `BridgeDepositReceiver` holds canonical USDC outside clearinghouse custody until a successful `flush()` transfers it
-through `depositFor` to its immutable beneficiary. Neither an announced source-chain payment nor a receiver token
-balance is clearinghouse credit. Recovery from the receiver applies only before funds are flushed; once credited,
-normal account withdrawal and carry rules apply. See [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md).
+Canonical USDC delivered to an Across destination handler remains outside clearinghouse custody until a successful
+`depositFor` transfers it to the beneficiary's settlement balance. The payer in `DepositFor` is that handler. An
+announced source-chain payment, provider status, or token balance is not clearinghouse credit: attribution requires
+the intent's canonical destination fill, exact quote marker, and matching confirmed clearinghouse events. If destination
+execution falls back to the trading-account beneficiary, the returned tokens remain wallet USDC (`needs-deposit`) and require a
+separate deposit before they are margin. Once credited, normal withdrawal and carry rules apply. See
+[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md).
 
 ## Snapshot Boundaries
 

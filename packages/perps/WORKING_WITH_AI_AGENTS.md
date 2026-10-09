@@ -90,10 +90,13 @@ grants the payer no trading or withdrawal authority. It does not collect carry o
 normal account actions still project and collect outstanding carry.
 
 Treat the emitted `Deposit` and `DepositFor` as one credit plus payer metadata. For bridge-assisted funding, verify
-the receiver's immutable beneficiary and destination bindings and confirm the clearinghouse credit before using it
-in an order decision. A source-chain submission or receiver balance alone does not prove destination funding.
-Provider support and recovery rules are documented in [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md); no bridge
-provider or live deployment is implied by the core funding API.
+the Across handler, destination token/clearinghouse, actual-balance deposit call, and trading-account beneficiary;
+the explicit fallback recipient must be that same beneficiary. Attribute credit only from the intent's canonical
+destination fill, exact quote marker, and matching confirmed clearinghouse events. Source submission, provider status,
+or wallet USDC alone does not prove margin funding. A fallback remains `needs-deposit` until a separate deposit succeeds.
+The integration has no per-intent receiver or bridge-specific signing/flush worker. Provider, deployment, and V3
+application compatibility requirements are documented in [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md); the core funding
+API does not imply a live compatible release.
 
 ### Trader actions
 

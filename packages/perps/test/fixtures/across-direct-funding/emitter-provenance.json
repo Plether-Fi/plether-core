@@ -1,0 +1,45 @@
+{
+  "chainId": 42161,
+  "address": "0xBF75133b48b0a42AB9374027902E83C5E2949034",
+  "blockNumber": 513217007,
+  "blockHash": "0x5a34ad0c35414c86e7529d77f14279d4554c46673f7f519ab224555131deaa82",
+  "runtimeBytes": 302,
+  "runtimeKeccak256": "0x833b49ceddf001f197603e23297ddc21147b7d9e61adbe812e1167b3a7fe2fe5",
+  "sourceUrl": "https://sourcify.dev/server/v2/contract/42161/0xbf75133b48b0a42ab9374027902e83c5e2949034?fields=all",
+  "runtimeMatch": "exact_match",
+  "creationMatch": "exact_match",
+  "verifiedAt": "2026-06-18T19:25:58Z",
+  "compilation": {
+    "language": "Solidity",
+    "compiler": "solc",
+    "compilerVersion": "0.8.23+commit.f704f362",
+    "compilerSettings": {
+      "debug": {
+        "revertStrings": "strip"
+      },
+      "viaIR": true,
+      "metadata": {
+        "useLiteralContent": true
+      },
+      "libraries": {},
+      "optimizer": {
+        "runs": 1000000,
+        "enabled": true
+      }
+    },
+    "name": "AcrossEventEmitter",
+    "fullyQualifiedName": "contracts/AcrossEventEmitter.sol:AcrossEventEmitter"
+  },
+  "deployment": {
+    "transactionHash": "0x220c99382773ca52e1de8953954ea6145d8bcf59453dafe692ea08554cfc55ad",
+    "blockNumber": "392949295",
+    "transactionIndex": "5",
+    "deployer": "0x9A8f92a830A5cB89a3816e3D267CB7791c16b04D"
+  },
+  "officialSourceCommit": "e628982ea5043f77708bc416b65a3ec7bc0c0575",
+  "officialSourceUrl": "https://raw.githubusercontent.com/across-protocol/contracts/e628982ea5043f77708bc416b65a3ec7bc0c0575/contracts/AcrossEventEmitter.sol",
+  "officialSourceMatchesVerified": true,
+  "rpc": "https://arb1.arbitrum.io/rpc",
+  "sourceSha256": "3779c753d9cfdbc9c1e608de2894a1ac4ea3a4a48203908ff6f590eaa01d637f",
+  "testInitialization": "vm.etch installs exact runtime at deployed address. Emitter has no constructor state. Offline execution only; no live quote or SpokePool fill proof."
+}

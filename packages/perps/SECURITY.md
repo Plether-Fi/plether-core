@@ -471,7 +471,7 @@ Those actors cannot:
 - withdraw seized user funds to arbitrary third-party recipients,
 - bypass clearinghouse bucket accounting.
 
-### Credit-only funding and bridge receivers
+### Credit-only funding and bridge destination calls
 
 `MarginClearinghouse.depositFor(account, amount)` is permissionless funding from the caller's own token allowance.
 It requires a nonzero beneficiary, positive amount, and exact receipt of the requested settlement token amount before
@@ -483,19 +483,27 @@ terminal-NAV book. Existing carry remains due under normal health projections an
 `deposit` / `depositMargin` and withdrawals retain their existing checks and carry behavior. Indexers must treat
 `DepositFor` as payer metadata for the accompanying `Deposit`, not a second credit.
 
-The optional `BridgeDepositReceiver` fixes its beneficiary, clearinghouse, and canonical USDC at construction.
-Permissionless `flush()` may move all received USDC only into that beneficiary's clearinghouse account. The
-beneficiary alone may recover canonical USDC or accidentally received ERC-20s still at the receiver, always to that
-same beneficiary; there is no native ETH recovery path. Recovery cannot undo an earlier permissionless flush. The
-deterministic factory permits permissionless, idempotent creation of the same bound receiver, so a different deployer cannot select a different recipient for an already-derived address.
+Across funding uses an existing destination handler rather than a per-intent custody contract. The reviewed route
+must bind the destination chain, SpokePool, handler, canonical USDC, clearinghouse, and trading-account beneficiary.
+Its balance-based approval and `depositFor` calldata must use that exact token/clearinghouse/account. The explicit
+call sequence then clears the allowance and emits the unique quote identifier through the pinned Across EventEmitter.
+The fallback recipient must equal the beneficiary; a provider response cannot introduce a different recipient or extend
+the approved call targets. Handler code and SpokePool proxy/implementation code are external trust dependencies;
+verify their runtime hashes and the EIP-1967 implementation slot against the reviewed release. The handler callback
+is permissionless and the handler is shared: funds must arrive with the atomic fill/callback, not through a standalone
+transfer intended for later custody or recovery.
 
-These contracts do not authenticate a source-chain transfer, choose a bridge, convert assets, or establish source
-finality. Applications must verify the exact destination chain, factory, clearinghouse, token, beneficiary, and intent
-salt before giving a receiver address to a provider. Token-binding validation does not prove that a clearinghouse
-implements `depositFor`; verify compatible deployed code as well. Existing immutable deployments are unchanged.
-Control of an undeployed beneficiary remains an application assumption. Provider availability and deployment
-activation are separate requirements described in
-[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md).
+Source and destination evidence remain separate. Provider status, an unrelated clearinghouse deposit, or a wallet
+token balance does not establish this intent's credit. Require its canonical fill, exact quote marker, and matching
+confirmed `Deposit`/`DepositFor` events with the handler as payer, the intended beneficiary, token, and amount. A failed
+destination call that returns tokens to the beneficiary is `needs-deposit`, not trading-ready margin. The application
+must not resend a source payment merely because destination credit is pending or unavailable.
+
+Token-binding validation does not prove that a clearinghouse implements `depositFor`; verify compatible deployed
+code and a real credit probe. Existing immutable deployments are unchanged, and active V3 trading/AA compatibility
+is a separate release requirement. Control of an undeployed trading-account beneficiary remains an application
+assumption. This integration adds no per-intent factory or bridge-specific KMS signing/flush worker. Provider
+availability and activation gates are described in [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md).
 
 ## Oracle And Execution Security
 
@@ -1257,7 +1265,6 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `OrderRouter` | Pre-audit reviewed before the V2 bounded-intent/lifecycle redesign; V2 formal audit pending |
 | `OrderLifecycleBook`, `CfdOrderPolicyEvaluator`, and `OrderRouterExecutionSidecar` | V3 execution-authority additions; formal audit pending |
 | `MarginClearinghouse` | Pre-audit reviewed before V2 no-carry reservation release and credit-only `depositFor`; formal audit pending |
-| `BridgeDepositReceiver` and `BridgeDepositReceiverFactory` | New optional funding contracts; formal audit pending |
 | `HousePool` and stateless redemption-math sidecar | Settlement-hold and size-split changes require formal review |
 | `TrancheVault` | Pre-audit reviewed before the activation-aged cooldown and direct claim-escrow redemption extension; those changes require formal review |
 | `PerpsPublicLens` deposit-cooldown view | Additive read surface for the new lifecycle; formal audit pending |

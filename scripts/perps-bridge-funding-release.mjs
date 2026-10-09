@@ -7,17 +7,22 @@ import { fileURLToPath } from 'node:url'
 // This schema is independent of the AA/paymaster manifest. All hashes must come
 // from reviewed release artifacts; verification checks the supplied pins against
 // chain state, but cannot establish the provenance of an untrusted manifest.
+// The destination SpokePool's runtime pin is supplemented by an explicit
+// EIP-1967 implementation address and runtime pin at the same captured block.
 export const contractNames = Object.freeze([
   'settlementToken', 'marginClearinghouse', 'cfdEngine', 'housePool',
-  'orderRouter', 'pletherOracle', 'orderLifecycleBook', 'receiverFactory',
+  'orderRouter', 'pletherOracle', 'orderLifecycleBook', 'destinationSpokePool',
+  'destinationSpokePoolImplementation', 'multicallHandler',
 ])
+
+export const implementationSlot = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc'
 
 export const selectors = Object.freeze({
   'settlementAsset()': '0xd3781d58', 'engine()': '0xc9d4623f',
   'USDC()': '0x89a30271', 'clearinghouse()': '0x5d4f5f97',
   'orderRouter()': '0xcd41f0c6', 'pool()': '0x16f0115b',
   'ENGINE()': '0x4785e8d4', 'housePool()': '0x281c9cbf',
-  'usdc()': '0x3e413bee', 'decimals()': '0x313ce567',
+  'decimals()': '0x313ce567',
   'pletherOracle()': '0xae98f6f2', 'lifecycleBook()': '0x76a6b6f2',
   'ROUTER()': '0x32fe7b26', 'CLEARINGHOUSE()': '0x9b0de7a0',
   'HOUSE_POOL()': '0x9ceb4408', 'depositFor(address,uint256)': '0x2f4f21e2',
@@ -47,8 +52,6 @@ export const bindings = Object.freeze([
   ['orderLifecycleBook', 'ENGINE()', 'cfdEngine'],
   ['orderLifecycleBook', 'CLEARINGHOUSE()', 'marginClearinghouse'],
   ['orderLifecycleBook', 'HOUSE_POOL()', 'housePool'],
-  ['receiverFactory', 'clearinghouse()', 'marginClearinghouse'],
-  ['receiverFactory', 'usdc()', 'settlementToken'],
 ])
 
 const addressPattern = /^0x[0-9a-fA-F]{40}$/
@@ -73,17 +76,18 @@ const validHash = value => typeof value === 'string' && hashPattern.test(value) 
 
 /** Checks a template only with explicit template:true; normal validation rejects every unfilled field. */
 export function validateFundingManifest(manifest, { template = false } = {}) {
-  keys(manifest, ['version', 'provider', 'destinationChainId', 'releaseId', 'clearinghouse', 'clearinghouseCodeHash', 'token', 'receiverFactory',
-    'factoryCodeHash', 'confirmations', 'startBlock', 'sources', 'evidence'], 'manifest')
+  keys(manifest, ['version', 'provider', 'destinationChainId', 'releaseId', 'clearinghouse', 'clearinghouseCodeHash', 'token',
+    'destinationSpokePool', 'destinationSpokePoolCodeHash', 'multicallHandler', 'multicallHandlerCodeHash',
+    'destinationSpokePoolImplementation', 'destinationSpokePoolImplementationCodeHash',
+    'confirmations', 'startBlock', 'sources', 'evidence'], 'manifest')
   assert.equal(manifest.version, 'perps-funding-v1', 'Unsupported runtime manifest version')
   assert.equal(manifest.provider, 'across', 'Unsupported funding provider')
   field(manifest.destinationChainId, value => Number.isSafeInteger(value) && value > 0, 'destinationChainId', template)
   field(manifest.releaseId, value => typeof value === 'string' && value.length <= 128 && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value), 'releaseId', template)
   field(manifest.confirmations, value => Number.isSafeInteger(value) && value > 0 && value <= 1000, 'confirmations', template)
   field(manifest.startBlock, value => Number.isSafeInteger(value) && value >= 0, 'startBlock', template)
-  for (const name of ['clearinghouse', 'token', 'receiverFactory']) field(manifest[name], validAddress, name, template)
-  field(manifest.factoryCodeHash, validHash, 'factoryCodeHash', template)
-  field(manifest.clearinghouseCodeHash, validHash, 'clearinghouseCodeHash', template)
+  for (const name of ['clearinghouse', 'token', 'destinationSpokePool', 'destinationSpokePoolImplementation', 'multicallHandler']) field(manifest[name], validAddress, name, template)
+  for (const name of ['clearinghouseCodeHash', 'destinationSpokePoolCodeHash', 'destinationSpokePoolImplementationCodeHash', 'multicallHandlerCodeHash']) field(manifest[name], validHash, name, template)
   assert.ok(Array.isArray(manifest.sources) && manifest.sources.length > 0, 'Manifest requires explicit source routes')
   const routes = new Set()
   for (const source of manifest.sources) {
@@ -108,12 +112,10 @@ export function validateFundingManifest(manifest, { template = false } = {}) {
     }
   }
   const evidence = manifest.evidence
-  keys(evidence, ['schema', 'schemaVersion', 'sourceCommit', 'deployer', 'factoryDeploymentTransaction', 'contracts', 'depositFor'], 'evidence')
+  keys(evidence, ['schema', 'schemaVersion', 'sourceCommit', 'contracts', 'depositFor'], 'evidence')
   assert.equal(evidence.schema, 'plether-perps-bridge-funding', 'Wrong manifest schema')
   assert.equal(evidence.schemaVersion, 1, 'Unsupported funding schema version')
   field(evidence.sourceCommit, value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value) && /[1-9a-f]/.test(value), 'evidence.sourceCommit', template)
-  field(evidence.deployer, validAddress, 'evidence.deployer', template)
-  field(evidence.factoryDeploymentTransaction, validHash, 'evidence.factoryDeploymentTransaction', template)
   keys(evidence.contracts, contractNames, 'evidence.contracts')
   const seen = new Set()
   for (const name of contractNames) {
@@ -136,14 +138,16 @@ export function validateFundingManifest(manifest, { template = false } = {}) {
   if (probe.payer !== null && probe.beneficiary !== null) {
     assert.notEqual(lower(probe.payer), lower(probe.beneficiary), 'Probe must demonstrate a third-party deposit')
   }
-  if (probe.transactionHash !== null && manifest.evidence.factoryDeploymentTransaction !== null) {
-    assert.notEqual(lower(probe.transactionHash), lower(manifest.evidence.factoryDeploymentTransaction), 'Deployment and deposit probe must be separate transactions')
-  }
-  for (const [runtimeField, contractName] of [['clearinghouse', 'marginClearinghouse'], ['token', 'settlementToken'], ['receiverFactory', 'receiverFactory']]) {
+  for (const [runtimeField, contractName] of [['clearinghouse', 'marginClearinghouse'], ['token', 'settlementToken'],
+    ['destinationSpokePool', 'destinationSpokePool'], ['destinationSpokePoolImplementation', 'destinationSpokePoolImplementation'],
+    ['multicallHandler', 'multicallHandler']]) {
     assert.equal(lower(manifest[runtimeField]), lower(evidence.contracts[contractName].address), `${runtimeField} disagrees with release evidence`)
   }
-  assert.equal(lower(manifest.factoryCodeHash), lower(evidence.contracts.receiverFactory.runtimeCodeHash), 'factoryCodeHash disagrees with release evidence')
-  assert.equal(lower(manifest.clearinghouseCodeHash), lower(evidence.contracts.marginClearinghouse.runtimeCodeHash), 'clearinghouseCodeHash disagrees with release evidence')
+  for (const [runtimeField, contractName] of [['clearinghouseCodeHash', 'marginClearinghouse'],
+    ['destinationSpokePoolCodeHash', 'destinationSpokePool'],
+    ['destinationSpokePoolImplementationCodeHash', 'destinationSpokePoolImplementation'], ['multicallHandlerCodeHash', 'multicallHandler']]) {
+    assert.equal(lower(manifest[runtimeField]), lower(evidence.contracts[contractName].runtimeCodeHash), `${runtimeField} disagrees with release evidence`)
+  }
   return manifest
 }
 
@@ -167,6 +171,8 @@ export async function verifyFundingManifest(manifest, { rpc, hash = castKeccak }
     assert.equal(lower(await hash(code)), lower(contracts[name].runtimeCodeHash), `${name} runtime code hash mismatch`)
   }
   await Promise.all(contractNames.map(name => checkCode(name, snapshot.number)))
+  const implementation = await rpc('eth_getStorageAt', [contracts.destinationSpokePool.address, implementationSlot, snapshot.number])
+  assert.equal(lower(implementation), addressWord(contracts.destinationSpokePoolImplementation.address), 'Destination SpokePool implementation mismatch')
   await Promise.all(bindings.map(async ([name, signature, target]) => {
     const result = await rpc('eth_call', [{ to: contracts[name].address, data: selectors[signature] }, snapshot.number])
     assert.equal(lower(result), addressWord(contracts[target].address), `${name}.${signature} binding mismatch`)
@@ -193,15 +199,9 @@ export async function verifyFundingManifest(manifest, { rpc, hash = castKeccak }
     return { receipt, transaction }
   }
 
-  const factory = await evidence(manifest.evidence.factoryDeploymentTransaction)
-  assert.equal(factory.transaction.to, null, 'Factory evidence must be its direct creation transaction')
-  assert.equal(lower(factory.transaction.from), lower(manifest.evidence.deployer), 'Factory deployer mismatch')
-  assert.equal(lower(factory.receipt.contractAddress), lower(contracts.receiverFactory.address), 'Factory deployment address mismatch')
-  assert.ok(BigInt(manifest.startBlock) <= quantity(factory.receipt.blockNumber, 'factory deployment block'), 'startBlock would skip factory deployment')
-  await checkCode('receiverFactory', factory.receipt.blockNumber)
-
   const probe = manifest.evidence.depositFor
   const { receipt, transaction } = await evidence(probe.transactionHash)
+  assert.ok(BigInt(manifest.startBlock) <= quantity(receipt.blockNumber, 'deposit probe block'), 'startBlock would skip depositFor probe')
   const clearinghouse = contracts.marginClearinghouse.address
   const token = contracts.settlementToken.address
   assert.equal(lower(transaction.to), lower(clearinghouse), 'Probe must directly call the clearinghouse')
