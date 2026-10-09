@@ -81,6 +81,20 @@ limit, a withdrawal policy, or a revocation mechanism; those controls belong in 
 
 ## Core integration tools
 
+### Margin funding
+
+An owner funds its own account with `MarginClearinghouse.depositMargin(amount)`, which retains ordinary carry
+checkpointing. A payer can instead approve the clearinghouse and call `depositFor(account, amount)` to credit exact
+USDC to that account's free settlement. This credit-only path requires no beneficiary signature or deployed code and
+grants the payer no trading or withdrawal authority. It does not collect carry or add to a position's PnL pledge;
+normal account actions still project and collect outstanding carry.
+
+Treat the emitted `Deposit` and `DepositFor` as one credit plus payer metadata. For bridge-assisted funding, verify
+the receiver's immutable beneficiary and destination bindings and confirm the clearinghouse credit before using it
+in an order decision. A source-chain submission or receiver balance alone does not prove destination funding.
+Provider support and recovery rules are documented in [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md); no bridge
+provider or live deployment is implied by the core funding API.
+
 ### Trader actions
 
 Use `IPerpsTraderActions` for the production order entrypoint:

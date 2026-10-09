@@ -11,3 +11,5 @@ export * from "./protection.js";
 export * from "./protectionAbi.js";
 export * from "./orderV3.js";
 export * from "./orderV3Abi.js";
+export * from "./bridgeFunding.js";
+export * from "./bridgeFundingAbi.js";

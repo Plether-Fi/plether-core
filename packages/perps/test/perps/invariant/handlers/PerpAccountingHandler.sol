@@ -237,6 +237,38 @@ contract PerpAccountingHandler is Test {
         lastWithdrawParityAttempt = attempt;
     }
 
+    /// @notice Funds one tracked account from a different tracked actor without realizing the beneficiary's carry.
+    function depositCollateralFor(
+        uint256 actorIndex,
+        uint256 payerIndex,
+        uint256 amountFuzz
+    ) external {
+        _clearLastPriceLossTraderClaimEvent();
+        _clearTerminalReservationSet();
+        uint256 beneficiaryIndex = actorIndex % actors.length;
+        address actor = actors[beneficiaryIndex];
+        address payer = actors[(beneficiaryIndex + 1 + payerIndex % (actors.length - 1)) % actors.length];
+        if (_isLiquidated(actor) || _isLiquidated(payer)) {
+            return;
+        }
+
+        address account = _account(actor);
+        AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        uint256 amount = bound(amountFuzz, 1, 250_000e6);
+        usdc.mint(payer, amount);
+        vm.startPrank(payer);
+        usdc.approve(address(clearinghouse), amount);
+        clearinghouse.depositFor(account, amount);
+        vm.stopPrank();
+
+        // The payer introduces new tracked USDC; free credit creates no claim or committed-margin ghost entry.
+        ghostTotalTraderMinted += amount;
+        AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        _recordReachabilityTransition(account, REACHABILITY_ACTION_DEPOSIT, beforeSnapshot, afterSnapshot);
+    }
+
     function commitOpenOrder(
         uint256 actorIndex,
         uint8 sideRaw,

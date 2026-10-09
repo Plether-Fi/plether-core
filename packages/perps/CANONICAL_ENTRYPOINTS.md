@@ -9,7 +9,12 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 
 ## Traders
 
-- Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
+- Owner margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
+- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact USDC amount and
+  credits the beneficiary's free settlement without a carry checkpoint or position-margin allocation. Funding gives
+  the payer no authority over the beneficiary. `DepositFor` is payer metadata for the same credit recorded by
+  `Deposit`; indexers must not count both. See [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for optional
+  deterministic receivers and provider/deployment requirements.
 - Ordinary trade action: `OrderRouter.commitOrder(OrderV3Types.OrderRequest request)`
 - Fresh external V3 requests must set `expectedConfigHash` to the current nonzero value returned by
   `OrderLifecycleBook.currentExecutionConfigHash()`; the public commit path rejects zero for a new intent.
@@ -58,6 +63,20 @@ Use these interfaces:
 Do not use the wide clearinghouse reservation API or detailed accounting lenses as the canonical trader integration
 surface. `CfdEngineLens.previewClose(...)` remains a planner diagnostic; it does not project a new close commitment's
 carry and bounty reservation.
+
+### Optional bridge funding receivers
+
+Use the exact deployed `BridgeDepositReceiverFactory` ABI for `predictReceiver(beneficiary,intentSalt)` and
+`createReceiver(beneficiary,intentSalt)`. Anyone may create the predicted receiver; repeated creation returns the
+same address. The receiver's immutable `beneficiary`, `clearinghouse`, and `usdc` bindings define the destination,
+independently of the caller who creates or flushes it.
+
+`BridgeDepositReceiver.flush()` permissionlessly deposits its full current canonical-USDC balance through
+`depositFor`; an empty balance is a no-op and later arrivals may be flushed again. Only the beneficiary may call
+`recover()` for unflushed canonical USDC or `recoverToken(token)` for another ERC-20, always paying itself. A flush
+may complete before recovery; already-credited funds use ordinary clearinghouse withdrawal rules. There is no native
+ETH recovery path. Select a clearinghouse that implements `depositFor`; factory deployment does not upgrade an
+existing clearinghouse or enable a bridge provider.
 
 ## LPs
 

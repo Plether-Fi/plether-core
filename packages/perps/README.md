@@ -127,6 +127,7 @@ In practice, the compact public API is:
 
 - Traders:
   - `MarginClearinghouse.depositMargin(uint256)`
+  - `MarginClearinghouse.depositFor(address,uint256)` for credit-only funding by a payer
   - `MarginClearinghouse.withdrawMargin(uint256)`
 - Ordinary trade actions:
   - `OrderRouter.commitOrder(OrderV3Types.OrderRequest)`
@@ -247,6 +248,8 @@ Close previews expose frozen-market pricing separately from VPI. `frozenSpreadUs
 The main runtime and read surfaces are:
 
 - `MarginClearinghouse`: trader custody and typed margin buckets.
+- Optional `BridgeDepositReceiver` / `BridgeDepositReceiverFactory`: deterministic, fixed-beneficiary USDC funding
+  receivers that call `depositFor`; they do not implement a bridge or hold trader positions.
 - `OrderRouter`: thin external shell for bounded delayed-order commits, queue custody, authenticated sidecar
   callbacks, and clearinghouse-reserved keeper bounties.
 - `OrderLifecycleBook`: independently predeployed source for permanent account-scoped idempotency, pending execution
@@ -339,6 +342,26 @@ The main runtime and read surfaces are:
   advisory: off-chain monitoring archives its evidence and the configured guardian independently decides whether to
   call the coordinator with reason/evidence hashes.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
+
+## Trader Account Funding
+
+`depositMargin(amount)` funds the caller's own account and retains its normal carry-checkpoint behavior.
+`depositFor(account, amount)` pulls the caller's USDC and credits the named account's free settlement without calling
+Engine hooks, collecting carry, or allocating position margin. It requires a nonzero account, positive amount,
+allowance from the payer, and an exact increase in clearinghouse token custody. The payer gains no trading or
+withdrawal authority. An account may fund itself through this path, and the beneficiary may be an undeployed smart
+account address whose eventual control the application must verify.
+
+Credit-only funding leaves accrued carry due. Later account actions and health projections apply the existing carry
+rules; an account owner must use the ordinary margin-allocation flow to increase a live position's PnL pledge.
+A successful call emits `Deposit` for the settlement credit and `DepositFor` for payer attribution. Count the two
+logs as one deposit.
+
+The optional bridge receiver/factory forwards canonical destination USDC into this credit-only path for a fixed
+beneficiary. It does not validate source-chain payments or implement a bridge. See
+[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for address binding, finality, recovery, and provider-availability
+requirements. The source integration does not imply a deployed receiver or an enabled bridge provider. Existing
+immutable clearinghouses do not gain `depositFor` by deploying a receiver; the destination must support this API.
 
 ## Trader Lifecycle
 
@@ -912,7 +935,8 @@ Carry behavior:
   at the same timestamp. Claim payouts still require pool cash to cover all outstanding claims after collection; a
   failure rolls back the whole transaction.
 - Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
-- On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
+- On an owner `deposit` / `depositMargin`, realized carry may be collected from post-deposit settlement in the same
+  transaction. Credit-only `depositFor` does not checkpoint or collect carry; that liability remains due.
 - On withdraw, carry is realized before settlement balance is reduced.
 - Flows to LP trading revenue once realized.
 - Guard and risk checks project carry against active position margin first, then free settlement. The reduced pledge

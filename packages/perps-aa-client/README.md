@@ -91,6 +91,25 @@ clearinghouse.depositMargin(amount)
 
 The smart account is both the EIP-3009 recipient and the caller of `depositMargin`, preserving the contracts' `msg.sender` ownership invariant. Enable this route only after verifying that the configured USDC implements `receiveWithAuthorization` with the expected EIP-712 domain.
 
+## Bridge funding
+
+The source package also exports destination-chain bridge-funding primitives. They require a separately verified
+release with `MarginClearinghouse.depositFor(address,uint256)`; deploying a receiver cannot upgrade an old
+clearinghouse. Existing published package versions may not contain these additive exports.
+
+`buildDepositForCalls` builds payer approval plus free-settlement credit for a fixed beneficiary.
+`buildCreateBridgeDepositReceiverCall`, `buildFlushBridgeDepositReceiverCall`, and the two receiver-recovery builders
+encode the deterministic receiver lifecycle. `resolveBridgeDepositReceiver` checks the destination chain, pinned
+code hashes, factory/clearinghouse bindings, and any deployed receiver's beneficiary at one block. Its input profile
+must come from a trusted release whose full graph and actual `depositFor` behavior have already been verified.
+
+These return raw destination calls, not `PerpsActionPlan` objects approved for existing sponsorship. Anyone may flush
+the receiver's canonical USDC into its immutable beneficiary; only that beneficiary may recover unflushed tokens.
+Provider completion and receiver token balance do not establish margin credit: confirm the clearinghouse receipt and
+count its `Deposit`/`DepositFor` pair once. Provider route selection, gas funding, durable intent tracking, and source
+allowlists remain application responsibilities. See the repository's
+[bridge-funding guide](../perps/BRIDGE_FUNDING.md) for release and recovery requirements.
+
 ## Trader actions and cancellation
 
 Builders are provided for deposit, commit order, add margin, withdraw, and settle claim. `addMargin(account, amount)` and `settleTraderClaim(account)` always encode the smart-account address as the account argument.

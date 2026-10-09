@@ -264,6 +264,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Earliest lot gate | Router commit rejects non-100-token-multiple opens and closes before reserving value or assigning an order id |
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
+| Credit-only funding | Exact token receipt increases beneficiary settlement only; no Engine hook, carry checkpoint, reserve allocation, or payer authority |
 | Carry-neutral reservation release | Execution/cleanup reservation release does not checkpoint carry, and a retryable item rollback restores the reservation |
 
 ### HousePool and LP accounting
@@ -298,6 +299,7 @@ The tables above describe the intended safety properties. The suites below are t
 | Permanent idempotency / lifecycle outcomes / receipt authentication | `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
 | Caller financial bounds / planner parity / retryable failure classification | `packages/perps/test/perps/CfdOrderPolicyEvaluator.t.sol`, `packages/perps/test/perps/CfdOrderPolicyEvaluatorParity.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
 | Config-version drift / pinned execution configuration | `packages/perps/test/perps/AdminConfigVersion.t.sol`, `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
+| Credit-only funding / exact receipt / unchanged carry and position state | `packages/perps/test/perps/DepositFor.t.sol` |
 | Carry-neutral reservation release | `packages/perps/test/perps/MarginClearinghouseReservationRelease.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
 | Risk-off and liquidation receipt/bounty disposition | `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol` |
 | Emergency pause atomicity / monotonic risk-off cutoff / bounded cleanup gas | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol` |
@@ -468,6 +470,32 @@ Those actors cannot:
 - create negative balances,
 - withdraw seized user funds to arbitrary third-party recipients,
 - bypass clearinghouse bucket accounting.
+
+### Credit-only funding and bridge receivers
+
+`MarginClearinghouse.depositFor(account, amount)` is permissionless funding from the caller's own token allowance.
+It requires a nonzero beneficiary, positive amount, and exact receipt of the requested settlement token amount before
+crediting that beneficiary's free settlement. It grants the payer no trading, withdrawal, or reserve-management
+permission and does not require a beneficiary signature or deployed beneficiary code.
+
+This path makes no Engine calls and cannot checkpoint carry, allocate position margin, change the mark, or alter the
+terminal-NAV book. Existing carry remains due under normal health projections and subsequent account actions. Owner
+`deposit` / `depositMargin` and withdrawals retain their existing checks and carry behavior. Indexers must treat
+`DepositFor` as payer metadata for the accompanying `Deposit`, not a second credit.
+
+The optional `BridgeDepositReceiver` fixes its beneficiary, clearinghouse, and canonical USDC at construction.
+Permissionless `flush()` may move all received USDC only into that beneficiary's clearinghouse account. The
+beneficiary alone may recover canonical USDC or accidentally received ERC-20s still at the receiver, always to that
+same beneficiary; there is no native ETH recovery path. Recovery cannot undo an earlier permissionless flush. The
+deterministic factory permits permissionless, idempotent creation of the same bound receiver, so a different deployer cannot select a different recipient for an already-derived address.
+
+These contracts do not authenticate a source-chain transfer, choose a bridge, convert assets, or establish source
+finality. Applications must verify the exact destination chain, factory, clearinghouse, token, beneficiary, and intent
+salt before giving a receiver address to a provider. Token-binding validation does not prove that a clearinghouse
+implements `depositFor`; verify compatible deployed code as well. Existing immutable deployments are unchanged.
+Control of an undeployed beneficiary remains an application assumption. Provider availability and deployment
+activation are separate requirements described in
+[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md).
 
 ## Oracle And Execution Security
 
@@ -739,7 +767,10 @@ The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
-- realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and clearinghouse deposit/withdraw before the carry base/rate denominator changes; deposits may collect realized carry from post-deposit settlement in the same transaction, while withdraws realize carry before reducing settlement
+- realization points: open, close, add margin, pool-asset changes, risk-parameter changes, and owner clearinghouse
+  `deposit` / `depositMargin` / withdraw paths before the carry base/rate denominator changes. Owner deposits may
+  collect realized carry from post-deposit settlement in the same transaction; withdrawals realize carry before
+  reducing settlement. Credit-only `depositFor` makes no carry checkpoint and leaves accrued carry due
 - destination: realized carry becomes LP trading revenue
 - collection priority: active position margin first, then free settlement; all other locked buckets and trader claims
   remain protected during carry collection
@@ -1225,7 +1256,8 @@ As of May 21, 2026, `master` includes the resolution commit and later changes. F
 | `CfdMath` | Pre-audit reviewed as supporting logic; formal audit pending |
 | `OrderRouter` | Pre-audit reviewed before the V2 bounded-intent/lifecycle redesign; V2 formal audit pending |
 | `OrderLifecycleBook`, `CfdOrderPolicyEvaluator`, and `OrderRouterExecutionSidecar` | V3 execution-authority additions; formal audit pending |
-| `MarginClearinghouse` | Pre-audit reviewed before V2 no-carry reservation-release additions; formal audit pending |
+| `MarginClearinghouse` | Pre-audit reviewed before V2 no-carry reservation release and credit-only `depositFor`; formal audit pending |
+| `BridgeDepositReceiver` and `BridgeDepositReceiverFactory` | New optional funding contracts; formal audit pending |
 | `HousePool` and stateless redemption-math sidecar | Settlement-hold and size-split changes require formal review |
 | `TrancheVault` | Pre-audit reviewed before the activation-aged cooldown and direct claim-escrow redemption extension; those changes require formal review |
 | `PerpsPublicLens` deposit-cooldown view | Additive read surface for the new lifecycle; formal audit pending |

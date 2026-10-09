@@ -10,10 +10,12 @@ interface IMarginClearinghouse {
 
     /// @notice The caller is not the engine or the engine-derived router or settlement sidecar required by the call.
     error MarginClearinghouse__NotOperator();
-    /// @notice A user attempted to deposit to or withdraw from an account other than its own address.
+    /// @notice A legacy owner-authenticated deposit or withdrawal named an account other than the caller.
     error MarginClearinghouse__NotAccountOwner();
     /// @notice An operation that requires a positive amount received zero.
     error MarginClearinghouse__ZeroAmount();
+    /// @notice The settlement token delivered a different amount than requested by a third-party deposit.
+    error MarginClearinghouse__UnexpectedTransferAmount(uint256 expected, uint256 received);
     /// @notice An account's settlement balance cannot cover a requested user withdrawal.
     error MarginClearinghouse__InsufficientBalance();
     /// @notice Unencumbered settlement cannot cover a new lock or the post-withdrawal locked-margin floor.
@@ -44,6 +46,18 @@ interface IMarginClearinghouse {
     error MarginClearinghouse__ReservationAccountMismatch(
         uint64 orderId, address expectedAccount, address actualAccount
     );
+
+    /// @notice Identifies the payer of a credit-only deposit; the matching `Deposit` event records the same credit.
+    /// @dev This metadata event is not an additional settlement credit.
+    event DepositFor(address indexed payer, address indexed account, uint256 amount);
+
+    /// @notice Pulls the caller's USDC and credits the beneficiary's free settlement, without recipient authorization.
+    /// @dev Rejects zero account/amount and inexact token receipt. Does not checkpoint carry or allocate position
+    ///      margin. Existing carry remains due, and only the credited account retains trading/withdrawal authority.
+    function depositFor(
+        address account,
+        uint256 amount
+    ) external;
 
     /// @notice Owner namespace for keeper-bounty reservations; ids are unique within each namespace.
     enum BountyKind {
