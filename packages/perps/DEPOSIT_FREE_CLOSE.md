@@ -6,7 +6,7 @@ This change is for a fresh deployment. It is not an upgrade or recovery of the e
 
 `CloseCommitmentLib.project` is the shared commitment calculator used by the engine planner and prospective preview. It validates even a zero bounty, checkpoints carry, and reserves the snapshotted bounty from free settlement followed by eligible position pledge. Reservation changes classification, not custody. It immediately changes side margin and borrow base. Partial commitments require fully collected carry and strict maintenance/FAD health of the entire exposed position after reservation. Claims, unrealized gains, liquidation reserve, VPI backing, and other orders' reservations do not fund the bounty.
 
-Execution preserves price-PnL collection, gain withholding, negative-VPI clawback, spendable action reserve, and free-settlement priority. Terminal-safe pledge release then funds charges before terminal-only committed-order margin. The clearinghouse verifies the released-pledge attribution against its current buckets. Receipt fields satisfy:
+Execution preserves price-PnL collection, gain withholding, negative-VPI clawback, spendable action reserve, and free-settlement priority. For full closes, liquidation-reserve surplus is released into free settlement before pledge attribution. Terminal-safe pledge release then funds charges before terminal-only committed-order margin. The clearinghouse verifies the released-pledge attribution against its current buckets. Receipt fields satisfy:
 
 ```
 netReleasedMarginUsdc = safeMarginReleaseUsdc - actionChargeFromReleasedMarginUsdc

@@ -27,7 +27,7 @@ contract AuditRemainingCoverageFindingsFailing_ReservationShielding is BasePerpT
         assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
         vm.warp(block.timestamp + 365 days);
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
-        assertTrue(preview.valid, "Full close should collect terminal carry from queued committed margin");
+        assertTrue(preview.valid, "Full close should collect charges from released surplus");
         assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action charges from price PnL");
         assertEq(preview.badDebtUsdc, 0, "Action-charge collection must never create protocol debt");
 

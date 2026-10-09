@@ -482,7 +482,8 @@ interface IMarginClearinghouse {
     ) external;
 
     /// @notice Collects an action charge from spendable action reserve, free settlement, then committed order margin.
-    /// @dev PnL pledge, liquidation reserve, negative-VPI backing, and pending execution bounties are never reachable.
+    /// @dev Locked PnL pledge, liquidation reserve, negative-VPI backing, and pending execution bounties are never
+    ///      reachable here. Full closes release surplus pledge and liquidation reserve into free settlement first.
     ///      Both expected-source arguments must exactly match the split implied by current state; this makes a stale or
     ///      incorrect settlement plan revert. Committed margin is consumed through the clearinghouse-owned FIFO reservation
     ///      ledger. Collection is capped by eligible value, so callers may treat the remainder as waived.
