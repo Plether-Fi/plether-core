@@ -5,6 +5,7 @@ import {CfdClosePreviewTestBase} from "./CfdClosePreviewTestBase.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -101,6 +102,48 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
 
     function test_StandardFullLongZeroFree() public {
         _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, false, KEEPER);
+    }
+
+    function test_AdminCanSetZeroCloseBountyAndRestoreAfterStandardFullClose() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        uint256 originalBounty = config.closeOrderExecutionBountyUsdc;
+        assertGt(originalBounty, 0);
+        config.closeOrderExecutionBountyUsdc = 0;
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", ACCOUNT));
+        vm.prank(ACCOUNT);
+        routerAdmin.proposeRouterConfig(config);
+
+        routerAdmin.proposeRouterConfig(config);
+        assertEq(router.closeOrderExecutionBountyUsdc(), originalBounty, "proposal does not apply immediately");
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
+        routerAdmin.finalizeRouterConfig();
+        vm.warp(routerAdmin.routerConfigActivationTime());
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", ACCOUNT));
+        vm.prank(ACCOUNT);
+        routerAdmin.finalizeRouterConfig();
+        routerAdmin.finalizeRouterConfig();
+        assertEq(router.closeOrderExecutionBountyUsdc(), 0);
+
+        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, false, KEEPER);
+        assertEq(
+            uint8(
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, router.nextCommitId() - 1)
+                .state
+            ),
+            uint8(IMarginClearinghouse.BountyReservationState.Settled),
+            "zero standard bounty is explicitly settled"
+        );
+
+        config.closeOrderExecutionBountyUsdc = originalBounty;
+        _setRouterConfig(config);
+        assertEq(router.closeOrderExecutionBountyUsdc(), originalBounty, "owner can restore the bounty");
+    }
+
+    function test_AdminZeroCloseBountySupportsStandardPartialClose() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.closeOrderExecutionBountyUsdc = 0;
+        _setRouterConfig(config);
+        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE / 2, false, KEEPER);
     }
 
     function test_CommitmentSidecarFailureAndMalformedReturnRollBack() public {
