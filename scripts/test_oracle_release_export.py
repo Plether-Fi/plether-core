@@ -20,19 +20,29 @@ spec.loader.exec_module(release)
 
 
 IDENTIFIER = "Example.sol:Example"
+SOURCE_PATH = "packages/perps/src/Example.sol"
+SOURCE = b"contract Example {}\n"
+
+
+def synthetic_keccak(data):
+    return "0x" + hashlib.sha256(b"mock-keccak" + data).hexdigest()
 MANIFEST = {"schemaVersion": 3, "orderInterfaceVersion": 3,
             "contracts": {"example": {"artifact": "packages/perps/src/" + IDENTIFIER}}}
 
 
-def artifact(creation=b"\x60\x00", runtime=b"\x00"):
-    return {
+def artifact(creation=b"\x60\x00", runtime=b"\x00", source=SOURCE_PATH, name="Example", content=SOURCE):
+    result = {
         "abi": [{"type": "constructor", "inputs": [{"name": "owner", "type": "address"}]}],
         "bytecode": {"object": "0x" + creation.hex()},
         "deployedBytecode": {"object": "0x" + runtime.hex()},
         "metadata": {"compiler": {"version": "0.8.35+commit.47b9dedd"}, "settings": {
             "viaIR": True, "optimizer": {"enabled": True, "runs": 200}, "evmVersion": "prague",
-        }},
+            "compilationTarget": {source: name},
+        }, "sources": {source: {"keccak256": synthetic_keccak(content)}}},
     }
+
+    result["metadata"]["output"] = {"abi": json.loads(json.dumps(result["abi"]))}
+    return result
 
 
 def record(creation=b"\x60\x00", runtime=b"\x00", arguments=b"\x00" * 31 + b"\x01"):
@@ -105,6 +115,44 @@ class DeploymentSizeEvidenceTest(unittest.TestCase):
         self.assertEqual(release.parse_size_records(json.dumps(forge_result())), [record()])
 
 
+class CompilerSourceBindingTest(unittest.TestCase):
+    def test_dependency_source_uses_recorded_gitlink_commit(self):
+        root = Path("/synthetic/repo")
+        revision, dependency_commit = "a" * 40, "b" * 40
+        def links(repo, sha):
+            if repo == root:
+                self.assertEqual(sha, revision)
+                return [("lib/dependency", dependency_commit)]
+            self.assertEqual((repo, sha), (root / "lib/dependency", dependency_commit))
+            return []
+        release.pinned_source.cache_clear()
+        self.addCleanup(release.pinned_source.cache_clear)
+        with patch.object(release, "gitlinks", side_effect=links), \
+             patch.object(release.subprocess, "check_output", return_value=SOURCE) as read:
+            self.assertEqual(release.pinned_source(root, revision, "lib/dependency/src/Example.sol"), SOURCE)
+        self.assertEqual(read.call_args.args[0], ["git", "-C", str(root / "lib/dependency"),
+                                                "show", dependency_commit + ":src/Example.sol"])
+
+    def test_removed_source_and_external_metadata_paths_are_rejected(self):
+        release.pinned_source.cache_clear()
+        self.addCleanup(release.pinned_source.cache_clear)
+        for path in ("/outside.sol", "../outside.sol"):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "non-repository"):
+                release.pinned_source(Path("/synthetic/repo"), "a" * 40, path)
+        with patch.object(release, "gitlinks", return_value=[]), \
+             patch.object(release.subprocess, "check_output", side_effect=subprocess.CalledProcessError(128, "git")):
+            with self.assertRaisesRegex(ValueError, "absent at pinned revision"):
+                release.pinned_source(Path("/synthetic/repo"), "a" * 40, "removed.sol")
+
+    def test_abi_order_and_empty_output_normalization_preserve_semantics(self):
+        function = {"type": "function", "name": "call", "inputs": [], "stateMutability": "nonpayable"}
+        constructor = {"type": "constructor", "inputs": []}
+        self.assertEqual(release.normalized_abi([function, constructor]),
+                         release.normalized_abi([constructor, dict(function, outputs=[])]))
+        self.assertNotEqual(release.normalized_abi([function]),
+                            release.normalized_abi([dict(function, outputs=[{"type": "uint256", "name": ""}])]))
+
+
 class ExportWorkflowTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -116,6 +164,8 @@ class ExportWorkflowTest(unittest.TestCase):
         self.artifact_path = release.artifact_path(self.root, IDENTIFIER)
         self.artifact_path.parent.mkdir(parents=True)
         self.artifact_path.write_text(json.dumps(artifact()))
+        self.build_artifacts = {IDENTIFIER: artifact()}
+        self.build_paths = []
         self.fingerprint = {"sourceCommit": "a" * 40, "sha256": "b" * 64, "files": [], "dependencies": []}
 
     def check_output(self, command, **_kwargs):
@@ -125,13 +175,24 @@ class ExportWorkflowTest(unittest.TestCase):
         return json.dumps({"out": "out", "eth_rpc_url": None, "fork_block_number": None})
 
     def run_command(self, command, **_kwargs):
+        build_out = Path(command[command.index("--out") + 1])
+        self.build_paths.append(build_out)
+        if command[1] == "build":
+            self.fresh_artifact_path = build_out / "Example.sol/Example.json"
+            for identifier, compiled in self.build_artifacts.items():
+                filename, name = identifier.split(":")
+                path = build_out / filename / (name + ".json")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(compiled))
         output = json.dumps(forge_result()) if command[1] == "test" else "production build complete\n"
         return subprocess.CompletedProcess(command, 0, output, "")
 
     def export(self, fingerprints=None, run=None, check_output=None):
         with patch.object(release, "source_fingerprint", side_effect=fingerprints or [self.fingerprint] * 3), \
              patch.object(release.subprocess, "check_output", side_effect=check_output or self.check_output), \
-             patch.object(release.subprocess, "run", side_effect=run or self.run_command):
+             patch.object(release.subprocess, "run", side_effect=run or self.run_command), \
+             patch.object(release, "pinned_source", side_effect=lambda _root, _revision, path: SOURCE if path == SOURCE_PATH else (self.root / path).read_bytes()), \
+             patch.object(release, "keccak256", side_effect=synthetic_keccak):
             return release.export_release(self.root, self.output, self.fingerprint["sourceCommit"])
 
     def test_success_binds_full_source_revision_abi_and_local_size_evidence(self):
@@ -141,7 +202,12 @@ class ExportWorkflowTest(unittest.TestCase):
         self.assertEqual(set(report["deploymentSizeValidation"]["deployments"]), {"example"})
         abi = (self.output / "abi/Example.json").read_bytes()
         self.assertEqual(report["contracts"]["Example"]["abiSha256"], hashlib.sha256(abi).hexdigest())
-        self.assertEqual(report["contracts"]["Example"]["artifactSha256"], hashlib.sha256(self.artifact_path.read_bytes()).hexdigest())
+        self.assertEqual(report["contracts"]["Example"]["artifactSha256"], hashlib.sha256((self.output / report["contracts"]["Example"]["artifact"]).read_bytes()).hexdigest())
+        self.assertEqual(self.build_paths[0], self.build_paths[1])
+        self.assertNotEqual(self.build_paths[0], self.root / "out")
+        self.assertFalse(self.build_paths[0].exists())
+        self.assertEqual(report["contracts"]["Example"]["sourceArtifact"], SOURCE_PATH + ":Example")
+        self.assertEqual(set(report["compilerSources"]), {SOURCE_PATH})
         self.assertNotIn("qualified", report)
         command = report["logs"]["deployment-sizes.log"]["command"]
         self.assertNotIn("--broadcast", " ".join(command))
@@ -163,7 +229,7 @@ class ExportWorkflowTest(unittest.TestCase):
     def test_wrong_compiler_settings_prevent_abi_export(self):
         wrong = artifact()
         wrong["metadata"]["settings"]["optimizer"]["runs"] = 1
-        self.artifact_path.write_text(json.dumps(wrong))
+        self.build_artifacts[IDENTIFIER] = wrong
         with self.assertRaisesRegex(ValueError, "production settings"):
             self.export()
         self.assertFalse((self.output / "build.json").exists())
@@ -174,7 +240,7 @@ class ExportWorkflowTest(unittest.TestCase):
             nonlocal calls
             calls += 1
             if calls == 3:
-                self.artifact_path.write_text(json.dumps(artifact(creation=b"\x61\x00")))
+                self.fresh_artifact_path.write_text(json.dumps(artifact(creation=b"\x61\x00")))
             return self.fingerprint
         with self.assertRaisesRegex(ValueError, "Compiler artifacts changed"):
             self.export(fingerprints=fingerprint)
@@ -201,6 +267,62 @@ class ExportWorkflowTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "forbids configured RPC"):
             self.export(check_output=remote)
         self.assertFalse(self.output.exists())
+
+
+    def add_unused_interface(self):
+        path = self.root / "packages/perps/src/interfaces/IUnused.sol"
+        path.parent.mkdir(parents=True)
+        path.write_text("interface IUnused { function current() external; }\n")
+        fresh = artifact(creation=b"", runtime=b"", source=str(path.relative_to(self.root)),
+                         name="IUnused", content=path.read_bytes())
+        fresh["abi"] = [{"type": "function", "name": "current", "inputs": [], "outputs": [], "stateMutability": "nonpayable"}]
+        fresh["metadata"]["output"]["abi"] = fresh["abi"]
+        stale = release.artifact_path(self.root, "IUnused.sol:IUnused")
+        stale.parent.mkdir(parents=True)
+        stale.write_text(json.dumps(artifact()))
+        return fresh
+
+    def test_ignored_stale_interface_artifact_cannot_fill_missing_compiler_output(self):
+        self.add_unused_interface()
+        with self.assertRaises(FileNotFoundError):
+            self.export()
+        self.assertFalse((self.output / "build.json").exists())
+
+    def test_unused_interface_is_explicitly_compiled_and_stale_abi_is_replaced(self):
+        self.build_artifacts["IUnused.sol:IUnused"] = self.add_unused_interface()
+        report = self.export()
+        self.assertEqual(set(report["contracts"]), {"Example", "IUnused"})
+        self.assertEqual(json.loads((self.output / "abi/IUnused.json").read_text())[0]["name"], "current")
+        self.assertIn("packages/perps/src/interfaces/IUnused.sol", report["logs"]["build.log"]["command"])
+        self.assertEqual(report["logs"]["build.log"]["command"][3:7],
+                         report["logs"]["deployment-sizes.log"]["command"][3:7])
+
+    def test_stale_source_or_wrong_target_or_wrong_abi_fails_export(self):
+        import shutil
+        for corruption in ("source", "target", "abi", "compiler"):
+            with self.subTest(corruption=corruption):
+                if self.output.exists():
+                    shutil.rmtree(self.output)
+                value = artifact()
+                if corruption == "source":
+                    value["metadata"]["sources"][SOURCE_PATH]["keccak256"] = "0x" + "00" * 32
+                elif corruption == "target":
+                    value["metadata"]["settings"]["compilationTarget"] = {SOURCE_PATH: "Other"}
+                elif corruption == "abi":
+                    value["abi"] = []
+                else:
+                    value["metadata"]["compiler"]["version"] = "0.8.35+commit.ffffffff"
+                self.build_artifacts[IDENTIFIER] = value
+                with self.assertRaises(ValueError):
+                    self.export()
+                self.assertFalse((self.output / "build.json").exists())
+
+    def test_inventory_exports_every_interface_declaration_without_artifact_discovery(self):
+        path = self.root / "packages/perps/src/interfaces/IMultiple.sol"
+        path.parent.mkdir(parents=True)
+        path.write_text("// interface Fake {}\n/* contract Fake2 {} */\ninterface IMultiple {}\ninterface ISecondary {}\n")
+        result = release.consumer_inventory(self.root, MANIFEST)
+        self.assertEqual(set(result), {IDENTIFIER, "IMultiple.sol:IMultiple", "IMultiple.sol:ISecondary"})
 
     def test_existing_output_cannot_be_overwritten(self):
         self.output.mkdir()

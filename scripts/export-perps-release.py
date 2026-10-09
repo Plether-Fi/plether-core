@@ -2,12 +2,14 @@
 """Export revision-bound perps ABIs and local full-deployment size evidence. Never broadcasts."""
 
 import argparse
+from functools import lru_cache
 import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 sys.dont_write_bytecode = True
 from oracle_sync_evidence import assert_unchanged, production_environment, sanitize_log, sha256_file, source_fingerprint
@@ -19,6 +21,7 @@ SIZE_TEST_PATH = "test/scripts/PerpsReleaseDeploymentSize.t.sol"
 SIZE_TEST_SUITE = SIZE_TEST_PATH + ":PerpsReleaseDeploymentSizeTest"
 SIZE_TEST = "test_AllReleaseContractsFitFullDeploymentLimits()"
 LOG_PREFIX = "RELEASE_SIZE "
+SOLC_VERSION = "0.8.35+commit.47b9dedd"
 
 
 def artifact_identifier(key, entry):
@@ -39,6 +42,96 @@ def artifact_path(root, identifier):
     return Path(root) / "out" / source / (name + ".json")
 
 
+def consumer_inventory(root, manifest):
+    """Select artifacts from committed source declarations, never from pre-existing compiler output."""
+    inventory = {}
+    for key, entry in manifest["contracts"].items():
+        identifier = artifact_identifier(key, entry)
+        filename = identifier.split(":")[0]
+        source = entry["artifact"].rsplit(":", 1)[0] if entry.get("artifact") else (
+            "script/" + filename if filename == "DeployPerpsArbitrumSepolia.s.sol"
+            else "packages/perps/src/" + filename
+        )
+        inventory[identifier] = source
+    for path in sorted((root / "packages/perps/src/interfaces").glob("*.sol")):
+        # Remove comments and literals so example declarations cannot become ABI inventory entries.
+        source = re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', "", path.read_text())
+        names = re.findall(r"^\s*(?:abstract\s+)?(?:interface|library|contract)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b", source, re.M)
+        if not names:
+            raise ValueError(f"Consumer source has no exportable declaration: {path.name}")
+        for name in names:
+            inventory[path.name + ":" + name] = str(path.relative_to(root))
+    if len({identifier.split(":")[1] for identifier in inventory}) != len(inventory):
+        raise ValueError("Duplicate artifact names would overwrite consumer ABI files")
+    return inventory
+
+
+@lru_cache(maxsize=None)
+def gitlinks(repo, revision):
+    entries = subprocess.check_output(["git", "-C", str(repo), "ls-tree", "-r", "-z", revision]).split(b"\0")
+    result = []
+    for entry in entries:
+        if entry:
+            info, path = entry.split(b"\t", 1)
+            mode, _kind, object_id = info.decode().split()
+            if mode == "160000":
+                result.append((path.decode(), object_id))
+    return result
+
+
+@lru_cache(maxsize=None)
+def pinned_source(repo, revision, path):
+    """Read exact Git blobs, following each dependency's pinned commit rather than its working tree."""
+    if Path(path).is_absolute() or ".." in Path(path).parts:
+        raise ValueError("Compiler metadata has a non-repository source path")
+    for dependency, commit in gitlinks(repo, revision):
+        if path.startswith(dependency + "/"):
+            return pinned_source(Path(repo) / dependency, commit, path[len(dependency) + 1:])
+    try:
+        return subprocess.check_output(["git", "-C", str(repo), "show", revision + ":" + path], stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"Compiler metadata source is absent at pinned revision: {path}") from error
+
+
+def keccak256(data):
+    # Ethereum Keccak differs from hashlib.sha3_256. Cast is provided by the pinned Foundry toolchain.
+    return subprocess.check_output(["cast", "keccak"], input=b"0x" + data.hex().encode()).decode().strip()
+
+
+def normalized_abi(abi):
+    entries = []
+    for item in abi:
+        item = dict(item)
+        if item["type"] in ("function", "constructor", "event", "error"):
+            item.setdefault("inputs", [])
+        if item["type"] == "function":
+            item.setdefault("outputs", [])
+        if item["type"] == "event":
+            item.setdefault("anonymous", False)
+        entries.append(json.dumps(item, sort_keys=True, separators=(",", ":")))
+    return sorted(entries)
+
+
+def validate_metadata_sources(root, revision, inventory, artifacts):
+    sources = {}
+    for identifier, artifact in artifacts.items():
+        metadata = artifact["metadata"]
+        source, name = inventory[identifier], identifier.split(":")[1]
+        if metadata["settings"].get("compilationTarget") != {source: name}:
+            raise ValueError(f"{identifier}: compiler metadata has the wrong compilation target")
+        if normalized_abi(artifact["abi"]) != normalized_abi(metadata["output"]["abi"]):
+            raise ValueError(f"{identifier}: ABI differs from compiler metadata")
+        if source not in metadata["sources"]:
+            raise ValueError(f"{identifier}: compilation target is absent from metadata sources")
+        for path, record in metadata["sources"].items():
+            if path not in sources:
+                content = pinned_source(root, revision, path)
+                sources[path] = {"keccak256": keccak256(content), "sha256": hashlib.sha256(content).hexdigest()}
+            if record.get("keccak256") != sources[path]["keccak256"]:
+                raise ValueError(f"{identifier}: metadata source differs from pinned Git blob: {path}")
+    return dict(sorted(sources.items()))
+
+
 def bytecode(value):
     if not isinstance(value, str) or not re.fullmatch(r"(?:0x)?(?:[a-fA-F0-9]{2})*", value):
         raise ValueError("Malformed or unlinked bytecode")
@@ -49,13 +142,14 @@ def read_artifact(path):
     raw = path.read_bytes()
     artifact = json.loads(raw)
     artifact["_artifactSha256"] = hashlib.sha256(raw).hexdigest()
+    artifact["_rawArtifact"] = raw
     metadata = artifact["metadata"]
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
         artifact["metadata"] = metadata
     settings = metadata["settings"]
     if (
-        not metadata["compiler"]["version"].startswith("0.8.35+")
+        metadata["compiler"]["version"] != SOLC_VERSION
         or settings.get("viaIR") is not True
         or settings.get("optimizer") != {"enabled": True, "runs": 200}
         or settings.get("evmVersion") != "prague"
@@ -135,11 +229,6 @@ def export_release(root, output, source_revision=None):
     config = json.loads(subprocess.check_output(["forge", "config", "--json"], cwd=root, env=environment, text=True))
     if config.get("eth_rpc_url") or config.get("fork_block_number") is not None:
         raise ValueError("Local release export forbids configured RPC/fork execution")
-    configured_out = Path(config.get("out", "out"))
-    if not configured_out.is_absolute():
-        configured_out = root / configured_out
-    if configured_out.resolve() != root / "out":
-        raise ValueError("Release export requires the canonical out artifact directory")
     output.mkdir(parents=True)
     logs = {}
 
@@ -152,72 +241,81 @@ def export_release(root, output, source_revision=None):
             raise ValueError(f"{name} failed; see sanitized log")
         return completed.stdout
 
-    try:
-        run(["forge", "build", "--offline", "--skip", "test"], "build.log")
-        size_output = run([
-            "forge", "test", "--offline", "--match-path", SIZE_TEST_PATH,
-            "--match-test", "^" + re.escape(SIZE_TEST) + "$", "--json", "-vv",
-        ], "deployment-sizes.log")
-        records = parse_size_records(size_output)
-        manifest_path = root / "deployments/arbitrum-sepolia-perps.template.json"
-        manifest = json.loads(manifest_path.read_text())
-        identifiers = {artifact_identifier(key, entry) for key, entry in manifest["contracts"].items()}
-        for path in sorted((root / "packages/perps/src/interfaces").glob("*.sol")):
-            identifier = path.name + ":" + path.stem
-            if artifact_path(root, identifier).exists():
-                identifiers.add(identifier)
-        if len({identifier.split(":")[1] for identifier in identifiers}) != len(identifiers):
-            raise ValueError("Duplicate artifact names would overwrite consumer ABI files")
-        artifacts = {identifier: read_artifact(artifact_path(root, identifier)) for identifier in sorted(identifiers)}
-        deployment_sizes = validate_size_records(records, manifest, artifacts)
-        after = source_fingerprint(root, before["sourceCommit"])
-        assert_unchanged(before, after)
-        report = {
-            "sourceCommit": before["sourceCommit"],
-            "sourceFingerprint": before,
-            "schemaVersion": manifest["schemaVersion"],
-            "orderInterfaceVersion": manifest["orderInterfaceVersion"],
-            "manifestTemplateSha256": sha256_file(manifest_path),
-            "forgeVersion": forge_version,
-            "deploymentSizeValidation": {
-                "environment": "local EVM; no RPC; inactive deployment",
-                "test": SIZE_TEST_SUITE + "::" + SIZE_TEST,
-                "runtimeLimitBytes": RUNTIME_LIMIT,
-                "creationInputLimitBytes": CREATION_INPUT_LIMIT,
-                "deployments": deployment_sizes,
-            },
-            "note": "Compiler runtime templates precede immutable substitution; local deployed sizes and hashes are recorded separately. Full creation inputs include exact local constructor arguments. This export alone does not qualify or deploy a release.",
-            "logs": logs,
-            "contracts": {},
-        }
-        (output / "abi").mkdir()
-        for identifier, artifact in artifacts.items():
-            name = identifier.split(":")[1]
-            abi = (json.dumps(artifact["abi"], indent=2) + "\n").encode()
-            path = artifact_path(root, identifier)
-            (output / "abi" / (name + ".json")).write_bytes(abi)
-            report["contracts"][name] = {
-                "artifact": str(path.relative_to(root)),
-                "artifactSha256": artifact["_artifactSha256"],
-                "abiSha256": hashlib.sha256(abi).hexdigest(),
-                "runtimeBytes": len(bytecode(artifact["deployedBytecode"]["object"])),
-                "creationCodeBytes": len(bytecode(artifact["bytecode"]["object"])),
-                "compiler": artifact["metadata"]["compiler"],
-                "settings": artifact["metadata"]["settings"],
+    # Build from an empty, private compiler tree. Ignored root/out artifacts must never select
+    # the inventory or supply an ABI; use these same paths when vm.getCode deploys the fixtures.
+    with tempfile.TemporaryDirectory(prefix="perps-release-export-") as temporary:
+        build_root = Path(temporary)
+        compiler_paths = ["--out", str(build_root / "out"), "--cache-path", str(build_root / "cache")]
+        try:
+            manifest_path = root / "deployments/arbitrum-sepolia-perps.template.json"
+            manifest = json.loads(manifest_path.read_text())
+            inventory = consumer_inventory(root, manifest)
+            build_sources = sorted(set(inventory.values()))
+            run(["forge", "build", "--offline", *compiler_paths, *build_sources], "build.log")
+            size_output = run([
+                "forge", "test", "--offline", *compiler_paths, "--match-path", SIZE_TEST_PATH,
+                "--match-test", "^" + re.escape(SIZE_TEST) + "$", "--json", "-vv",
+            ], "deployment-sizes.log")
+            records = parse_size_records(size_output)
+            artifacts = {identifier: read_artifact(artifact_path(build_root, identifier))
+                         for identifier in sorted(inventory)}
+            metadata_sources = validate_metadata_sources(root, before["sourceCommit"], inventory, artifacts)
+            deployment_sizes = validate_size_records(records, manifest, artifacts)
+            after = source_fingerprint(root, before["sourceCommit"])
+            assert_unchanged(before, after)
+            report = {
+                "sourceCommit": before["sourceCommit"],
+                "sourceFingerprint": before,
+                "schemaVersion": manifest["schemaVersion"],
+                "orderInterfaceVersion": manifest["orderInterfaceVersion"],
+                "manifestTemplateSha256": sha256_file(manifest_path),
+                "forgeVersion": forge_version,
+                "compilerInputs": build_sources,
+                "compilerSources": metadata_sources,
+                "artifactIsolation": "fresh temporary output and cache shared by build and local deployment-size test",
+                "inventoryPolicy": "all manifest contracts and every declaration in perps consumer interface sources",
+                "deploymentSizeValidation": {
+                    "environment": "local EVM; no RPC; inactive deployment",
+                    "test": SIZE_TEST_SUITE + "::" + SIZE_TEST,
+                    "runtimeLimitBytes": RUNTIME_LIMIT,
+                    "creationInputLimitBytes": CREATION_INPUT_LIMIT,
+                    "deployments": deployment_sizes,
+                },
+                "note": "Compiler runtime templates precede immutable substitution; local deployed sizes and hashes are recorded separately. Full creation inputs include exact local constructor arguments. This export alone does not qualify or deploy a release.",
+                "logs": logs,
+                "contracts": {},
             }
-        # Recheck after reading artifact bytes and exporting ABIs as well as after the build/test commands.
-        assert_unchanged(before, source_fingerprint(root, before["sourceCommit"]))
-        if any(sha256_file(artifact_path(root, identifier)) != artifact["_artifactSha256"]
-               for identifier, artifact in artifacts.items()):
-            raise ValueError("Compiler artifacts changed during export; evidence cannot pass")
-        (output / "build.json").write_text(json.dumps(report, indent=2) + "\n")
-        return report
-    except Exception as error:
-        (output / "export-failed.json").write_text(json.dumps({
-            "exportComplete": False, "sourceCommit": before["sourceCommit"], "logs": logs,
-            "error": sanitize_log(str(error), environment),
-        }, indent=2) + "\n")
-        raise
+            (output / "abi").mkdir()
+            for identifier, artifact in artifacts.items():
+                name = identifier.split(":")[1]
+                abi = (json.dumps(artifact["abi"], indent=2) + "\n").encode()
+                path = Path("compiler-artifacts") / artifact_path(build_root, identifier).relative_to(build_root / "out")
+                (output / path).parent.mkdir(parents=True, exist_ok=True)
+                (output / path).write_bytes(artifact["_rawArtifact"])
+                (output / "abi" / (name + ".json")).write_bytes(abi)
+                report["contracts"][name] = {
+                    "artifact": str(path),
+                    "sourceArtifact": inventory[identifier] + ":" + name,
+                    "artifactSha256": artifact["_artifactSha256"],
+                    "abiSha256": hashlib.sha256(abi).hexdigest(),
+                    "runtimeBytes": len(bytecode(artifact["deployedBytecode"]["object"])),
+                    "creationCodeBytes": len(bytecode(artifact["bytecode"]["object"])),
+                    "compiler": artifact["metadata"]["compiler"],
+                    "settings": artifact["metadata"]["settings"],
+                }
+            # Recheck after reading artifact bytes and exporting ABIs as well as after the build/test commands.
+            assert_unchanged(before, source_fingerprint(root, before["sourceCommit"]))
+            if any(sha256_file(artifact_path(build_root, identifier)) != artifact["_artifactSha256"]
+                   for identifier, artifact in artifacts.items()):
+                raise ValueError("Compiler artifacts changed during export; evidence cannot pass")
+            (output / "build.json").write_text(json.dumps(report, indent=2) + "\n")
+            return report
+        except Exception as error:
+            (output / "export-failed.json").write_text(json.dumps({
+                "exportComplete": False, "sourceCommit": before["sourceCommit"], "logs": logs,
+                "error": sanitize_log(str(error), environment),
+            }, indent=2) + "\n")
+            raise
 
 
 def main():
