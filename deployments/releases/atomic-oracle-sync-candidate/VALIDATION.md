@@ -2,7 +2,19 @@
 
 **Candidate is unqualified and has not been deployed.** Source commit: `eea28a5c35b043f1d1ae91372bd384e84cb1c745`; baseline: `71ba5cdcc3c1842ebe2669e8f7ddd9a31c0dcde8`. The active deployment record is unchanged. The ABI export records evidence commit `8c810043a9362588a353c8ddc7f5448ae1195e9e`; its complete source/test/script/dependency/compiler-input Git objects are identical to the tested source commit, as recorded in `build-input-equivalence.json`.
 
-## Completed local checks
+## Merge validation — 2026-10-09
+
+Merged `master` at `75720362a4c1c7e26c99ea15927783e1a1173b80` into candidate `ab79c79860eebf622281bef78381b3969d2692e8`. The synchronization tests now use `OrderV3Types`; the shared fork harness checks the common executed-status value so the same scenario compiles on both the recorded V2 baseline and current V3 source. The execution quote and forwarded-funding accounting remain in the renamed `OrderRouterExecutionSidecar`.
+
+- `forge fmt --check packages test script`, `bash scripts/check-package-boundaries.sh`, and `git diff --check` passed.
+- `FOUNDRY_PROFILE=ci forge test --offline --no-match-path 'test/fork/*'`: 40 root integration/script tests passed, no failures or skips.
+- `FOUNDRY_PROFILE=ci forge test --offline --root packages/perps --match-path '**/OracleSynchronization*.t.sol'`: 24 tests passed, including the invariant's 16 × 500 calls with zero handler reverts or coverage violations.
+- `FOUNDRY_PROFILE=ci forge test --offline --root packages/perps --match-contract 'DepositFreeClose.*Test|OrderRouter.*Test'`: 228 router/close tests passed, no failures or skips. The initial combined run was stopped during validation after its long compilation; these completed runs provide the final results.
+- `scripts/run-oracle-sync-fork.py test/fixtures/oracle-sync/arbitrum-sepolia.json artifacts/oracle-sync/real-pyth-replay-ab79c798`: baseline/candidate replay passed on clean merged source. Baseline reproduced the ordering failure; candidate synchronized all six feeds and passed the eligible live read. Both retained fill `97666256` and mark `97667164`.
+
+The full qualification and exported artifacts below remain historical evidence for `eea28a5c35b043f1d1ae91372bd384e84cb1c745`; they are not a new qualification or ABI export for the merged V3 source. The full deep shards, coverage and static-analysis reports were not regenerated for this conflict-resolution task; GitHub CI runs separately on the updated PR. Deployment remains outside this task's scope.
+
+## Recorded pre-merge checks
 
 - Production build: Forge 1.5.1, Solidity 0.8.35, optimizer 200 runs, via-IR, Prague. All five Solidity package builds passed.
 - Synchronization regression suite: **23 passed**, using six explicit feeds and production compiler settings. Covers historical-price preservation, immediate eligible live reads, independent live confidence/freshness guards, synchronization/fee rollback, cache isolation and coverage, frozen/FAD paths, missing feeds, per-component lag and exactly-once immediate/deferred refunds.
