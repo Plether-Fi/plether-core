@@ -3,7 +3,7 @@ pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 /// @dev Test-only adapter for historical scalar-commit coverage. Production deployments intentionally expose only
 ///      the bounded V2 commit surface; tests read oracle policy through the production `pletherOracle()` getter.
@@ -58,15 +58,18 @@ contract LegacyOrderRouterHarness is OrderRouter {
             }
         }
 
-        OrderV2Types.OrderRequest memory request = OrderV2Types.OrderRequest({
+        OrderV3Types.OrderRequest memory request = OrderV3Types.OrderRequest({
             clientOrderId: clientOrderId,
             side: side,
             sizeDelta: sizeDelta,
             marginDelta: marginDelta,
             targetPrice: translatedTargetPrice,
             isClose: isClose,
-            bounds: OrderV2Types.ExecutionBounds({
-                validUntil: uint64(block.timestamp) + uint64(maxOrderAge),
+            bounds: OrderV3Types.ExecutionBounds({
+                submitBy: uint64(block.timestamp) + uint64(maxExecutionWindowSeconds),
+                executionWindowSeconds: uint32(
+                    uint256(uint64(block.timestamp) + uint64(maxExecutionWindowSeconds)) - block.timestamp
+                ),
                 allowedExecutionModes: 7,
                 expectedConfigHash: lifecycleBook.currentExecutionConfigHash(),
                 maxExecutionBountyUsdc: type(uint256).max,

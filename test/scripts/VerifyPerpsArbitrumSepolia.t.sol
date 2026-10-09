@@ -3,8 +3,10 @@ pragma solidity 0.8.35;
 
 import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
 import {DeployPerpsArbitrumSepolia} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
+import {ArbitrumSepoliaReleaseRouter} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {VerifyPerpsArbitrumSepolia} from "../../script/VerifyPerpsArbitrumSepolia.s.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
+import {SettlementMonitorLens} from "@plether/perps/SettlementMonitorLens.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract VerifyPerpsArbitrumSepoliaTest is Test {
@@ -20,6 +22,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
 
         DeployPerpsArbitrumSepolia deployScript = new DeployPerpsArbitrumSepolia();
         DeployPerpsArbitrumSepolia.DeployedContracts memory deployed = deployScript.run();
+        _assertDeploymentLimits(deployed);
 
         _setAddress("PERPS_OWNER", vm.addr(DEPLOYER_KEY));
         _setAddress("PERPS_GUARDIAN", address(0xBEEF));
@@ -39,6 +42,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         _setAddress("PERPS_ORDER_POLICY_EVALUATOR", address(deployed.orderPolicyEvaluator));
         _setAddress("PERPS_CLOSE_PREVIEW", address(deployed.closePreview));
         _setAddress("PERPS_ORDER_EXECUTION_SIDECAR", address(deployed.orderExecutionSidecar));
+        _setAddress("PERPS_ORDER_RECOVERY_SIDECAR", deployed.orderExecutionSidecar.recoverySidecar());
         _setAddress("PERPS_ORDER_ROUTER", address(deployed.router));
         _setAddress("PERPS_LIQUIDATION_BATCH_SIDECAR", address(deployed.liquidationBatchSidecar));
         _setAddress("PERPS_ORDER_LIFECYCLE_BOOK", address(deployed.lifecycleBook));
@@ -102,6 +106,54 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         address value
     ) internal {
         vm.setEnv(key, vm.toString(value));
+    }
+
+    function _assertDeploymentLimits(
+        DeployPerpsArbitrumSepolia.DeployedContracts memory d
+    ) private view {
+        address[25] memory contracts = [
+            address(d.usdc),
+            address(d.clearinghouse),
+            address(d.engine),
+            address(d.terminalNavBook),
+            address(d.planner),
+            address(d.settlementSidecar),
+            address(d.engineAdmin),
+            address(d.housePoolRedemptionMathSidecar),
+            address(d.housePool),
+            address(d.seniorVault),
+            address(d.juniorVault),
+            address(d.accountLens),
+            address(d.engineLens),
+            address(d.orderPolicyEvaluator),
+            address(d.closePreview),
+            address(d.orderExecutionSidecar),
+            d.orderExecutionSidecar.recoverySidecar(),
+            address(d.router),
+            address(d.liquidationBatchSidecar),
+            d.positionProtectionBook,
+            address(d.lifecycleBook),
+            d.pletherOracle,
+            d.routerAdmin,
+            address(d.publicLens),
+            address(d.settlementMonitorLens)
+        ];
+        for (uint256 i; i < contracts.length; ++i) {
+            assertLe(contracts[i].code.length, 24_576, "deployed runtime exceeds EIP-170");
+        }
+        assertLe(address(d.settlementMonitorLensSidecar).code.length, 24_576);
+        assertLe(address(d.emergencyPauseCoordinator).code.length, 24_576);
+        // These constructors embed other deployable contracts and are the limiting initcode paths.
+        assertLe(
+            type(ArbitrumSepoliaReleaseRouter).creationCode.length + 8 * 32,
+            49_152,
+            "release router including constructor arguments exceeds EIP-3860"
+        );
+        assertLe(
+            type(SettlementMonitorLens).creationCode.length + 32,
+            49_152,
+            "monitor including constructor argument exceeds EIP-3860"
+        );
     }
 
 }

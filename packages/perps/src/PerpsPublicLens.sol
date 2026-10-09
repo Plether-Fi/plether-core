@@ -121,8 +121,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Configures the backing read surfaces used by this facade.
     /// @dev Addresses are stored without validation. Trader/order reads do not dereference `HOUSE_POOL`, and
-    ///      protocol-status reads explicitly guard a zero `housePool_`; tranche and LP-status functions require
-    ///      a deployed HousePool.
+    ///      protocol-status, queue, and request reads explicitly guard a zero `housePool_`. Senior/Junior tranche
+    ///      and LP-status reads require a deployed HousePool.
     /// @param accountLens_ Rich account lens used to derive compact trader views.
     /// @param engine_ Core engine used for runtime status and risk params.
     /// @param orderRouter_ Router accounting surface used for pending-order summaries.
@@ -207,7 +207,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
     }
 
-    /// @notice Returns the account's pending-open, armed, or triggered position protection.
+    /// @notice Returns the account's pending-open, armed, triggered, or latched position protection.
     /// @dev Returns a zero-valued `None` record when the account has no active protection. Terminal records are
     ///      available by id through `getPositionProtection`.
     /// @param account Canonical perps account to inspect.
@@ -236,7 +236,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         return IPositionProtectionViews(ORDER_ROUTER.positionProtectionBook());
     }
 
-    /// @notice Returns whether exact price risk breaches maintenance or projected carry remains uncovered at the stored mark.
+    /// @notice Returns the account lens's liquidation flag at the stored mark.
+    /// @dev Includes maintenance breaches, uncovered projected carry, and an underfunded negative-VPI reserve.
+    ///      The reserve failure is a diagnostic flag; liquidation planning still rejects an underfunded reserve.
     /// @param account Canonical perps account to inspect.
     /// @return True only when the account lens reports an existing liquidatable position.
     function isLiquidatable(
@@ -317,8 +319,9 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     }
 
     /// @notice Returns one controller's pending and claimable deposit/redemption state for a shared request epoch.
-    /// @dev Pending share/asset fields are current estimates because their settlement rate is not fixed. Claimable and
-    ///      refundable fields are exact request accounting. A rejected deposit leaves Pending and becomes refundable
+    /// @dev Pending deposit assets and redeem shares are exact escrow amounts; the corresponding output estimates
+    ///      use current pricing because settlement rates are not fixed. Claimable and refundable fields are exact
+    ///      request accounting. A rejected deposit leaves Pending and becomes refundable
     ///      until the controller or its operator cancels it and pulls the escrowed assets.
     /// @param isSenior True for the Senior vault and false for the Junior vault.
     /// @param requestId Shared LP epoch used as the asynchronous request id.
@@ -362,7 +365,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     /// @notice Returns activation-aged cooldown and direct-redemption capacity for one deposit request.
     /// @dev An unactivated, rejected, or unknown request reports zero activation and cooldown timestamps. Remaining
     ///      shares include the request's full unconsumed entitlement, while `directRedeemableShares` additionally
-    ///      applies finalization, cooldown, and live direct-request eligibility checks in the vault.
+    ///      applies the activation cooldown. Authorization and minimum request size are checked when submitting.
     /// @param isSenior True for the Senior vault and false for the Junior vault.
     /// @param requestId Shared LP epoch used as the asynchronous deposit request id.
     /// @param controller Account that controls the deposit request.
@@ -403,7 +406,8 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
 
     /// @notice Builds the position view and applies the FAD maintenance ratio when the FAD window is active.
     /// @dev Maintenance notional is marked at `ENGINE.lastMarkPrice()` and integer division rounds down. Carry is first
-    ///      projected against eligible free settlement; any uncovered remainder independently sets `liquidatable`.
+    ///      projected against active position margin, then free settlement; any uncovered remainder independently
+    ///      sets `liquidatable`. The account lens also flags underfunded negative-VPI backing.
     /// @param account Canonical perps account to inspect.
     /// @return viewData Zeroed for no position; otherwise the current compact position view.
     function _getPositionView(

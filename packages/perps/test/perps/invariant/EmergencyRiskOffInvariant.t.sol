@@ -278,7 +278,7 @@ contract EmergencyRiskOffInvariantTest is BasePerpTest {
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets, "released epoch must settle once");
     }
 
-    /// @notice The unified guardian has one escalation capability and no direct component or recovery authority.
+    /// @notice The guardian activates fixed containment actions and has no direct component or recovery authority.
     function test_CoordinatorAuthorityRemainsLeastPrivilege() public {
         vm.prank(OUTSIDER);
         vm.expectRevert(EmergencyPauseCoordinator.EmergencyPauseCoordinator__UnauthorizedGuardian.selector);

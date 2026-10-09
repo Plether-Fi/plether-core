@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -23,10 +24,19 @@ abstract contract OrderCommitHandler is OrderValidation {
     ) internal {
         uint64 orderId = order.orderId;
         address account = order.account;
-        _reserveExecutionBounty(account, order.sizeDelta, executionBountyUsdc, order.isClose);
-        clearinghouse.recordBountyReservation(
-            account, IMarginClearinghouse.BountyKind.Order, orderId, executionBountyUsdc
+        CfdEnginePlanTypes.CloseCommitment memory effects =
+            _reserveExecutionBounty(account, order.sizeDelta, executionBountyUsdc, order.isClose);
+        // Zero pledge funding has no position provenance; a funded pledge records its exact live epoch.
+        // slither-disable-next-line incorrect-equality
+        clearinghouse.recordFundedBountyReservation(
+            account,
+            IMarginClearinghouse.BountyKind.Order,
+            orderId,
+            executionBountyUsdc,
+            effects.bountyFromPledgeUsdc,
+            effects.bountyFromPledgeUsdc == 0 ? 0 : engine.positionEpoch(account)
         );
+        _onOrderCommitted(order, effects);
         _reserveCommittedMargin(account, orderId, order.isClose, order.marginDelta);
 
         _recordCommittedOrder(order);

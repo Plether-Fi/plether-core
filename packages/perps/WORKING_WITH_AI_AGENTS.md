@@ -3,8 +3,9 @@
 Plether Perps is designed so autonomous software can operate capital without asking an observer to trust its private
 memory, interpretation of protocol state, or report of what happened. The protocol does not give an AI agent special
 privileges. For externally submitted bounded orders, it gives every account a typed, financially bounded and
-permanently identified intent. Position-protection actions add retained OCO geometry and synthesize typed parent or
-linked-close orders. Both paths have deterministic execution semantics and authenticated terminal evidence.
+permanently identified intent. Position-protection actions add retained OCO geometry, accept caller-authored bounded
+parent opens, and synthesize linked-close orders. Both paths have deterministic execution semantics and authenticated
+terminal evidence.
 
 This document explains the core protocol surfaces available to agent developers. It covers order integration, policy
 enforcement, execution, and verification. Wallet delegation, session keys, strategy design, model hosting, market-data
@@ -30,8 +31,8 @@ not perps directions. Bind the intended market through the Router's verified Ora
 | Requirement | Protocol guarantee | Primary tool |
 |-------------|--------------------|--------------|
 | Authoritative state | Live state comes from the Router, Engine, Clearinghouse, HousePool, and Oracle; permanent order identity and outcomes come from a predeployed immutable lifecycle Book whose exact bindings the Router validates | `IOrderLifecycleBook`, `PerpsPublicLens`, `PletherOracle`, Engine preview lenses |
-| Protocol meaning | Dollar-index direction, requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics have an explicit machine mapping | `CfdTypes.Side`, `OrderV2Types`, `CfdOrderPolicyEvaluator` |
-| Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV2Types.ExecutionBounds`, `IPositionProtectionActions` |
+| Protocol meaning | Dollar-index direction, requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics have an explicit machine mapping | `CfdTypes.Side`, `OrderV3Types`, `CfdOrderPolicyEvaluator` |
+| Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV3Types.ExecutionBounds`, `IPositionProtectionActions` |
 | Financial policy | The evaluator reconstructs authoritative Engine state and checks the registered intent's limits before the Engine applies the transition | `CfdOrderPolicyEvaluator`, configured Engine planner |
 | Composable execution | Bounded-order submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
 | Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.outcome`, `IPositionProtectionViews` |
@@ -40,8 +41,8 @@ The practical result is that an agent can separate three questions that are ofte
 
 1. **What am I authorizing?** For externally submitted bounded orders, the complete `OrderRequest` and
    `ExecutionBounds` answer this.
-   For position protection, the action parameters and retained OCO record answer it, while the protocol synthesizes
-   the parent or linked-close request.
+   For position protection, the action parameters and retained OCO record answer it. An attached parent also uses
+   the caller's complete bounded request; the protocol synthesizes only triggered and retried close requests.
 2. **What is the protocol currently willing to do?** Canonical state, previews, and the execution configuration hash
    answer this at a particular block.
 3. **What actually happened?** The lifecycle status, compact outcome, receipt event, and receipt hash answer this after
@@ -86,7 +87,7 @@ Use `IPerpsTraderActions` for the production order entrypoint:
 
 ```solidity
 function commitOrder(
-    OrderV2Types.OrderRequest calldata request
+    OrderV3Types.OrderRequest calldata request
 ) external returns (uint64 orderId);
 ```
 
@@ -117,7 +118,7 @@ durable order state:
 - `isProtectionAttempt(orderId)` identifies the Router-registered close-attempt marker while that order is pending;
   `ProtectionAttemptRegistered` is the permanent event evidence after finalization removes the transient marker.
 - `lifecycleStatus(orderId)` returns `None`, `Pending`, `Executed`, or `Failed`.
-- `outcome(orderId)` returns the permanent compact terminal outcome and receipt hash.
+- `terminalOutcome(orderId)` returns account, terminal block, status, reason, and receipt hash. Fetch detailed history from `OrderFinalized`; `verifyReceipt(receipt, terminalTime)` authenticates a supplied receipt.
 
 The Book owns no funds and has no owner, upgrade, migration, or arbitrary mutation path. Only its immutable Router may
 register and finalize records.
@@ -137,7 +138,8 @@ Use the smallest canonical surface that answers the decision:
 - `PerpsPublicLens` for compact account, position, tranche, and protocol status.
 - `OrderRouter.pletherOracle()` and the deployed `PletherOracle` configuration for the exact FX-basket market bound
   to the Router.
-- `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for trade-ticket simulation.
+- `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for Engine-level trade-ticket simulation; use
+  `CfdClosePreview.previewClose(...)` for a prospective ordinary close that must first reserve its execution bounty.
 - `IOrderLifecycleBook` for order identity, pinned policy, lifecycle, and outcome.
 - `PerpsPublicLens.getActivePositionProtection(...)` and `getPositionProtection(...)`, or direct
   `IPositionProtectionViews`, for retained protection thresholds, status, trigger evidence, and order linkage.
@@ -173,18 +175,18 @@ Use `IPerpsKeeper` for execution:
   the original trigger.
 
 The submitting agent does not have to be the executor. Any keeper may execute an order. For a freshly submitted
-bounded-order request, execution remains inside the limits pinned by the account. Protection parent and linked-close
-orders instead use the documented protocol-synthesized envelope and remain subject to ordinary Router, evaluator,
-Engine, and protection-state checks. Bounty economics differ: self-execution credits the stored order bounty to the
-account while an external keeper receives it. Receipts encode self-execution as `Paid` to `executor == account`;
-`RefundedToAccount` is reserved for risk-off cleanup. A failed registered protection attempt records
+bounded-order request, including an attached protection parent, execution remains inside the limits pinned by the
+account. Only triggered and retried protection close orders use the documented protocol-synthesized envelope; they
+remain subject to ordinary Router, evaluator, Engine, and protection-state checks. Self-execution releases the stored
+order bounty to the account's free settlement; an external keeper receives a clearinghouse credit instead. Receipts
+encode self-execution as `Paid` to `executor == account`; `RefundedToAccount` is reserved for risk-off cleanup. A failed registered protection attempt records
 `RetainedForProtectionRetry`, pays no cleaner, and rolls the same reserved amount back to the latched protection only
 while the exact protected position still matches. A missing or mismatched position instead uses `Paid` cleanup and
 terminally resolves the protection as `Failed`.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
-execution sidecar (`OrderRouterV2ExecutionSidecar`) applies oracle, policy, rollback-isolation, and receipt logic.
+execution sidecar (`OrderRouterExecutionSidecar`) applies oracle, policy, rollback-isolation, and receipt logic.
 Integrations must still call the Router or the Router-discovered protection Book. Direct sidecar calls are not
 alternative protocol entrypoints and cannot acquire Router authority.
 
@@ -238,14 +240,15 @@ mandatory fields such as the deadline, expected configuration hash, execution-mo
 leverage cannot be zero.
 
 Fresh commits additionally require a nonzero `clientOrderId`, a nonzero lot-aligned `sizeDelta`,
-`validUntil > block.timestamp`, and `validUntil - block.timestamp <= OrderRouter.maxOrderAge`. Close requests require
+`submitBy >= block.timestamp`, and `0 < executionWindowSeconds <= OrderRouter.maxExecutionWindowSeconds`. Close requests require
 `marginDelta == 0`, the same side as the account's bounded queued-position projection, and a size no larger than that
 projection. Fresh public client ids must not start with `0x504c455448455221`; that prefix is reserved for
 protocol-generated position-protection orders.
 
 | Bound | What it limits |
 |-------|----------------|
-| `validUntil` | Absolute execution deadline; equality is executable and expiry begins one second later |
+| `submitBy` | Latest permitted fresh commitment timestamp; equality is accepted |
+| `executionWindowSeconds` | Positive duration, bounded by `maxExecutionWindowSeconds`; execution expires after commitment time plus this duration |
 | `allowedExecutionModes` | Authorization mask bits: `Live = 1 << 0` (`1`), `Fad = 1 << 1` (`2`), `Frozen = 1 << 2` (`4`) |
 | `expectedConfigHash` | Exact execution-critical configuration accepted by a public intent; zero is internal-only |
 | `maxExecutionBountyUsdc` | Keeper bounty that may be reserved at commit |
@@ -263,7 +266,7 @@ because no position survives.
 
 Router-authenticated triggered and retried protection closes are the only zero-config exception. Those internal requests
 use `expectedConfigHash == bytes32(0)` as an unpinned marker, enable every execution mode, use
-`validUntil = block.timestamp + maxOrderAge`, set upper bounds to their integer maxima and minimum bounds to zero,
+`submitBy = block.timestamp` and `executionWindowSeconds = maxExecutionWindowSeconds`, set upper bounds to their integer maxima and minimum bounds to zero,
 and record the configuration actually observed at execution. They remain subject to ordinary protocol safety policy,
 but they are not a caller-selected financial envelope. This exception is unavailable through public `commitOrder`:
 an agent-supplied fresh request with a zero configuration hash is rejected.
@@ -393,11 +396,12 @@ For an externally submitted bounded order, use both on-chain state and the canon
 1. Resolve `(account, clientOrderId)` with `clientIntent` and compare the stored intent hash with
    `hashOrderRequest(account, request)`.
 2. While pending, compare `pendingIntent` and `pendingPolicy` with the instruction approved by the account layer.
-3. On terminal status, read `outcome(orderId)` from the Book.
+3. On terminal status, read `terminalOutcome(orderId)` from the Book. Its terminal block is the Solidity receipt clock, not an RPC log locator on Arbitrum; executor, price, bounty and failure details are event history.
 4. Fetch the corresponding `OrderFinalized` event using the Book address and indexed order/account/client-id fields.
 5. Recompute
    `keccak256(abi.encode(RECEIPT_TYPEHASH, chainId, book, router, terminalBlock, terminalTime, receipt))` and compare it
-   with both the event and `outcome(orderId).receiptHash`.
+   with both the event and `terminalOutcome(orderId).receiptHash`.
+   Alternatively, use `verifyReceipt(receipt, terminalTime)` on the Book; still compare the event hash and indexed identity to the stored summary. The SDK `decodeVerifiedOrderFinalized` performs these checks locally.
 6. Independently reconcile the receipt economics with Engine, Clearinghouse, and pool events when the strategy's risk
    policy requires deeper accounting assurance.
 
@@ -581,8 +585,9 @@ protocol-synthesized execution envelope.
   a strict, predictable progress boundary matters.
 - **Contract size:** several core contracts operate close to EIP-170. Integrations should not assume new convenience
   methods can be added to the core contracts; prefer stable interfaces and off-chain composition.
-- **Audit status:** the protocol remains pre-deployment and formal production audit coverage, including the agent
-  execution-authority components, is pending. Check [`SECURITY.md`](SECURITY.md) against the exact deployment commit.
+- **Audit status:** formal production audit coverage, including the agent execution-authority components, is pending.
+  Testnet release artifacts do not establish production readiness. Check [`SECURITY.md`](SECURITY.md) and the release
+  manifest against the exact deployment commit.
 
 ## Integration checklist
 
@@ -607,7 +612,7 @@ protocol-synthesized execution envelope.
 - [`CfdTypes.sol`](src/CfdTypes.sol): current perps ABI side encoding and core position types; apply the product-facing
   direction mapping defined above.
 - [`PletherOracle.sol`](src/PletherOracle.sol): authoritative dollar-index pricing configuration and timing policy.
-- [`OrderV2Types.sol`](src/OrderV2Types.sol): request, bounds, lifecycle, failure, economics, and result types.
+- [`OrderV3Types.sol`](src/OrderV3Types.sol): request, bounds, lifecycle, failure, economics, and result types.
 - [`IOrderLifecycleBook.sol`](src/interfaces/IOrderLifecycleBook.sol): authoritative identity, policy, outcome, and
   configuration reads.
 - [`IPerpsTraderActions.sol`](src/interfaces/IPerpsTraderActions.sol): canonical order submission ABI.

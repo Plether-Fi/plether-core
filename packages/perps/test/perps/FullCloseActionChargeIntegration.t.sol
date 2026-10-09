@@ -4,7 +4,7 @@ pragma solidity 0.8.35;
 import {CfdClosePreviewTestBase} from "./CfdClosePreviewTestBase.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -42,7 +42,7 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         // Remain within the ordinary order deadline while accruing nonzero execution-time carry.
         vm.warp(vm.getBlockTimestamp() + 30);
         bytes[] memory update = _mockPythUpdateData(CLOSE_PRICE);
-        (CfdEnginePlanTypes.CloseDelta memory d, OrderV2Types.ExecutionAssessment memory assessment) = _planAndAssess(f);
+        (CfdEnginePlanTypes.CloseDelta memory d, OrderV3Types.ExecutionAssessment memory assessment) = _planAndAssess(f);
         _assertCombinedFunding(d, f.vpiBacking);
         assertEq(assessment.carryUsdc, d.pendingCarryUsdc);
         assertEq(assessment.actionChargeCollectedUsdc, d.realizedCarryUsdc + d.actionChargeCollectedUsdc);
@@ -50,8 +50,8 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
 
         vm.recordLogs();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(f.closeId, update);
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(f.closeId, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         Vm.Log[] memory logs = vm.getRecordedLogs();
         _assertReceipt(logs, f.closeId, assessment);
         _assertSettlementEvents(logs, d);
@@ -60,7 +60,7 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
 
     function _planAndAssess(
         CloseFixture memory f
-    ) private returns (CfdEnginePlanTypes.CloseDelta memory d, OrderV2Types.ExecutionAssessment memory assessment) {
+    ) private returns (CfdEnginePlanTypes.CloseDelta memory d, OrderV3Types.ExecutionAssessment memory assessment) {
         uint64 publishTime = uint64(_mockHistoricalPublishTime());
         CfdTypes.Order memory order = _order(CfdTypes.Side.LONG, SIZE);
         order.orderId = f.closeId;
@@ -73,9 +73,7 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
             CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(ACCOUNT, depth);
             d = engine.planner().planClose(snap, order, CLOSE_PRICE, publishTime);
         }
-        assessment = policyEvaluator.assessOrder(
-            address(engine), order, KEEPER, CLOSE_PRICE, depth, publishTime, _bounds(), f.closeBounty
-        );
+        assessment = policyEvaluator.assessCommittedOrder(address(engine), f.closeId, KEEPER, CLOSE_PRICE, publishTime);
     }
 
     function _prepareClose() private returns (CloseFixture memory f) {
@@ -118,8 +116,8 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         uint64 id = router.commitOrder(CfdTypes.Side.SHORT, size, margin, PRICE, false);
         bytes[] memory update = _mockPythUpdateData(PRICE);
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(id, update);
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
     }
 
     function _assertCombinedFunding(
@@ -181,7 +179,7 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
     function _assertFinalState(
         CloseFixture memory f,
         CfdEnginePlanTypes.CloseDelta memory d,
-        OrderV2Types.ExecutionAssessment memory assessment
+        OrderV3Types.ExecutionAssessment memory assessment
     ) private view {
         IMarginClearinghouse.OrderReservation memory first = clearinghouse.getOrderReservation(f.firstPendingId);
         IMarginClearinghouse.OrderReservation memory second = clearinghouse.getOrderReservation(f.secondPendingId);

@@ -128,3 +128,76 @@ encodings and hashes; `RELEASING.md` describes the artifact compatibility gate.
 ## UI errors and fallback
 
 Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and contract failures into stable codes and user-safe messages. Do not silently fall back to an EOA transaction: it would create protocol state under a different `msg.sender` and split the user's account. If sponsorship is unavailable, show a retry/support state unless the product has explicitly implemented and disclosed user-paid smart-account gas.
+
+`buildCloseOrderV3` uses the same request shape for full closes and partial
+reductions. The protocol reserves the configured keeper bounty from free USDC,
+then eligible position margin. There is no mode selector or per-order bounty
+waiver. Admin configuration may set the close bounty to zero for all new closes;
+existing orders retain their snapshotted bounty. `classifyCloseFailureV3` keeps
+bounty funding, carry funding, action funding, and residual health failures
+distinct. `buildExpireOrderV3` encodes permissionless cleanup after the order's
+execution deadline without oracle data.
+
+## Terminal history on the new stack (0.2.0)
+
+The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
+`terminalOutcome(orderId)`: account, terminal block, status, reason and receipt
+hash. Full details come from the V4-domain `OrderFinalized` event, now including the merged timing tuple. Use the
+trusted deployment's chain, Book and Router addresses; do not take those or the
+summary from an untrusted indexer.
+
+```ts
+import { decodeVerifiedOrderFinalized, orderLifecycleV5Abi } from "@plether-fi/perps-aa-client";
+
+const summary = await publicClient.readContract({
+  address: book, abi: orderLifecycleV5Abi, functionName: "terminalOutcome", args: [orderId],
+});
+// None/Pending has no terminal history. Wait for finality before caching.
+if (summary.status === 2 || summary.status === 3) {
+  // Fetch by chain + Book + order ID from your receipt index, or select the
+  // event from the known execution transaction receipt. The helper checks it.
+  const matchingFinalizedLog = await history.getFinalizedLog({ chainId, book, orderId });
+  const verified = decodeVerifiedOrderFinalized({
+    chainId: BigInt(chainId), book, router, summary, log: matchingFinalizedLog,
+  });
+  displayReceipt(verified.receipt);
+}
+```
+
+`history.getFinalizedLog` represents the application's event retrieval layer; it is not an SDK method. `matchingFinalizedLog` includes its emitter address, data, and nonempty topics.
+The helper authenticates the event, clocks and full receipt against the summary;
+`hashOrderReceiptV4` exposes the same digest separately. Solidity consumers can
+call `verifyReceipt(receipt, terminalTime)` on the Book. The V4 receipt and V3
+intent domain labels are unchanged; V5 is the read API version. Requests use one close flow,
+and the receipt includes authenticated timing. Earlier candidate event and request
+encodings must not be reused on the final graph.
+
+Cache history by chain/Book/order ID and invalidate it on reorg. If a log cannot
+be retrieved, report history as unavailable instead of assuming zero fees or
+bounty. Verification proves authenticity, not availability. Detailed on-chain
+reads now require a supplied full receipt. The archived `orderLifecycleV4Abi`
+export and old-stack action/assistance bindings remain available; choose ABI by
+deployment, and migrate external app/keeper reads before new-stack activation.
+Commitment history remains stored and does not require an event join.
+
+On Arbitrum, the authenticated `terminalBlock` retains Solidity `block.number`
+semantics (an approximate ancestor-chain block); it is **not** the RPC/L2 log
+block number. Never use it directly as an `eth_getLogs` block range. Use the
+execution transaction receipt, an index keyed by chain/Book/order ID, or paginated
+RPC log queries over the known L2 deployment-to-head range. Keep transport
+`blockNumber`/`blockHash` separately for indexing and reorg handling; hash the
+event's authenticated `terminalBlock` as emitted. See [Arbitrum block-number
+documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time).
+## V3 order timing (0.2.0 source release)
+
+`buildPlaceOrderV3Action` and `buildProtectedOpenAction` encode `submitBy` and
+`executionWindowSeconds`. A fresh web review uses 120 seconds for submission
+and 60 seconds for execution after commitment. Both builders expose
+`submissionDeadline`; `sendSponsoredAction` rejects stub or final sponsorship
+that extends beyond it before requesting the owner signature. The contract
+resolves the execution deadline at commitment, so execution requires no new
+client signature. V2 signed calldata cannot be reinterpreted as V3.
+
+This is a breaking order ABI release. No package publication or deployment is
+included. See `packages/perps/ORDER_V3_TIMING.md` in the repository for activation
+requirements and the canonical lifecycle timing tuple.

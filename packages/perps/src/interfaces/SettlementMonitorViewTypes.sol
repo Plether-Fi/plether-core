@@ -8,7 +8,7 @@ library SettlementMonitorViewTypes {
 
     /// @notice Oracle/authorization path currently required to attempt LP settlement.
     enum ExecutionPath {
-        /// @notice Required route could not be established because a dependency read failed.
+        /// @notice Required route could not be established from the available clock and dependency evidence.
         Unknown,
         /// @notice No matured queue head is currently visible. This does not imply that the observed epoch is empty.
         NoMaturedWork,

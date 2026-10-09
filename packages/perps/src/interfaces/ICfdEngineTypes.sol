@@ -71,7 +71,7 @@ interface ICfdEngineTypes {
     error CfdEngine__NotAccountOwner();
     /// @notice An operation requiring an existing position was requested for an account without one.
     error CfdEngine__NoOpenPosition();
-    /// @notice Unused legacy selector retained in the shared ABI; V2 has no accumulated-debt repayment path.
+    /// @notice Unused legacy selector retained in the shared ABI; V3 has no accumulated-debt repayment path.
     error CfdEngine__BadDebtTooLarge();
     /// @notice Risk, fee, spread, price-cap, or liquidation-bounty parameters violate engine bounds.
     error CfdEngine__InvalidRiskParams();
@@ -85,14 +85,15 @@ interface ICfdEngineTypes {
     error CfdEngine__StillInsolvent();
     /// @notice A required dependency, token, account, or recipient address is zero.
     error CfdEngine__ZeroAddress();
-    /// @notice Free settlement after carry cannot fund the prepaid close-order execution bounty.
+    /// @notice Free settlement and eligible pledge after carry cannot fund the close-order bounty.
     error CfdEngine__InsufficientCloseOrderBountyBacking(
-        uint256 requiredBountyUsdc, uint256 availableFreeSettlementUsdc, uint256 unpaidCarryUsdc
+        uint256 requiredBountyUsdc, uint256 availableBackingUsdc, uint256 unpaidCarryUsdc
     );
     /// @notice The requested close size is not divisible by the canonical size quantum.
     error CfdEngine__InvalidCloseSizeQuantum();
     /// @notice A partial-close commitment would start from a position below maintenance health.
     error CfdEngine__PartialCloseUnhealthy();
+    error CfdEngine__PartialCloseCarryUnfunded(uint256 unpaidCarryUsdc);
     /// @notice The one-time terminal NAV book has already been configured.
     error CfdEngine__TerminalNavBookAlreadySet();
     /// @notice A terminal NAV book is absent, has no code, or is not bound to this Engine and price domain.
@@ -163,7 +164,7 @@ interface ICfdEngineTypes {
     /// @notice Legacy event describing a change to the engine's live cached-mark staleness component.
     /// @param newStaleness New maximum age in seconds.
     event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
-    /// @notice Unused legacy event retained in the shared ABI; V2 does not emit or maintain accumulated debt.
+    /// @notice Unused legacy event retained in the shared ABI; V3 does not emit or maintain accumulated debt.
     /// @param amount Legacy cleared amount in USDC.
     /// @param remaining Legacy remaining amount in USDC.
     event BadDebtCleared(uint256 amount, uint256 remaining);
@@ -318,8 +319,8 @@ interface ICfdEngineTypes {
     /// @param immediatePayoutUsdc Portion of the fresh payout paid immediately into clearinghouse settlement.
     /// @param traderClaimBalanceUsdc Projected claim balance after consuming old claims and recording deferred payout.
     /// @param seizedCollateralUsdc PnL pledge collected for price loss; excludes carry and action charges.
-    /// @param badDebtUsdc Compatibility diagnostic for price loss above the exact collectible cap; V2 does not store it
-    ///        as debt or include it in LP NAV.
+    /// @param badDebtUsdc Inactive compatibility field, zero in current planner previews; excess price loss is reported
+    ///        by the settlement sidecar's `PriceLossWrittenOff` event and never becomes debt or LP NAV.
     /// @param remainingSize Position size after the close.
     /// @param remainingMargin Active position margin after the close.
     /// @param triggersDegradedMode Whether this operation newly reveals adjusted pool insolvency.
@@ -327,8 +328,8 @@ interface ICfdEngineTypes {
     /// @param effectiveAssetsAfterUsdc Projected physical pool assets net of senior trader claims.
     /// @param maxLiabilityAfterUsdc Projected larger-side maximum-profit liability.
     /// @param frozenSpreadUsdc LP-owned spread assessed on an oracle-frozen voluntary close.
-    /// @param frozenSpreadPaidUsdc Assessed frozen spread recovered from retained value, physical collateral, or
-    ///        existing-claim netting.
+    /// @param frozenSpreadPaidUsdc Assessed spread recovered from fresh price-gain withholding or eligible action
+    ///        collateral; existing trader claims cannot pay the spread.
     /// @param frozenSpreadWaivedUsdc Assessed frozen spread left uncollected; it does not become bad debt.
     struct ClosePreview {
         bool valid;
@@ -377,8 +378,8 @@ interface ICfdEngineTypes {
     /// @param initialMarginRequirementUsdc Initial-margin requirement for the projected position.
     /// @param maintenanceMarginUsdc Active FAD or normal maintenance requirement for the projected position.
     /// @param postSize Projected total position size.
-    /// @param postMarginUsdc Projected clearinghouse position-margin bucket after carry and open-cost mutation; a
-    ///        negative trade-cost rebate can be included even though projected risk does not count it as supplied margin.
+    /// @param postMarginUsdc Projected PnL pledge after carry, positive trade cost, and liquidation/VPI reserve
+    ///        reclassification. A trade-cost rebate credits settlement without directly increasing this pledge.
     /// @param postEntryPrice Projected size-weighted entry price.
     /// @param postVpiAccrued Projected lifetime signed VPI balance.
     /// @param postUnrealizedPnlUsdc Projected signed price PnL at `executionPrice`, excluding carry and VPI.
@@ -439,8 +440,8 @@ interface ICfdEngineTypes {
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
     /// @param immediatePayoutUsdc Portion of fresh trader payout paid immediately into clearinghouse settlement.
     /// @param traderClaimBalanceUsdc Projected claim balance after netting and any deferred fresh payout.
-    /// @param badDebtUsdc Compatibility diagnostic for price loss above the exact collectible cap; V2 does not store it
-    ///        as debt or include it in LP NAV.
+    /// @param badDebtUsdc Inactive compatibility field, zero in current planner previews; excess price loss is reported
+    ///        by the settlement sidecar's `PriceLossWrittenOff` event and never becomes debt or LP NAV.
     /// @param triggersDegradedMode Whether liquidation newly reveals adjusted pool insolvency.
     /// @param postOpDegradedMode Projected degraded-mode latch after liquidation.
     /// @param effectiveAssetsAfterUsdc Projected physical pool assets net of senior trader claims.

@@ -42,7 +42,7 @@ library OpenAccountingLib {
     /// @param newEntryPrice Display-only average entry price, rounded down to 8 decimals.
     /// @param newEntryCostUsdcAtoms Exact resulting entry cost in 6-decimal USDC atoms.
     /// @param newSize Resulting position size.
-    /// @param newEntryNotional Raw `newSize * newEntryPrice`; may omit weighted-average division dust.
+    /// @param newEntryNotional Exact resulting entry cost scaled by `1e20`, preserving basis dust at 26-decimal precision.
     /// @param postSkewUsdc Caller-supplied post-trade skew copied into the result.
     /// @param vpiUsdc Signed VPI; positive charges the trader and negative rebates the trader.
     /// @param notionalUsdc Added trade notional at `price`.
@@ -51,6 +51,7 @@ library OpenAccountingLib {
     /// @param maintenanceMarginUsdc Maintenance requirement on the entire resulting position at `price`.
     /// @param initialMarginRequirementUsdc Initial requirement on the entire resulting position, floored by
     ///        `riskParams.minBountyUsdc`.
+    /// @param liquidationReserveTargetUsdc Notional-based liquidation charge, floored by `riskParams.minBountyUsdc`.
     struct OpenState {
         uint256 addedMaxProfitUsdc;
         uint256 oldEntryNotional;

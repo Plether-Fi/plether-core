@@ -5,7 +5,7 @@ import {CfdClosePreviewTestBase} from "./CfdClosePreviewTestBase.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -37,16 +37,16 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
         vm.stopPrank();
         uint256 bounty = router.closeOrderExecutionBountyUsdc();
         uint256 protectedBefore = clearinghouse.totalBountyReservationsUsdc(ACCOUNT);
-        OrderV2Types.ExecutionAssessment memory assessment = policyEvaluator.assessOrder(
-            address(engine), order, KEEPER, PRICE, pool.totalAssets(), uint64(block.timestamp), _bounds(), bounty
+        OrderV3Types.ExecutionAssessment memory assessment = policyEvaluator.assessCommittedOrder(
+            address(engine), closeId, KEEPER, PRICE, uint64(vm.getBlockTimestamp())
         );
         assertEq(assessment.actionChargeCollectedUsdc, assessment.actionChargeAssessedUsdc);
         bytes[] memory update = _mockPythUpdateData(PRICE);
         vm.recordLogs();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(closeId, update);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(closeId, update);
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         _assertReceipt(logs, closeId, assessment);
         _assertChargeEvent(logs, assessment.actionChargeAssessedUsdc, assessment.actionChargeAssessedUsdc, 0);
         assertEq(clearinghouse.getOrderReservation(pendingId).remainingAmountUsdc, 100e6);
@@ -189,9 +189,9 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
         bytes[] memory update = _mockPythUpdateData(price);
         vm.recordLogs();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(id, update);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         _assertReceipt(logs, id, p.assessment);
         _assertChargeEvent(logs, assessed, assessed, 0);
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), p.assessment.postSettlementBalanceUsdc);

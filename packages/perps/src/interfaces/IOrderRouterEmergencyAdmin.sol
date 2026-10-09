@@ -6,9 +6,9 @@ import {IPerpsAdmin} from "@plether/perps/interfaces/IPerpsAdmin.sol";
 /// @notice Narrow emergency surface exposed by the order router's administrative component.
 interface IOrderRouterEmergencyAdmin is IPerpsAdmin {
 
-    /// @notice Returns the highest order id permanently invalidated by an administrative risk-off pause.
-    /// @dev The cutoff is inclusive. A zero value means that no committed order id has been invalidated.
-    /// @return Highest invalidated order id
+    /// @notice Returns the inclusive order-id cutoff for opens permanently invalidated by a risk-off pause.
+    /// @dev Close orders are unaffected. Zero means no committed open can be covered by the cutoff.
+    /// @return Highest order id whose pending opens are invalidated
     function riskOffOrderCutoff() external view returns (uint64);
 
 }

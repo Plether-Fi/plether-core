@@ -96,6 +96,9 @@ contract FullCloseActionChargePlanTest is Test {
         assertEq(d.actionChargeAssessedUsdc, FEE);
         assertEq(d.actionChargeCollectedUsdc, collected);
         assertEq(d.actionChargeWaivedUsdc, waived);
+        assertEq(d.safeMarginReleaseUsdc, pledge);
+        assertEq(d.actionChargeFromReleasedMarginUsdc, collected > reserve ? collected - reserve : 0);
+        assertEq(d.netReleasedMarginUsdc, pledge - d.actionChargeFromReleasedMarginUsdc);
         assertEq(d.posMarginAfter, 0);
         assertEq(d.priceLossWrittenOffUsdc, 0);
     }
@@ -111,8 +114,8 @@ contract FullCloseActionChargePlanTest is Test {
         assertEq(d.actionChargeWaivedUsdc, 0);
     }
 
-    function test_Close_NearFullCannotUseReleasedSurplusOrCommittedMargin() public view {
-        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(200e6, 10e6, 0, 100e6, 0);
+    function test_Close_NearFullCannotUseLiquidationReserveOrCommittedMargin() public view {
+        CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(2e6, 10e6, 0, 100e6, 0);
         CfdEnginePlanTypes.CloseDelta memory partialClose = _plan(snap, PRICE, SIZE - CfdTypes.SIZE_QUANTUM);
         assertFalse(partialClose.valid);
         assertEq(

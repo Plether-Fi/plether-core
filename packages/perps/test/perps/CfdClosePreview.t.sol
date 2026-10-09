@@ -5,7 +5,7 @@ import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {OrderV2Types} from "@plether/perps/OrderV2Types.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -13,6 +13,19 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {Vm} from "forge-std/Vm.sol";
 
 import {CfdClosePreviewTestBase} from "./CfdClosePreviewTestBase.sol";
+
+interface ILegacyClosePreview {
+
+    function previewClose(
+        address engine,
+        CfdTypes.Order calldata order,
+        address executor,
+        uint256 price,
+        uint64 publishTime,
+        OrderV3Types.ExecutionBounds calldata bounds
+    ) external view;
+
+}
 
 contract CfdClosePreviewTest is CfdClosePreviewTestBase {
 
@@ -39,28 +52,20 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkPrice()"), abi.encode(entry));
         vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkTime()"), abi.encode(uint64(block.timestamp)));
         vm.mockCall(address(pool), abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(1_000_000_000e6)));
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = IMarginClearinghouse.AccountUsdcBuckets({
+        IMarginClearinghouse.PnlIsolationBuckets memory buckets = IMarginClearinghouse.PnlIsolationBuckets({
             settlementBalanceUsdc: 10_000_200_000,
-            totalLockedMarginUsdc: 10_000e6,
-            activePositionMarginUsdc: 10_000e6,
-            otherLockedMarginUsdc: 0,
+            pnlPledgeUsdc: 10_000e6,
+            liquidationReserveUsdc: 0,
+            orderMarginUsdc: 0,
+            actionReserveUsdc: 0,
+            vpiRebateReserveUsdc: 0,
+            totalLockedUsdc: 10_000e6,
             freeSettlementUsdc: 200_000
         });
-        IMarginClearinghouse.LockedMarginBuckets memory locked = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 10_000e6,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 10_000e6
-        });
         vm.mockCall(
             address(clearinghouse),
-            abi.encodeWithSignature("getAccountUsdcBuckets(address)", ACCOUNT),
+            abi.encodeWithSignature("getPnlIsolationBuckets(address)", ACCOUNT),
             abi.encode(buckets)
-        );
-        vm.mockCall(
-            address(clearinghouse),
-            abi.encodeWithSignature("getLockedMarginBuckets(address)", ACCOUNT),
-            abi.encode(locked)
         );
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, size);
         uint256 adversePrice = entry * 999 / 1000;
@@ -106,7 +111,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
     function test_ExactFundingPreservesBountyWhileReleasedReservePaysCharges() public {
         _openNormally(CfdTypes.Side.SHORT, 200_000);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
-        OrderV2Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
+        OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
             address(engine), o, KEEPER, 95_000_000, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
         );
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(o, 95_000_000, KEEPER);
@@ -115,17 +120,11 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc);
     }
 
-    function test_OneAtomicUnitShortMatchesCommitFundingError() public {
+    function test_OneAtomicUnitShortUsesPledgeAndMatchesCommit() public {
         _openNormally(CfdTypes.Side.LONG, 199_999);
-        CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE);
-        bytes memory err = abi.encodeWithSelector(
-            ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector, 200_000, 199_999, 0
-        );
-        vm.expectRevert(err);
-        previewer.previewClose(address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds());
-        vm.expectRevert(err);
-        vm.prank(ACCOUNT);
-        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+        (, CfdClosePreview.ClosePreview memory p) = _commitParity(_order(CfdTypes.Side.LONG, SIZE), PRICE, KEEPER);
+        assertEq(p.commitment.bountyFromFreeUsdc, 199_999);
+        assertEq(p.commitment.bountyFromPledgeUsdc, 1);
     }
 
     function test_OtherOrderBountyIsNotTheProspectiveBounty() public {
@@ -171,7 +170,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         CfdClosePreview.ClosePreview memory p = _preview(o, PRICE, KEEPER);
         assertEq(p.commitmentCarryUsdc, 0);
         assertEq(p.executionBountyUsdc, 0);
-        OrderV2Types.ExecutionAssessment memory a = policyEvaluator.assessOrder(
+        OrderV3Types.ExecutionAssessment memory a = policyEvaluator.assessOrder(
             address(engine), o, KEEPER, PRICE, pool.totalAssets(), uint64(block.timestamp), _bounds(), 0
         );
         assertEq(keccak256(abi.encode(a)), keccak256(abi.encode(p.assessment)));
@@ -214,8 +213,8 @@ contract CfdClosePreviewTest is CfdClosePreviewTestBase {
         bytes[] memory update = _mockPythUpdateData(105_000_000);
         vm.recordLogs();
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(id, update);
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         _assertReceipt(vm.getRecordedLogs(), id, p.assessment);
         assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), p.assessment.postTraderClaimUsdc);
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), p.assessment.postSettlementBalanceUsdc);
@@ -303,8 +302,8 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         (uint64 id,) = _commitParity(_order(CfdTypes.Side.LONG, SIZE - 9 * CfdTypes.SIZE_QUANTUM), PRICE, KEEPER);
         bytes[] memory update = _mockPythUpdateData(PRICE);
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory result = router.executeOrder(id, update);
-        assertEq(uint8(result.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         (uint256 size,,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, 9 * CfdTypes.SIZE_QUANTUM);
         vm.prank(address(router));
@@ -330,14 +329,14 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         uint64 openId = router.commitOrder(CfdTypes.Side.LONG, SIZE, 250e6, PRICE, false);
         bytes[] memory openUpdate = _mockPythUpdateData(PRICE);
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory opened = router.executeOrder(openId, openUpdate);
-        assertEq(uint8(opened.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory opened = router.executeOrder(openId, openUpdate);
+        assertEq(uint8(opened.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 200_000);
         assertGe(clearinghouse.liquidationReserveUsdc(ACCOUNT), 200_000);
 
         uint256 adversePrice = 1025e5;
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE);
-        OrderV2Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
+        OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
             address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
         );
         assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, adversePrice));
@@ -347,8 +346,8 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
 
         bytes[] memory closeUpdate = _mockPythUpdateData(adversePrice);
         vm.prank(KEEPER);
-        OrderV2Types.ExecutionResult memory closed = router.executeOrder(closeId, closeUpdate);
-        assertEq(uint8(closed.status), uint8(OrderV2Types.LifecycleStatus.Executed));
+        OrderV3Types.ExecutionResult memory closed = router.executeOrder(closeId, closeUpdate);
+        assertEq(uint8(closed.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(ACCOUNT);
         assertEq(sizeAfter, p.assessment.postPositionSize);
         // The oracle fixture advances one second, so carry can accrue after the preview.
@@ -363,7 +362,7 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         vm.warp(block.timestamp + 1 hours);
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(_order(CfdTypes.Side.SHORT, SIZE), PRICE, KEEPER);
         assertGt(p.commitmentCarryUsdc, 0);
-        assertEq(p.assessment.carryUsdc, 0);
+        assertEq(p.assessment.carryUsdc, p.commitmentCarryUsdc);
     }
 
     function test_CarryExhaustingFreeSettlementMatchesFundingFailure() public {
@@ -374,7 +373,8 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         (bool previewOk, bytes memory previewError) = address(previewer)
             .staticcall(
                 abi.encodeCall(
-                    previewer.previewClose, (address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds())
+                    ILegacyClosePreview(address(previewer)).previewClose,
+                    (address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds())
                 )
             );
         assertFalse(previewOk);

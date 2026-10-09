@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
@@ -18,7 +20,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @notice Stateless evaluator that enforces the account's pinned execution policy before settlement is applied.
     address public immutable policyEvaluator;
 
-    /// @notice Predeployed immutable registry for V2 client intents, pending policy, and authenticated receipts.
+    /// @notice Predeployed immutable registry for V3 client intents, pending policy, and authenticated receipts.
     OrderLifecycleBook public immutable lifecycleBook;
 
     /// @notice Minimum open/increase notional accepted at commit time (6-decimal USDC).
@@ -37,12 +39,12 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @notice Initializes oracle/accounting integrations, deploys the admin, and installs router defaults.
     /// @dev Defaults are: $100 minimum open notional, 1 bp open bounty with $0.01/$0.20 floor/cap,
     ///      $0.20 close and protection-trigger bounties, 600,000 minimum engine gas,
-    ///      and 64 expired-order prunes per call.
+    ///      and 64 expiry/config-mismatch prunes per call.
     /// @param _engine CfdEngine that processes trades and liquidations.
     /// @param _engineLens CfdEngineLens used for open-order commit preflight.
     /// @param _housePool HousePool used for depth and risk-availability queries.
     /// @param _pletherOracle Deployed Plether oracle used for Pyth basket pricing.
-    /// @param _policyEvaluator Deployed stateless V2 financial-policy evaluator.
+    /// @param _policyEvaluator Deployed stateless V3 financial-policy evaluator.
     /// @param _lifecycleBook Predeployed lifecycle Book bound to this predicted Router and protocol stack.
     constructor(
         address _engine,
@@ -106,8 +108,15 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         address account,
         uint256 sizeDelta,
         uint256 executionBountyUsdc
+    ) internal override returns (CfdEnginePlanTypes.CloseCommitment memory) {
+        return engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc);
+    }
+
+    function _onOrderCommitted(
+        CfdTypes.Order memory order,
+        CfdEnginePlanTypes.CloseCommitment memory effects
     ) internal override {
-        engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc);
+        lifecycleBook.recordCommitment(order.orderId, effects);
     }
 
     /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.

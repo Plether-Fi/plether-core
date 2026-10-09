@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+// Historical audit identifiers and test names are retained for traceability.
+// The assertions below exercise current behavior; legacy names do not describe unfixed vulnerabilities.
+
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -14,7 +17,7 @@ import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 // ============================================================
-// C-01: Multiplicative HWM Scaling Inflates Phantom Debt
+// C-01 regression: impairment blocks deposits that could distort Senior HWM accounting
 // ============================================================
 
 contract AuditC01_HwmInflation is BasePerpTest {
@@ -88,7 +91,8 @@ contract AuditC01_HwmInflation is BasePerpTest {
 }
 
 // ============================================================
-// C-02: 100% Keeper Fee Refund Enables FIFO Queue Deadlock
+// C-02 historical refund fixture: failed order processing does not move wallet ETH.
+// Internal USDC bounty disposition and FIFO progress are not asserted by this fixture.
 // ============================================================
 
 contract AuditC02_KeeperFeeRefund is BasePerpTest {
@@ -126,7 +130,7 @@ contract AuditC02_KeeperFeeRefund is BasePerpTest {
 }
 
 // ============================================================
-// C-03: Delta Margin Check Allows Under-Margined Positions
+// C-03 regression: initial margin is checked after execution costs and reserve allocation
 // ============================================================
 
 contract AuditC03_MarginCheck is BasePerpTest {
@@ -140,8 +144,8 @@ contract AuditC03_MarginCheck is BasePerpTest {
         // Open 200k LONG tokens at $1.00
         // Notional = $200k, MMR = 1% = $2000, explicit IMR = 1.5% = $3000
         // marginDelta = $3070 → pre-fee passes IMR ($3070 >= $3000)
-        // execFee = 4bps * $200k = $80 → pos.margin = $2990 < $3000
-        // C-03 FIX: IMR check now uses pos.margin, so this correctly reverts
+        // The $80 execution fee and dedicated liquidation reserve reduce the available PnL pledge
+        // below $3000, so the typed initial-margin failure is expected.
         uint256 depth = pool.totalAssets();
         vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
         vm.prank(address(router));
@@ -166,7 +170,7 @@ contract AuditC03_MarginCheck is BasePerpTest {
 }
 
 // ============================================================
-// C-04: Stale Oracle Early Return Bypasses MTM
+// C-04 regression: stale marks block live-market funding without erasing coupon accounting
 // ============================================================
 
 contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
@@ -216,7 +220,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
         _fundJunior(bob, 500_000 * 1e6);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
-        config.seniorRateBps = 800; // 8% APY
+        config.seniorRateBps = 800; // 8% annualized target coupon
         pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);
         pool.finalizePoolConfig();
@@ -253,7 +257,7 @@ contract AuditC04_StaleOracleMtmBypass is BasePerpTest {
 }
 
 // ============================================================
-// C-05: Deposits Allowed When Senior Tranche Is Impaired
+// C-05 regression: Senior impairment blocks ordinary deposit requests
 // ============================================================
 
 contract AuditC05_ImpairedDeposit is BasePerpTest {
@@ -302,9 +306,7 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
         uint256 hwm = pool.seniorHighWaterMark();
         assertLt(seniorPrincipal, hwm, "Senior tranche is impaired");
 
-        // C-05 BUG: attacker can deposit into an impaired tranche.
-        // With multiplicative HWM scaling (C-01), this fabricates phantom debt.
-        // Deposits should be blocked when seniorPrincipal < seniorHighWaterMark.
+        // New deposits must be rejected while Senior principal is below its high-water mark.
         uint256 depositAmount = pool.minTrancheDepositUsdc();
         usdc.mint(attacker, depositAmount);
         vm.startPrank(attacker);
@@ -317,7 +319,7 @@ contract AuditC05_ImpairedDeposit is BasePerpTest {
 }
 
 // ============================================================
-// H-01: Pyth VAA Lookback Option via block.timestamp
+// H-01 regression: older oracle publish timestamps cannot replace the stored mark
 // ============================================================
 
 contract AuditH01_MarkTimeLookback is BasePerpTest {
@@ -333,7 +335,7 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
 
         _warpForward(50);
 
-        // H-01 FIX: engine.updateMarkPrice now uses publishTime, not block.timestamp
+        // An update published before lastMarkTime is rejected even when submitted later.
         uint64 vaaTime = engine.lastMarkTime() - 1;
         vm.prank(address(router));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
@@ -343,7 +345,7 @@ contract AuditH01_MarkTimeLookback is BasePerpTest {
 }
 
 // ============================================================
-// H-02: Overly Restrictive Withdrawal Firewall
+// H-02 regression: a healthy open position does not block withdrawal of free settlement
 // ============================================================
 
 contract AuditH02_WithdrawBlocked is BasePerpTest {
@@ -359,7 +361,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
         address aliceAccount = alice;
 
         // Open a small position: 50k tokens, $1000 margin (well above IMR)
-        // Notional = $50k, IMR = max(1.5% * $50k, $5) = $750
+        // Notional = $50k; the 1.5% initial-margin requirement is $750.
         _open(aliceAccount, CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
@@ -370,8 +372,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
         uint256 freeBalance = balance - locked;
         assertGt(freeBalance, 90_000 * 1e6, "Alice has ~$99k free but can't touch it");
 
-        // H-02 BUG: Alice should be able to withdraw $1 from her $99k+ free balance.
-        // Instead, checkWithdraw reverts for ANY size > 0, trapping all excess collateral.
+        // The healthy position allows a $1 withdrawal from Alice's free settlement.
         uint256 aliceBalanceBefore = usdc.balanceOf(alice);
         vm.prank(alice);
         clearinghouse.withdraw(aliceAccount, 1e6);
@@ -381,7 +382,7 @@ contract AuditH02_WithdrawBlocked is BasePerpTest {
 }
 
 // ============================================================
-// H-03: Partial Close Creates Unliquidatable Dust
+// H-03 regression: an exact whole-lot residual retains a reserve and remains liquidatable
 // ============================================================
 
 contract AuditH03_DustPosition is BasePerpTest {
@@ -393,7 +394,7 @@ contract AuditH03_DustPosition is BasePerpTest {
         address aliceAccount = alice;
 
         // Open 50k tokens at $1.00: notional = $50k
-        // IMR = max(1.5% * $50k, $5) = $750. The supplied margin also funds the
+        // The 1.5% initial-margin requirement is $750. The supplied margin also funds the
         // dedicated $50 liquidation reserve and the $20 execution fee.
         uint256 posSize = 50_000 * 1e18;
         _open(aliceAccount, CfdTypes.Side.LONG, posSize, 825 * 1e6, 1e8);
@@ -444,7 +445,7 @@ contract AuditH03_DustPosition is BasePerpTest {
 }
 
 // ============================================================
-// N-01: Share Transfer Bypasses Deposit Cooldown
+// N-01 regression: a fresh transfer recipient inherits the sender's cooldown timestamp
 // ============================================================
 
 contract AuditN01_TransferBypassesCooldown is BasePerpTest {
@@ -468,10 +469,8 @@ contract AuditN01_TransferBypassesCooldown is BasePerpTest {
         vm.prank(alice);
         juniorVault.transfer(bob, shares);
 
-        // Fix: Bob inherits Alice's deposit time instead of keeping zero default.
-        // Since sender cooldown is already expired when transfers are allowed,
-        // this is defense-in-depth — it ensures lastDepositTime is never 0 for
-        // an address holding shares, which matters if cooldown logic evolves.
+        // Bob inherits Alice's deposit timestamp. This fixture transfers only after the
+        // sender cooldown has elapsed and verifies timestamp propagation to a fresh recipient.
         assertEq(juniorVault.lastDepositTime(bob), aliceDepositTime, "Bob inherits Alice's deposit time");
         assertGt(juniorVault.lastDepositTime(bob), 0, "Zero default is eliminated");
     }
@@ -501,7 +500,7 @@ contract AuditH04_SeniorCouponWithdrawalAccounting is BasePerpTest {
         _fundJunior(address(this), 2_000_000 * 1e6);
 
         IHousePool.PoolConfig memory config = _currentPoolConfig();
-        config.seniorRateBps = 800; // 8% APY
+        config.seniorRateBps = 800; // 8% annualized target coupon
         pool.proposePoolConfig(config);
         _warpForward(48 hours + 1);
         pool.finalizePoolConfig();

@@ -31,7 +31,7 @@ exits**. Plether therefore provides granular breakers, not a global protocol sto
 | Router risk-off pause | `OrderRouterAdmin.pause()` by its owner or configured pauser | New opens/increases; permanently invalidates pending opens through `riskOffOrderCutoff` | Closes, liquidations, mark refresh, LP settlement when not separately held, refunds, and claims | RouterAdmin owner calls `unpause()`; the historical cutoff never decreases |
 | HousePool entry pause | `HousePool.pause()` by its owner or configured pauser | New Senior and Junior deposit requests, Senior reservations, and deposit activation | Redemption requests, eligible settlement/redemption funding, reconciliation, LP request cancellations under existing rules, claims, and trading | HousePool owner calls `unpause()` |
 | HousePool settlement hold | `HousePool.pauseLpEpochSettlement()` by its owner or configured pauser | Synchronized epoch clearing: deposit activation and redemption funding | New requests, existing cancellations, reconciliation, claims, and trading | HousePool owner calls `unpauseLpEpochSettlement()` |
-| Engine degraded mode | Automatically latches when a close or liquidation leaves raw `E < L`, where `E = max(HousePool.totalAssets() - trader claims, 0)` and `L` is maximum directional liability | New opens, position-backed LP redemption funding, and new LP entry through the pool gate | Closes, liquidations, mark refresh, recapitalization, redemption requests, and already-funded claims | Engine owner may clear it once raw `E >= L`; the separate settlement-buffer target need not be restored to clear |
+| Engine degraded mode | Automatically latches when a close or liquidation leaves raw `E < L`, where `E = max(HousePool.totalAssets() - trader claims, 0)` and `L` is maximum directional liability | New opens, every LP epoch settlement (including deposit activation and redemption funding), and new LP entry through the pool gate | Closes, liquidations, mark refresh, recapitalization, redemption requests, and already-funded claims | Engine owner may clear it once raw `E >= L`; the separate settlement-buffer target need not be restored to clear |
 | Oracle/FAD close-only policy | Automatically derived from oracle regime and calendar | Opens in FAD or `oracleFrozen`; oracle-dependent actions also fail closed when their policy is not satisfied | Policy-valid closes, liquidations, mark refresh, and frozen-market LP settlement when not held | Automatic when a valid regime returns; configuration changes remain timelocked |
 | LP freshness/accounting gates | Automatically evaluated from canonical Engine and HousePool state | Settlement/redemption funding while withdrawals are not live; activation on stale marks, deficits, impairment, unassigned assets, or unavailable Senior capacity | Unrelated trading and claims already funded | Automatic after canonical state becomes eligible |
 
@@ -94,7 +94,7 @@ Use `triggerEmergencyPause` when new market risk or new LP admission is unsafe b
 trusted. Examples include:
 
 - a confirmed wrong/manipulated oracle, unexpected oracle binding, or compromised pricing signer;
-- credible compromise of an admin, Router keeper, deployment, or signing system executing unauthorized
+- credible compromise of an admin, trader-account, deployment, or signing system executing unauthorized
   risk-increasing actions;
 - unexpected degraded mode or insolvency whose cause is not promptly understood; or
 - an active exploit affecting new opens/increases or LP entry while settlement accounting remains reconciled.
@@ -207,7 +207,9 @@ The guardian must never auto-release a restriction. There is no expiry. Governan
 5. every cutoff-invalidated open, queued LP request, and cleanup backlog is understood;
 6. degraded mode, if active, passes its raw `E >= L` on-chain solvency check; settlement-buffer restoration is
    independently required before new risk or LP redemption funding, not before clearing the latch;
-7. the held epoch is simulated through the exact cached or atomic-refresh route before settlement release; and
+7. the held epoch is simulated through the exact cached or atomic-refresh route on a fork that models the intended
+   governance releases; an ordinary live simulation still reverts while the hold is active. Repeat the exact live
+   simulation after release and before broadcasting settlement; and
 8. governance documents release order and rotates/disables an implicated guardian.
 
 Unpausing cannot reset `riskOffOrderCutoff`. Releasing the settlement hold only restores eligibility to attempt
@@ -226,8 +228,10 @@ settlement; it does not repair state or guarantee success.
 - The monitor is advisory. Reason/evidence hashes are incident metadata, not on-chain proofs.
 - There is no arbitrary caller-selected mask, claim-off, redemption-request-off or global all-LP-request freeze,
   queue quarantine, emergency price setter, discretionary close-off, or global protocol freeze.
-- The coordinator protects only its immutable RouterAdmin and HousePool. Wrong bindings or pauser assignments cause
-  atomic calls to revert.
+- The coordinator acts only on its immutable RouterAdmin and HousePool. It checks constructor addresses for nonzero,
+  distinct code-bearing targets, but does not prove they belong to the intended deployment. Verify that graph
+  independently. Missing pauser authority can make a required downstream pause revert the entire action; already
+  active restrictions are skipped.
 - A compromised governance owner can still use its owner authorities; the guardian cannot constrain governance.
 - This release supplies on-chain controls and observability only. An automated off-chain observer, policy engine,
   guardian signer, and incident keeper are explicitly out of scope.

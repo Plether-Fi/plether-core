@@ -43,9 +43,9 @@ contract PlanApplyRegressionTest is BasePerpTest {
 
         uint256 closeTime = block.timestamp + 30 days;
         vm.warp(closeTime);
-        this.doClose(longAccount, CfdTypes.Side.LONG, 50_000e18, 1.2e8);
+        this.doClose(longAccount, CfdTypes.Side.LONG, 50_000e18, 1.05e8);
         vm.warp(closeTime + 1);
-        this.doClose(longAccount, CfdTypes.Side.LONG, 50_000e18, 1.2e8);
+        this.doClose(longAccount, CfdTypes.Side.LONG, 50_000e18, 1.05e8);
         vm.warp(closeTime + 2);
         this.doClose(shortAccount, CfdTypes.Side.SHORT, 50_000e18, 0.8e8);
 

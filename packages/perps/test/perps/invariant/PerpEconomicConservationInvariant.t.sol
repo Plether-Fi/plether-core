@@ -89,7 +89,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 ghostClaimBefore = handler.traderClaimSnapshot(account);
         assertGt(handler.accountExecutionBountyReserve(account), 0, "Close bounty must be reserved");
 
-        handler.warpForward(router.maxOrderAge() + 1);
+        handler.warpForward(router.maxExecutionWindowSeconds() + 1);
         handler.executeNextOrderModelled();
 
         assertEq(handler.ghostOrderLifecycleState(closeOrderId), 3, "Expired close must be tracked as failed");

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
@@ -15,6 +17,10 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 ///      Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals,
 ///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngine is ICfdEngineTypes {
+
+    function positionEpoch(
+        address account
+    ) external view returns (uint64);
 
     /// @notice Margin clearinghouse address used for account margin locking/unlocking
     /// @return Clearinghouse contract address
@@ -38,12 +44,12 @@ interface ICfdEngine is ICfdEngineTypes {
 
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @dev Callable only by the configured router. Reverts with `CfdEngine__TypedOrderFailure` for expected order
-    ///      invalidations so the router can apply deterministic bounty policy without selector matching. Successful
+    ///      invalidations so the router can classify the exact typed selector and payload. Successful
     ///      execution delegates the planned clearinghouse, HousePool, aggregate-side, and position mutations.
     /// @param order Queued order being executed by the router
     /// @param currentOraclePrice Execution oracle price (8 decimals), clamped to CAP_PRICE
     /// @param poolDepthUsdc HousePool depth used for planning and solvency checks
-    /// @param publishTime Execution-price publish time, cached only when it is not older than `lastMarkTime`
+    /// @param publishTime Router-validated execution publish time; the Engine caches the execution price only when strictly newer
     function processOrderTyped(
         CfdTypes.Order memory order,
         uint256 currentOraclePrice,
@@ -61,7 +67,7 @@ interface ICfdEngine is ICfdEngineTypes {
         address account,
         uint256 sizeDelta,
         uint256 amountUsdc
-    ) external;
+    ) external returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Moves forfeited reserved execution-bounty reservation into the protocol treasury account.
     /// @dev Callable only by the router. Reclassifies clearinghouse balances without moving ERC20 tokens; zero is a

@@ -266,14 +266,14 @@ library CfdEnginePlanLib {
 
     /// @notice Plans an open or same-side increase from a complete engine snapshot.
     /// @dev Execution price is capped by `snap.capPrice`. For a live position, pending carry is first projected into a
-    ///      memory copy of the snapshot and must be fully collectible; a zero-size position skips that realization even
+    ///      local memory snapshot and must be fully collectible; a zero-size position skips that realization even
     ///      if an inconsistent snapshot supplies unsettled carry. The planner then rejects an opposing live position,
     ///      degraded mode, a position too small to support the minimum bounty, insufficient clearinghouse funds,
     ///      post-operation insolvency, insufficient initial margin/equity, or pool-relative skew above the configured
     ///      maximum unless the order strictly reduces an existing imbalance without making its side the heavier side.
-    ///      The skew-cap check is skipped when pool assets are zero. On a
-    ///      business-rule failure `valid` remains false, `revertCode` identifies the first failed check, and previously
-    ///      populated fields are diagnostic only. VPI, notional, fee, margin, and skew-cap divisions round down in
+    ///      Zero or non-quantized order sizes and underfunded dedicated reserves are rejected. The skew-cap check is
+    ///      skipped when pool assets are zero. On a business-rule failure `valid` remains false, `revertCode` identifies
+    ///      the first failed check, and previously populated fields are diagnostic only. VPI, notional, fee, margin, and skew-cap divisions round down in
     ///      their respective calculations. `publishTime` is retained for planner-interface parity but is not read.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
     /// @param order Open/increase order; account, side, size, and margin are consumed by this planner.
@@ -617,15 +617,16 @@ library CfdEnginePlanLib {
 
     /// @notice Plans a full or partial close, including PnL, carry, charges, collection, claims, and solvency.
     /// @dev Execution price is capped by `snap.capPrice`; the live position side is authoritative and `order.side` is
-    ///      not read. Carry is deducted from the pre-carry close settlement. A positive result creates an immediate
-    ///      payout only when pool cash left after reserving existing aggregate trader claims is sufficient; otherwise
-    ///      it creates a new trader claim. A negative result consumes eligible clearinghouse buckets and then the
-    ///      account's existing claim. Price loss beyond the account-local collectible cap is an explicit write-off and
-    ///      never blocks a partial close. A valid close may still project degraded mode; solvency is reported rather than
-    ///      rejected. Callers must prevalidate a live position and nonzero close size—zero size against a zero-size
-    ///      position can reach division by zero instead of a typed failure. Close proration, notional, VPI, fee, and
-    ///      spread calculations use integer division with the rounding described by `CloseAccountingLib`.
-    ///      `publishTime` is currently unused.
+    ///      not read. Carry is collected from active margin, then free settlement before close economics are calculated;
+    ///      any unpaid remainder enters the separate action charge. Price losses consume the same-account claim first
+    ///      and then eligible PnL pledge, with excess written off. Partial-close pledge consumption and release preserve
+    ///      the remaining terminal price curve. Action charges use new price gain, dedicated VPI backing, spendable
+    ///      action reserve, free settlement, safely released pledge, and (for a full close only) committed order margin; uncollectible action
+    ///      charges reject a partial close but are waived on a full close. Net price gain is paid in full or becomes a
+    ///      trader claim after existing claims are reserved. Action rebates use remaining cash, may be paid partially,
+    ///      and never create claims. Zero/non-quantized sizes and sizes exceeding the position return typed failures.
+    ///      A valid close may project degraded mode; solvency is reported rather than rejected. Rounding follows
+    ///      `CloseAccountingLib`; `publishTime` is currently unused.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
     /// @param order Close order; account and size are consumed, while side is taken from `snap.position`.
     /// @param executionPrice Oracle execution price before the protocol cap.
@@ -663,31 +664,40 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        (delta.totalMarginBefore, delta.postLongOi, delta.postShortOi) =
-            _closeOpenInterest(snap, pos.side, order.sizeDelta);
+        return _planValidatedClose(snap, delta);
+    }
 
-        delta.closeState = _buildCloseState(snap, pos, order.sizeDelta, price, delta.postLongOi, delta.postShortOi);
+    function _planValidatedClose(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta
+    ) private pure returns (CfdEnginePlanTypes.CloseDelta memory) {
+        CfdTypes.Position memory pos = snap.position;
+        (delta.totalMarginBefore, delta.postLongOi, delta.postShortOi) =
+            _closeOpenInterest(snap, pos.side, delta.sizeDelta);
+
+        delta.closeState =
+            _buildCloseState(snap, pos, delta.sizeDelta, delta.price, delta.postLongOi, delta.postShortOi);
 
         CloseAccountingLib.CloseState memory cs = delta.closeState;
-        delta.posSizeDelta = order.sizeDelta;
+        delta.posSizeDelta = delta.sizeDelta;
         delta.posEntryCostAfterUsdcAtoms = cs.remainingEntryCostUsdcAtoms;
         if (cs.remainingSize > 0) {
             delta.posEntryPriceAfter = cs.remainingEntryCostUsdcAtoms / CfdMath.sizeToLots(cs.remainingSize);
         }
         delta.posMaxProfitReduction = cs.maxProfitReductionUsdc;
         delta.posVpiAccruedReduction = cs.proportionalAccrualUsdc;
-        delta.deletePosition = pos.size == order.sizeDelta;
+        delta.deletePosition = pos.size == delta.sizeDelta;
 
-        delta.sideOiDecrease = order.sizeDelta;
+        delta.sideOiDecrease = delta.sizeDelta;
         delta.sideEntryNotionalReduction = cs.closedEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
         delta.sideMaxProfitReduction = cs.maxProfitReductionUsdc;
 
         delta.unlockMarginUsdc = cs.marginToFreeUsdc;
 
-        uint256 remainingSize = pos.size - order.sizeDelta;
+        uint256 remainingSize = pos.size - delta.sizeDelta;
         uint256 reserveTargetUsdc;
         if (remainingSize > 0) {
-            reserveTargetUsdc = (CfdMath.sizeToLots(remainingSize) * price * snap.riskParams.bountyBps) / 10_000;
+            reserveTargetUsdc = (CfdMath.sizeToLots(remainingSize) * delta.price * snap.riskParams.bountyBps) / 10_000;
             if (reserveTargetUsdc < snap.riskParams.minBountyUsdc) {
                 reserveTargetUsdc = snap.riskParams.minBountyUsdc;
             }
@@ -697,6 +707,9 @@ library CfdEnginePlanLib {
         }
         delta.realizedPnlUsdc = cs.realizedPnlUsdc;
         delta = _planIsolatedCloseSettlement(snap, delta, cs);
+        if (delta.revertCode != CfdEnginePlanTypes.CloseRevertCode.OK) {
+            return delta;
+        }
 
         if (remainingSize > 0 && delta.actionChargeWaivedUsdc > 0) {
             delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE;
@@ -707,12 +720,18 @@ library CfdEnginePlanLib {
             delta.posMarginAfter += delta.pricePayoutUsdc;
         }
 
+        if (remainingSize > 0 && !_postCloseHealthy(snap, delta, cs)) {
+            delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNHEALTHY;
+            return delta;
+        }
+
         delta.totalMarginAfterClose = delta.totalMarginBefore
             + (delta.posMarginAfter > pos.margin ? delta.posMarginAfter - pos.margin : 0)
             - (pos.margin > delta.posMarginAfter ? pos.margin - delta.posMarginAfter : 0);
 
         delta.solvency = _computeCloseSolvency(snap, delta);
         delta.valid = true;
+        return delta;
     }
 
     /// @notice Separates price PnL from action economics so realized settlement matches the terminal NAV cap.
@@ -748,6 +767,11 @@ library CfdEnginePlanLib {
         }
 
         delta.unlockMarginUsdc = _maxPricePledgeUnlockPreservingTerminalCap(snap, delta, cs);
+        if (cs.remainingSize > 0 && !_limitCloseReleaseByHealth(snap, delta, cs)) {
+            delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.PARTIAL_CLOSE_UNHEALTHY;
+            return delta;
+        }
+        delta.safeMarginReleaseUsdc = delta.unlockMarginUsdc;
         delta.posMarginAfter = snap.position.margin - delta.pricePnlPledgeConsumedUsdc - delta.unlockMarginUsdc;
         delta.existingTraderClaimConsumedUsdc = delta.pricePnlClaimConsumedUsdc;
         delta.existingTraderClaimRemainingUsdc = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedUsdc;
@@ -820,41 +844,12 @@ library CfdEnginePlanLib {
             vpiClawbackWithheldUsdc =
                 delta.actionChargeWithheldUsdc < vpiClawbackUsdc ? delta.actionChargeWithheldUsdc : vpiClawbackUsdc;
             delta.vpiRebateReserveConsumedUsdc = vpiClawbackUsdc - vpiClawbackWithheldUsdc;
-            uint256 remainingActionChargeToCollectUsdc =
-                delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
-            uint256 protectedActionReserveUsdc = snap.protectedExecutionBountyUsdc + snap.vpiRebateReserveUsdc;
-            uint256 spendableActionReserveUsdc = snap.actionReserveUsdc > protectedActionReserveUsdc
-                ? snap.actionReserveUsdc - protectedActionReserveUsdc
-                : 0;
-            delta.actionReserveConsumedUsdc = remainingActionChargeToCollectUsdc < spendableActionReserveUsdc
-                ? remainingActionChargeToCollectUsdc
-                : spendableActionReserveUsdc;
-            uint256 actionChargeAfterReserveUsdc = remainingActionChargeToCollectUsdc - delta.actionReserveConsumedUsdc;
-            uint256 releasedVpiReserveUsdc =
-                delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
-            uint256 collectibleFreeSettlementUsdc = snap.accountBuckets.freeSettlementUsdc + releasedVpiReserveUsdc;
-            if (cs.remainingSize == 0) {
-                // Full exits release only the surplus left after carry and capped price-loss settlement.
-                // Collect it as free settlement before reaching unrelated pending-order margin.
-                collectibleFreeSettlementUsdc += delta.unlockMarginUsdc + delta.liquidationReserveReleaseUsdc;
-            }
-            uint256 freeConsumedUsdc = actionChargeAfterReserveUsdc < collectibleFreeSettlementUsdc
-                ? actionChargeAfterReserveUsdc
-                : collectibleFreeSettlementUsdc;
-            uint256 actionChargeAfterFreeUsdc = actionChargeAfterReserveUsdc - freeConsumedUsdc;
-            if (cs.remainingSize == 0) {
-                delta.actionCommittedMarginConsumedUsdc = actionChargeAfterFreeUsdc
-                    < snap.lockedBuckets.committedOrderMarginUsdc
-                    ? actionChargeAfterFreeUsdc
-                    : snap.lockedBuckets.committedOrderMarginUsdc;
-            }
-            delta.actionChargeCollectedUsdc = delta.vpiRebateReserveConsumedUsdc + delta.actionReserveConsumedUsdc
-                + freeConsumedUsdc + delta.actionCommittedMarginConsumedUsdc;
-            delta.actionChargeWaivedUsdc = delta.actionChargeToCollectUsdc - delta.actionChargeCollectedUsdc;
+            _planCloseCashSources(snap, delta, cs.remainingSize == 0);
         } else if (actionNetUsdc < 0) {
             delta.actionRebateUsdc = uint256(-actionNetUsdc);
         }
 
+        delta.netReleasedMarginUsdc = delta.unlockMarginUsdc - delta.actionChargeFromReleasedMarginUsdc;
         uint256 nonClawbackWithheldUsdc = delta.actionChargeWithheldUsdc - vpiClawbackWithheldUsdc;
         uint256 nonVpiReserveCollectedUsdc = delta.actionChargeCollectedUsdc - delta.vpiRebateReserveConsumedUsdc;
         uint256 executionFeeEligibleUsdc = nonClawbackWithheldUsdc + nonVpiReserveCollectedUsdc;
@@ -865,6 +860,106 @@ library CfdEnginePlanLib {
         uint256 feeToCollectUsdc = delta.executionFeeUsdc - feeWithheldUsdc;
         delta.actionProtocolFeeCreditedUsdc =
             feeToCollectUsdc < nonVpiReserveCollectedUsdc ? feeToCollectUsdc : nonVpiReserveCollectedUsdc;
+    }
+
+    function _postCloseHealthy(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        CloseAccountingLib.CloseState memory cs
+    ) private pure returns (bool) {
+        CfdTypes.Position memory remaining;
+        remaining.side = snap.position.side;
+        remaining.size = cs.remainingSize;
+        uint256 claims =
+            delta.existingTraderClaimRemainingUsdc + (delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0);
+        uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
+        return !PositionRiskAccountingLib.buildExactPriceRiskState(
+            remaining, cs.remainingEntryCostUsdcAtoms, delta.price, snap.capPrice, delta.posMarginAfter + claims, bps
+        )
+        .liquidatable;
+    }
+
+    function _planCloseCashSources(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        bool terminal
+    ) private pure {
+        uint256 remainingActionChargeToCollectUsdc =
+            delta.actionChargeToCollectUsdc - delta.vpiRebateReserveConsumedUsdc;
+        uint256 protectedActionReserveUsdc = snap.protectedExecutionBountyUsdc + snap.vpiRebateReserveUsdc;
+        uint256 spendableActionReserveUsdc = snap.actionReserveUsdc > protectedActionReserveUsdc
+            ? snap.actionReserveUsdc - protectedActionReserveUsdc
+            : 0;
+        delta.actionReserveConsumedUsdc = remainingActionChargeToCollectUsdc < spendableActionReserveUsdc
+            ? remainingActionChargeToCollectUsdc
+            : spendableActionReserveUsdc;
+        uint256 actionChargeAfterReserveUsdc = remainingActionChargeToCollectUsdc - delta.actionReserveConsumedUsdc;
+        uint256 releasedVpiReserveUsdc =
+            delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
+        uint256 collectibleFreeSettlementUsdc = snap.accountBuckets.freeSettlementUsdc + releasedVpiReserveUsdc;
+        if (terminal) {
+            // The full-close reserve is released before pledge attribution and cash collection.
+            collectibleFreeSettlementUsdc += delta.liquidationReserveReleaseUsdc;
+        }
+        uint256 freeConsumedUsdc = actionChargeAfterReserveUsdc < collectibleFreeSettlementUsdc
+            ? actionChargeAfterReserveUsdc
+            : collectibleFreeSettlementUsdc;
+        uint256 actionChargeAfterFreeUsdc = actionChargeAfterReserveUsdc - freeConsumedUsdc;
+        delta.actionChargeFromReleasedMarginUsdc =
+            actionChargeAfterFreeUsdc < delta.unlockMarginUsdc ? actionChargeAfterFreeUsdc : delta.unlockMarginUsdc;
+        actionChargeAfterFreeUsdc -= delta.actionChargeFromReleasedMarginUsdc;
+        if (terminal) {
+            delta.actionCommittedMarginConsumedUsdc = actionChargeAfterFreeUsdc
+                < snap.lockedBuckets.committedOrderMarginUsdc
+                ? actionChargeAfterFreeUsdc
+                : snap.lockedBuckets.committedOrderMarginUsdc;
+        }
+        delta.actionChargeCollectedUsdc = delta.vpiRebateReserveConsumedUsdc + delta.actionReserveConsumedUsdc
+            + freeConsumedUsdc + delta.actionChargeFromReleasedMarginUsdc + delta.actionCommittedMarginConsumedUsdc;
+        delta.actionChargeWaivedUsdc = delta.actionChargeToCollectUsdc - delta.actionChargeCollectedUsdc;
+    }
+
+    /// @dev Claims are health collateral, never cash funding. Net gains contribute once whether paid or deferred.
+    function _limitCloseReleaseByHealth(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        CloseAccountingLib.CloseState memory cs
+    ) private pure returns (bool) {
+        uint256 pledge = snap.position.margin - delta.pricePnlPledgeConsumedUsdc;
+        uint256 claims = snap.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedUsdc;
+        PositionRiskAccountingLib.PositionRiskState memory risk;
+        {
+            int256 actionNet = cs.vpiDeltaUsdc
+                + int256(cs.executionFeeUsdc + cs.frozenSpreadUsdc + delta.pendingCarryUsdc - delta.realizedCarryUsdc);
+            uint256 withheld = actionNet > 0 ? uint256(actionNet) : 0;
+            if (withheld > delta.priceGainUsdc) {
+                withheld = delta.priceGainUsdc;
+            }
+            uint256 gain = delta.priceGainUsdc - withheld;
+            CfdTypes.Position memory remaining;
+            remaining.side = snap.position.side;
+            remaining.size = cs.remainingSize;
+            uint256 bps = snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps;
+            risk = PositionRiskAccountingLib.buildExactPriceRiskState(
+                remaining, cs.remainingEntryCostUsdcAtoms, delta.price, snap.capPrice, pledge + claims + gain, bps
+            );
+        }
+        if (risk.liquidatable) {
+            return false;
+        }
+        uint256 headroom = uint256(risk.equityUsdc) - risk.maintenanceMarginUsdc - 1;
+        if (delta.unlockMarginUsdc > headroom) {
+            delta.unlockMarginUsdc = headroom;
+        }
+        (bool profit, uint256 terminalTarget) = _requiredPostCloseTerminalCapUsdc(snap, delta, cs);
+        if (!profit && risk.unrealizedPnlUsdc < 0) {
+            uint256 rawLoss = uint256(-risk.unrealizedPnlUsdc);
+            uint256 cap = pledge - delta.unlockMarginUsdc + claims;
+            if ((rawLoss < cap ? rawLoss : cap) != terminalTarget) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// @notice Returns the greatest close allocation that can leave PnL pledge without changing terminal price NAV.
@@ -991,15 +1086,16 @@ library CfdEnginePlanLib {
     }
 
     /// @notice Builds detailed close economics from projected post-close open interest.
-    /// @dev Pre- and post-close skew are valued at `price`. The delegated close calculation prorates margin,
-    ///      max-profit, and lifetime VPI, clamps lifetime close VPI from becoming negative, and calculates fees/spread.
+    /// @dev Pre- and post-close skew are valued at `price`. The delegated calculation prorates margin, exact entry basis,
+    ///      and lifetime VPI, derives the closed endpoint-profit envelope, clamps lifetime close VPI from becoming
+    ///      negative, and calculates fees/spread.
     /// @param snap Current side, pool-depth, cap, frozen-market, fee, and risk snapshot.
     /// @param pos Position being reduced.
     /// @param sizeDelta Size being closed.
     /// @param price Capped execution price.
     /// @param postLongOi Projected LONG open interest.
     /// @param postShortOi Projected SHORT open interest.
-    /// @return Detailed close state before pending carry and collateral collection.
+    /// @return Detailed close economics after projected carry collection, excluding any still-unpaid carry and settlement.
     function _buildCloseState(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Position memory pos,
@@ -1029,7 +1125,7 @@ library CfdEnginePlanLib {
     }
 
     /// @notice Computes post-close effective assets, maximum liability, and degraded-mode transition.
-    /// @dev Maximum liability removes the close's pro-rata max-profit envelope. Physical assets include seized
+    /// @dev Maximum liability removes the closed lots' exact max-profit envelope. Physical assets include seized
     ///      collateral and subtract collected/top-up protocol fee plus any immediate payout. A deferred fresh payout
     ///      instead increases trader claims; consumed existing claims reduce them. No pending payout is separately
     ///      supplied because immediate and deferred treatment is already encoded in those deltas.
@@ -1157,14 +1253,16 @@ library CfdEnginePlanLib {
 
     /// @notice Separates full-liquidation price PnL, action charges, and the dedicated liquidation reserve.
     /// @dev Price loss consumes only the same-account claim and PnL pledge; excess is a diagnostic write-off. The
-    ///      keeper/protocol/LP charge is capped by `liquidationReserveUsdc`. Still-unpaid carry and negative lifetime VPI are action
-    ///      charges recovered from new price gain first, then action reserve and pre-existing free settlement, with the
-    ///      remainder waived. No shortfall becomes protocol bad debt or reaches order/liquidation/PnL buckets.
+    ///      keeper/protocol/LP charge is capped by `liquidationReserveUsdc`. Still-unpaid carry and negative lifetime VPI
+    ///      are action charges recovered from new price gain first, dedicated VPI backing for its clawback, spendable
+    ///      action reserve, pre-existing free settlement (including released VPI backing), then committed order margin.
+    ///      Any remainder is waived. These action charges cannot consume PnL pledge, liquidation reserve, or protected
+    ///      execution-bounty reserves, and no shortfall becomes protocol debt.
     /// @param snap Account, pool cash, claims, risk parameters, and aggregate side snapshot.
     /// @param delta Liquidatable delta containing precomputed risk state.
     /// @param pos Entire position being liquidated.
     /// @param price Capped liquidation price.
-    /// @param settlementReachableUsdc Terminal account settlement reachable before the liquidation charge.
+    /// @param settlementReachableUsdc Diagnostic price collateral plus VPI backing; retained for parity but unused here.
     /// @param maintMarginBps Active maintenance or FAD rate used for liquidation state.
     /// @return Updated liquidation delta containing all position, charge-split, residual, claim, and payout effects.
     function _applyLiquidationSettlement(
