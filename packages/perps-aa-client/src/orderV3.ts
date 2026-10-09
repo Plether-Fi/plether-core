@@ -2,19 +2,12 @@ import { decodeErrorResult, encodeFunctionData, getAddress, parseAbi, type Hex, 
 import { orderRouterV3Abi, orderRouterV3TraderAbi } from "./orderV3Abi.js";
 import type { SmartAccountCall, PerpsActionPlan } from "./types.js";
 
-export const CloseMode = { Standard: 0, CallerPaidFullExit: 1 } as const;
 export type OrderRequestV3 = ContractFunctionArgs<typeof orderRouterV3Abi, "nonpayable", "commitOrder">[0];
 
 /** Builds one ordinary commitment call; no token approval, transfer, deposit or subsidy is included. */
 export function buildCloseOrderV3(router: Address, request: OrderRequestV3): SmartAccountCall {
   if (!request.isClose || request.marginDelta !== 0n || request.sizeDelta <= 0n || request.sizeDelta % (100n * 10n ** 18n) !== 0n) {
     throw new Error("A close requires a positive lot-aligned size and zero marginDelta.");
-  }
-  if (request.closeMode !== CloseMode.Standard && request.closeMode !== CloseMode.CallerPaidFullExit) {
-    throw new Error("Unknown close mode.");
-  }
-  if (request.closeMode === CloseMode.CallerPaidFullExit && request.bounds.maxPostPositionSize !== 0n) {
-    throw new Error("Caller-paid full exit requires a zero post-position-size bound.");
   }
   return Object.freeze({ to: getAddress(router), value: 0n, data: encodeFunctionData({
     abi: orderRouterV3Abi, functionName: "commitOrder", args: [request],
@@ -30,11 +23,10 @@ export function buildExpireOrderV3(router: Address, orderId: bigint): SmartAccou
 
 /** Stable consumer copy; funding and health failures must not share the old 'underwater' message. */
 export const closeFailureMessages = {
-  bountyFunding: "Eligible collateral cannot back the keeper reward. Prepare a caller-paid full exit.",
+  bountyFunding: "Free USDC and eligible position margin cannot back the configured keeper reward.",
   carryFunding: "Accrued carry must be fully collected before a partial reduction. Review a full exit.",
   actionFunding: "This reduction cannot fund its charges while preserving the remaining position. Review a full exit.",
   residualHealth: "This reduction would leave the remaining position below its required margin.",
-  callerPaid: "No keeper reward is reserved. You or another executor must pay transaction gas and oracle fees; automatic execution is not guaranteed.",
   reservationMismatch: "The order remains pending because its reservation does not match. After its deadline, expire it to resolve the queue entry.",
 } as const;
 

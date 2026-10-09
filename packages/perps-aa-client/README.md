@@ -129,6 +129,15 @@ encodings and hashes; `RELEASING.md` describes the artifact compatibility gate.
 
 Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and contract failures into stable codes and user-safe messages. Do not silently fall back to an EOA transaction: it would create protocol state under a different `msg.sender` and split the user's account. If sponsorship is unavailable, show a retry/support state unless the product has explicitly implemented and disclosed user-paid smart-account gas.
 
+`buildCloseOrderV3` uses the same request shape for full closes and partial
+reductions. The protocol reserves the configured keeper bounty from free USDC,
+then eligible position margin. There is no mode selector or per-order bounty
+waiver. Admin configuration may set the close bounty to zero for all new closes;
+existing orders retain their snapshotted bounty. `classifyCloseFailureV3` keeps
+bounty funding, carry funding, action funding, and residual health failures
+distinct. `buildExpireOrderV3` encodes permissionless cleanup after the order's
+execution deadline without oracle data.
+
 ## Terminal history on the new stack (0.2.0)
 
 The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
@@ -159,8 +168,9 @@ if (summary.status === 2 || summary.status === 3) {
 The helper authenticates the event, clocks and full receipt against the summary;
 `hashOrderReceiptV4` exposes the same digest separately. Solidity consumers can
 call `verifyReceipt(receipt, terminalTime)` on the Book. The V4 receipt and V3
-intent domain labels are unchanged; V5 is the read API version. The merged tuples include both close mode and timing,
-so earlier candidate event and request encodings must not be reused on the merged graph.
+intent domain labels are unchanged; V5 is the read API version. Requests use one close flow,
+and the receipt includes authenticated timing. Earlier candidate event and request
+encodings must not be reused on the final graph.
 
 Cache history by chain/Book/order ID and invalidate it on reorg. If a log cannot
 be retrieved, report history as unavailable instead of assuming zero fees or

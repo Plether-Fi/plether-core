@@ -174,10 +174,6 @@ abstract contract DirectCloseGasFixture is Test {
         return SIZE;
     }
 
-    function _callerPaid() internal pure virtual returns (bool) {
-        return false;
-    }
-
     function _scenario() internal pure virtual returns (string memory) {
         return "standard_full_zero_free";
     }
@@ -191,8 +187,6 @@ abstract contract DirectCloseGasFixture is Test {
         request.marginDelta = isClose ? 0 : 250e6;
         request.targetPrice = isClose ? type(uint256).max : PRICE;
         request.isClose = isClose;
-        request.closeMode =
-            isClose && _callerPaid() ? OrderV3Types.CloseMode.CallerPaidFullExit : OrderV3Types.CloseMode.Standard;
         request.bounds = OrderV3Types.ExecutionBounds({
             submitBy: uint64(vm.getBlockTimestamp() + router.maxExecutionWindowSeconds()),
             executionWindowSeconds: uint32(router.maxExecutionWindowSeconds()),
@@ -237,7 +231,7 @@ abstract contract DirectCloseGasFixture is Test {
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
         assertEq(uint8(reservation.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
         assertEq(reservation.freeFundedUsdc, 0);
-        assertEq(reservation.pledgeFundedUsdc, _callerPaid() ? 0 : router.closeOrderExecutionBountyUsdc());
+        assertEq(reservation.pledgeFundedUsdc, router.closeOrderExecutionBountyUsdc());
         assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
     }
 
@@ -280,7 +274,6 @@ abstract contract DirectCloseExecuteGasFixture is DirectCloseGasFixture {
         (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
         assertEq(remaining, SIZE - _closeSize());
         assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
     }
 
 }
@@ -309,30 +302,6 @@ contract DirectStandardPartialExecuteGasTest is DirectCloseExecuteGasFixture {
 
     function _scenario() internal pure override returns (string memory) {
         return "standard_partial_zero_free";
-    }
-
-}
-
-contract DirectCallerPaidFullCommitGasTest is DirectCloseCommitGasFixture {
-
-    function _callerPaid() internal pure override returns (bool) {
-        return true;
-    }
-
-    function _scenario() internal pure override returns (string memory) {
-        return "caller_paid_full_zero_free";
-    }
-
-}
-
-contract DirectCallerPaidFullExecuteGasTest is DirectCloseExecuteGasFixture {
-
-    function _callerPaid() internal pure override returns (bool) {
-        return true;
-    }
-
-    function _scenario() internal pure override returns (string memory) {
-        return "caller_paid_full_zero_free";
     }
 
 }

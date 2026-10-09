@@ -112,28 +112,6 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         _includeCommitment(preview.assessment, preview.commitment, request.bounds, bounty);
     }
 
-    /// @notice Bit flags: 1 no position, 2 pending orders, 4 active protection, 8 pending terminal exit.
-    function fullExitBlockers(
-        address engineAddress,
-        address account
-    ) external view returns (uint8 blockers) {
-        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
-        ICfdClosePreviewRouter router = ICfdClosePreviewRouter(engine.orderRouter());
-        (uint256 size,,,,,,) = engine.positions(account);
-        if (size == 0) {
-            blockers |= 1;
-        }
-        if (router.pendingOrderCounts(account) != 0) {
-            blockers |= 2;
-        }
-        if (ICfdClosePreviewProtection(router.positionProtectionBook()).activePositionProtectionId(account) != 0) {
-            blockers |= 4;
-        }
-        if (IOrderLifecycleBook(router.lifecycleBook()).pendingTerminalExitId(account) != 0) {
-            blockers |= 8;
-        }
-    }
-
     /// @notice Projects commitment now and close execution at the supplied price, using canonical pool depth.
     /// @dev Always adds a new reservation, even if other orders already reserve bounties for this account. Assessment
     ///      starts AFTER projected commitment; commitmentCarryUsdc is a separate debit. No future carry, oracle update,

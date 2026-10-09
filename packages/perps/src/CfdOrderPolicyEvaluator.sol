@@ -12,14 +12,6 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 
-interface IPositionEpoch {
-
-    function positionEpoch(
-        address account
-    ) external view returns (uint64);
-
-}
-
 interface ICommittedPolicyRouter {
 
     function lifecycleBook() external view returns (IOrderLifecycleBook);
@@ -64,15 +56,6 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             publishTime,
             pending.executionBountyUsdc
         );
-        if (pending.closeMode == OrderV3Types.CloseMode.CallerPaidFullExit) {
-            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(pending.account);
-            if (
-                IPositionEpoch(engineAddress).positionEpoch(pending.account) != pending.positionEpoch
-                    || size != pending.positionSize || side != pending.positionSide
-            ) {
-                revert CfdOrderPolicyEvaluator__TerminalPositionChanged(orderId);
-            }
-        }
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc, context.poolDepthUsdc);

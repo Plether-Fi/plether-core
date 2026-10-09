@@ -15,7 +15,6 @@ interface ICfdOrderPolicyEvaluator {
 
     error CfdOrderPolicyEvaluator__CommittedPolicyChanged(uint64 orderId);
 
-    error CfdOrderPolicyEvaluator__TerminalPositionChanged(uint64 orderId);
     error CfdOrderPolicyEvaluator__ReservationMismatch(uint64 orderId);
     function assessCommittedOrder(
         address engine,

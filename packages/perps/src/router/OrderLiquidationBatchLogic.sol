@@ -141,12 +141,10 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) external view returns (uint256) {
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(_delegatedLogicRouter());
         if (!request.isClose) {
-            revert OrderRouter__InvalidCloseMode();
+            revert OrderRouter__NotCloseOrder();
         }
         _validateFreshRequest(host, account, request, true);
-        return request.closeMode == OrderV3Types.CloseMode.CallerPaidFullExit
-            ? 0
-            : _validatedCloseBounty(host, account, request.side, request.sizeDelta);
+        return _validatedCloseBounty(host, account, request.side, request.sizeDelta);
     }
 
     /// @notice Resolves or submits a caller-authored bounded open through the Router's immutable protection Book.
@@ -217,11 +215,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         _validateFreshRequest(host, account, request, enforceProtectionLock);
-        uint256 executionBountyUsdc = request.closeMode == OrderV3Types.CloseMode.CallerPaidFullExit
-            ? 0
-            : request.isClose
-                ? _validatedCloseBounty(host, account, request.side, request.sizeDelta)
-                : _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+        uint256 executionBountyUsdc = request.isClose
+            ? _validatedCloseBounty(host, account, request.side, request.sizeDelta)
+            : _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
         if (executionBountyUsdc > request.bounds.maxExecutionBountyUsdc) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
                 executionBountyUsdc, request.bounds.maxExecutionBountyUsdc
@@ -275,25 +271,6 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         OrderValidationLib.validateBaseCommit(request.sizeDelta, request.marginDelta, request.isClose);
-        uint64 terminalId = host.lifecycleBook().pendingTerminalExitId(account);
-        if (terminalId != 0) {
-            revert OrderRouter__TerminalExitActive(terminalId);
-        }
-        if (request.closeMode == OrderV3Types.CloseMode.CallerPaidFullExit) {
-            (uint256 size,,,, CfdTypes.Side side,,) = host.engine().positions(account);
-            if (
-                !request.isClose || request.marginDelta != 0 || size == 0 || request.sizeDelta != size
-                    || request.side != side || request.bounds.maxPostPositionSize != 0
-            ) {
-                revert OrderRouter__InvalidCloseMode();
-            }
-            if (
-                host.pendingOrderCounts(account) != 0
-                    || host.positionProtectionBook().activePositionProtectionId(account) != 0
-            ) {
-                revert OrderRouter__TerminalExitBusy();
-            }
-        }
         if (enforceProtectionLock && host.positionProtectionBook().activePositionProtectionId(account) != 0) {
             revert OrderRouter__ProtectionActive();
         }

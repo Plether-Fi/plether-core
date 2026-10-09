@@ -234,7 +234,6 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.clientOrderId = pending.clientOrderId;
         receipt.intentHash = pending.intentHash;
         receipt.expectedConfigHash = pending.bounds.expectedConfigHash;
-        receipt.closeMode = pending.closeMode;
         receipt.commitment = pending.commitment;
         receipt.timing = pending.timing;
         receipt.bounty.bountyEntitlementUsdc = pending.executionBountyUsdc;

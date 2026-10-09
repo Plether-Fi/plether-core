@@ -17,7 +17,11 @@ actions also verify signature → durable journal → submission ordering and th
 journal failure prevents submission.
 
 Version 0.2.0 intentionally adds `orderLifecycleV5Abi`, `hashOrderReceiptV4` and
-`decodeVerifiedOrderFinalized` to the reviewed export list. This update changes no
-baseline action bytes, sponsorship hashes, historical Book ABI, or old-stack
-bindings. `terminalHistory.test.ts` independently checks that V4 events remain
-identical and shares a golden hash vector with the Solidity lifecycle tests.
+`decodeVerifiedOrderFinalized` to the reviewed export list. The current V3 request
+uses one close flow, so `CloseMode` is removed from exports and the protected-open
+calldata and its dependent sponsorship/UserOperation hashes use the final V3
+tuple without a mode field. The protection ABI hash tracks that current schema.
+The other ten action vectors, sponsorship envelope, historical Book ABI, and
+old-stack bindings remain unchanged. `terminalHistory.test.ts` independently
+checks the archived V4 ABI and shares a current receipt hash vector with the
+Solidity lifecycle tests.

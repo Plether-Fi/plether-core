@@ -388,29 +388,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             );
         }
 
-        if (pending.closeMode == OrderV3Types.CloseMode.CallerPaidFullExit) {
-            ICfdEngineCore engine_ = ICfdEngineCore(host.engine());
-            (uint256 size,,,, CfdTypes.Side side,,) = engine_.positions(pending.account);
-            if (
-                engine_.positionEpoch(pending.account) != pending.positionEpoch || size != pending.positionSize
-                    || side != pending.positionSide
-            ) {
-                // Zero oracle/execution fields are intentional: a changed terminal position is never executed.
-                // slither-disable-next-line uninitialized-local
-                IOrderRouterExecutionHost.ItemRequest memory terminalRequest;
-                terminalRequest.orderId = request.orderId;
-                terminalRequest.executor = request.executor;
-                return _settleNonEngine(
-                    host,
-                    book,
-                    orderView.order,
-                    pending,
-                    terminalRequest,
-                    OrderV3Types.TerminalReason.TerminalPositionChanged,
-                    OrderV3Types.FailureDetails(bytes4(0), 0, 0, OrderV3Types.ConstraintKind.None, 0, 0, bytes32(0))
-                );
-            }
-        }
         // Execute requests carry the digest read after oracle/mark updates by _executionItem. Only static
         // dependency reads and Router self-calls occur between that observation and this check. Reuse it inside
         // this authenticated item; public committed assessment still validates configuration independently.
@@ -739,7 +716,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         uint64 oraclePublishTime,
         bool priceReachedEngine
     ) private pure returns (OrderV3Types.OrderReceipt memory receipt) {
-        receipt.closeMode = pending.closeMode;
         receipt.commitment = pending.commitment;
         receipt.bounty.bountyEntitlementUsdc = pending.executionBountyUsdc;
         receipt.orderId = orderId;

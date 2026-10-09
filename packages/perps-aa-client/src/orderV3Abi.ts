@@ -41,11 +41,6 @@ export const orderRouterV3Abi = [
             "internalType": "bool"
           },
           {
-            "name": "closeMode",
-            "type": "uint8",
-            "internalType": "enum OrderV3Types.CloseMode"
-          },
-          {
             "name": "bounds",
             "type": "tuple",
             "internalType": "struct OrderV3Types.ExecutionBounds",
@@ -227,25 +222,6 @@ export const orderRouterV3Abi = [
     "stateMutability": "nonpayable"
   },
   {
-    "type": "function",
-    "name": "pendingTerminalExitId",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
     "type": "error",
     "name": "CfdEngine__NoPositionToLiquidate",
     "inputs": []
@@ -365,11 +341,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InvalidCloseMode",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__InvalidEngineLens",
     "inputs": []
   },
@@ -485,6 +456,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__NotCloseOrder",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__NotInSeedLifecycle",
     "inputs": []
   },
@@ -596,22 +572,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__TerminalExitActive",
-    "inputs": [
-      {
-        "name": "orderId",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__TerminalExitBusy",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__TooManyPendingOrders",
     "inputs": []
   },
@@ -660,30 +620,6 @@ export const orderRouterV3Abi = [
 export const closePreviewV3Abi = [
   {
     "type": "function",
-    "name": "fullExitBlockers",
-    "inputs": [
-      {
-        "name": "engineAddress",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "blockers",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "previewClose",
     "inputs": [
       {
@@ -730,11 +666,6 @@ export const closePreviewV3Abi = [
             "name": "isClose",
             "type": "bool",
             "internalType": "bool"
-          },
-          {
-            "name": "closeMode",
-            "type": "uint8",
-            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "bounds",
@@ -1558,17 +1489,6 @@ export const committedOrderV3Abi = [
         "internalType": "uint64"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "CfdOrderPolicyEvaluator__TerminalPositionChanged",
-    "inputs": [
-      {
-        "name": "orderId",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ]
   }
 ] as const;
 
@@ -1718,26 +1638,6 @@ export const orderLifecycleV5Abi = [
           },
           {
             "name": "executionBountyUsdc",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "closeMode",
-            "type": "uint8",
-            "internalType": "enum OrderV3Types.CloseMode"
-          },
-          {
-            "name": "positionEpoch",
-            "type": "uint64",
-            "internalType": "uint64"
-          },
-          {
-            "name": "positionSide",
-            "type": "uint8",
-            "internalType": "enum CfdTypes.Side"
-          },
-          {
-            "name": "positionSize",
             "type": "uint256",
             "internalType": "uint256"
           },
@@ -2229,11 +2129,6 @@ export const orderLifecycleV5Abi = [
             ]
           },
           {
-            "name": "closeMode",
-            "type": "uint8",
-            "internalType": "enum OrderV3Types.CloseMode"
-          },
-          {
             "name": "commitment",
             "type": "tuple",
             "internalType": "struct CfdEnginePlanTypes.CloseCommitment",
@@ -2425,11 +2320,6 @@ export const orderLifecycleV5Abi = [
             "name": "isClose",
             "type": "bool",
             "internalType": "bool"
-          },
-          {
-            "name": "closeMode",
-            "type": "uint8",
-            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "bounds",
@@ -2867,11 +2757,6 @@ export const orderLifecycleV5Abi = [
                 ]
               }
             ]
-          },
-          {
-            "name": "closeMode",
-            "type": "uint8",
-            "internalType": "enum OrderV3Types.CloseMode"
           },
           {
             "name": "commitment",

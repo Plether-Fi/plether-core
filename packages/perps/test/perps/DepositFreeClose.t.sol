@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdClosePreviewTestBase} from "./CfdClosePreviewTestBase.sol";
-import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
+import {CfdClosePreview, ICloseAdmission} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
@@ -11,14 +11,25 @@ import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolic
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
-import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
-import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {Vm} from "forge-std/Vm.sol";
+
+interface ICloseRequestPreview {
+
+    function previewClose(
+        address engine,
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        address executor,
+        uint256 executionPrice,
+        uint64 publishTime
+    ) external view returns (CfdClosePreview.ClosePreview memory);
+
+}
 
 contract DepositFreeCloseTest is CfdClosePreviewTestBase {
 
@@ -31,32 +42,26 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
 
     function _request(
         CfdTypes.Side side,
-        uint256 size,
-        bool callerPaid
+        uint256 size
     ) internal view returns (OrderV3Types.OrderRequest memory request) {
         request.clientOrderId = keccak256(abi.encode("deposit-free", router.nextCommitId()));
         request.side = side;
         request.sizeDelta = size;
         request.targetPrice = side == CfdTypes.Side.LONG ? type(uint256).max : 1;
         request.isClose = true;
-        request.closeMode = callerPaid ? OrderV3Types.CloseMode.CallerPaidFullExit : OrderV3Types.CloseMode.Standard;
         request.bounds = _bounds();
         request.bounds.submitBy = uint64(vm.getBlockTimestamp() + router.maxExecutionWindowSeconds());
         request.bounds.executionWindowSeconds = uint32(router.maxExecutionWindowSeconds());
         request.bounds.expectedConfigHash = router.lifecycleBook().currentExecutionConfigHash();
-        if (callerPaid) {
-            request.bounds.maxPostPositionSize = 0;
-        }
     }
 
     function _closeAtZeroFree(
         CfdTypes.Side side,
         uint256 size,
-        bool callerPaid,
         address executor
     ) internal {
         _openNormally(side, 0);
-        OrderV3Types.OrderRequest memory request = _request(side, size, callerPaid);
+        OrderV3Types.OrderRequest memory request = _request(side, size);
         Balances memory beforeState = Balances(
             clearinghouse.balanceUsdc(ACCOUNT),
             clearinghouse.pnlPledgeUsdc(ACCOUNT),
@@ -71,7 +76,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
         assertEq(uint8(reservation.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
         assertEq(reservation.freeFundedUsdc, 0);
-        assertEq(reservation.pledgeFundedUsdc, callerPaid ? 0 : router.closeOrderExecutionBountyUsdc());
+        assertEq(reservation.pledgeFundedUsdc, router.closeOrderExecutionBountyUsdc());
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), beforeState.custody, "reservation does not debit custody");
         assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), beforeState.margin - reservation.pledgeFundedUsdc);
         assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
@@ -97,11 +102,10 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         assertEq(
             clearinghouse.balanceUsdc(KEEPER) - beforeState.keeper, executor == KEEPER ? reservation.amountUsdc : 0
         );
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
     }
 
     function test_StandardFullLongZeroFree() public {
-        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, false, KEEPER);
+        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, KEEPER);
     }
 
     function test_AdminCanSetZeroCloseBountyAndRestoreAfterStandardFullClose() public {
@@ -124,7 +128,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         routerAdmin.finalizeRouterConfig();
         assertEq(router.closeOrderExecutionBountyUsdc(), 0);
 
-        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, false, KEEPER);
+        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, KEEPER);
         assertEq(
             uint8(
                 clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, router.nextCommitId() - 1)
@@ -143,12 +147,12 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.closeOrderExecutionBountyUsdc = 0;
         _setRouterConfig(config);
-        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE / 2, false, KEEPER);
+        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE / 2, KEEPER);
     }
 
     function test_CommitmentSidecarFailureAndMalformedReturnRollBack() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         address target = address(engine.settlementSidecar());
         bytes memory callData = abi.encodeCall(
             ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty,
@@ -177,65 +181,25 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
     }
 
     function test_StandardFullShortZeroFree() public {
-        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE, false, KEEPER);
+        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE, KEEPER);
     }
 
     function test_StandardPartialLongZeroFree() public {
-        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE / 2, false, KEEPER);
+        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE / 2, KEEPER);
     }
 
     function test_StandardPartialShortSelfZeroFree() public {
-        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE / 2, false, ACCOUNT);
-    }
-
-    function test_CallerPaidLongZeroFree() public {
-        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, true, KEEPER);
-    }
-
-    function test_CallerPaidShortZeroFree() public {
-        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE, true, ACCOUNT);
-    }
-
-    function test_FullExitBlockersFollowProtectionOrdersAndTerminalCleanup() public {
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 1, "flat account");
-        _openNormally(CfdTypes.Side.LONG, 10e6);
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "live unencumbered position");
-        IPositionProtectionActions protection = IPositionProtectionActions(address(router.positionProtectionBook()));
-        vm.prank(ACCOUNT);
-        uint64 protectionId = protection.createPositionProtection(
-            PositionProtectionTypes.PositionProtectionParams({
-                takeProfitTriggerPrice: PRICE - 1e6, stopLossTriggerPrice: PRICE + 1e6
-            })
-        );
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 4, "armed protection");
-        vm.prank(ACCOUNT);
-        protection.cancelPositionProtection(protectionId);
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "cancelled protection");
-
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2, false);
-        vm.prank(ACCOUNT);
-        uint64 id = router.commitOrder(request);
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 2, "ordinary pending close");
-        vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
-        router.expireOrder(id);
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "ordinary expiry clears queue");
-
-        request = _request(CfdTypes.Side.LONG, SIZE, true);
-        vm.prank(ACCOUNT);
-        id = router.commitOrder(request);
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 10, "pending order and exclusive exit lock");
-        vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
-        router.expireOrder(id);
-        assertEq(previewer.fullExitBlockers(address(engine), ACCOUNT), 0, "terminal expiry clears both blockers");
-        (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
-        assertEq(remaining, SIZE, "preview and expiry do not reduce the position");
+        _closeAtZeroFree(CfdTypes.Side.SHORT, SIZE / 2, ACCOUNT);
     }
 
     function test_ProspectiveCloseRejectsAnOpeningRequest() public {
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         request.isClose = false;
         vm.expectRevert(CfdClosePreview.CfdClosePreview__NotCloseOrder.selector);
         previewer.previewClose(address(engine), ACCOUNT, request, KEEPER, PRICE, uint64(block.timestamp));
+        ICloseAdmission admission = ICloseAdmission(router.liquidationBatchSidecar());
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__NotCloseOrder.selector);
+        admission.previewCloseAdmission(ACCOUNT, request);
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
     }
 
@@ -247,7 +211,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         );
         policyEvaluator.assessCommittedOrder(address(engine), 999, KEEPER, PRICE, uint64(block.timestamp));
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         bytes32 pendingBefore = keccak256(abi.encode(router.lifecycleBook().pendingIntent(id)));
@@ -259,14 +223,14 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         );
         policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE, uint64(block.timestamp));
         assertEq(keccak256(abi.encode(router.lifecycleBook().pendingIntent(id))), pendingBefore);
-        assertEq(router.pendingTerminalExitId(ACCOUNT), id, "a read cannot clear the exit lock");
+        assertEq(router.pendingOrderCounts(ACCOUNT), 1, "a read cannot consume the order");
         router.expireOrder(id);
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
     }
 
     function test_CommittedAssessmentRejectsChangedConfigurationAndCanBeRetried() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         bytes32 pendingBefore = keccak256(abi.encode(router.lifecycleBook().pendingIntent(id)));
@@ -287,26 +251,20 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         OrderV3Types.ExecutionAssessment memory assessment =
             policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE, uint64(block.timestamp));
         assertEq(assessment.postPositionSize, 0, "the unchanged order remains assessable");
-        assertEq(router.pendingTerminalExitId(ACCOUNT), id);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 1);
     }
 
-    function test_TerminalLockReplayAndPermissionlessExpiry() public {
+    function test_CloseReplayAndPermissionlessExpiry() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
-        assertEq(router.pendingTerminalExitId(ACCOUNT), id);
         vm.prank(ACCOUNT);
         assertEq(router.commitOrder(request), id);
-        request.clientOrderId = keccak256("different");
-        vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__TerminalExitActive.selector, id));
-        vm.prank(ACCOUNT);
-        router.commitOrder(request);
         vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.expireOrder(id);
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed));
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
         assertEq(
             uint8(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id).state),
@@ -314,45 +272,33 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         );
     }
 
-    function test_AbandonedCallerPaidExitsPermissionlessCleanupUnblocksFifo() public {
-        _abandonedZeroBountyQueue(true, false);
-    }
-
     function test_AbandonedStandardZeroBountyClosesPermissionlessCleanupUnblocksFifo() public {
-        _abandonedZeroBountyQueue(false, false);
-    }
-
-    function test_AbandonedCallerPaidExitsAutoPruneUnblocksFifo() public {
-        _abandonedZeroBountyQueue(true, true);
+        _abandonedZeroBountyQueue(false);
     }
 
     function test_AbandonedStandardZeroBountyClosesAutoPruneUnblocksFifo() public {
-        _abandonedZeroBountyQueue(false, true);
+        _abandonedZeroBountyQueue(true);
     }
 
     function _abandonedZeroBountyQueue(
-        bool callerPaid,
         bool autoPrune
     ) private {
-        if (!callerPaid) {
-            IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-            config.closeOrderExecutionBountyUsdc = 0;
-            _setRouterConfig(config);
-        }
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.closeOrderExecutionBountyUsdc = 0;
+        _setRouterConfig(config);
         _openNormally(CfdTypes.Side.LONG, 0);
         // The same position can submit another attempt after expiry. Each round must unblock another account.
         for (uint256 round; round < 3; ++round) {
-            _abandonedZeroBountyRound(callerPaid, autoPrune, address(uint160(0xF0110 + round)));
+            _abandonedZeroBountyRound(autoPrune, address(uint160(0xF0110 + round)));
         }
     }
 
     function _abandonedZeroBountyRound(
-        bool callerPaid,
         bool autoPrune,
         address follower
     ) private {
         _fundTrader(follower, 1000e6);
-        OrderV3Types.OrderRequest memory abandoned = _request(CfdTypes.Side.LONG, SIZE, callerPaid);
+        OrderV3Types.OrderRequest memory abandoned = _request(CfdTypes.Side.LONG, SIZE);
         abandoned.bounds.executionWindowSeconds = 5;
         vm.prank(ACCOUNT);
         uint64 head = router.commitOrder(abandoned);
@@ -366,7 +312,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint256 keeperBalance = clearinghouse.balanceUsdc(KEEPER);
         uint64 next;
         {
-            OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE, false);
+            OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
             request.isClose = false;
             request.marginDelta = 250e6;
             request.targetPrice = PRICE;
@@ -419,7 +365,6 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         assertEq(followerSize, SIZE);
         assertEq(router.nextExecuteId(), 0);
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
         assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
         assertEq(
             uint8(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, head).state),
@@ -462,9 +407,9 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         revert("missing zero-bounty expiry receipt");
     }
 
-    function test_CallerPaidExpiryUsesCommittedDeadlineAfterSubmitBy() public {
+    function test_CloseExpiryUsesCommittedDeadlineAfterSubmitBy() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         uint64 reviewedAt = uint64(vm.getBlockTimestamp());
         request.bounds.submitBy = reviewedAt + 120;
         request.bounds.executionWindowSeconds = 60;
@@ -484,23 +429,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         OrderV3Types.ExecutionResult memory result = router.expireOrder(id);
         assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
         assertEq(router.lifecycleBook().orderTiming(id).executionDeadline, deadline);
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
-    }
-
-    function test_CallerPaidRejectsPartialAndPendingOrders() public {
-        _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2, true);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidCloseMode.selector);
-        vm.prank(ACCOUNT);
-        router.commitOrder(request);
-        request.closeMode = OrderV3Types.CloseMode.Standard;
-        request.bounds.maxPostPositionSize = type(uint256).max;
-        vm.prank(ACCOUNT);
-        router.commitOrder(request);
-        request = _request(CfdTypes.Side.LONG, SIZE, true);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__TerminalExitBusy.selector);
-        vm.prank(ACCOUNT);
-        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
     }
 
     function testFuzz_ZeroFreeReductions(
@@ -508,7 +437,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         bool shortSide
     ) public {
         uint256 size = bound(uint256(lots), 20, 99) * 100e18;
-        _closeAtZeroFree(shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG, size, false, KEEPER);
+        _closeAtZeroFree(shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG, size, KEEPER);
     }
 
     function _openMaxAtZeroFree(
@@ -544,7 +473,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint256 size = _openMaxAtZeroFree(side);
         uint256 supply = usdc.totalSupply();
         uint256 closeSize = isPartial ? size / 2 / CfdTypes.SIZE_QUANTUM * CfdTypes.SIZE_QUANTUM : size;
-        OrderV3Types.OrderRequest memory request = _request(side, closeSize, false);
+        OrderV3Types.OrderRequest memory request = _request(side, closeSize);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         bytes[] memory update = _mockPythUpdateData(PRICE);
@@ -572,7 +501,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         _maxOpenClose(CfdTypes.Side.SHORT, true);
     }
 
-    function test_CallerPaidAfterRepeatedExpiryExhaustsBountyFunding() public {
+    function test_RepeatedExpiryExhaustsBountyFundingWithoutSilentlyWaivingIt() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.closeOrderExecutionBountyUsdc = 1e6;
         _setRouterConfig(config);
@@ -587,7 +516,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         clearinghouse.withdraw(ACCOUNT, free);
         uint256 attempts;
         for (; attempts < 60; ++attempts) {
-            OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, 1000e18, false);
+            OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, 1000e18);
             vm.prank(ACCOUNT);
             try router.commitOrder(request) returns (uint64 id) {
                 vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
@@ -598,53 +527,41 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         }
         assertGt(attempts, 1);
         assertLt(attempts, 60, "ordinary bounty backing actually exhausted");
-        OrderV3Types.OrderRequest memory terminal = _request(CfdTypes.Side.LONG, 1000e18, true);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, 1000e18);
+        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT)));
+        uint64 nextId = router.nextCommitId();
+        (bool previewOk, bytes memory previewError) = address(previewer)
+            .staticcall(
+                abi.encodeCall(
+                    ICloseRequestPreview.previewClose,
+                    (address(engine), ACCOUNT, request, KEEPER, PRICE, uint64(vm.getBlockTimestamp()))
+                )
+            );
+        assertFalse(previewOk);
+        assertEq(bytes4(previewError), ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        vm.expectRevert(previewError);
         vm.prank(ACCOUNT);
-        uint64 closeId = router.commitOrder(terminal);
-        update = _mockPythUpdateData(PRICE);
-        vm.prank(KEEPER);
-        OrderV3Types.ExecutionResult memory result = router.executeOrder(closeId, update);
-        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        router.commitOrder(request);
+        assertEq(router.closeOrderExecutionBountyUsdc(), 1e6, "failed attempts do not waive the configured bounty");
+        assertEq(keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT))), bucketsBefore);
+        assertEq(router.nextCommitId(), nextId);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
         (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
-        assertEq(remaining, 0);
+        assertEq(remaining, 1000e18);
     }
 
-    function test_TerminalPositionIdentityChangeFailsWithoutResizing() public {
+    function test_LiquidationWinsAndClearsZeroBountyReservation() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.closeOrderExecutionBountyUsdc = 0;
+        _setRouterConfig(config);
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
-        vm.prank(ACCOUNT);
-        uint64 id = router.commitOrder(request);
-        // Synthetic epoch mismatch; actual position remains unchanged.
-        vm.mockCall(
-            address(engine),
-            abi.encodeWithSignature("positionEpoch(address)", ACCOUNT),
-            abi.encode(uint64(engine.positionEpoch(ACCOUNT) + 1))
-        );
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__TerminalPositionChanged.selector, id
-            )
-        );
-        policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, PRICE, uint64(block.timestamp));
-        assertEq(router.pendingTerminalExitId(ACCOUNT), id, "assessment does not finalize the changed position");
-        bytes[] memory update = _mockPythUpdateData(PRICE);
-        vm.prank(KEEPER);
-        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
-        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.TerminalPositionChanged));
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
-        (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
-        assertEq(remaining, SIZE);
-    }
-
-    function test_LiquidationWinsAndClearsZeroReservationTerminalLock() public {
-        _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         bytes[] memory update = _mockPythUpdateData(110_000_000);
         vm.prank(KEEPER);
         router.executeLiquidation(ACCOUNT, update);
-        assertEq(router.pendingTerminalExitId(ACCOUNT), 0);
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
         (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
         assertEq(remaining, 0);
@@ -655,7 +572,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
     }
 
     function test_CloseWinsThenLiquidationHasNoPosition() public {
-        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, true, ACCOUNT);
+        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, ACCOUNT);
         bytes[] memory update = _mockPythUpdateData(110_000_000);
         vm.expectRevert();
         vm.prank(KEEPER);
@@ -680,7 +597,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint256 first = bound(uint256(lotSeed), 20, 80) * CfdTypes.SIZE_QUANTUM;
         for (uint256 i; i < 2; ++i) {
             uint256 size = i == 0 ? first : SIZE - first;
-            OrderV3Types.OrderRequest memory request = _request(side, size, false);
+            OrderV3Types.OrderRequest memory request = _request(side, size);
             vm.prank(ACCOUNT);
             uint64 id = router.commitOrder(request);
             bytes[] memory update = _mockPythUpdateData(PRICE);
@@ -715,7 +632,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         _openNormally(CfdTypes.Side.SHORT, 0);
         uint256 margin = clearinghouse.pnlPledgeUsdc(ACCOUNT);
         uint256 custody = clearinghouse.balanceUsdc(ACCOUNT);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         uint256 backing = router.closeOrderExecutionBountyUsdc();
@@ -764,10 +681,10 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
 
     function test_ExpiryCanRemoveLaterOrderWithoutExecutingOutOfFifo() public {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2);
         vm.prank(ACCOUNT);
         uint64 first = router.commitOrder(request);
-        request = _request(CfdTypes.Side.LONG, SIZE / 2, false);
+        request = _request(CfdTypes.Side.LONG, SIZE / 2);
         request.bounds.executionWindowSeconds -= 1;
         vm.prank(ACCOUNT);
         uint64 second = router.commitOrder(request);
@@ -777,9 +694,12 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         assertEq(router.pendingOrderCounts(ACCOUNT), 1);
     }
 
-    function test_ZeroBountyStillChecksFullExitAdmission() public {
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, true);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidCloseMode.selector);
+    function test_ZeroBountyStillRequiresAnOpenPosition() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.closeOrderExecutionBountyUsdc = 0;
+        _setRouterConfig(config);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector);
         vm.prank(ACCOUNT);
         router.commitOrder(request);
     }
@@ -789,7 +709,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint8 kind
     ) private {
         _openNormally(CfdTypes.Side.LONG, 0);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         vm.record();
@@ -855,11 +775,11 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
     }
 
     function test_OriginalPositionEpochCannotRefundIntoReopenedPosition() public {
-        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, true, ACCOUNT);
+        _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, ACCOUNT);
         uint64 originalEpoch = engine.positionEpoch(ACCOUNT);
         _openNormally(CfdTypes.Side.LONG, 0);
         assertEq(engine.positionEpoch(ACCOUNT), originalEpoch + 1);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         uint256 margin = clearinghouse.pnlPledgeUsdc(ACCOUNT);
@@ -921,7 +841,7 @@ contract DepositFreeCarryTest is DepositFreeCloseTest {
         // Keep price flat to isolate carry. Only time advances; no account storage or funding is injected.
         vm.warp(vm.getBlockTimestamp() + elapsed);
         assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
-        OrderV3Types.OrderRequest memory request = _request(side, size, false);
+        OrderV3Types.OrderRequest memory request = _request(side, size);
         vm.prank(ACCOUNT);
         uint64 id = router.commitOrder(request);
         uint256 commitmentCarry = router.lifecycleBook().pendingIntent(id).commitment.carryCollectedUsdc;
@@ -995,7 +915,7 @@ contract DepositFreeCarryTest is DepositFreeCloseTest {
     function test_CommitmentCarryIncludedOnceAndBoundedBeforeAdmission() public {
         _openNormally(CfdTypes.Side.SHORT, 0);
         vm.warp(vm.getBlockTimestamp() + 1 hours);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
         CfdClosePreview.ClosePreview memory preview =
             previewer.previewClose(address(engine), ACCOUNT, request, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
         assertGt(preview.commitment.carryCollectedUsdc, 0);
@@ -1013,7 +933,7 @@ contract DepositFreeCarryTest is DepositFreeCloseTest {
     function test_CommitmentGrossAndActionBoundsRollBackCarryAndReservation() public {
         _openNormally(CfdTypes.Side.SHORT, 0);
         vm.warp(vm.getBlockTimestamp() + 1 hours);
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE, false);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
         CfdClosePreview.ClosePreview memory preview =
             previewer.previewClose(address(engine), ACCOUNT, request, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
         uint256 carry = preview.commitment.carryCollectedUsdc;

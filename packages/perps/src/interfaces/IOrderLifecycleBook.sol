@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
-import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
@@ -15,15 +14,9 @@ interface IOrderLifecycleBook {
         OrderV3Types.ConstraintKind constraint, uint256 actual, uint256 limit
     );
 
-    function pendingTerminalExitId(
-        address account
-    ) external view returns (uint64);
     function recordCommitment(
         uint64 orderId,
-        CfdEnginePlanTypes.CloseCommitment calldata effects,
-        uint64 epoch,
-        CfdTypes.Side side,
-        uint256 size
+        CfdEnginePlanTypes.CloseCommitment calldata effects
     ) external;
 
     /// @notice A mutation was attempted by an address other than the immutable Router.

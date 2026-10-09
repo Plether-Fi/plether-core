@@ -173,12 +173,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return _getPendingOrderView(orderId);
     }
 
-    function pendingTerminalExitId(
-        address account
-    ) external view returns (uint64) {
-        return lifecycleBook.pendingTerminalExitId(account);
-    }
-
     function expireOrder(
         uint64 orderId
     ) external nonReentrant returns (OrderV3Types.ExecutionResult memory) {

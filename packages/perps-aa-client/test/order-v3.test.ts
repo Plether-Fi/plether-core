@@ -8,7 +8,7 @@ import signatures from "./compatibility/order-v3-signatures.json";
 const account = "0x1111111111111111111111111111111111111111";
 const target = "0x2222222222222222222222222222222222222222";
 const request: OrderRequestV3 = {
-  clientOrderId: `0x${"11".repeat(32)}`, side: 0, sizeDelta: 100n, marginDelta: 20n, targetPrice: 80_000_000n, isClose: false, closeMode: 0,
+  clientOrderId: `0x${"11".repeat(32)}`, side: 0, sizeDelta: 100n, marginDelta: 20n, targetPrice: 80_000_000n, isClose: false,
   bounds: { submitBy: 1_700_000_120n, executionWindowSeconds: 60, allowedExecutionModes: 1,
     expectedConfigHash: `0x${"22".repeat(32)}`, maxExecutionBountyUsdc: 1n, maxExecutionNotionalUsdc: 100n,
     maxGrossAccountDebitUsdc: 5n, maxActionChargeUsdc: 2n, maxExplicitFeesUsdc: 2n, maxPostPositionSize: 100n,

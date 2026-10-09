@@ -54,12 +54,10 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         uint128 cash,
         uint128 carry,
         uint256 outstanding,
-        uint96 freeBounty,
-        bool terminal
+        uint96 freeBounty
     ) public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory request = _request(bytes32("compact-commitment"));
-        request.closeMode = terminal ? OrderV3Types.CloseMode.CallerPaidFullExit : OrderV3Types.CloseMode.Standard;
         request.bounds.maxExecutionBountyUsdc = type(uint96).max;
         request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
         request.bounds.maxActionChargeUsdc = type(uint256).max;
@@ -72,12 +70,9 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         effects.settlementAfterUsdc = (uint256(1) << 200) + cash;
         effects.settlementBeforeUsdc = effects.settlementAfterUsdc + carry;
         effects.freeSettlementAfterUsdc = cash;
-        book.recordCommitment(1, effects, 77, CfdTypes.Side.SHORT, request.sizeDelta);
+        book.recordCommitment(1, effects);
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(1);
         assertEq(keccak256(abi.encode(pending.commitment)), keccak256(abi.encode(effects)));
-        assertEq(pending.positionEpoch, terminal ? 77 : 0);
-        assertEq(pending.positionSize, terminal ? request.sizeDelta : 0);
-        assertEq(uint8(pending.positionSide), uint8(terminal ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG));
     }
 
     function test_CompactCommitmentRejectsInconsistentReconstruction() public {
@@ -88,11 +83,11 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
         effects.carryCollectedUsdc = 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
-        book.recordCommitment(1, effects, 0, CfdTypes.Side.LONG, 0);
+        book.recordCommitment(1, effects);
         effects.settlementBeforeUsdc = 1;
         effects.bountyFromFreeUsdc -= 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
-        book.recordCommitment(1, effects, 0, CfdTypes.Side.LONG, 0);
+        book.recordCommitment(1, effects);
     }
 
     function testFuzz_PackedBoundsPreserveEveryPublicValue(
@@ -157,7 +152,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertEq(
             book.INTENT_TYPEHASH(),
             keccak256(
-                "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint8 closeMode,uint64 submitBy,uint32 executionWindowSeconds,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,uint256 minPostPositionEquityUsdc,uint32 maxPostLeverageBps)"
+                "PletherOrderIntentV3(uint256 chainId,address router,address account,bytes32 clientOrderId,uint8 side,uint256 sizeDelta,uint256 marginDelta,uint256 targetPrice,bool isClose,uint64 submitBy,uint32 executionWindowSeconds,uint8 allowedExecutionModes,bytes32 expectedConfigHash,uint256 maxExecutionBountyUsdc,uint256 maxExecutionNotionalUsdc,uint256 maxGrossAccountDebitUsdc,uint256 maxActionChargeUsdc,uint256 maxExplicitFeesUsdc,uint256 maxPostPositionSize,uint256 minPostSettlementBalanceUsdc,uint256 minPostPositionEquityUsdc,uint32 maxPostLeverageBps)"
             )
         );
         assertEq(
@@ -349,8 +344,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
             request.sizeDelta,
             request.marginDelta,
             request.targetPrice,
-            request.isClose,
-            uint8(request.closeMode)
+            request.isClose
         );
         bytes memory financialPolicy = abi.encode(
             bounds.submitBy,
@@ -579,7 +573,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
                     receipt
                 )
             ),
-            0x174a7dfedc5c5cbdbbf19cfe9319e51754d1d66ddd611f93df6e63c8c27c39fa
+            0xbc2109052facc33653e84d37e4d2686dd4eb53fc9a140cf6f614afe9673af3f4
         );
     }
 

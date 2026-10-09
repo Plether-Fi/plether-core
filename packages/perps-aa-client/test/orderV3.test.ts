@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { decodeFunctionData, encodeErrorResult, parseAbi } from "viem";
-import { buildCloseOrderV3, buildExpireOrderV3, classifyCloseFailureV3, CloseMode, orderRouterV3Abi, type OrderRequestV3 } from "../src/index.js";
+import { buildCloseOrderV3, buildExpireOrderV3, classifyCloseFailureV3, orderRouterV3Abi, type OrderRequestV3 } from "../src/index.js";
 const router = "0x5555555555555555555555555555555555555555";
 const hash = `0x${"11".repeat(32)}` as const;
 const request: OrderRequestV3 = {
   clientOrderId: hash, side: 0, sizeDelta: 10_000n * 10n ** 18n, marginDelta: 0n,
-  targetPrice: 100_000_000n, isClose: true, closeMode: CloseMode.Standard,
+  targetPrice: 100_000_000n, isClose: true,
   bounds: { submitBy: 1_900_000_000n, executionWindowSeconds: 60, allowedExecutionModes: 7, expectedConfigHash: hash,
     maxExecutionBountyUsdc: 200_000n, maxExecutionNotionalUsdc: 10_000_000_000n,
     maxGrossAccountDebitUsdc: 1_000_000n, maxActionChargeUsdc: 500_000n, maxExplicitFeesUsdc: 400_000n,
@@ -13,9 +13,10 @@ const request: OrderRequestV3 = {
     maxPostLeverageBps: 100_000 },
 };
 describe("new-stack close calls", () => {
-  for (const closeMode of [CloseMode.Standard, CloseMode.CallerPaidFullExit]) {
-    it(`encodes mode ${closeMode} as one deposit-free call with exact bounds`, () => {
-      const input = { ...request, closeMode };
+  for (const maxPostPositionSize of [0n, 5_000n * 10n ** 18n]) {
+    it(`encodes a close with a ${maxPostPositionSize} post-size bound as one deposit-free call`, () => {
+      const input = { ...request, sizeDelta: request.sizeDelta - maxPostPositionSize,
+        bounds: { ...request.bounds, maxPostPositionSize } };
       const call = buildCloseOrderV3(router, input);
       expect(call.to).toBe(router);
       expect(call.value).toBe(0n);
@@ -24,10 +25,6 @@ describe("new-stack close calls", () => {
       expect(decoded.args).toEqual([input]);
     });
   }
-  it("rejects a caller-paid request allowing remaining exposure", () => {
-    expect(() => buildCloseOrderV3(router, { ...request, closeMode: CloseMode.CallerPaidFullExit,
-      bounds: { ...request.bounds, maxPostPositionSize: 1n } })).toThrow(/post-position-size/);
-  });
   it("encodes permissionless expiry without price data or funds", () => {
     const call = buildExpireOrderV3(router, 7n);
     expect(call.value).toBe(0n);

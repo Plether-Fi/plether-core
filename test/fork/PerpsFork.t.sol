@@ -315,7 +315,6 @@ contract PerpsForkTest is Test {
                 : (side == CfdTypes.Side.LONG ? 1 : type(uint256).max);
         }
         request = OrderV3Types.OrderRequest({
-            closeMode: OrderV3Types.CloseMode.Standard,
             clientOrderId: keccak256(
                 abi.encode("PerpsForkTest", block.chainid, address(router), trader, router.nextCommitId())
             ),

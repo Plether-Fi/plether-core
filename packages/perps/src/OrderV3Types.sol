@@ -9,10 +9,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 /// @custom:security-contact contact@plether.com
 library OrderV3Types {
 
-    enum CloseMode {
-        Standard,
-        CallerPaidFullExit
-    }
     enum ReservationDiscrepancy {
         None,
         MissingOrSettled,
@@ -100,7 +96,6 @@ library OrderV3Types {
         PlannerRejected,
         ConstraintViolation,
         AccountLiquidated,
-        TerminalPositionChanged,
         ExpiredReservationMismatch
     }
 
@@ -171,7 +166,6 @@ library OrderV3Types {
         uint256 marginDelta;
         uint256 targetPrice;
         bool isClose;
-        CloseMode closeMode;
         ExecutionBounds bounds;
     }
 
@@ -187,10 +181,6 @@ library OrderV3Types {
         bytes32 clientOrderId;
         bytes32 intentHash;
         uint256 executionBountyUsdc;
-        CloseMode closeMode;
-        uint64 positionEpoch;
-        CfdTypes.Side positionSide;
-        uint256 positionSize;
         CfdEnginePlanTypes.CloseCommitment commitment;
         ExecutionBounds bounds;
         OrderTiming timing;
@@ -278,7 +268,6 @@ library OrderV3Types {
         BountyDisposition bountyDisposition;
         FailureDetails failure;
         OrderEconomics economics;
-        CloseMode closeMode;
         CfdEnginePlanTypes.CloseCommitment commitment;
         BountyAccounting bounty;
         OrderTiming timing;

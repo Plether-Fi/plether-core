@@ -32,17 +32,17 @@ function logFor(value = receipt) {
 }
 const input = { ...context, summary, log: logFor() };
 describe("authenticated terminal history", () => {
-  it("retains the historical ABI and appends authenticated timing to the new receipt", () => {
+  it("retains the historical ABI and uses the current single-flow receipt with authenticated timing", () => {
     expect(orderLifecycleV4Abi.some((x) => x.type === "function" && x.name === "outcome")).toBe(true);
     expect(orderLifecycleV5Abi.some((x) => x.type === "function" && (x.name as string) === "outcome")).toBe(false);
     expect(sha256(toHex(JSON.stringify(orderLifecycleV4Abi)))).toBe("0x63e62da0b44d682fb7528a7a6b21b49854ae60f4e3e5c34f1c8ce94b4390bfc1");
     const historical = orderLifecycleV4Abi.find((x) => x.type === "event" && x.name === "OrderFinalized")!;
     expect(event.inputs[6].components.map((x) => x.name)).toEqual([
-      ...historical.inputs[6].components.map((x) => x.name), "timing",
+      ...historical.inputs[6].components.map((x) => x.name).filter((name) => name !== "closeMode"), "timing",
     ]);
   });
   it("matches the independent Solidity golden receipt hash", () => {
-    expect(receiptHash).toBe("0x174a7dfedc5c5cbdbbf19cfe9319e51754d1d66ddd611f93df6e63c8c27c39fa");
+    expect(receiptHash).toBe("0xbc2109052facc33653e84d37e4d2686dd4eb53fc9a140cf6f614afe9673af3f4");
   });
   it("returns complete receipt history after verification", () => {
     // RPC/L2 log position can differ from the Solidity/ancestor-chain receipt clock.

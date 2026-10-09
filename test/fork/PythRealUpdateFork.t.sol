@@ -224,7 +224,6 @@ contract PythRealUpdateForkTest is Test {
         uint256 margin
     ) internal view returns (OrderV3Types.OrderRequest memory request) {
         request = OrderV3Types.OrderRequest({
-            closeMode: OrderV3Types.CloseMode.Standard,
             clientOrderId: keccak256(
                 abi.encode("PythRealUpdateForkTest", block.chainid, address(router), trader, router.nextCommitId())
             ),

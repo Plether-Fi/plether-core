@@ -47,7 +47,7 @@ export function actions(client) {
     client.buildReplaceProtectionAction({ account, book, params, protectionId: 42n }),
     client.buildCancelProtectionAction({ account, book, protectionId: 42n }),
     client.buildProtectedOpenAction({ account, book, params, request: {
-      clientOrderId: word('ab'), side: 1, sizeDelta: 10n ** 18n, marginDelta: 2000000n, targetPrice: 80000000n, isClose: false, closeMode: 0,
+      clientOrderId: word('ab'), side: 1, sizeDelta: 10n ** 18n, marginDelta: 2000000n, targetPrice: 80000000n, isClose: false,
       bounds: { submitBy: 1900000000n, executionWindowSeconds: 60, allowedExecutionModes: 1, expectedConfigHash: word('cd'),
         maxExecutionBountyUsdc: 100000n, maxExecutionNotionalUsdc: 21000000n,
         maxGrossAccountDebitUsdc: 3000000n, maxActionChargeUsdc: 200000n, maxExplicitFeesUsdc: 300000n,

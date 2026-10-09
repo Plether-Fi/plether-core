@@ -44,7 +44,7 @@ export function buildCancelProtectionAction(input: { account: Address; book: Add
 export function buildProtectedOpenAction(input: { account: Address; book: Address; request: ProtectedOpenRequest; params: PositionProtectionParams }): PerpsActionPlan {
   validateParams(input.params);
   const { request } = input;
-  if (request.isClose || request.closeMode !== 0 || request.sizeDelta <= 0n || request.targetPrice <= 0n ||
+  if (request.isClose || request.sizeDelta <= 0n || request.targetPrice <= 0n ||
       (request.side !== 0 && request.side !== 1) ||
       /^0x0{64}$/i.test(request.clientOrderId) || request.clientOrderId.toLowerCase().startsWith("0x504c455448455221") ||
       /^0x0{64}$/i.test(request.bounds.expectedConfigHash) || request.bounds.submitBy <= 0n ||
