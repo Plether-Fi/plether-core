@@ -1,0 +1,812 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+import {LegacyOrderRouterHarness} from "../../utils/LegacyOrderRouterHarness.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEngineAccountLens} from "@plether/perps/CfdEngineAccountLens.sol";
+import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
+import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
+import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
+import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {CfdOrderPolicyEvaluator} from "@plether/perps/CfdOrderPolicyEvaluator.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
+import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
+import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiquidationBatchSidecar.sol";
+import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {PythStructs} from "@plether/shared/interfaces/IPyth.sol";
+import "forge-std/Test.sol";
+
+contract ControllablePythGas {
+
+    struct MockPrice {
+        int64 price;
+        int32 expo;
+        uint256 publishTime;
+    }
+
+    mapping(bytes32 => MockPrice) public prices;
+
+    function setAllPrices(
+        bytes32[] memory feedIds,
+        int64 _price,
+        int32 _expo,
+        uint256 _publishTime
+    ) external {
+        for (uint256 i = 0; i < feedIds.length; i++) {
+            prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
+        }
+    }
+
+    function getPriceUnsafe(
+        bytes32 id
+    ) external view returns (PythStructs.Price memory) {
+        MockPrice memory p = prices[id];
+        return PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
+    }
+
+    function getUpdateFee(
+        bytes[] calldata
+    ) external pure returns (uint256) {
+        return 0;
+    }
+
+    function updatePriceFeeds(
+        bytes[] calldata
+    ) external payable {}
+
+    function parsePriceFeedUpdatesUnique(
+        bytes[] calldata updateData,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) external view returns (PythStructs.PriceFeed[] memory priceFeeds) {
+        bool hasEncodedUpdate = updateData.length > 0 && updateData[0].length == 32;
+        uint256 encodedPrice;
+        if (hasEncodedUpdate) {
+            encodedPrice = abi.decode(updateData[0], (uint256));
+        }
+
+        priceFeeds = new PythStructs.PriceFeed[](priceIds.length);
+        for (uint256 i = 0; i < priceIds.length; i++) {
+            MockPrice memory p = hasEncodedUpdate
+                ? MockPrice(int64(uint64(encodedPrice)), int32(-8), maxPublishTime)
+                : prices[priceIds[i]];
+            require(p.publishTime >= minPublishTime && p.publishTime <= maxPublishTime, "outside range");
+            PythStructs.Price memory price =
+                PythStructs.Price({price: p.price, conf: 0, expo: p.expo, publishTime: p.publishTime});
+            priceFeeds[i] = PythStructs.PriceFeed({id: priceIds[i], price: price, emaPrice: price});
+        }
+    }
+
+}
+
+/// @notice Gas profiling for top 20 perps operations.
+/// Run from the repository root: forge test --root packages/perps --match-contract GasProfileTest -vv
+/// This benchmark always deploys a local mock token and oracle for reproducible gas measurements.
+contract GasProfileTest is Test {
+
+    bytes32 constant EUR_USD_FEED_ID = 0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b;
+    uint256 constant CAP_PRICE = 2e8;
+
+    MarginClearinghouse clearinghouse;
+    CfdEngine engine;
+    CfdEngineAccountLens engineAccountLens;
+    CfdEngineLens engineLens;
+    HousePool pool;
+    TrancheVault seniorVault;
+    TrancheVault juniorVault;
+    LegacyOrderRouterHarness router;
+    ControllablePythGas pyth;
+    address usdc;
+
+    bytes32[] feedIds;
+
+    address alice = makeAddr("alice");
+    address bob = makeAddr("bob");
+    address carol = makeAddr("carol");
+    address keeper = makeAddr("keeper");
+    address lp = makeAddr("lp");
+    address lp2 = makeAddr("lp2");
+
+    function setUp() public {
+        usdc = address(new MockUSDC6());
+        vm.label(usdc, "MockUSDC");
+
+        CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
+            vpiFactor: 0.0005e18,
+            maxSkewRatio: 0.4e18,
+            maintMarginBps: 100,
+            initMarginBps: ((100) * 15) / 10,
+            fadMarginBps: 300,
+            baseCarryBps: 500,
+            minBountyUsdc: 5e6,
+            bountyBps: 10,
+            keeperShareBps: 5000,
+            protocolShareBps: 0
+        });
+
+        clearinghouse = new MarginClearinghouse(usdc);
+        engine = new CfdEngine(usdc, address(clearinghouse), CAP_PRICE, params, 50);
+        CfdEnginePlanner planner = new CfdEnginePlanner();
+        CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
+        CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
+        engine.setDependencies(address(planner), address(settlement), address(engineAdmin));
+        TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
+        engine.setTerminalNavBook(address(terminalNavBook));
+        engineAccountLens = new CfdEngineAccountLens(address(engine));
+        engineLens = new CfdEngineLens(address(engine));
+        pool = new HousePool(usdc, address(engine), address(new HousePoolRedemptionMathSidecar()));
+
+        seniorVault = new TrancheVault(IERC20(usdc), address(pool), true, "Senior LP", "senUSDC", 0, address(0));
+        juniorVault = new TrancheVault(IERC20(usdc), address(pool), false, "Junior LP", "junUSDC", 0, address(0));
+        pool.setSeniorVault(address(seniorVault));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setPool(address(pool));
+
+        pyth = new ControllablePythGas();
+        feedIds.push(EUR_USD_FEED_ID);
+        uint256[] memory w = new uint256[](1);
+        w[0] = 1e18;
+        uint256[] memory b = new uint256[](1);
+        b[0] = 1e8;
+        PletherOracle testOracle =
+            new PletherOracle(address(engine), address(pool), address(pyth), feedIds, w, b, new bool[](1));
+        CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
+        OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
+        address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        OrderLifecycleBook lifecycleBook =
+            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
+        OrderRouterLiquidationBatchSidecar liquidationSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
+        router = new LegacyOrderRouterHarness(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(testOracle),
+            address(liquidationSidecar),
+            address(evaluator),
+            address(executionSidecar),
+            address(lifecycleBook)
+        );
+        assertEq(address(router), predictedRouter);
+        engine.setOrderRouter(address(router));
+
+        uint256 t0 = block.timestamp;
+        clearinghouse.setEngine(address(engine));
+        IHousePool.PoolConfig memory poolConfig = IHousePool.PoolConfig({
+            seniorRateBps: pool.seniorRateBps(),
+            markStalenessLimit: pool.markStalenessLimit(),
+            seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
+            juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
+            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorShareBps: 9999
+        });
+        pool.proposePoolConfig(poolConfig);
+        vm.warp(t0 + 144 hours + 3);
+        pool.finalizePoolConfig();
+
+        uint256 seedAmount = 1000e6;
+        _mintUsdc(address(this), seedAmount * 2);
+        IERC20(usdc).approve(address(pool), seedAmount * 2);
+        pool.initializeSeedPosition(false, seedAmount, address(this));
+        pool.initializeSeedPosition(true, seedAmount, address(this));
+        pool.activateTrading();
+
+        _fundTrancheAsync(juniorVault, lp, 1_000_000e6);
+    }
+
+    // ==========================================
+    // Oracle fixture preparation and keeper-balance reads happen before each gas measurement.
+    // Each sample measures the intended keeper call, with receipt credit checked afterward.
+    // GAS PROFILING — 20 operation families
+    // ==========================================
+
+    // --- 1. commitOrder (open) ---
+    function test_gas_01_commitOrder_open() public {
+        _depositToClearinghouse(alice, 10_000e6);
+
+        vm.prank(alice);
+        uint256 g0 = gasleft();
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8, false);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("01_commitOrder_open", gas);
+    }
+
+    // --- 2. commitOrder (close) ---
+    function test_gas_02_commitOrder_close() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
+
+        vm.prank(alice);
+        uint256 g0 = gasleft();
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("02_commitOrder_close", gas);
+    }
+
+    // --- 3. executeOrder (open, first position — cold storage) ---
+    function test_gas_03_executeOrder_open_first() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        uint256 ts = block.timestamp;
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8, false);
+
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        uint256 g0 = gasleft();
+        router.executeOrder(1, updateData);
+        uint256 gas = g0 - gasleft();
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+        emit log_named_uint("03_executeOrder_open_first", gas);
+    }
+
+    // --- 4. executeOrder (open, increase existing position — warm storage) ---
+    function test_gas_04_executeOrder_open_increase() public {
+        _depositToClearinghouse(alice, 20_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
+
+        uint256 ts = block.timestamp + 30;
+        vm.warp(ts);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 3000e6, 1e8, false);
+
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        uint256 g0 = gasleft();
+        router.executeOrder(2, updateData);
+        uint256 gas = g0 - gasleft();
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+        emit log_named_uint("04_executeOrder_open_increase", gas);
+    }
+
+    // --- 5. executeOrder (close, full) ---
+    function test_gas_05_executeOrder_close_full() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
+
+        uint256 ts = block.timestamp + 30;
+        vm.warp(ts);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
+
+        pyth.setAllPrices(feedIds, int64(95_000_000), int32(-8), ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        uint256 g0 = gasleft();
+        router.executeOrder(2, updateData);
+        uint256 gas = g0 - gasleft();
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+        emit log_named_uint("05_executeOrder_close_full", gas);
+    }
+
+    // --- 6. executeOrder (close, partial) ---
+    function test_gas_06_executeOrder_close_partial() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
+
+        uint256 ts = block.timestamp + 30;
+        vm.warp(ts);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 0, 0, true);
+
+        pyth.setAllPrices(feedIds, int64(95_000_000), int32(-8), ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        uint256 g0 = gasleft();
+        router.executeOrder(2, updateData);
+        uint256 gas = g0 - gasleft();
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+        emit log_named_uint("06_executeOrder_close_partial", gas);
+    }
+
+    // --- 7. executeOrderBatch (3 orders) ---
+    function test_gas_07_executeOrderBatch_3() public {
+        _depositToClearinghouse(alice, 20_000e6);
+        _depositToClearinghouse(bob, 20_000e6);
+        _depositToClearinghouse(carol, 20_000e6);
+
+        uint256 ts = block.timestamp;
+
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 30_000e18, 3000e6, 1e8, false);
+        vm.prank(bob);
+        router.commitOrder(CfdTypes.Side.SHORT, 25_000e18, 2500e6, 1e8, false);
+        vm.prank(carol);
+        router.commitOrder(CfdTypes.Side.LONG, 20_000e18, 2000e6, 1e8, false);
+
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        uint256 g0 = gasleft();
+        router.executeOrderBatch(3, updateData);
+        uint256 gas = g0 - gasleft();
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+        emit log_named_uint("07_executeOrderBatch_3_orders", gas);
+    }
+
+    // --- 8. executeLiquidation ---
+    function test_gas_08_executeLiquidation() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+
+        // Withdraw free margin so position is thinly margined
+        address aliceAccount = _account(alice);
+        uint256 balance = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
+        if (balance > locked) {
+            vm.prank(alice);
+            clearinghouse.withdraw(aliceAccount, balance - locked);
+        }
+
+        // Price rises → LONG loses. $1.10 = -$10k PnL on $100k notional
+        uint256 liqTs = block.timestamp + 60;
+        vm.warp(liqTs);
+        pyth.setAllPrices(feedIds, int64(110_000_000), int32(-8), liqTs);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        uint256 g0 = gasleft();
+        router.executeLiquidation(aliceAccount, updateData);
+        uint256 gas = g0 - gasleft();
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+        emit log_named_uint("08_executeLiquidation", gas);
+    }
+
+    // --- 9. addMargin ---
+    function test_gas_09_addMargin() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 3000e6, 1e8);
+
+        address aliceAccount = _account(alice);
+
+        vm.prank(alice);
+        uint256 g0 = gasleft();
+        engine.addMargin(aliceAccount, 1000e6);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("09_addMargin", gas);
+    }
+
+    // --- 10. settleTraderClaim ---
+    function test_gas_10_settleTraderClaim() public {
+        _depositToClearinghouse(alice, 11_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 100_000e18, 9000e6, 1e8);
+
+        address aliceAccount = _account(alice);
+
+        // Drain pool to force trader claim
+        uint256 poolAssets = IERC20(usdc).balanceOf(address(pool));
+        vm.prank(address(pool));
+        IERC20(usdc).transfer(address(0xDEAD), poolAssets - 9000e6);
+
+        // Close at profit; payout becomes a trader claim (use external call for clean timestamp reads)
+        this._closeAtPrice(alice, CfdTypes.Side.LONG, 100_000e18, int64(80_000_000));
+
+        uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        require(traderClaim > 0, "Setup failed: no trader claim balance");
+
+        // Replenish pool so claim can succeed
+        _mintUsdc(address(pool), traderClaim);
+
+        vm.prank(alice);
+        uint256 g0 = gasleft();
+        engine.settleTraderClaim(aliceAccount);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("10_settleTraderClaim", gas);
+    }
+
+    // --- 11. clearinghouse.deposit ---
+    function test_gas_11_clearinghouse_deposit() public {
+        _mintUsdc(alice, 10_000e6);
+        vm.startPrank(alice);
+        IERC20(usdc).approve(address(clearinghouse), type(uint256).max);
+
+        address aliceAccount = _account(alice);
+        uint256 g0 = gasleft();
+        clearinghouse.deposit(aliceAccount, 5000e6);
+        uint256 gas = g0 - gasleft();
+        vm.stopPrank();
+        emit log_named_uint("11_clearinghouse_deposit", gas);
+    }
+
+    // --- 12. clearinghouse.withdraw ---
+    function test_gas_12_clearinghouse_withdraw() public {
+        _depositToClearinghouse(alice, 10_000e6);
+
+        address aliceAccount = _account(alice);
+        vm.prank(alice);
+        uint256 g0 = gasleft();
+        clearinghouse.withdraw(aliceAccount, 5000e6);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("12_clearinghouse_withdraw", gas);
+    }
+
+    // --- 13a/b. juniorVault.requestDeposit on both sides of the request cutoff ---
+    function test_gas_13a_juniorVault_requestDeposit_beforeCutoff() public {
+        _profileRequestDeposit(juniorVault, 100_000e6, false, "13a_juniorVault_requestDeposit_before_cutoff");
+    }
+
+    function test_gas_13b_juniorVault_requestDeposit_atCutoff() public {
+        _profileRequestDeposit(juniorVault, 100_000e6, true, "13b_juniorVault_requestDeposit_at_cutoff");
+    }
+
+    // --- 14a/b. juniorVault.requestRedeem on both sides of the request cutoff ---
+    function test_gas_14a_juniorVault_requestRedeem_beforeCutoff() public {
+        _profileRequestRedeem(juniorVault, 100_000e6, 50_000e6, false, "14a_juniorVault_requestRedeem_before_cutoff");
+    }
+
+    function test_gas_14b_juniorVault_requestRedeem_atCutoff() public {
+        _profileRequestRedeem(juniorVault, 100_000e6, 50_000e6, true, "14b_juniorVault_requestRedeem_at_cutoff");
+    }
+
+    // --- 15a/b. seniorVault.requestDeposit on both sides of the request cutoff ---
+    function test_gas_15a_seniorVault_requestDeposit_beforeCutoff() public {
+        _profileRequestDeposit(seniorVault, 500_000e6, false, "15a_seniorVault_requestDeposit_before_cutoff");
+    }
+
+    function test_gas_15b_seniorVault_requestDeposit_atCutoff() public {
+        _profileRequestDeposit(seniorVault, 500_000e6, true, "15b_seniorVault_requestDeposit_at_cutoff");
+    }
+
+    // --- 16a/b. seniorVault.requestRedeem on both sides of the request cutoff ---
+    function test_gas_16a_seniorVault_requestRedeem_beforeCutoff() public {
+        _profileRequestRedeem(seniorVault, 500_000e6, 200_000e6, false, "16a_seniorVault_requestRedeem_before_cutoff");
+    }
+
+    function test_gas_16b_seniorVault_requestRedeem_atCutoff() public {
+        _profileRequestRedeem(seniorVault, 500_000e6, 200_000e6, true, "16b_seniorVault_requestRedeem_at_cutoff");
+    }
+
+    // --- 17. previewClose ---
+    function test_gas_17_previewClose() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
+
+        address aliceAccount = _account(alice);
+        uint256 g0 = gasleft();
+        engineLens.previewClose(aliceAccount, 50_000e18, 0.95e8);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("17_previewClose", gas);
+    }
+
+    // --- 18. previewLiquidation ---
+    function test_gas_18_previewLiquidation() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
+
+        address aliceAccount = _account(alice);
+        uint256 g0 = gasleft();
+        engineLens.previewLiquidation(aliceAccount, 1.1e8);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("18_previewLiquidation", gas);
+    }
+
+    // --- 19. getAccountLedgerSnapshot ---
+    function test_gas_19_getAccountLedgerSnapshot() public {
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
+
+        address aliceAccount = _account(alice);
+        uint256 g0 = gasleft();
+        engineAccountLens.getAccountLedgerSnapshot(aliceAccount);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("19_getAccountLedgerSnapshot", gas);
+    }
+
+    // --- 20. getPoolLiquidityView ---
+    function test_gas_20_getPoolLiquidityView() public {
+        // Add some state: positions + both tranches
+        _fundTrancheAsync(seniorVault, lp2, 500_000e6);
+
+        _depositToClearinghouse(alice, 10_000e6);
+        _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
+
+        uint256 g0 = gasleft();
+        pool.getPoolLiquidityView();
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint("20_getPoolLiquidityView", gas);
+    }
+
+    // --- Batch scaling ---
+
+    function test_gas_21_executeOrderBatch_30() public {
+        _batchOpenTest(30);
+    }
+
+    function test_gas_22_executeOrderBatch_300() public {
+        _batchOpenTest(300);
+    }
+
+    function _batchOpenTest(
+        uint256 n
+    ) internal {
+        // Seed pool with enough liquidity for all positions
+        _fundTrancheAsync(juniorVault, lp, n * 100_000e6);
+
+        uint256 ts = block.timestamp;
+
+        for (uint256 i = 0; i < n; i++) {
+            address trader = address(uint160(0xA000 + i));
+            _depositToClearinghouse(trader, 5000e6);
+            CfdTypes.Side side = i % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
+            vm.prank(trader);
+            router.commitOrder(side, 10_000e18, 1000e6, 1e8, false);
+        }
+
+        pyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        uint256 g0 = gasleft();
+        router.executeOrderBatch(uint64(n), updateData);
+        uint256 gasUsed = g0 - gasleft();
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+
+        emit log_named_uint(string.concat("batch_", vm.toString(n), "_total"), gasUsed);
+        emit log_named_uint(string.concat("batch_", vm.toString(n), "_per_order"), gasUsed / n);
+    }
+
+    // ==========================================
+    // HELPERS
+    // ==========================================
+
+    function _profileRequestDeposit(
+        TrancheVault vault,
+        uint256 assets,
+        bool cutoffWindow,
+        string memory label
+    ) internal {
+        _mintUsdc(lp2, assets);
+        vm.prank(lp2);
+        IERC20(usdc).approve(address(vault), type(uint256).max);
+
+        _warpToRequestWindowSide(vault, cutoffWindow);
+        _refreshMark();
+
+        vm.prank(lp2);
+        uint256 g0 = gasleft();
+        vault.requestDeposit(assets, lp2, lp2);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint(label, gas);
+    }
+
+    function _profileRequestRedeem(
+        TrancheVault vault,
+        uint256 fundingAssets,
+        uint256 redeemAssets,
+        bool cutoffWindow,
+        string memory label
+    ) internal {
+        uint256 fundedShares = _fundTrancheAsync(vault, lp2, fundingAssets);
+        vm.warp(block.timestamp + vault.DEPOSIT_COOLDOWN());
+        _warpToRequestWindowSide(vault, cutoffWindow);
+
+        uint256 requestedShares = vault.estimateWithdrawShares(redeemAssets);
+        assertLe(requestedShares, fundedShares, "redeem setup exceeds funded shares");
+
+        vm.prank(lp2);
+        uint256 g0 = gasleft();
+        vault.requestRedeem(requestedShares, lp2, lp2);
+        uint256 gas = g0 - gasleft();
+        emit log_named_uint(label, gas);
+    }
+
+    function _warpToRequestWindowSide(
+        TrancheVault vault,
+        bool cutoffWindow
+    ) internal {
+        (, uint256 nextCutoffTime) = vault.getRequestEpochWindow();
+        assertGt(nextCutoffTime, block.timestamp, "request cutoff must be in the future");
+        vm.warp(cutoffWindow ? nextCutoffTime : nextCutoffTime - 1);
+    }
+
+    function _fundTrancheAsync(
+        TrancheVault vault,
+        address provider,
+        uint256 assets
+    ) internal returns (uint256 shares) {
+        _mintUsdc(provider, assets);
+        vm.startPrank(provider);
+        IERC20(usdc).approve(address(vault), assets);
+        uint256 requestId = vault.requestDeposit(assets, provider, provider);
+        vm.stopPrank();
+
+        uint256 activationTime = vault.depositEpochStart(requestId);
+        if (block.timestamp < activationTime) {
+            vm.warp(activationTime);
+        }
+        _refreshMark();
+        pool.settleLpEpoch(0, 0);
+
+        uint256 claimableAssets = vault.claimableDepositRequest(requestId, provider);
+        assertEq(claimableAssets, assets, "async tranche funding did not finalize");
+        vm.prank(provider);
+        shares = vault.claimDeposit(requestId, claimableAssets, provider, provider);
+        assertGt(shares, 0, "async tranche funding produced no shares");
+    }
+
+    function _refreshMark() internal {
+        uint256 markPrice = engine.lastMarkPrice();
+        vm.prank(address(router));
+        engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
+    }
+
+    function _mintUsdc(
+        address to,
+        uint256 amount
+    ) internal {
+        MockUSDC6(usdc).mint(to, amount);
+    }
+
+    function _depositToClearinghouse(
+        address trader,
+        uint256 amount
+    ) internal {
+        _mintUsdc(trader, amount);
+        vm.startPrank(trader);
+        IERC20(usdc).approve(address(clearinghouse), amount);
+        clearinghouse.deposit(_account(trader), amount);
+        vm.stopPrank();
+    }
+
+    function _openPosition(
+        address trader,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 margin,
+        uint256 targetPrice
+    ) internal {
+        uint256 ts = block.timestamp;
+        uint64 orderId = router.nextCommitId();
+
+        vm.prank(trader);
+        router.commitOrder(side, size, margin, targetPrice, false);
+
+        pyth.setAllPrices(feedIds, int64(int256(targetPrice)), int32(-8), ts + 6);
+        vm.warp(ts + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        router.executeOrder(orderId, updateData);
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+    }
+
+    function _closeAtPrice(
+        address trader,
+        CfdTypes.Side side,
+        uint256 size,
+        int64 pythPrice
+    ) external {
+        uint256 commitTime = block.timestamp + 30;
+        vm.warp(commitTime);
+        uint64 orderId = router.nextCommitId();
+
+        vm.prank(trader);
+        router.commitOrder(side, size, 0, 0, true);
+
+        pyth.setAllPrices(feedIds, pythPrice, int32(-8), commitTime + 6);
+        vm.warp(commitTime + 7);
+        vm.roll(block.number + 2);
+
+        bytes[] memory updateData = _pythUpdateData();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        vm.prank(keeper);
+        router.executeOrder(orderId, updateData);
+        assertGt(clearinghouse.balanceUsdc(keeper), keeperBefore, "intended keeper must receive execution credit");
+    }
+
+    function _account(
+        address trader
+    ) internal pure returns (address) {
+        return trader;
+    }
+
+    function _pythUpdateData() internal view returns (bytes[] memory updateData) {
+        (int64 price,,) = pyth.prices(feedIds[0]);
+        if (price <= 0) {
+            price = int64(100_000_000);
+        }
+        updateData = new bytes[](1);
+        updateData[0] = abi.encode(uint256(uint64(price)));
+    }
+
+}
+
+contract MockUSDC6 {
+
+    string public constant name = "Mock USDC";
+    string public constant symbol = "USDC";
+    uint8 public constant decimals = 6;
+    uint256 public totalSupply;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+
+    function mint(
+        address to,
+        uint256 amount
+    ) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+        emit Transfer(address(0), to, amount);
+    }
+
+    function approve(
+        address spender,
+        uint256 amount
+    ) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
+        return true;
+    }
+
+    function transfer(
+        address to,
+        uint256 amount
+    ) external returns (bool) {
+        return _transfer(msg.sender, to, amount);
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) {
+            allowance[from][msg.sender] = allowed - amount;
+        }
+        return _transfer(from, to, amount);
+    }
+
+    function _transfer(
+        address from,
+        address to,
+        uint256 amount
+    ) internal returns (bool) {
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
+        return true;
+    }
+
+}

@@ -492,35 +492,7 @@ Reachability note:
 
 ## Test Map
 
-Use the suites below as the highest-signal audit companions.
-
-| Theme | Primary suites |
-|-------|----------------|
-| Carry | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/CfdEnginePlanRegression.t.sol`, `packages/perps/test/perps/MarginClearinghouse.t.sol` |
-| Trader claim modes | `packages/perps/test/perps/TraderClaimsMatrix.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol` |
-| Liquidation | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol` |
-| Payout modes | `packages/perps/test/perps/PayoutModesMatrix.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol` |
-| Trader claim liabilities | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol` |
-| Settlement-liability buffer / raw degraded boundary | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditFollowupFindingsFailing.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol` |
-| Economic conservation | `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
-| Multi-account isolation | `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
-| FIFO / expiry / queue | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
-| Permanent intent identity / config versions / typed execution bounds / authenticated receipts | `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/AdminConfigVersion.t.sol`, `packages/perps/test/perps/CfdOrderPolicyEvaluator.t.sol`, `packages/perps/test/perps/CfdOrderPolicyEvaluatorParity.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
-| Protection latching and bounty retention | `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/PositionProtectionLiquidationBatch.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
-| Three-action emergency containment / persistent risk-off refunds | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol`, `packages/perps/test/perps/TimelockPause.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/invariant/EmergencyRiskOffInvariant.t.sol`, `test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol` |
-| Frozen oracle / FAD | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol` |
-| Oracle refresh / ETH refunds | `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
-| Fee accounting | `packages/perps/test/perps/invariant/PerpFeeFlowInvariant.t.sol` |
-| Open/close/liquidation preview parity | `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpClosePreviewParityInvariant.t.sol`, `packages/perps/test/perps/PreviewExecutionDifferential.t.sol` |
-| LP reserve / withdrawals | `packages/perps/test/perps/MarginClearinghouse.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
-| HousePool snapshot parity | `packages/perps/test/perps/HousePoolSnapshotParity.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
-| Exact terminal NAV / close conservation | `packages/perps/test/perps/TerminalNavBookV2.t.sol`, `packages/perps/test/perps/TerminalNavCloseConservation.t.sol`, `packages/perps/test/perps/TerminalNavIntegrationSecurity.t.sol` |
-| HousePool lifecycle / activation-aged cooldown / direct claim-escrow redemption | `packages/perps/test/perps/ClaimableDepositRedeem.t.sol`, `packages/perps/test/perps/PerpsPublicLensDepositCooldown.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
-| Governed senior capacity / delayed reservations | `packages/perps/test/perps/SeniorCapacity.t.sol`, `packages/perps/test/perps/FrozenLpFeePolicy.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
-| Router policy matrix | `packages/perps/test/perps/OrderRouterPolicyMatrix.t.sol` |
-| Stale-mark / reconcile behavior | `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |
-| Redemption-math sidecar parity | `packages/perps/test/perps/HousePoolRedemptionMathLib.t.sol`, `packages/perps/test/perps/HousePoolRedemptionPhaseGuard.t.sol` |
-| Settlement monitor / hold / cutoff observation | `packages/perps/test/perps/SettlementMonitorLens.t.sol`, `packages/perps/test/perps/PerpsPublicLens.t.sol`, `packages/perps/test/perps/LpRequestCutoff.t.sol`, `test/scripts/LpEpochKeeper.t.sol` |
-| Audit-history regressions | `packages/perps/test/perps/AuditCurrentFindingsVerification.t.sol`, `packages/perps/test/perps/AuditFindings.t.sol`, `packages/perps/test/perps/AuditV2.t.sol`, `packages/perps/test/perps/AuditV3.t.sol` |
-
-Historical or obsolete regression names that still mention legacy spread labels are audit-history artifacts, not live accounting concepts. When those names appear, trust the surrounding comments and the current accounting docs rather than the historical label.
+Use [`test/perps/TEST_MAP.md`](test/perps/TEST_MAP.md) as the authoritative index of critical rules, exact test
+entrypoints, assertion methods, fixture boundaries, execution profiles, and remaining gaps. The index distinguishes
+independent models from production parity and synthetic-state tests. Historical finding names are not normative
+policy, and passing examples do not establish the absence of defects.

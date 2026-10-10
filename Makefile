@@ -21,7 +21,7 @@ test: test-packages test-integration
 
 test-packages: $(addprefix test-, $(TEST_PACKAGES))
 
-$(addprefix test-, $(TEST_PACKAGES)):
+$(addprefix test-, $(filter-out perps,$(TEST_PACKAGES))):
 	forge test --root packages/$(@:test-%=%)
 
 test-integration:
@@ -29,7 +29,6 @@ test-integration:
 
 coverage-spot coverage-options coverage-perps: COVERAGE_FLAGS := --ir-minimum
 coverage-spot coverage-options: COVERAGE_TEST_FLAGS := --no-match-test 'testFuzz_|invariant_'
-coverage-perps: COVERAGE_TEST_FLAGS := --no-match-test 'testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)|test_Batch_SplitComponentsFitDeploymentLimits|test_AtomicLpEpoch_RuntimeFitsEip170|test_Batch_SplitComponentBindingAndRuntimeFitsEip170|test_OrderRouterCreationCodeAndConstructorArgsFitEip3860|test_SettlementMonitorLens(RuntimeFitsEip170|CreationInputFitsEip3860)|test_Batch_MaxPendingOrdersLiquidatesWithinItemGasBudget|test_Gas_RiskOffKeeperCallRefundsExactly64OpensWithinBlockBudget|test_Gas_RiskOffSingleTargetCleanupFitsAcceptanceGate|testProductionRuntimeFitsEip170|test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating|test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund'
 
 coverage-spot coverage-options:
 	FOUNDRY_SRC=packages/$(@:coverage-%=%)/src \
@@ -37,7 +36,27 @@ coverage-spot coverage-options:
 	FOUNDRY_SCRIPT=integration/src forge coverage $(COVERAGE_FLAGS) $(COVERAGE_TEST_FLAGS)
 
 coverage-perps:
-	bash scripts/run-perps-coverage.sh $(COVERAGE_FLAGS) $(COVERAGE_TEST_FLAGS)
+	bash scripts/run-perps-coverage.sh $(COVERAGE_FLAGS)
 
 fmt-check:
 	forge fmt --check packages test script
+
+.PHONY: test-perps-quick test-perps-ci test-perps-audit test-perps-fork check-perps-tests
+check-perps-tests:
+	python3 scripts/check-perps-test-map.py
+	python3 -m unittest discover -s scripts -p 'test_perps_runners.py'
+	python3 scripts/perps-test-inventory.py
+
+test-perps: test-perps-quick
+
+test-perps-quick:
+	FOUNDRY_PROFILE=quick bash scripts/run-perps-fast-tests.sh
+
+test-perps-ci:
+	FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef bash scripts/run-perps-fast-tests.sh
+
+test-perps-audit:
+	bash scripts/run-perps-audit-tests.sh
+
+test-perps-fork:
+	bash scripts/run-perps-fork-tests.sh

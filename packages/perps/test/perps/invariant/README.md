@@ -1,7 +1,85 @@
 # Perps Invariant Suites
 
 This directory contains handler-driven Foundry invariant campaigns and bounded state-machine fuzz tests for the
-perps system. Coverage descriptions below refer to the assertions and actor domains in each harness.
+perps system. Coverage descriptions below refer to the assertions and actor domains in each harness. Executable suites live in
+`properties/`; deployment fixtures, handlers, mocks, and reference ledgers are kept alongside that directory.
+
+## Evidence and failure handling
+
+- **Independent reference models** compute expected state from initial conditions and action inputs. The claim,
+  fee, VPI/frozen-spread, and waterfall campaigns below have explicit bounded domains; none proves every interaction.
+- **Reconciliation** checks agreement among observed storage, custody, snapshots, and tracked ownership. In particular,
+  `PerpAccountingHandler` keeps observed claim mirrors for batch/account reconciliation. Those mirrors are separate
+  from `PerpGhostLedger` and are not an independent oracle for the correctness of claim amounts.
+- **Differential checks** compare previews/planners with execution or other public views. Shared production arithmetic
+  can make both sides agree on the same error; these checks complement the independent models.
+- Every invariant campaign inherits `fail_on_revert = true` from the default Foundry profile. An unexpected outer
+  handler revert therefore fails validation under default, quick, CI, audit, and coverage profiles. Expected protocol business
+  rejections remain caught within adversarial actions and are counted by selector; strict handling therefore also
+  exposes a reverted ghost assertion or arithmetic failure. `PerpAccountingHandler` classifies caught bytes by action
+  domain, custom-error selector, and ABI length (including exact planner error codes). Unknown errors, empty data,
+  `Error(string)`, and `Panic(uint256)` fail validation. Returned `EngineFailure` or `ReceiptFailure` pending outcomes
+  also fail. Deterministic injection tests cover both thrown and returned failures. The bounded models additionally
+  classify exact expected rejections or retain sticky unexpected-failure counters. The main/adversarial Router
+  handlers classify commit error payloads and reject internal pending failures. Oracle rejection expectations include
+  the current live/frozen policy and timestamp precedence. LP lifecycle handlers distinguish state-qualified
+  frozen/capacity rejection and exact `NoLpEpochProgress` from all other failures. Positive value-conservation
+  fixtures require their setup calls to succeed and distinguish the intentional slippage rejection from a successful
+  close. Snapshot scenarios persist outcome counters after restoring economic state.
+- Deterministic reachability and deliberately perturbed accounting tests establish that the new models exercise
+  successful transitions and detect incorrect balances. More runs cannot replace these checks.
+
+## Campaign entrypoints
+
+There are 20 invariant entrypoints. Each retained campaign has a domain name describing its checks; reconciliation
+and parity names do not claim independent economic modeling. The 17 former `invariant_job1`/`invariant_job2` pairs
+called the same `_assertAllInvariants()` body with identical setup, targets and configuration. Each second wrapper
+was removed and both baseline entries map to the retained, renamed entrypoint. Assertion bodies, actor domains,
+profile budgets and seed selection are unchanged.
+
+The prior CI run produced identical per-selector metrics for every pair. A separate fixed-seed replay of one pair
+also produced identical full handler call traces; the prior full CI traces were compacted, so that exact-history
+comparison is limited to the replay. Additional exploration uses the configured depth, runs and separate seeds.
+This cleanup removes duplicate execution without changing economic expectations.
+
+## Reachability and fault sensitivity
+
+Successful setup is asserted before fault injection; the following negative controls perturb the deployed subject
+or its dependency response while retaining the reference model. They must fail the normal reconciliation assertion.
+
+| Subject | Reachable transition | Negative control |
+| --- | --- | --- |
+| Claims and base withdrawal reserve | Deferred and immediate full closes, claim consumption, live-position claim settlement | Add one atom to per-account or aggregate Engine claim storage; the reserve model also detects the aggregate mutation |
+| Fee custody and payout | Repeated open/close/treasury-withdraw cycles | Add/remove one atom of treasury credit, or burn one atom of the paid wallet balance |
+| VPI and frozen spread | Positive/negative VPI, frozen partial/full close, thaw | Add one atom of unmodeled pool cash |
+| LP waterfall | Junior loss, Senior impairment/restoration, coupon accrual, recapitalization | Add one atom of unmodeled pool cash |
+| Bounty custody and payment | Fund protection, trigger it, then execute its close | Add one atom to the actual reservation aggregate, or remove one atom of actual execution-keeper credit |
+| Shared accounting handler | Execute a real queued order, then reject the sixth pending commit | Inject unknown/empty/built-in errors or malformed planner codes; return internal Engine/receipt failures |
+| Explicit preview/live scenarios | Successful close, liquidation, and paired roundtrip | Inject an unexpected open failure and verify its counter survives snapshot rollback |
+
+The properties use counters to distinguish successful comparisons from intentional no-op or invalid-preview cases.
+A counter does not turn a rejected action into evidence for successful settlement. Random action coverage remains
+bounded by each handler's actor set and input range.
+
+## Independent campaigns
+
+- `properties/PerpIndependentClaimInvariant.t.sol`: persistent three-account claim creation, same-account price-loss
+  consumption, immediate payout, and all-or-nothing claim settlement at zero/own-claim/global-minus-one/exact/surplus
+  pool liquidity. Checks settlement and PnL-pledge credits, pool cash, aggregate claims, and the base Engine withdrawal reserve from input-derived position liabilities plus
+  claims and an independently rounded buffer (excluding real-vault epoch reserves). Uses funded full closes,
+  fixed time, zero VPI, and a mock HousePool; it does not model partial-close health, Router policy, carry, or LP NAV.
+- `properties/PerpFeeFlowInvariant.t.sol`: independent amount and wallet ledger for funded live-market opens and full
+  closes, with actual queued Router execution and unique oracle updates. Covers gain/loss/flat outcomes and rounding;
+  zero VPI/carry and ample liquidity exclude fee waivers, deferred-claim priority, and liquidation charges.
+- `properties/PerpVpiFrozenAccountingInvariant.t.sol`: persistent nonzero-VPI opens/increases and partial/full closes,
+  lifetime clamp and reserve tracking, and successful nonzero frozen-spread settlement across freeze/thaw. Computes
+  expected quadratic costs and cash independently at a fixed mark with zero carry. Calls the Engine as its configured
+  Router; the Router oracle/degraded authorization matrix is covered separately in `../matrices/`.
+- `properties/PerpWaterfallReferenceInvariant.t.sol`: persistent real-pool Junior-first losses, Senior impairment,
+  revenue restoration, coupon ratcheting, and recapitalization priority with an input-derived cash/principal/HWM
+  model. Both seeded tranches retain their owners. Router authorization and the Engine-only recapitalization inflow
+  are explicit harness boundaries; issuance/redemption, carry, VPI, deferred claims, and raw-cash shortage remain
+  outside this model. Existing lifecycle and capacity campaigns cover those LP queue paths separately.
 
 ## Suites
 
@@ -24,7 +102,7 @@ perps system. Coverage descriptions below refer to the assertions and actor doma
 - `PerpTraderClaimInvariant.t.sol`
   - Catches trader claim and liquidity-gating bugs
   - Verifies trader claim status matches engine storage and current HousePool liquidity
-  - Verifies trader claim ghost accounting stays fully model-derived and reconciles with engine totals
+  - Verifies observed per-account claim mirrors reconcile with engine totals; independent claim amounts are checked by the dedicated reference campaign
   - Verifies close and liquidation previews use all-or-nothing immediate vs trader claim gating
 
 - `PerpOracleBoundaryInvariant.t.sol`
@@ -40,7 +118,7 @@ perps system. Coverage descriptions below refer to the assertions and actor doma
 
 - `PerpFeeFlowInvariant.t.sol`
   - Catches fee accrual, custody, and withdrawal drift
-  - Verifies a handler-side fee model tracks accumulated and withdrawn fees
+  - Verifies independently calculated execution fees reconcile with accumulated and withdrawn treasury value
   - Verifies the canonical protocol accounting snapshot includes the same live treasury fee balance
   - Verifies the live fee balance remains clearinghouse-custodied
 
@@ -60,7 +138,7 @@ perps system. Coverage descriptions below refer to the assertions and actor doma
   - Verifies withdrawal reserves include maximum directional liability, trader claims, and the liability-scaled
     settlement buffer
   - Verifies terminal price loss never exceeds same-account claim plus PnL-pledge collection; any excess is a diagnostic write-off rather than protocol debt or terminal deficit
-  - Verifies ghost-tracked trader claims match engine storage and totals
+  - Verifies observed claim mirrors stay complete across processed accounts and reconcile with engine totals
 
 - `PerpValueConservationInvariant.t.sol`
   - Catches adversarial value-category transitions in the full perps stack
@@ -69,15 +147,23 @@ perps system. Coverage descriptions below refer to the assertions and actor doma
 
 - `PerpClosePreviewParityInvariant.t.sol`
   - Catches drift between close previews and canonical-depth simulations
-  - Verifies valid sampled partial closes preserve the minimum residual-margin floor
-  - When a full close is valid, restricts invalid sampled partial closes to `PartialCloseUnderwater` or `DustPosition`
+  - Independently checks valid partial-close residual health from whole lots, exact remaining entry basis, capped
+    mark, remaining PnL pledge, and same-account claims, strictly above the floored maintenance/FAD requirement
+  - Treats liquidation/VPI reserves as separate buckets; `minBountyUsdc` is not a residual pledge floor
+  - Executes a reachable claim-backed partial close whose remaining pledge is below the minimum liquidation bounty,
+    checking actual size, pledge, claims, exact entry basis, separate liquidation reserve, and authenticated receipt
+  - When a full close is valid, restricts invalid canonical partial closes to `PartialActionChargeUncollectible`
+    or `PartialCloseUnhealthy`; the legacy `DustPosition` ABI value must not be emitted
   - Verifies fresh payout is either immediately credited or added to the remaining existing trader claim, with the
     two fresh-payout modes mutually exclusive
-  - Note: the currently named carry-accrual invariant performs no time warp or
-    carry assertion; timed carry conservation is covered by
-    `PerpValueConservationInvariant.t.sol`
+  - Samples partial-close previews for non-reversion; this is not a carry-accrual or payout-funding assertion.
+    Timed carry conservation is covered separately by `PerpValueConservationInvariant.t.sol`
 
 - `PerpExplicitAccountingInvariant.t.sol`
+  - Runs isolated snapshot/revert scenarios, preserving mismatch/outcome counters but not economic state between calls;
+    depth is the number of independent scenarios, not a persistent trading history
+  - Seeds a successful close, liquidation, and paired roundtrip comparison; unexpected setup failures remain visible
+    after snapshot rollback, while invalid previews are counted as skipped scenarios
   - Exercises preview/live parity for successful closes and liquidations against
     the full deployed accounting stack
   - Verifies paired Long/Short round trips conserve LP, trader, and protocol value
@@ -148,37 +234,41 @@ perps system. Coverage descriptions below refer to the assertions and actor doma
 The stateful suites are high-signal conformance checks, not a complete proof of
 the accounting specification.
 
-- The current invariant harnesses use a zero VPI factor. Unit, fuzz, differential,
-  and matrix tests cover nonzero VPI arithmetic and lifetime clamps, but the
-  stateful invariant family does not yet exercise nonzero VPI.
-- The stateful invariant family does not currently drive a successful
-  oracle-frozen voluntary close with a nonzero frozen spread. Dedicated
-  frozen-close tests cover assessed/paid/waived allocation.
+- Most older campaigns retain zero VPI. The dedicated persistent VPI/frozen campaign adds funded nonzero-VPI and
+  frozen-spread settlement. Combined nonzero-VPI, unpaid carry, deferred claims, and stressed LP lifecycle histories
+  are not covered by one independent model; dedicated direct tests cover assessed/paid/waived spread allocation.
 - `PerpHousePoolLifecycleInvariant.t.sol` covers the active vault lifecycle,
   seed floors, cooldowns, caps, escrow routing, settlement holds, and excess accounting. Its maintenance-fee companion
   covers active Junior dilution and settlement pricing. The separate
   `GovernedSeniorCapacityInvariant.t.sol` covers the bounded pending senior
   request/cancel/finalize/claim state machine, reservation conservation, and
   stateful reachability on both sides of the shared request cutoff; it does not
-  model every possible epoch or governance transition.
+  model every possible epoch or governance transition. Epoch reservations and pending claims are reconciled against
+  observed queue/share state; the independent base Engine withdrawal-reserve model excludes those real-vault
+  reservations.
 - Degraded transition flags and post-operation balances are checked by
   `PerpPreviewInvariant.t.sol`; preview/live degraded settlement parity is
   additionally exercised by `PerpExplicitAccountingInvariant.t.sol`.
 - The stateful suites align protocol accounting views and withdrawal-reserve
   composition, but they do not prove the asymptotic complexity of endpoint
   aggregation or independently prove every projected admission branch.
-- The complete senior/junior waterfall - junior-first loss, senior high-water
-  restoration, coupon ratcheting, and recapitalization priority - is covered by
-  direct `HousePool.t.sol` tests rather than a dedicated stateful invariant.
+- The bounded persistent waterfall model covers Junior-first loss, Senior restoration, coupon ratcheting, and
+  recapitalization priority. It does not combine every waterfall transition with pending epoch/share transactions;
+  the lifecycle/capacity suites and domain-specific accounting tests remain complementary evidence.
 - FIFO structure and reservation ownership are statefully checked. Binding
   order-field immutability and the first unique strictly post-commit historical
-  Pyth tick are covered by direct `OrderRouter.t.sol` tests, not a dedicated
-  invariant. Protection cancellation is separate from queued-order cleanup: ordinary FIFO orders have no user
+  Pyth tick are covered by `../spec/trader/OrderRouterCommitment.t.sol` and
+  `../spec/oracle/OrderRouterExecutionFreshness.t.sol`, not a dedicated invariant. Protection cancellation is separate from queued-order cleanup: ordinary FIFO orders have no user
   cancellation path. `ProtectionBountyStateMachine.t.sol` checks the protection/attempt reservation state machine.
-- Timed carry ownership is statefully checked, while utilization-rate arithmetic
+- Timed carry ownership is checked with snapshot-isolated scenarios, while utilization-rate arithmetic
   and simultaneous carry on both sides remain direct-test/model properties.
 - Oracle/FAD boundary invariants do not span the complete two-axis authorization
   matrix formed by the oracle/calendar state and the degraded-mode latch.
+- Committed margin tracks per-order ownership and reconciles reservations, but parts of the older ghost ledger
+  still observe production reservation deltas. That evidence is weaker than the independent bounty/claim/fee models.
+  The current protocol has clearinghouse-held bounty reservations and directly credited keeper rewards; it has no
+  deferred-keeper-credit or stored protocol-bad-debt bucket to model. Uncollectible price tails are diagnostic
+  writeoffs and are checked as such.
 - Account-capped price collection, failed full-close value safety, and preview/live terminal
   parity are statefully exercised. No single invariant quantifies over every
   valid insolvent terminal path and every risk-increasing entry point.
@@ -203,7 +293,11 @@ the accounting specification.
   - Stateful fuzz actor that performs deposits, withdrawals, order commits, execution, liquidation, payout claims, and HousePool mode changes
 
 - `ghost/PerpGhostLedger.sol`
-  - Independent ghost model for liquidation snapshots, committed margin ownership, and execution bounty reservation tracking
+  - Tracks liquidation observations and committed-margin ownership for the adversarial accounting handler. Per-order
+    reservation transitions also reconcile against production state; this is not a fully independent economic model.
+
+- `handlers/PerpClaimModelHandler.sol`
+  - Independent expected claims and position lifecycle; expected balances never synchronize from Engine storage
 
 - `handlers/PerpOracleHandler.sol` and `handlers/PerpFeeHandler.sol`
   - Dedicated oracle/calendar and protocol-fee fuzz actors; several full-stack suites define their handlers locally
@@ -217,6 +311,9 @@ the accounting specification.
 Run from the repository root. The package root selects the perps test tree and compiler configuration:
 
 ```bash
+forge test --root packages/perps --match-contract PerpIndependentClaimInvariantTest
+forge test --root packages/perps --match-contract PerpVpiFrozenAccountingInvariantTest
+forge test --root packages/perps --match-contract PerpWaterfallReferenceInvariantTest
 forge test --root packages/perps --match-contract PerpAccountingInvariantTest
 forge test --root packages/perps --match-contract PerpPreviewInvariantTest
 forge test --root packages/perps --match-contract PerpTraderClaimInvariantTest

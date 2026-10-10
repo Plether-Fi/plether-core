@@ -20,9 +20,36 @@ optimizer = true
 optimizer_runs = 200
 via_ir = true
 
-[fuzz]
+# The default matches the local quick lane. CI/audit never override these budgets.
+[profile.default.fuzz]
 seed = "0xdeadbeef"
 runs = 256
+
+[profile.default.invariant]
+runs = 16
+depth = 128
+fail_on_revert = true
+
+[profile.quick.fuzz]
+runs = 256
+
+[profile.quick.invariant]
+runs = 16
+depth = 128
+
+[profile.ci.fuzz]
+runs = 2000
+
+[profile.ci.invariant]
+runs = 32
+depth = 256
+
+[profile.audit.fuzz]
+runs = 20000
+
+[profile.audit.invariant]
+runs = 256
+depth = 1000
 
 [fmt]
 line_length = 120
@@ -35,7 +62,3 @@ number_underscore = "thousands"
 single_line_statement_blocks = "multi"
 sort_imports = true
 contract_new_lines = true
-
-[invariant]
-runs = 16
-depth = 500

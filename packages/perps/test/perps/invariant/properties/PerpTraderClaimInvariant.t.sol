@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
+import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
+
+contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
+
+    PerpAccountingHandler internal handler;
+
+    function setUp() public override {
+        super.setUp();
+
+        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
+        handler.seedActors(50_000e6, 100_000e6);
+
+        bytes4[] memory selectors = new bytes4[](8);
+        selectors[0] = handler.depositCollateral.selector;
+        selectors[1] = handler.withdrawCollateral.selector;
+        selectors[2] = handler.commitOpenOrder.selector;
+        selectors[3] = handler.createTraderClaim.selector;
+        selectors[4] = handler.settleTraderClaim.selector;
+        selectors[5] = handler.setPoolAssets.selector;
+        selectors[6] = handler.fundHousePool.selector;
+        selectors[7] = handler.liquidate.selector;
+
+        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
+        targetContract(address(handler));
+    }
+
+    function _assertInvariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity() internal view {
+        uint256 totalTraderClaimBalanceUsdc;
+        uint256 poolAssets = housePool.totalAssets();
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address account = _account(handler.actorAt(i));
+            ClaimEngineViewTypes.TraderClaimStatus memory status = _traderClaimStatus(account, address(handler));
+            uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
+
+            assertEq(status.traderClaimBalanceUsdc, traderClaimBalanceUsdc, "Trader claim status amount mismatch");
+            assertEq(
+                status.traderClaimServiceableNow,
+                traderClaimBalanceUsdc > 0 && poolAssets > 0,
+                "Trader claim serviceability mismatch"
+            );
+
+            totalTraderClaimBalanceUsdc += traderClaimBalanceUsdc;
+        }
+
+        assertEq(totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc(), "Total trader claim mismatch");
+    }
+
+    function _assertInvariant_ObservedClaimsReconcileAcrossTrackedAccounts() internal view {
+        uint256 observedTotalTraderClaimUsdc;
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address account = _account(handler.actorAt(i));
+            uint256 observedTraderClaimUsdc = handler.traderClaimSnapshot(account);
+            uint256 liveTraderClaimUsdc = engine.traderClaimBalanceUsdc(account);
+
+            assertEq(
+                observedTraderClaimUsdc, liveTraderClaimUsdc, "Observed trader claim balance must match engine state"
+            );
+            observedTotalTraderClaimUsdc += observedTraderClaimUsdc;
+        }
+
+        assertEq(
+            handler.totalTraderClaimSnapshot(),
+            observedTotalTraderClaimUsdc,
+            "Observed trader claim total must match tracked account sum"
+        );
+        assertEq(
+            engine.totalTraderClaimBalanceUsdc(), observedTotalTraderClaimUsdc, "Engine trader claim total mismatch"
+        );
+    }
+
+    function _assertInvariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating() internal view {
+        uint256 oraclePrice = _previewOraclePrice();
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address account = _account(handler.actorAt(i));
+            (uint256 size,,,,,,) = engine.positions(account);
+            if (size == 0) {
+                continue;
+            }
+
+            ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, oraclePrice);
+            if (!preview.valid) {
+                continue;
+            }
+
+            uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
+                ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
+                : 0;
+            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshTraderClaimUsdc;
+            if (totalFreshPayoutUsdc == 0) {
+                continue;
+            }
+
+            assertEq(
+                preview.immediatePayoutUsdc == 0,
+                freshTraderClaimUsdc > 0,
+                "Close preview must choose immediate or trader claim"
+            );
+            assertEq(
+                totalFreshPayoutUsdc, preview.freshTraderPayoutUsdc, "Close preview fresh payout split must reconcile"
+            );
+            uint256 freeCashForFreshPayouts =
+                CashPriorityLib.reserveFreshPayouts(housePool.totalAssets(), engine.totalTraderClaimBalanceUsdc())
+            .freeCashUsdc;
+            if (freeCashForFreshPayouts >= totalFreshPayoutUsdc) {
+                assertEq(freshTraderClaimUsdc, 0, "Close preview must not defer when HousePool is liquid");
+            } else {
+                assertEq(preview.immediatePayoutUsdc, 0, "Close preview must fully defer when HousePool is illiquid");
+            }
+        }
+    }
+
+    function _assertInvariant_LiquidationPreviewUsesAllOrNothingHousePoolLiquidityGating() internal view {
+        uint256 oraclePrice = _previewOraclePrice();
+
+        for (uint256 i = 0; i < handler.actorCount(); i++) {
+            address account = _account(handler.actorAt(i));
+            ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
+            uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc > preview.existingTraderClaimRemainingUsdc
+                ? preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc
+                : 0;
+            uint256 totalFreshPayoutUsdc = preview.immediatePayoutUsdc + freshTraderClaimUsdc;
+
+            if (totalFreshPayoutUsdc == 0) {
+                continue;
+            }
+
+            assertEq(
+                preview.immediatePayoutUsdc == 0,
+                freshTraderClaimUsdc > 0,
+                "Fresh liquidation payout must choose immediate settlement or trader claim balance"
+            );
+            if (housePool.totalAssets() >= totalFreshPayoutUsdc) {
+                assertEq(
+                    freshTraderClaimUsdc,
+                    0,
+                    "Liquidation preview must not defer the fresh payout when HousePool liquidity is sufficient"
+                );
+            } else {
+                assertEq(
+                    preview.immediatePayoutUsdc,
+                    0,
+                    "Liquidation preview must fully defer the fresh payout when HousePool is illiquid"
+                );
+            }
+        }
+    }
+
+    function _previewOraclePrice() internal view returns (uint256) {
+        uint256 price = engine.lastMarkPrice();
+        return price == 0 ? 1e8 : price;
+    }
+
+    function _account(
+        address actor
+    ) internal pure returns (address) {
+        return actor;
+    }
+
+    /// forge-config: default.invariant.fail-on-revert = true
+    /// forge-config: quick.invariant.fail-on-revert = true
+    /// forge-config: ci.invariant.fail-on-revert = true
+    /// forge-config: audit.invariant.fail-on-revert = true
+    function invariant_ObservedClaimsAndLiquidityGatingReconcile() public view {
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants() internal view {
+        _assertInvariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity();
+        _assertInvariant_ObservedClaimsReconcileAcrossTrackedAccounts();
+        _assertInvariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating();
+        _assertInvariant_LiquidationPreviewUsesAllOrNothingHousePoolLiquidityGating();
+    }
+
+}

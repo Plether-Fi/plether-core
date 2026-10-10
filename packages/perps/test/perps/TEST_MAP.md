@@ -1,0 +1,198 @@
+# Perps test map
+
+The current specification defines expected behavior. Test names, historical findings, and green runs are evidence to
+inspect, not alternative specifications or proof that vulnerabilities are absent. Start with
+[ACCOUNTING_SPEC.md](../../ACCOUNTING_SPEC.md), [SECURITY.md](../../SECURITY.md), and
+[PRE_AUDIT_GUIDE.md](../../PRE_AUDIT_GUIDE.md), then use the exact entrypoints below.
+
+## Reading the evidence
+
+- **Independent model:** expected values advance from inputs and a separate ledger; production observations are comparisons.
+- **Direct expected behavior:** explicit outcomes, fixed examples, boundary values, custody changes, and rollback checks.
+- **Parity:** agreement between production surfaces or preview and execution; shared implementation can share a bug.
+- **Synthetic state:** storage mutation or capability impersonation isolates a kernel; it does not prove public reachability.
+- **Full-stack execution:** real package contracts with the stated token/oracle doubles; external integrations remain separate.
+
+All active correctness tests are expected to pass. An exposed implementation defect must be fixed separately; it must
+not be hidden by skipping the test, narrowing the scenario, or changing the asserted specification. Removed historical
+sources remain available in Git history. Review migration reports are validation artifacts, not live policy documents.
+
+## Critical rules
+
+Unless a row says otherwise, its execution lane is PR `ci`, post-merge production `ci`, and nightly/pre-audit `audit`.
+Unit/ordinary fuzz cases run once per selected profile; only `invariant_*` entrypoints have invariant depth.
+
+| Rule / normative source | Exact test or property | Evidence method | Fixture limits / gaps | Execution lane |
+|---|---|---|---|---|
+| [Buffered admission and rounding](../../ACCOUNTING_SPEC.md#settlement-buffer-terms) | [SettlementBuffer.t.sol](accounting/cash-priority/SettlementBuffer.t.sol)::`test_HasRequiredSettlementBuffer_AcceptsEqualityAndRejectsOneAtomLess` | Direct boundary values | Pure reserve kernel; execution also covered by queued buffer invalidation | Correctness (PR and deep) |
+| [Post-commit buffer revalidation](../../ACCOUNTING_SPEC.md#settlement-buffer-terms) | [SettlementBuffer.t.sol](accounting/cash-priority/SettlementBuffer.t.sol)::`test_QueuedOpenIsRevalidatedAndTerminallyFailsAfterBufferIncrease` | Full-stack execution | Mock oracle; validates current governance configuration | Correctness (PR and deep) |
+| [Rounded liability buffer across live mark staleness](../../ACCOUNTING_SPEC.md#settlement-buffer-terms) | [EngineCarrySettlement.t.sol](accounting/carry/EngineCarrySettlement.t.sol)::`test_HousePoolSnapshot_ReservesRoundedSettlementBufferAcrossLiveMarkStaleness` | Independent liability and ceiling arithmetic; snapshot checks | View-only; 37 bps and odd entry price; selected live freshness limit and one second beyond | Correctness (PR and deep) |
+| [Rounded liability buffer across frozen mark staleness](../../ACCOUNTING_SPEC.md#settlement-buffer-terms) | [EngineCarrySettlement.t.sol](accounting/carry/EngineCarrySettlement.t.sol)::`test_HousePoolSnapshot_ReservesRoundedSettlementBufferAcrossFrozenMarkStaleness` | Independent liability and ceiling arithmetic; snapshot checks | View-only; 37 bps and odd entry price; frozen freshness limit and one second beyond | Correctness (PR and deep) |
+| [Degraded latch excludes buffer](../../ACCOUNTING_SPEC.md#degraded-mode) | [SettlementBuffer.t.sol](accounting/cash-priority/SettlementBuffer.t.sol)::`test_RawSolvencyCanClearDegradedModeWhileNewExposureRemainsBufferBlocked` | Full-stack execution | Distinguishes raw solvency from entry headroom | Correctness (PR and deep) |
+| [Initial margin and position direction](../../ACCOUNTING_SPEC.md#open-projection) | [EnginePositionAdmission.t.sol](spec/trader/EnginePositionAdmission.t.sol)::`test_OpenPosition_UsesExplicitInitMarginBps` | Direct expected behavior | Explicit IMR; admission property below adds fuzz coverage | Correctness (PR and deep) |
+| [Single direction per account](../../ACCOUNTING_SPEC.md#open-projection) | [EnginePositionAdmission.t.sol](spec/trader/EnginePositionAdmission.t.sol)::`test_OpposingPosition_Reverts` | Direct expected behavior | Engine boundary; Router lifecycle tested separately | Correctness (PR and deep) |
+| [Exact basis and capped price collection](../../ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms) | [TerminalNavCloseConservation.t.sol](accounting/close/TerminalNavCloseConservation.t.sol)::`testFuzz_PartialPriceLossPreservesTerminalValue` | Independent conservation | Whole-lot partial-close price loss; no exhaustive carry/VPI cross product | Correctness (PR and deep) |
+| [Terminal book curve replacement](../../ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms) | [TerminalNavBookV2.t.sol](accounting/waterfall/TerminalNavBookV2.t.sol)::`testFuzz_AggregateReplacementAndRemovalMatchDirectSum` | Independent direct-sum model | Bounded account/price domain, separate authenticated Engine integration | Correctness (PR and deep) |
+| [Terminal curve authentication](../../ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms) | [TerminalNavBookV2.t.sol](accounting/waterfall/TerminalNavBookV2.t.sol)::`test_StrictExpectedHashRejectsStaleLivePositionSynchronization` | Direct expected behavior | Book unit fixture | Correctness (PR and deep) |
+| [Trader-claim seniority and all-claim liquidity gate](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [EngineTraderClaims.t.sol](accounting/claims/EngineTraderClaims.t.sol)::`test_SettleTraderClaim_RevertsDuringAggregateShortfallEvenForLargestClaimant` | Execution and custody | Real Engine; controlled liquidity | Correctness (PR and deep) |
+| [Claim payment restores settlement custody](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [EngineTraderClaims.t.sol](accounting/claims/EngineTraderClaims.t.sol)::`test_SettleTraderClaim_CreditsClearinghouseWhenLiquidityReturns` | Execution and custody | Deterministic claim creation and payment | Correctness (PR and deep) |
+| [Claims consumed before diagnostic write-off](../../ACCOUNTING_SPEC.md#liquidation-settlement) | [EngineLiquidationAccounting.t.sol](accounting/liquidation/EngineLiquidationAccounting.t.sol)::`test_Liquidation_ConsumesTraderClaimBeforeWritingOffTerminalPriceLoss` | Execution accounting | Write-off is diagnostic; no accumulated-debt ledger | Correctness (PR and deep) |
+| [Carry source priority and conservation](../../ACCOUNTING_SPEC.md#lp-capital-carry) | [MarginFirstCarry.t.sol](accounting/carry/MarginFirstCarry.t.sol)::`testFuzz_AllocationConservesAndProtectsOtherBuckets` | Independent arithmetic and conservation | Allocation kernel; persistent account histories have separate tests | Correctness (PR and deep) |
+| [Carry checkpoints and exact-once collection](../../ACCOUNTING_SPEC.md#lp-capital-carry) | [MarginFirstCarry.t.sol](accounting/carry/MarginFirstCarry.t.sol)::`testFuzz_CheckpointInterleavingsConserveCarry` | Differential conservation | Bounded checkpoint sequences | Correctness (PR and deep) |
+| [Transient NAV and downstream rollback](../../ACCOUNTING_SPEC.md#lp-capital-carry) | [MarginFirstCarry.t.sol](accounting/carry/MarginFirstCarry.t.sol)::`test_TransientNavReadBlockedAndDownstreamRevertRestoresAccounting` | Fault-injected execution | Adversarial token fixture | Correctness (PR and deep) |
+| [Credit/claim rollback](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [CarryCreditCheckpoint.t.sol](accounting/carry/CarryCreditCheckpoint.t.sol)::`test_InsufficientClaimLiquidityRollsBackCollection` | Execution and custody | Also checks carry collection rollback | Correctness (PR and deep) |
+| [Reservation ownership and exact-once disposition](../../ACCOUNTING_SPEC.md#pending-order-reservation-model) | [ClearinghouseReservationOwnership.t.sol](accounting/cash-priority/ClearinghouseReservationOwnership.t.sol)::`test_BountyReservationCannotBeTakenForAnotherAccountOrTwice` | Direct authority and conservation | Clearinghouse capability fixture | Correctness (PR and deep) |
+| [Reservation FIFO and protected floors](../../ACCOUNTING_SPEC.md#pending-order-reservation-model) | [ClearinghouseReservationOwnership.t.sol](accounting/cash-priority/ClearinghouseReservationOwnership.t.sol)::`test_ReservationFloorsAndFifoConsumptionDoNotReadRouterAccounting` | Direct authority and conservation | Router accounting is deliberately unavailable | Correctness (PR and deep) |
+| [Carry-neutral cleanup](../../ACCOUNTING_SPEC.md#pending-order-reservation-model) | [MarginClearinghouseReservationRelease.t.sol](accounting/cash-priority/MarginClearinghouseReservationRelease.t.sol)::`test_TerminalCleanup_SkipsCarryAndReconcilesReservationAccounting` | Execution and custody | Authorized Router cleanup; excludes unrelated carry realization | Correctness (PR and deep) |
+| [Permanent client identity and replay](../../ACCOUNTING_SPEC.md#order-state-model) | [OrderLifecycleBook.t.sol](spec/trader/OrderLifecycleBook.t.sol)::`test_ResolveAndRegisterExactReplayAreNoOpsEvenAfterTerminal` | Direct state-machine behavior | Lifecycle Book unit fixture | Correctness (PR and deep) |
+| [Authenticated terminal receipt](../../ACCOUNTING_SPEC.md#order-state-model) | [OrderLifecycleBook.t.sol](spec/trader/OrderLifecycleBook.t.sol)::`testFuzz_ReceiptVerificationRejectsAlteredFullHistory` | Fuzzed authenticated encoding | Receipt integrity; economic application covered separately | Correctness (PR and deep) |
+| [Execution configuration authority](../../ACCOUNTING_SPEC.md#order-state-model) | [OrderLifecycleBook.t.sol](spec/trader/OrderLifecycleBook.t.sol)::`test_CurrentExecutionConfigHashCommitsToEveryCriticalIntegrationAndVersion` | Direct expected behavior | Configuration binding, not settlement arithmetic | Correctness (PR and deep) |
+| [Unknown failures remain retryable](../../ACCOUNTING_SPEC.md#order-state-model) | [OrderRouterExecutionSidecar.t.sol](spec/trader/OrderRouterExecutionSidecar.t.sol)::`testUnknownPanicAndEmptyFailuresRemainRetryable` | Fault-injected execution | Planner failure double; checks policy classification | Correctness (PR and deep) |
+| [Global FIFO](../../ACCOUNTING_SPEC.md#order-state-model) | [OrderRouterQueueLifecycle.t.sol](spec/keeper/OrderRouterQueueLifecycle.t.sol)::`test_StrictFIFO_OutOfOrder_Reverts` | Full-stack execution | Mock oracle | Correctness (PR and deep) |
+| [Adversarial batch outcomes and reservation ownership](../../ACCOUNTING_SPEC.md#order-state-model) | [PerpInvariant.t.sol](invariant/properties/PerpInvariant.t.sol)::`invariant_AdversarialQueueProgressAndReservationsStayConsistent` | Authenticated receipts, per-batch custody reconciliation and persistent queue checks | Bounded ordinary orders and mock oracle; terminal failure can advance the queue, while a documented nonterminal stop must preserve pending custody | Correctness (PR and deep) |
+| [Funded adversarial execution is reachable](../../ACCOUNTING_SPEC.md#open-projection) | [PerpInvariant.t.sol](invariant/properties/PerpInvariant.t.sol)::`test_AdversarialHandlerPreservesRejectedSpamAndValidExecution` | Deterministic full-stack execution | Rejected spam followed by funded single-order and batch execution; success is demonstrated separately from adverse histories | Correctness (PR and deep) |
+| [Starved batches settle terminal failures and keeper bounties](../../ACCOUNTING_SPEC.md#open-order-failure-policy) | [PerpInvariant.t.sol](invariant/properties/PerpInvariant.t.sol)::`test_AdversarialStarvedBatchesSettleFailuresAndBountiesWithoutSuccessfulExecution` | Authenticated receipts, exact USDC recipient changes and reservation cleanup | 33 planner-rejected batches with a $10 pool floor; stale admission mark then fresh execution mark; no replenishment or successful execution | Correctness (PR and deep) |
+| [Close-only blocking preserves the pending head](../../ACCOUNTING_SPEC.md#oracle-and-freshness-policy) | [PerpInvariant.t.sol](invariant/properties/PerpInvariant.t.sol)::`test_AdversarialCloseOnlyBatchPreservesPendingHeadAndReservations` | Deterministic calendar boundary and custody preservation | Open committed before FAD; actual CloseOnly stop preserves FIFO head, $2,000 margin, $0.20 bounty and physical custody | Correctness (PR and deep) |
+| [Queued state preservation on stale oracle](../../ACCOUNTING_SPEC.md#oracle-and-freshness-policy) | [OrderRouterQueueRecovery.t.sol](spec/keeper/OrderRouterQueueRecovery.t.sol)::`testFuzz_StaleOracleRevertPreservesReservationAndQueue` | Execution conservation | Generated stale timestamps; recovery checked separately | Correctness (PR and deep) |
+| [Frozen stale-mark withdrawal preserves accounting](../../ACCOUNTING_SPEC.md#oracle-and-freshness-policy) | [EngineCarrySettlement.t.sol](accounting/carry/EngineCarrySettlement.t.sol)::`test_WithdrawMargin_RejectsFrozenStaleMarkWithoutAccountingMutation` | Exact rejection and accounting rollback | Funded withdrawal with a surviving position at frozen freshness limit plus one second; checks custody, reservations, carry, curve and pool accounting | Correctness (PR and deep) |
+| [Whole-lot gate before reservation](../../ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms) | [OrderRouterCommitment.t.sol](spec/trader/OrderRouterCommitment.t.sol)::`test_NonLotPartialCloseCommit_RevertsBeforeQueueMutation` | Full-stack execution | Commit validation with exact failure | Correctness (PR and deep) |
+| [Dust full-close exception](../../ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms) | [OrderRouterCommitment.t.sol](spec/trader/OrderRouterCommitment.t.sol)::`test_DustFullResidualCloseCommit_Allowed` | Full-stack execution | Residual full close only | Correctness (PR and deep) |
+| [Protection reservation namespace](../../ACCOUNTING_SPEC.md#position-protection-bounty-policy) | [ProtectionBountyStateMachine.t.sol](invariant/properties/ProtectionBountyStateMachine.t.sol)::`testFuzz_ProtectionBountiesFollowIndependentLedger` | Independent state machine | Bounded protection histories; not ordinary FIFO user cancellation | Correctness (PR and deep) |
+| [Protection trigger single ownership](../../ACCOUNTING_SPEC.md#position-protection-bounty-policy) | [PositionProtection.t.sol](spec/trader/PositionProtection.t.sol)::`test_TriggeredProtection_RejectsReplacementAndCancellation` | Full-stack execution | Protection lifecycle | Correctness (PR and deep) |
+| [Protection post-lock equity boundary](../../ACCOUNTING_SPEC.md#position-protection-bounty-policy) | [PositionProtection.t.sol](spec/trader/PositionProtection.t.sol)::`test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroUsdcAboveBoundary` | Direct boundary values | Same-mark exact price risk | Correctness (PR and deep) |
+| [VPI reserve cannot improve price health](../../ACCOUNTING_SPEC.md#close-settlement) | [VpiRebateReserve.t.sol](accounting/fees/VpiRebateReserve.t.sol)::`test_OverfundedVpiReserveDoesNotImproveExactPriceHealth` | Synthetic-state accounting | Explicit planner fixture; not a public reachability claim | Correctness (PR and deep) |
+| [VPI liquidation reserve cancellation](../../ACCOUNTING_SPEC.md#liquidation-settlement) | [VpiRebateReserve.t.sol](accounting/fees/VpiRebateReserve.t.sol)::`test_LiquidationCancelsFundedVpiOnceAndProtectsBounty` | Synthetic-state accounting | Dedicated VPI and execution bounty are separate reserves | Correctness (PR and deep) |
+| [Symmetric entry/exit terminal NAV](../../ACCOUNTING_SPEC.md#symmetric-exact-marked-nav) | [HousePoolTerminalNav.t.sol](accounting/waterfall/HousePoolTerminalNav.t.sol)::`test_TerminalNav_OpenPnlUsesSameJuniorEntryAndExitPricing` | Full-stack accounting | Marked receivables are distinct from withdrawal cash | Correctness (PR and deep) |
+| [Terminal deficit blocks LP entry](../../ACCOUNTING_SPEC.md#symmetric-exact-marked-nav) | [HousePoolDeposits.t.sol](spec/lp/HousePoolDeposits.t.sol)::`test_CurrentTerminalDeficitBlocksEntryBeforeStoredCheckpointUpdates` | Full-stack accounting | Live deficit versus cached checkpoint | Correctness (PR and deep) |
+| [Junior-first loss waterfall](../../ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view) | [HousePoolWaterfall.t.sol](accounting/waterfall/HousePoolWaterfall.t.sol)::`test_LossWaterfall_JuniorAbsorbs` | Known input/output values | Deterministic full-stack scenario | Correctness (PR and deep) |
+| [Senior impairment restoration priority](../../ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view) | [HousePoolWaterfall.t.sol](accounting/waterfall/HousePoolWaterfall.t.sol)::`test_SeniorPrincipal_RestoredBeforeJuniorSurplus` | Known input/output values | Deterministic full-stack scenario | Correctness (PR and deep) |
+| [Senior coupon high-water ratchet](../../ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view) | [HousePoolWaterfall.t.sol](accounting/waterfall/HousePoolWaterfall.t.sol)::`test_SeniorHighWaterMark_RatchetsPaidCouponIntoProtectedClaim` | Known input/output values | Time-controlled coupon checkpoint | Correctness (PR and deep) |
+| [Senior exposure reservation and cancellation](../../ACCOUNTING_SPEC.md#32-senior-exposure-admission-limits) | [SeniorCapacity.t.sol](spec/lp/SeniorCapacity.t.sol)::`test_AggregateReservationsTrackPartialCancellationFinalizationAndClaims` | Full-stack state machine | Configured capacity boundaries | Correctness (PR and deep) |
+| [Junior withdrawal capacity covenant](../../ACCOUNTING_SPEC.md#32-senior-exposure-admission-limits) | [SeniorCapacity.t.sol](spec/lp/SeniorCapacity.t.sol)::`test_JuniorCanWithdrawToActiveRatioBoundaryAndInvalidateReservation` | Direct boundary values | Active versus reserved Senior exposure | Correctness (PR and deep) |
+| [Request cutoff, both tranches and directions](../../ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries) | [LpRequestCutoff.t.sol](spec/lp/LpRequestCutoff.t.sol)::`test_RequestBoundaryMatrix_AllTranchesDirectionsAndAuthorizations` | Execution matrix | Before/equal/after cutoff; ownership variants | Correctness (PR and deep) |
+| [Locked epoch additions and cancellation](../../ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries) | [LpRequestCutoff.t.sol](spec/lp/LpRequestCutoff.t.sol)::`test_LateDepositCancellationAndReplacementUseCanonicalLaterEpoch` | Full-stack execution | Cancellation shrinks old epoch; replacement uses later epoch | Correctness (PR and deep) |
+| [Activation-aged cooldown](../../ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries) | [ClaimableDepositRedeem.t.sol](spec/lp/ClaimableDepositRedeem.t.sol)::`test_OlderClaimCannotShortenNewerWalletCooldown` | Full-stack execution | Multiple activation lots | Correctness (PR and deep) |
+| [Claim-escrow routing and exact custody](../../ACCOUNTING_SPEC.md#2-lp-redemption-settlement-view) | [ClaimableDepositRedeem.t.sol](spec/lp/ClaimableDepositRedeem.t.sol)::`test_DirectRouteCanBeFundedAndClaimedWithoutWalletShareCustody` | Full-stack execution | Authorized same-controller route | Correctness (PR and deep) |
+| [Claim-share dust conservation](../../ACCOUNTING_SPEC.md#2-lp-redemption-settlement-view) | [ClaimableDepositRedeem.t.sol](spec/lp/ClaimableDepositRedeem.t.sol)::`test_MixedDirectRouteAndWalletClaimSweepsTerminalShareDust` | Full-stack execution | Mixed direct route and wallet claim | Correctness (PR and deep) |
+| [Snapshot versus reconciliation](../../ACCOUNTING_SPEC.md#snapshot-boundaries) | [HousePoolSnapshotParity.t.sol](differential/HousePoolSnapshotParity.t.sol)::`test_PendingTrancheStateMatchesReconcileOutcome` | Production-to-production parity | Shared production math can agree while both are wrong | Correctness (PR and deep) |
+| [Public lens versus withdrawal execution](../../ACCOUNTING_SPEC.md#4-trader-reachability--terminal-settlement-view) | [PerpsPublicLens.t.sol](spec/trader/PerpsPublicLens.t.sol)::`test_GetTraderAccount_WithdrawableMatchesEngineAndActualWithdrawBound` | View/execution parity | Same timestamp and mark; not independent risk arithmetic | Correctness (PR and deep) |
+| [Monitor distinguishes unavailable from healthy](../../SECURITY.md#settlement-monitor-trust-boundary) | [SettlementMonitorLens.t.sol](spec/trader/SettlementMonitorLens.t.sol)::`test_UnreadableSettlementHoldIsPoolDependencyUnknownWithoutErasingRoute` | Fault-injected view behavior | Dependency failure is not healthy zero | Correctness (PR and deep) |
+| [Admin configuration versions](../../SECURITY.md#timelocked-admin-state) | [AdminConfigVersion.t.sol](spec/admin/AdminConfigVersion.t.sol)::`test_FailedEngineFinalization_DoesNotAdvanceVersionOrConsumeProposal` | Direct expected behavior | Normative authority also in SECURITY.md | Correctness (PR and deep) |
+| [Open/increase admission at rebate and margin boundaries](../../ACCOUNTING_SPEC.md#open-projection) | [OpenAdmissionProperty.t.sol](differential/OpenAdmissionProperty.t.sol)::`testFuzz_SuccessfulOpenOrIncreaseMeetsInstalledInitialMargin` | Independent post-state risk | Fresh and existing positions; zero/nonzero margin, both sides, fixed mark | Correctness (PR and deep) |
+| [Zero-margin increase reachability](../../ACCOUNTING_SPEC.md#open-projection) | [OpenAdmissionProperty.t.sol](differential/OpenAdmissionProperty.t.sol)::`test_ZeroMarginHealingIncreaseIsReachableAndCollateralized` | Deterministic reachability | Existing collateral; does not claim every zero-margin order should succeed | Correctness (PR and deep) |
+| [Open preview versus settlement after carry/skew](../../ACCOUNTING_SPEC.md#open-projection) | [PreviewExecutionDifferential.t.sol](differential/PreviewExecutionDifferential.t.sol)::`testFuzz_PreviewOpen_MatchesLiveExecution_AfterCarryAndSkew` | Same-state preview/execution parity | Canonical lots; rejected collateral checks typed failure and rollback, then independently funded execution | Correctness (PR and deep) |
+| [Immediate full-close preview versus settlement](../../ACCOUNTING_SPEC.md#close-settlement) | [PreviewExecutionDifferential.t.sol](differential/PreviewExecutionDifferential.t.sol)::`testFuzz_PreviewClose_FullCloseMatchesLiveExecution_LiquidVault` | Same-state preview/execution parity | Profitable full closes with zero VPI; preview-approved states only, not independent validity classification | Correctness (PR and deep) |
+| [Deferred full-close preview versus settlement](../../ACCOUNTING_SPEC.md#close-settlement) | [PreviewExecutionDifferential.t.sol](differential/PreviewExecutionDifferential.t.sol)::`testFuzz_PreviewClose_FullCloseMatchesLiveExecution_IlliquidVault` | Same-state preview/execution parity | Controlled pool shortage and claim creation; preview-approved states only | Correctness (PR and deep) |
+| [Partial-close preview with live carry](../../ACCOUNTING_SPEC.md#close-settlement) | [PreviewExecutionDifferential.t.sol](differential/PreviewExecutionDifferential.t.sol)::`test_PreviewClose_PartialCloseMatchesLiveExecution_AfterPositiveCarryAccrual` | Same-state preview/execution parity | Deterministic carry history and partial size; separate reservation-isolation companion | Correctness (PR and deep) |
+| [Claim-backed partial-close residual health](../../ACCOUNTING_SPEC.md#close-settlement) | [PerpClosePreviewParityInvariant.t.sol](invariant/properties/PerpClosePreviewParityInvariant.t.sol)::`test_ClaimBackedPartialCloseExecutesWithPledgeBelowMinimumLiquidationBounty` | Reachable Router execution, authenticated receipt and independent residual-risk arithmetic | Realized unpaid gain backs a reopened position; remaining pledge below $1 is valid with sufficient same-account claims; liquidation reserve is a separate bucket | Correctness (PR and deep) |
+| [Funded liquidation preview versus settlement](../../ACCOUNTING_SPEC.md#liquidation-settlement) | [PreviewExecutionDifferential.t.sol](differential/PreviewExecutionDifferential.t.sol)::`testFuzz_PreviewLiquidation_MatchesLiveExecution_LiquidVault` | Same-state preview/execution parity | Bounded liquidatable LONG positions; independent liquidation-boundary correctness is outside this comparison | Correctness (PR and deep) |
+| [Illiquid liquidation preview versus settlement](../../ACCOUNTING_SPEC.md#liquidation-settlement) | [PreviewExecutionDifferential.t.sol](differential/PreviewExecutionDifferential.t.sol)::`testFuzz_PreviewLiquidation_MatchesLiveExecution_IlliquidVault` | Same-state preview/execution parity | Controlled pool shortage; preview-approved liquidation states only | Correctness (PR and deep) |
+| [Independent claim ledger and withdrawal reserve](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [PerpIndependentClaimInvariant.t.sol](invariant/properties/PerpIndependentClaimInvariant.t.sol)::`invariant_IndependentClaimsMatchPersistentEngineState` | Persistent independent model | Three actors, full closes, fixed time, zero VPI/carry, controlled mock pool; excludes vault epoch reserves | Correctness (PR and deep) |
+| [Claim model sensitivity](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [PerpIndependentClaimInvariant.t.sol](invariant/properties/PerpIndependentClaimInvariant.t.sol)::`test_ModelDetectsIncorrectAccountClaimWithoutResynchronizing` | Fault injection | One-atom live claim corruption must fail without adjusting the reference ledger | Correctness (PR and deep) |
+| [Independent fee calculation and custody](../../ACCOUNTING_SPEC.md#treasury-fee-withdrawals) | [PerpFeeFlowInvariant.t.sol](invariant/properties/PerpFeeFlowInvariant.t.sol)::`test_FeeTransitionsAreReachableAcrossRepeatedOrders` | Independent model with queued execution | Flat-price opens/closes/withdrawals; liquidation and stressed fee waiver use separate scenario coverage | Correctness (PR and deep) |
+| [Fee oracle sensitivity](../../ACCOUNTING_SPEC.md#treasury-fee-withdrawals) | [PerpFeeFlowInvariant.t.sol](invariant/properties/PerpFeeFlowInvariant.t.sol)::`test_FeeModelDetectsOneAtomUndercredit` | Fault injection | Missing treasury credit is detected independently | Correctness (PR and deep) |
+| [Persistent signed VPI and frozen spread](../../ACCOUNTING_SPEC.md#frozen-close-spread-terms) | [PerpVpiFrozenAccountingInvariant.t.sol](invariant/properties/PerpVpiFrozenAccountingInvariant.t.sol)::`invariant_PersistentVpiCashAndReserveModel` | Persistent independent model | Fixed mark, zero carry, mock pool; real calendar changes; excludes Router/Pyth authorization and price PnL | Correctness (PR and deep) |
+| [Independent Senior/Junior waterfall](../../ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view) | [PerpWaterfallReferenceInvariant.t.sol](invariant/properties/PerpWaterfallReferenceInvariant.t.sol)::`invariant_PersistentWaterfallMatchesIndependentCashLedger` | Persistent independent model | Seeded tranches, direct Engine orders and authorized inflows; no pending share transactions, claims, VPI or shortage | Correctness (PR and deep) |
+| [Oracle/calendar crossed with degraded state](../../ACCOUNTING_SPEC.md#oracle-and-freshness-policy) | [OracleRegimeMatrix.t.sol](matrices/OracleRegimeMatrix.t.sol)::`test_QueuedOpenAndClose_CalendarCrossedWithDegradedMode` | Execution matrix | Synthetic pool cash drain latches degraded state through an actual close; mock oracle | Correctness (PR and deep) |
+| [Liquidation across oracle/calendar and degraded state](../../ACCOUNTING_SPEC.md#liquidations) | [OracleRegimeMatrix.t.sol](matrices/OracleRegimeMatrix.t.sol)::`test_Liquidation_CalendarCrossedWithDegradedMode` | Execution matrix | Current liquidation policy, including frozen/FAD regimes | Correctness (PR and deep) |
+| [Liquidation freshness boundaries](../../ACCOUNTING_SPEC.md#liquidations) | [OracleRegimeMatrix.t.sol](matrices/OracleRegimeMatrix.t.sol)::`test_Liquidation_OracleFreshnessBoundaryEachCalendarRegime` | Boundary execution matrix | Boundary minus one, equality, and plus one where policy differs | Correctness (PR and deep) |
+| [Withdrawal firewall regime matrix](../../ACCOUNTING_SPEC.md#4-trader-reachability--terminal-settlement-view) | [WithdrawalFirewallMatrix.t.sol](matrices/WithdrawalFirewallMatrix.t.sol)::`test_WithdrawalFirewall_AllCalendarDegradedPositionAndFreshnessRows` | Execution matrix | Calendar, degraded, position and exact/stale mark axes; separate LP reserve coverage | Correctness (PR and deep) |
+| [Immediate payout with custody verification](../../ACCOUNTING_SPEC.md#close-settlement) | [PayoutModesMatrix.t.sol](matrices/PayoutModesMatrix.t.sol)::`test_CloseImmediatePayoutMode` | Preview/execution and cash deltas | Controlled liquidity; real settlement | Correctness (PR and deep) |
+| [Deferred payout with custody verification](../../ACCOUNTING_SPEC.md#close-settlement) | [PayoutModesMatrix.t.sol](matrices/PayoutModesMatrix.t.sol)::`test_CloseTraderClaimMode` | Preview/execution and cash deltas | Fresh payout is all-or-nothing after existing claims | Correctness (PR and deep) |
+| [Diagnostic liquidation write-off](../../ACCOUNTING_SPEC.md#liquidation-settlement) | [PayoutModesMatrix.t.sol](matrices/PayoutModesMatrix.t.sol)::`test_LiquidationPriceLossWriteoffMode` | Execution and accounting | Legacy badDebt remains zero; loss above collectible cap is a write-off | Correctness (PR and deep) |
+| [Claim payout all-cash boundary and exact-once payment](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [TraderClaimsMatrix.t.sol](matrices/TraderClaimsMatrix.t.sol)::`test_TraderClaim_ExactAggregateCashPaysBothBeneficiariesOnce` | Execution matrix | Claims created by executed trades; shortage/surplus companion rows in same file | Correctness (PR and deep) |
+| [Claim transfer failure rollback](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [TraderClaimsMatrix.t.sol](matrices/TraderClaimsMatrix.t.sol)::`test_TraderClaim_DownstreamTransferFailureRollsBackAccounting` | Fault-injected execution | Token transfer fails after reaching the payout path | Correctness (PR and deep) |
+| [Terminal order policy and internal keeper credit](../../ACCOUNTING_SPEC.md#open-order-failure-policy) | [OrderRouterPolicyMatrix.t.sol](matrices/OrderRouterPolicyMatrix.t.sol)::`test_ExpiredOpenPaysClearerAndDoesNotRefundTrader` | Execution matrix | Companion rows cover close expiry, slippage and typed terminal failures | Correctness (PR and deep) |
+| [Admin-held ETH refund custody and delivery](../../SECURITY.md#oracle-and-execution-security) | [OrderRouterV2BatchOogIsolation.t.sol](spec/keeper/OrderRouterV2BatchOogIsolation.t.sol)::`test_DeferredAdminRefundIsBackedUntilBeneficiaryClaimsExactlyOnce` | Execution and ETH conservation | Real terminal batch, rejected immediate callback and claim rollback, beneficiary payment and repeat-claim rejection | Production gates (PR and deep) |
+| [Deferred Oracle ETH refund custody](../../SECURITY.md#oracle-and-execution-security) | [PletherOracle.t.sol](spec/oracle/PletherOracle.t.sol)::`test_UpdatePrice_GasBurningRefundRecipientAccruesAndClaimsDeferredRefund` | Execution and ETH conservation | Gas-burning recipient; deferred claim remains funded, then pays and clears | Production gates (PR and deep) |
+| [Foreign-queue-independent terminal close](../../ACCOUNTING_SPEC.md#required-global-invariants) | [OrderRouterQueueGasBounds.t.sol](gas/OrderRouterQueueGasBounds.t.sol)::`test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive` | Production gas-sensitive execution | Bounded queue fixtures; not an asymptotic proof | Production gates (PR and deep) |
+| [Claim settlement versus account state](../../ACCOUNTING_SPEC.md#trader-claim-liabilities) | [ClaimSettlementParity.t.sol](differential/ClaimSettlementParity.t.sol)::`test_ClaimSettlement_LiveAccountReclassifiesClaimToPledgeAtSameMark` | Same-state view/execution parity | Flat-account companion verifies free custody; same-account live payment becomes pledge | Correctness (PR and deep) |
+| [LP estimate versus funded redemption](../../ACCOUNTING_SPEC.md#2-lp-redemption-settlement-view) | [WithdrawalLpExecutionParity.t.sol](differential/WithdrawalLpExecutionParity.t.sol)::`test_JuniorRedemptionEstimateMatchesSameStateFundingAndClaim` | Same-state view/execution parity | Real request/funding/claim lifecycle; no price change between quote and settlement | Correctness (PR and deep) |
+| [Changed mark invalidates old withdrawal quote](../../ACCOUNTING_SPEC.md#4-trader-reachability--terminal-settlement-view) | [WithdrawalLpExecutionParity.t.sol](differential/WithdrawalLpExecutionParity.t.sol)::`test_WithdrawalQuoteIsNotPromiseAfterMarkChanges` | Controlled changed-input execution | Separates legitimate changed-state outcomes from parity defects | Correctness (PR and deep) |
+| [Bounty model sensitivity](../../ACCOUNTING_SPEC.md#position-protection-bounty-policy) | [ProtectionBountyStateMachine.t.sol](invariant/properties/ProtectionBountyStateMachine.t.sol)::`test_BountyLedgerDetectsOneAtomExecutionKeeperUnderpayment` | Subject-state fault injection | Successful trigger/close followed by one-atom keeper underpayment; unchanged independent ledger must reject | Correctness (PR and deep) |
+
+## Organization and test ownership
+
+- `spec/` holds user, keeper, LP, administrator, and oracle behavior.
+- `accounting/` holds settlement, carry, claim, fee, waterfall, and cash-priority rules.
+- `matrices/` enumerates policy outcomes; each row executes or explicitly documents a view-only contract.
+- `differential/` holds planner/apply and public/internal view parity, plus independent admission checks.
+- `invariant/properties/` holds campaigns. Ordinary `.sol` fixtures, handlers and ledgers are not executable test inventories.
+- `regression/legacy/` is limited to current compatibility contracts for retired interfaces.
+- `gas/` holds benchmarks and deployment limits; gas-sensitive correctness cases can remain in their behavior domain
+  and are explicitly selected for production code generation.
+- `fork/` holds package-owned, pinned deployment integrations. Cross-package forks remain in root `test/fork/`.
+
+Shared setup lives in ordinary `.sol` fixtures. Entry points must not import another `.t.sol` file: that silently
+changes discovery and makes physical sharding unreliable. `scripts/perps-test-inventory.py` validates this boundary
+and assigns every non-fork entrypoint to exactly one shard. The test map checker rejects missing files or functions.
+
+## Running and replaying
+
+Run these commands from the repository root:
+
+```bash
+make check-perps-tests
+make test-perps-quick
+make test-perps-ci
+make test-perps-audit
+make test-perps-fork
+
+# Focused correctness run; ordinary direct Forge runs must exclude the RPC lane.
+FOUNDRY_PROFILE=quick forge test --offline --root packages/perps \
+  --no-match-path '**/fork/**' --match-contract PerpIndependentClaimInvariantTest
+
+# Inspect selection without compiling or executing.
+PERPS_SHARD_LIST_ONLY=1 bash scripts/run-perps-package-tests.sh 0 4
+```
+
+| Profile | Fuzz runs | Invariant runs | Depth | Default use |
+|---|---:|---:|---:|---|
+| `quick` / default | 256 | 16 | 128 | Local iteration |
+| `ci` | 2,000 | 32 | 256 | PR and post-merge |
+| `audit` | 20,000 | 256 | 1,000 | Nightly and pre-audit |
+
+PR runners use production via-IR for benchmarks and deployment gates, and non-via-IR for other correctness tests.
+Post-merge and audit shards run production via-IR throughout. PR seed is `0xdeadbeef`; scheduled seeds derive from the
+recorded run ID. The pre-audit target and dispatched deep workflow execute `0xdeadbeef`, `0x1`, and `0x2`.
+No runner silently lowers these budgets. Explicit environment overrides are captured in the effective configuration.
+
+Evidence is written under `artifacts/perps/` by default (`PERPS_ARTIFACT_DIR` overrides the destination): commit and
+working-tree status, Foundry version, effective compiler/profile configuration, discovered test selection, results,
+per-test durations, invariant call/revert counters, failure corpus, run status, and `replay.sh`. Run replay scripts
+from the repository root at the recorded revision; apply the reviewed working-tree patch when the run was dirty.
+The recorder isolates failure corpora under each lane artifact by default; these paths are independent of Foundry's
+compiler cache. For corpus replay, restore `corpus/fuzz` and `corpus/invariant` to the recorded
+`failure_persist_dir` settings (and any explicitly configured `corpus_dir`). Physical shard replay regenerates its
+temporary test tree. Successful execution traces are compacted; failure traces, counterexamples, logs, counters and
+per-test status remain in the recorded results. Interrupted, skipped, failed, and unselected coverage are distinct
+from a passing run.
+
+Coverage excludes RPC tests, invariant campaigns, production gas/size checks, and specifically documented
+instrumentation-sensitive bounded batch scenarios. Each excluded correctness scenario still runs without coverage
+instrumentation. The inventory artifact lists the reason; exclusions are not a place to hide current defects.
+
+Foundry 1.5.1 with Solc 0.8.35 and `--ir-minimum` emits missing-source-anchor warnings in this suite. Treat its LCOV
+output as partial instrumentation evidence; hit totals do not establish complete line or branch coverage. Preserve
+the warnings and use the ordinary correctness lanes to verify execution independently of coverage instrumentation.
+
+## External integration and remaining limits
+
+`make test-perps-fork` reads the existing `SPONSORED_CLOSE_FORK_RPC_URL` and `CLOSE_REGRESSION_ARCHIVE_RPC_URL`
+settings. Configured lanes require their pinned blocks, chain IDs, deployment code and fixtures to exist and must not
+skip. Unconfigured lanes are recorded as **not run**; they contribute no integration assurance. A direct fork command
+without its required configuration fails explicitly.
+
+The package forks exercise pinned historical deployment compatibility. Root `test/fork/PerpsFork.t.sol` uses real
+USDC with a controllable oracle. Root `test/fork/PythRealUpdateFork.t.sol` requires the separately fetched Hermes
+fixture and checks real Pyth update integration. Neither category substitutes for the other.
+
+Independent campaigns deliberately isolate domains; there is no single independent full-protocol model spanning
+carry, signed VPI, frozen spreads, all LP epochs, claims, and all oracle states simultaneously. Existing reconciliation,
+parity, deterministic execution matrices, and independent models supply complementary evidence. Snapshot-reset
+handlers such as `PerpExplicitAccountingInvariant` execute independent scenarios: depth is not a long economic
+history there. See [invariant/README.md](invariant/README.md) for exact modeled domains and remaining interactions.
+
+A new critical rule or a changed assertion must update this map and demonstrate a reachable successful transition,
+its relevant boundary/failure outcome, and sensitivity to an incorrect result. Public behavior cannot be established
+only by mutating storage or impersonating a privileged component in a kernel test.

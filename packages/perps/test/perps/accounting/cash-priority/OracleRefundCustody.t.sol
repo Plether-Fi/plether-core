@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity 0.8.35;
+
+// Category: accounting. All cases assert current documented behavior and are expected to pass.
+// Source of truth: packages/perps/SECURITY.md#router-and-reservation-accounting
+
+import {BasePerpTest} from "../../BasePerpTest.sol";
+import {RejectingRefundReceiver} from "../../support/BehaviorScenarioHelpers.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
+import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
+import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
+
+contract RejectedOracleRefundTest is BasePerpTest {
+
+    MockPyth internal mockPyth;
+    RejectingRefundReceiver internal refundReceiver;
+
+    bytes32 internal constant FEED_A = bytes32(uint256(1));
+    bytes32 internal constant FEED_B = bytes32(uint256(2));
+
+    function setUp() public override {
+        usdc = new MockUSDC();
+        clearinghouse = new MarginClearinghouse(address(usdc));
+
+        engine = _deployEngine(_riskParams());
+        _syncEngineAdmin();
+        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+
+        seniorVault = new TrancheVault(
+            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+        );
+        juniorVault = new TrancheVault(
+            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+        );
+        pool.setSeniorVault(address(seniorVault));
+        pool.setJuniorVault(address(juniorVault));
+        engine.setPool(address(pool));
+
+        mockPyth = new MockPyth();
+
+        bytes32[] memory feedIds = new bytes32[](2);
+        uint256[] memory weights = new uint256[](2);
+        uint256[] memory bases = new uint256[](2);
+        bool[] memory inversions = new bool[](2);
+
+        feedIds[0] = FEED_A;
+        feedIds[1] = FEED_B;
+        weights[0] = 0.5e18;
+        weights[1] = 0.5e18;
+        bases[0] = 1e8;
+        bases[1] = 1e8;
+
+        router = _deployLegacyOrderRouter(
+            address(engine),
+            address(new CfdEngineLens(address(engine))),
+            address(pool),
+            address(
+                new PletherOracle(
+                    address(engine), address(pool), address(mockPyth), feedIds, weights, bases, inversions
+                )
+            )
+        );
+        _syncRouterAdmin();
+        engine.setOrderRouter(address(router));
+
+        _bypassAllTimelocks();
+
+        refundReceiver = new RejectingRefundReceiver();
+        vm.deal(address(refundReceiver), 1 ether);
+    }
+
+    /// @dev accounting; source: SECURITY.md#router-and-reservation-accounting.
+    function test_FallbackRefundMustFundPletherOracleClaimBalance() public {
+        uint256 publishTime = block.timestamp;
+        uint256 pythFee = 0.01 ether;
+        uint256 overpay = 0.05 ether;
+
+        mockPyth.setFee(pythFee);
+        mockPyth.setPrice(FEED_A, int64(100_000_000), int32(-8), publishTime);
+        mockPyth.setPrice(FEED_B, int64(100_000_000), int32(-8), publishTime);
+
+        refundReceiver.setAcceptEth(false);
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = hex"00";
+
+        refundReceiver.refreshMark{value: pythFee + overpay}(router, updateData);
+
+        IPletherOracle oracle = router.pletherOracle();
+        assertEq(oracle.claimableEth(address(refundReceiver)), overpay, "failed refund should become claimable");
+        assertEq(address(oracle).balance, overpay, "fallback accounting must move the stranded ETH into PletherOracle");
+    }
+
+}

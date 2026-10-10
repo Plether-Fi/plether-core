@@ -107,7 +107,7 @@ jobs:
   package-test-perps:
     name: Package (perps)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,24 +121,25 @@ jobs:
       - name: Build package
         run: bash scripts/run-with-heartbeat.sh forge build --sizes --skip test --skip script --root packages/perps
 
-      - name: Enforce production deployment-size limits
-        run: >-
-          bash scripts/run-with-heartbeat.sh forge test --offline -vvv --root packages/perps
-          --match-test "RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|test_Runtime_"
+      - name: Validate suite inventory, map, and runner behavior
+        run: |
+          python3 scripts/check-perps-test-map.py
+          python3 -m unittest discover -s scripts -p 'test_perps_runners.py'
+          python3 scripts/perps-test-inventory.py > /tmp/perps-test-inventory.json
 
-      - name: Run fast package tests
+      - name: Run PR correctness and production gas/size gates
+        env:
+          FOUNDRY_FUZZ_SEED: '0xdeadbeef'
         run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-fast-tests.sh
 
-      - name: Upload perps failure corpus
-        if: failure()
+      - name: Upload perps run evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perps-fast-failures-${{ github.run_id }}
-          path: |
-            packages/perps/cache*/fuzz
-            packages/perps/cache*/invariant
-          if-no-files-found: ignore
-          retention-days: 7
+          name: perps-pr-evidence-${{ github.run_id }}
+          path: artifacts/perps
+          if-no-files-found: warn
+          retention-days: 14
 
   coverage-core:
     name: Coverage (core protocol)
@@ -177,8 +178,7 @@ jobs:
     name: Coverage (perps)
     runs-on: ubuntu-latest
     env:
-      FOUNDRY_SRC: packages/perps/src
-      FOUNDRY_SCRIPT: integration/src
+      FOUNDRY_PROFILE: quick
       PERPS_COVERAGE_SHARDS: 4
     steps:
       - uses: actions/checkout@v4
@@ -194,7 +194,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes lcov
 
       - name: Run coverage
-        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-coverage.sh --ir-minimum --report lcov --lcov-version 1 --report-file "$GITHUB_WORKSPACE/lcov-perps.raw.info" --no-match-test "testFuzz_|invariant_|test_H01_UpdateMarkUsesPublishTime|test_GetTraderAccount_Withdrawable(Decreases|Drops)|test_Batch_SplitComponentsFitDeploymentLimits|test_AtomicLpEpoch_RuntimeFitsEip170|test_Batch_SplitComponentBindingAndRuntimeFitsEip170|test_OrderRouterCreationCodeAndConstructorArgsFitsEip3860|test_SettlementMonitorLens(RuntimeFitsEip170|CreationInputFitsEip3860)|test_Batch_MaxPendingOrdersLiquidatesWithinItemGasBudget|test_Runtime_|test_Gas_|testProductionRuntimeFitsEip170|test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating|test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund"
+        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-coverage.sh --ir-minimum --report lcov --lcov-version 1 --report-file "$GITHUB_WORKSPACE/lcov-perps.raw.info"
+
+      - name: Upload coverage selection and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perps-coverage-evidence-${{ github.run_id }}
+          path: artifacts/perps/coverage
+          retention-days: 14
 
       - name: Filter coverage report
         run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov-perps.raw.info > lcov-perps.info
