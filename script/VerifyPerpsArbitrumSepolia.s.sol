@@ -99,6 +99,37 @@ contract VerifyPerpsArbitrumSepolia is Script {
         console.log("Junior pending fee shares:", deployed.juniorVault.pendingMaintenanceFeeShares());
     }
 
+    /// @notice Additional read-only gate for an inactive atomic-synchronization release.
+    /// @dev Invoke with --sig 'verifyOracleSynchronization()'. Missing fixture/hash is a failure, never a skip.
+    function verifyOracleSynchronization() external {
+        require(block.chainid == 421_614, "Unexpected chain id");
+        Deployment memory deployed = _loadDeployment();
+        _verifyCode(deployed);
+        _verifyCoreGraph(deployed);
+        _verifyReleaseEconomics(deployed);
+        _verifyGovernanceAndPhase(deployed, PHASE_DEPLOYED);
+        require(!deployed.housePool.isTradingActive(), "Candidate trading must remain inactive");
+        string memory fixture = vm.readFile(vm.envString("ORACLE_SYNC_FIXTURE"));
+        bytes[] memory updateData = abi.decode(vm.parseJson(fixture, ".updateData"), (bytes[]));
+        uint256 updateFee = deployed.oracle.getUpdateFee(updateData);
+        uint256 executionFee = deployed.oracle.getOrderExecutionFee(updateData);
+        require(
+            executionFee == (deployed.oracle.isOracleFrozen() ? updateFee : 2 * updateFee),
+            "Execution fee quote mismatch"
+        );
+        bytes32 expectedHash = vm.envBytes32("PERPS_EXECUTION_CONFIG_HASH");
+        require(expectedHash != bytes32(0), "Missing execution config hash");
+        require(deployed.lifecycleBook.currentExecutionConfigHash() == expectedHash, "Execution config hash mismatch");
+        uint64 markTime = deployed.engine.lastMarkTime();
+        for (uint256 i; i < 6; ++i) {
+            require(
+                deployed.oracle.pyth().getPriceUnsafe(deployed.oracle.pythFeedIds(i)).publishTime >= markTime,
+                "Stored feed does not cover mark"
+            );
+        }
+        console.log("Inactive atomic oracle synchronization release verified at block:", block.number);
+    }
+
     function _loadDeployment() internal view returns (Deployment memory deployed) {
         deployed.owner = vm.envAddress("PERPS_OWNER");
         deployed.guardian = vm.envAddress("PERPS_GUARDIAN");

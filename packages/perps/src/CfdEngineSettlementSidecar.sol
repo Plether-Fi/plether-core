@@ -539,6 +539,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         if (delta.safeMarginReleaseUsdc != delta.unlockMarginUsdc) {
             revert CfdEngineSettlementSidecar__SettlementMismatch();
         }
+        if (delta.deletePosition) {
+            // Make terminal reserve surplus free before validating how much charge needs released pledge.
+            clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseUsdc);
+        }
         clearinghouse.unlockCloseMargin(
             delta.account,
             delta.safeMarginReleaseUsdc,
@@ -596,7 +600,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 })
             );
         }
-        if (delta.liquidationReserveReleaseUsdc > 0) {
+        if (!delta.deletePosition && delta.liquidationReserveReleaseUsdc > 0) {
             clearinghouse.releaseLiquidationReserve(delta.account, delta.liquidationReserveReleaseUsdc);
         }
 

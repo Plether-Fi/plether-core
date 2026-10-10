@@ -1,0 +1,287 @@
+{
+  "recorded_utc": "2026-10-10T09:18:14.004258+00:00",
+  "validated_base_commit": "75720362a4c1c7e26c99ea15927783e1a1173b80",
+  "current_remote_master": "64c6ea90a537f58f14b1da3c48d296a254ab85c7",
+  "production_changes_in_this_patch": false,
+  "acceptance_complete": false,
+  "lanes": [
+    {
+      "lane": "quick-repaired",
+      "started_utc": "2026-10-10T07:27:03.668583+00:00",
+      "command": [
+        "forge",
+        "test",
+        "--offline",
+        "-j",
+        "4",
+        "--root",
+        "packages/perps",
+        "--no-match-path",
+        "**/fork/**",
+        "--no-match-test",
+        "GasBudget|test_[Gg]as_|RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|test_Runtime_|^testProductionRuntimeFitsEip170(\\(|$)|^test_AtomicLpEpoch_RuntimeFitsEip170(\\(|$)|^test_BatchItemOogAndRefundGasBurnCannotRollbackCompletedPrefix(\\(|$)|^test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating(\\(|$)|^test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund(\\(|$)|^test_Batch_LowGasReturnsSameUnattemptedIndex(\\(|$)|^test_Batch_SplitComponentBindingAndRuntimeFitsEip170(\\(|$)|^test_Batch_SplitComponentsFitDeploymentLimits(\\(|$)|^test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive(\\(|$)|^test_BoundedQueue_BatchClearsFailedOrdersAndExecutesTail(\\(|$)|^test_DeferredAdminRefundIsBackedUntilBeneficiaryClaimsExactlyOnce(\\(|$)|^test_FullContainmentGasIsBounded(\\(|$)|^test_Gas_AbsentPositionAndCurveNoOpStaysWithinBookGate(\\(|$)|^test_Gas_BatchDirectionalPricesWithPendingCarryFitDefaultItemBudget(\\(|$)|^test_Gas_CappedInsertAndRelocationStayWithinBookGate(\\(|$)|^test_Gas_CoordinatorActivationFitsAcceptanceGate(\\(|$)|^test_Gas_DefaultZeroJuniorSupplyBurnAddsAtMostFiveThousandGas(\\(|$)|^test_Gas_DefaultZeroJuniorSupplyMutationAddsAtMostFiveThousandGas(\\(|$)|^test_Gas_DirectCloseCommit(\\(|$)|^test_Gas_DirectCloseExecute(\\(|$)|^test_Gas_MaximumCatchUpActiveFeeHousePoolEpochSettlementRemainsPracticallyBounded(\\(|$)|^test_Gas_MaximumRadixReadStaysWithinBookGate(\\(|$)|^test_Gas_ReservationSummaryFullAccountQueue(\\(|$)|^test_Gas_ReservationSummaryOneOrder(\\(|$)|^test_Gas_RiskOffKeeperCallRefundsExactly64OpensWithinBlockBudget(\\(|$)|^test_Gas_RiskOffSingleTargetCleanupFitsAcceptanceGate(\\(|$)|^test_HistoricalFailedReservations_DoNotBrickLaterHeadCleanup(\\(|$)|^test_OrderRouterCreationCodeAndConstructorArgsFitsEip3860(\\(|$)|^test_Runtime_ClosePreviewFitsEip170(\\(|$)|^test_Runtime_HousePoolAndTrancheVaultStayWithinAcceptanceTargets(\\(|$)|^test_Runtime_QuoteComponentsFitDeploymentLimits(\\(|$)|^test_SettlementHoldGasIsBounded(\\(|$)|^test_SettlementMonitorLensCreationInputFitsEip3860(\\(|$)|^test_SettlementMonitorLensRuntimeFitsEip170(\\(|$)|^test_UpdatePrice_GasBurningRefundRecipientAccruesAndClaimsDeferredRefund(\\(|$)|^test_gas_01_commitOrder_open(\\(|$)|^test_gas_02_commitOrder_close(\\(|$)|^test_gas_03_executeOrder_open_first(\\(|$)|^test_gas_04_executeOrder_open_increase(\\(|$)|^test_gas_05_executeOrder_close_full(\\(|$)|^test_gas_06_executeOrder_close_partial(\\(|$)|^test_gas_07_executeOrderBatch_3(\\(|$)|^test_gas_08_executeLiquidation(\\(|$)|^test_gas_09_addMargin(\\(|$)|^test_gas_10_settleTraderClaim(\\(|$)|^test_gas_11_clearinghouse_deposit(\\(|$)|^test_gas_12_clearinghouse_withdraw(\\(|$)|^test_gas_13a_juniorVault_requestDeposit_beforeCutoff(\\(|$)|^test_gas_13b_juniorVault_requestDeposit_atCutoff(\\(|$)|^test_gas_14a_juniorVault_requestRedeem_beforeCutoff(\\(|$)|^test_gas_14b_juniorVault_requestRedeem_atCutoff(\\(|$)|^test_gas_15a_seniorVault_requestDeposit_beforeCutoff(\\(|$)|^test_gas_15b_seniorVault_requestDeposit_atCutoff(\\(|$)|^test_gas_16a_seniorVault_requestRedeem_beforeCutoff(\\(|$)|^test_gas_16b_seniorVault_requestRedeem_atCutoff(\\(|$)|^test_gas_17_previewClose(\\(|$)|^test_gas_18_previewLiquidation(\\(|$)|^test_gas_19_getAccountLedgerSnapshot(\\(|$)|^test_gas_20_getPoolLiquidityView(\\(|$)|^test_gas_21_executeOrderBatch_30(\\(|$)|^test_gas_22_executeOrderBatch_300(\\(|$)"
+      ],
+      "status": "passed",
+      "budgets": {
+        "fuzz": {
+          "runs": 256,
+          "fail_on_revert": true,
+          "max_test_rejects": 65536,
+          "seed": "0xdeadbeef",
+          "dictionary_weight": 40,
+          "include_storage": true,
+          "include_push_bytes": true,
+          "max_fuzz_dictionary_addresses": 15728640,
+          "max_fuzz_dictionary_values": 9830400,
+          "max_fuzz_dictionary_literals": 6553600,
+          "gas_report_samples": 256,
+          "corpus_dir": null,
+          "corpus_gzip": true,
+          "corpus_min_mutations": 5,
+          "corpus_min_size": 0,
+          "show_edge_coverage": false,
+          "failure_persist_dir": "/private/tmp/perps-suite-review/validation/quick-repaired/corpus/fuzz",
+          "show_logs": false,
+          "timeout": null
+        },
+        "invariant": {
+          "runs": 16,
+          "depth": 128,
+          "fail_on_revert": true,
+          "call_override": false,
+          "dictionary_weight": 80,
+          "include_storage": true,
+          "include_push_bytes": true,
+          "max_fuzz_dictionary_addresses": 15728640,
+          "max_fuzz_dictionary_values": 9830400,
+          "max_fuzz_dictionary_literals": 6553600,
+          "shrink_run_limit": 5000,
+          "max_assume_rejects": 65536,
+          "gas_report_samples": 256,
+          "corpus_dir": null,
+          "corpus_gzip": true,
+          "corpus_min_mutations": 5,
+          "corpus_min_size": 0,
+          "show_edge_coverage": false,
+          "failure_persist_dir": "/private/tmp/perps-suite-review/validation/quick-repaired/corpus/invariant",
+          "show_metrics": true,
+          "timeout": null,
+          "show_solidity": false
+        }
+      },
+      "compiler": {
+        "solc": "0.8.35",
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "via_ir": false
+      },
+      "selected_count": 1857,
+      "exit_code": 0,
+      "duration_seconds": 189.536,
+      "counts": {
+        "passed": 1857,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "lane": "ci-repaired",
+      "started_utc": "2026-10-10T07:30:13.383131+00:00",
+      "command": [
+        "forge",
+        "test",
+        "--offline",
+        "-j",
+        "4",
+        "--root",
+        "packages/perps",
+        "--no-match-path",
+        "**/fork/**",
+        "--no-match-test",
+        "GasBudget|test_[Gg]as_|RuntimeFitsEip170|FitsEip3860|FitDeploymentLimits|test_Runtime_|^testProductionRuntimeFitsEip170(\\(|$)|^test_AtomicLpEpoch_RuntimeFitsEip170(\\(|$)|^test_BatchItemOogAndRefundGasBurnCannotRollbackCompletedPrefix(\\(|$)|^test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating(\\(|$)|^test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund(\\(|$)|^test_Batch_LowGasReturnsSameUnattemptedIndex(\\(|$)|^test_Batch_SplitComponentBindingAndRuntimeFitsEip170(\\(|$)|^test_Batch_SplitComponentsFitDeploymentLimits(\\(|$)|^test_BoundedForeignQueue_FullCloseExecutesAndLeavesTailLive(\\(|$)|^test_BoundedQueue_BatchClearsFailedOrdersAndExecutesTail(\\(|$)|^test_DeferredAdminRefundIsBackedUntilBeneficiaryClaimsExactlyOnce(\\(|$)|^test_FullContainmentGasIsBounded(\\(|$)|^test_Gas_AbsentPositionAndCurveNoOpStaysWithinBookGate(\\(|$)|^test_Gas_BatchDirectionalPricesWithPendingCarryFitDefaultItemBudget(\\(|$)|^test_Gas_CappedInsertAndRelocationStayWithinBookGate(\\(|$)|^test_Gas_CoordinatorActivationFitsAcceptanceGate(\\(|$)|^test_Gas_DefaultZeroJuniorSupplyBurnAddsAtMostFiveThousandGas(\\(|$)|^test_Gas_DefaultZeroJuniorSupplyMutationAddsAtMostFiveThousandGas(\\(|$)|^test_Gas_DirectCloseCommit(\\(|$)|^test_Gas_DirectCloseExecute(\\(|$)|^test_Gas_MaximumCatchUpActiveFeeHousePoolEpochSettlementRemainsPracticallyBounded(\\(|$)|^test_Gas_MaximumRadixReadStaysWithinBookGate(\\(|$)|^test_Gas_ReservationSummaryFullAccountQueue(\\(|$)|^test_Gas_ReservationSummaryOneOrder(\\(|$)|^test_Gas_RiskOffKeeperCallRefundsExactly64OpensWithinBlockBudget(\\(|$)|^test_Gas_RiskOffSingleTargetCleanupFitsAcceptanceGate(\\(|$)|^test_HistoricalFailedReservations_DoNotBrickLaterHeadCleanup(\\(|$)|^test_OrderRouterCreationCodeAndConstructorArgsFitsEip3860(\\(|$)|^test_Runtime_ClosePreviewFitsEip170(\\(|$)|^test_Runtime_HousePoolAndTrancheVaultStayWithinAcceptanceTargets(\\(|$)|^test_Runtime_QuoteComponentsFitDeploymentLimits(\\(|$)|^test_SettlementHoldGasIsBounded(\\(|$)|^test_SettlementMonitorLensCreationInputFitsEip3860(\\(|$)|^test_SettlementMonitorLensRuntimeFitsEip170(\\(|$)|^test_UpdatePrice_GasBurningRefundRecipientAccruesAndClaimsDeferredRefund(\\(|$)|^test_gas_01_commitOrder_open(\\(|$)|^test_gas_02_commitOrder_close(\\(|$)|^test_gas_03_executeOrder_open_first(\\(|$)|^test_gas_04_executeOrder_open_increase(\\(|$)|^test_gas_05_executeOrder_close_full(\\(|$)|^test_gas_06_executeOrder_close_partial(\\(|$)|^test_gas_07_executeOrderBatch_3(\\(|$)|^test_gas_08_executeLiquidation(\\(|$)|^test_gas_09_addMargin(\\(|$)|^test_gas_10_settleTraderClaim(\\(|$)|^test_gas_11_clearinghouse_deposit(\\(|$)|^test_gas_12_clearinghouse_withdraw(\\(|$)|^test_gas_13a_juniorVault_requestDeposit_beforeCutoff(\\(|$)|^test_gas_13b_juniorVault_requestDeposit_atCutoff(\\(|$)|^test_gas_14a_juniorVault_requestRedeem_beforeCutoff(\\(|$)|^test_gas_14b_juniorVault_requestRedeem_atCutoff(\\(|$)|^test_gas_15a_seniorVault_requestDeposit_beforeCutoff(\\(|$)|^test_gas_15b_seniorVault_requestDeposit_atCutoff(\\(|$)|^test_gas_16a_seniorVault_requestRedeem_beforeCutoff(\\(|$)|^test_gas_16b_seniorVault_requestRedeem_atCutoff(\\(|$)|^test_gas_17_previewClose(\\(|$)|^test_gas_18_previewLiquidation(\\(|$)|^test_gas_19_getAccountLedgerSnapshot(\\(|$)|^test_gas_20_getPoolLiquidityView(\\(|$)|^test_gas_21_executeOrderBatch_30(\\(|$)|^test_gas_22_executeOrderBatch_300(\\(|$)"
+      ],
+      "status": "passed",
+      "budgets": {
+        "fuzz": {
+          "runs": 2000,
+          "fail_on_revert": true,
+          "max_test_rejects": 65536,
+          "seed": "0xdeadbeef",
+          "dictionary_weight": 40,
+          "include_storage": true,
+          "include_push_bytes": true,
+          "max_fuzz_dictionary_addresses": 15728640,
+          "max_fuzz_dictionary_values": 9830400,
+          "max_fuzz_dictionary_literals": 6553600,
+          "gas_report_samples": 256,
+          "corpus_dir": null,
+          "corpus_gzip": true,
+          "corpus_min_mutations": 5,
+          "corpus_min_size": 0,
+          "show_edge_coverage": false,
+          "failure_persist_dir": "/private/tmp/perps-suite-review/validation/ci-repaired/corpus/fuzz",
+          "show_logs": false,
+          "timeout": null
+        },
+        "invariant": {
+          "runs": 32,
+          "depth": 256,
+          "fail_on_revert": true,
+          "call_override": false,
+          "dictionary_weight": 80,
+          "include_storage": true,
+          "include_push_bytes": true,
+          "max_fuzz_dictionary_addresses": 15728640,
+          "max_fuzz_dictionary_values": 9830400,
+          "max_fuzz_dictionary_literals": 6553600,
+          "shrink_run_limit": 5000,
+          "max_assume_rejects": 65536,
+          "gas_report_samples": 256,
+          "corpus_dir": null,
+          "corpus_gzip": true,
+          "corpus_min_mutations": 5,
+          "corpus_min_size": 0,
+          "show_edge_coverage": false,
+          "failure_persist_dir": "/private/tmp/perps-suite-review/validation/ci-repaired/corpus/invariant",
+          "show_metrics": true,
+          "timeout": null,
+          "show_solidity": false
+        }
+      },
+      "compiler": {
+        "solc": "0.8.35",
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "via_ir": false
+      },
+      "selected_count": 1857,
+      "exit_code": 0,
+      "duration_seconds": 497.942,
+      "counts": {
+        "passed": 1857,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "lane": "ci-production-repaired",
+      "started_utc": "2026-10-10T07:27:03.669076+00:00",
+      "command": [
+        "forge",
+        "test",
+        "--offline",
+        "-j",
+        "4",
+        "--root",
+        "packages/perps",
+        "--no-match-path",
+        "**/fork/**"
+      ],
+      "status": "passed",
+      "budgets": {
+        "fuzz": {
+          "runs": 2000,
+          "fail_on_revert": true,
+          "max_test_rejects": 65536,
+          "seed": "0xdeadbeef",
+          "dictionary_weight": 40,
+          "include_storage": true,
+          "include_push_bytes": true,
+          "max_fuzz_dictionary_addresses": 15728640,
+          "max_fuzz_dictionary_values": 9830400,
+          "max_fuzz_dictionary_literals": 6553600,
+          "gas_report_samples": 256,
+          "corpus_dir": null,
+          "corpus_gzip": true,
+          "corpus_min_mutations": 5,
+          "corpus_min_size": 0,
+          "show_edge_coverage": false,
+          "failure_persist_dir": "/private/tmp/perps-suite-review/validation/ci-production-repaired/corpus/fuzz",
+          "show_logs": false,
+          "timeout": null
+        },
+        "invariant": {
+          "runs": 32,
+          "depth": 256,
+          "fail_on_revert": true,
+          "call_override": false,
+          "dictionary_weight": 80,
+          "include_storage": true,
+          "include_push_bytes": true,
+          "max_fuzz_dictionary_addresses": 15728640,
+          "max_fuzz_dictionary_values": 9830400,
+          "max_fuzz_dictionary_literals": 6553600,
+          "shrink_run_limit": 5000,
+          "max_assume_rejects": 65536,
+          "gas_report_samples": 256,
+          "corpus_dir": null,
+          "corpus_gzip": true,
+          "corpus_min_mutations": 5,
+          "corpus_min_size": 0,
+          "show_edge_coverage": false,
+          "failure_persist_dir": "/private/tmp/perps-suite-review/validation/ci-production-repaired/corpus/invariant",
+          "show_metrics": true,
+          "timeout": null,
+          "show_solidity": false
+        }
+      },
+      "compiler": {
+        "solc": "0.8.35",
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "via_ir": true
+      },
+      "selected_count": 1924,
+      "exit_code": 0,
+      "duration_seconds": 543.835,
+      "counts": {
+        "passed": 1924,
+        "failed": 0,
+        "skipped": 0
+      }
+    }
+  ],
+  "audit": {
+    "identity": "42290cf06c9133a71d5abaafe42b22b1a7046e7efc808131e595c0aee9f0bd52",
+    "observed_utc": "2026-10-10T09:03:03.899474+00:00",
+    "status": "running",
+    "cases_per_seed": 1924,
+    "seeds": {
+      "0x1": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "not_run": 1911,
+        "failed_jobs": 0,
+        "unfinished_jobs": 50
+      },
+      "0x2": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "not_run": 1911,
+        "failed_jobs": 0,
+        "unfinished_jobs": 50
+      },
+      "0xdeadbeef": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "not_run": 1911,
+        "failed_jobs": 0,
+        "unfinished_jobs": 50
+      }
+    }
+  },
+  "external_coverage": {
+    "status": "not_run",
+    "package_fork_cases": 5,
+    "reason": "RPC endpoints unconfigured"
+  },
+  "limitations": [
+    "Three full audit seeds remain pending.",
+    "Integrating production fixes #103 and #104 from newer master requires separate validation.",
+    "Coverage instrumentation was a focused six-case smoke, not a complete coverage campaign.",
+    "No production vulnerability was confirmed; passing tests do not prove absence of defects."
+  ]
+}

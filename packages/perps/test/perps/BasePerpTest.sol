@@ -134,6 +134,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         housePoolRedemptionMathSidecar = new HousePoolRedemptionMathSidecar();
         pool = new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar));
         baseMockPyth = new MockPyth();
+        baseMockPyth.setSynchronizeLegacyUniquePrices(true);
         bytes32[] memory baseFeedIds = _basePythFeedIds();
         baseMockPyth.setAllPrices(baseFeedIds, int64(100_000_000), int32(-8), SETUP_TIMESTAMP);
 
@@ -997,24 +998,6 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         CfdTypes.Side side
     ) internal view returns (uint256) {
         return _sideState(side).totalMargin;
-    }
-
-    // Historical helper name retained for obsolete carry/spread regression context.
-    // The live system does not maintain a legacy side-index state; this helper is intentionally zero.
-    function _legacySideIndexZero(
-        CfdTypes.Side side
-    ) internal pure returns (int256) {
-        side;
-        return 0;
-    }
-
-    // Historical helper name retained for obsolete carry/spread regression context.
-    // The live carry model does not use a legacy side-entry index; this helper is intentionally zero.
-    function _legacySideEntryIndexZero(
-        CfdTypes.Side side
-    ) internal pure returns (int256) {
-        side;
-        return 0;
     }
 
     function _sideMaxProfit(

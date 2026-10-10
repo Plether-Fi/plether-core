@@ -1,0 +1,484 @@
+{
+  "sourceCommit": "593230140be1aebfe6e227264ad5e50742121ea4",
+  "measurementNote": "callGas measures the isolated contract call, excluding transaction intrinsic gas and Arbitrum data fees",
+  "refundCoverage": {
+    "nonzeroOracleRefundScenarios": [],
+    "zeroQuoteScenarios": [
+      "caught_target_failure",
+      "distinct_basket_batch",
+      "historical_single",
+      "frozen_close",
+      "shared_basket_batch",
+      "unavailable_deferred",
+      "unavailable_immediate"
+    ],
+    "note": "Authentic zero quotes cannot prove nonzero Oracle-allocation refunds on this fork; that path is covered by the separately required MockPyth ETH-conservation invariant. Positive keeper surplus still exercises Router refunds and claims."
+  },
+  "keeperConfiguration": {
+    "repository": "Plether-Fi/plether-app",
+    "sourceCommit": "ccb8788ed7a3fbdcc258fc0c91f277949913974a",
+    "sourcePath": "apps/backend/src/Plether/Keeper.hs",
+    "symbol": "v2OrderGasLimitCap",
+    "orderGasLimit": 30000000,
+    "batchGasLimit": 30000000,
+    "postEngineGasReserve": 1000000,
+    "evaluatorReturnGasReserve": 250000,
+    "note": "Source-supported cap, not a claim of live ECS configuration. Outcome-aware preflight escalates within this cap.",
+    "sourceBlobSha": "b92ce42131f802efb71174ae92f0a0dc499f25ef",
+    "sourceFileSha256": "04f2df80e2c9b098578b179c4b7ac4d70024a7a962da1fe77a3a11f35ab58dfa",
+    "sourceEvidence": {
+      "path": "keeper/gas-cap-routing-excerpts.txt",
+      "sha256": "bc0c3bf71388ca5dab094034d332b6975621dc221e53dff0a65d32e81b266dcc"
+    },
+    "configurationPath": "deployments/releases/atomic-oracle-sync-candidate/keeper-evidence.json",
+    "coreSourceCommit": "593230140be1aebfe6e227264ad5e50742121ea4",
+    "configurationSha256": "5e94136e87b46e420e998708d9dc04ca76990212d98cb347fd1c3159882d5258",
+    "observedGasLimit": 30000000,
+    "gasCapEvidenceOnly": true,
+    "v3ConsumerCompatibilityVerified": false,
+    "limitation": "Pinned keeper still uses generic getUpdateFee; this proves a source-supported cap, not a compatible V3 consumer release or live service configuration.",
+    "coreGasSettings": {
+      "POST_ENGINE_GAS_RESERVE": {
+        "sourceCommit": "593230140be1aebfe6e227264ad5e50742121ea4",
+        "sourcePath": "packages/perps/src/OrderRouterExecutionSidecar.sol",
+        "sourceFileSha256": "9fe2360dd305e4a96b7630e53f2e8b460045dea49e325c1284ba261830a0cacf",
+        "value": 1000000
+      },
+      "EVALUATOR_RETURN_GAS_RESERVE": {
+        "sourceCommit": "593230140be1aebfe6e227264ad5e50742121ea4",
+        "sourcePath": "packages/perps/src/OrderRouterExecutionSidecar.sol",
+        "sourceFileSha256": "9fe2360dd305e4a96b7630e53f2e8b460045dea49e325c1284ba261830a0cacf",
+        "value": 250000
+      },
+      "minEngineGas": {
+        "sourceCommit": "593230140be1aebfe6e227264ad5e50742121ea4",
+        "sourcePath": "packages/perps/src/router/OrderRouterBase.sol",
+        "sourceFileSha256": "1deecdbffeb6e69b5c22e2aaaf467dc2eb985734992b07737d23df8f93bcb6de",
+        "value": 600000
+      }
+    }
+  },
+  "scenarios": [
+    {
+      "callGas": 976532,
+      "executionBlock": 311597306,
+      "executionDeadlines": [
+        1790091457
+      ],
+      "executionTimestamp": 1790091399,
+      "expectedParseCalls": 1,
+      "expectedUpdateCalls": 1,
+      "fundedWei": 1000000000,
+      "gasCap": 30000000,
+      "immediateRefundWei": 1000000000,
+      "isolationMode": "transaction",
+      "isolationVerified": true,
+      "lifecycleStatuses": [
+        3
+      ],
+      "liveReadChecked": true,
+      "markPrice": 97667164,
+      "markTime": 1790091398,
+      "oracleClaimedWei": 0,
+      "oracleCreditedWei": 0,
+      "oracleDeferredWei": 0,
+      "oracleRefundExercised": false,
+      "orderCommitTimes": [
+        1790091397
+      ],
+      "orderIds": [
+        1
+      ],
+      "outcome": "failed",
+      "payloadBytes": 2271,
+      "pythFeeDeltaWei": 0,
+      "quoteWei": 0,
+      "requiredPublishTimes": [
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398
+      ],
+      "routerClaimedWei": 0,
+      "routerCreditedWei": 0,
+      "routerDeferredWei": 0,
+      "routerRefundExercised": true,
+      "scenarioId": "caught_target_failure",
+      "schemaVersion": 1,
+      "storedPublishTimes": [
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398
+      ],
+      "surplusWei": 1000000000,
+      "terminalCount": 1
+    },
+    {
+      "callGas": 3687886,
+      "executionBlock": 311597307,
+      "executionDeadlines": [
+        1790091457,
+        1790091492
+      ],
+      "executionTimestamp": 1790091434,
+      "expectedParseCalls": 2,
+      "expectedUpdateCalls": 2,
+      "fundedWei": 1000000000,
+      "gasCap": 30000000,
+      "immediateRefundWei": 1000000000,
+      "isolationMode": "transaction",
+      "isolationVerified": true,
+      "lifecycleStatuses": [
+        2,
+        2
+      ],
+      "liveReadChecked": true,
+      "markPrice": 97664369,
+      "markTime": 1790091433,
+      "oracleClaimedWei": 0,
+      "oracleCreditedWei": 0,
+      "oracleDeferredWei": 0,
+      "oracleRefundExercised": false,
+      "orderCommitTimes": [
+        1790091397,
+        1790091432
+      ],
+      "orderIds": [
+        1,
+        2
+      ],
+      "outcome": "executed",
+      "payloadBytes": 4542,
+      "pythFeeDeltaWei": 0,
+      "quoteWei": 0,
+      "requiredPublishTimes": [
+        1790091433,
+        1790091433,
+        1790091433,
+        1790091433,
+        1790091433,
+        1790091433
+      ],
+      "routerClaimedWei": 0,
+      "routerCreditedWei": 0,
+      "routerDeferredWei": 0,
+      "routerRefundExercised": true,
+      "scenarioId": "distinct_basket_batch",
+      "schemaVersion": 1,
+      "storedPublishTimes": [
+        1790091433,
+        1790091433,
+        1790091433,
+        1790091433,
+        1790091433,
+        1790091433
+      ],
+      "surplusWei": 1000000000,
+      "terminalCount": 2
+    },
+    {
+      "callGas": 1997530,
+      "executionBlock": 311597306,
+      "executionDeadlines": [
+        1790091457
+      ],
+      "executionTimestamp": 1790091399,
+      "expectedParseCalls": 1,
+      "expectedUpdateCalls": 1,
+      "fundedWei": 1000000000,
+      "gasCap": 30000000,
+      "immediateRefundWei": 1000000000,
+      "isolationMode": "transaction",
+      "isolationVerified": true,
+      "lifecycleStatuses": [
+        2
+      ],
+      "liveReadChecked": true,
+      "markPrice": 97667164,
+      "markTime": 1790091398,
+      "oracleClaimedWei": 0,
+      "oracleCreditedWei": 0,
+      "oracleDeferredWei": 0,
+      "oracleRefundExercised": false,
+      "orderCommitTimes": [
+        1790091397
+      ],
+      "orderIds": [
+        1
+      ],
+      "outcome": "executed",
+      "payloadBytes": 2271,
+      "pythFeeDeltaWei": 0,
+      "quoteWei": 0,
+      "requiredPublishTimes": [
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398
+      ],
+      "routerClaimedWei": 0,
+      "routerCreditedWei": 0,
+      "routerDeferredWei": 0,
+      "routerRefundExercised": true,
+      "scenarioId": "historical_single",
+      "schemaVersion": 1,
+      "storedPublishTimes": [
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398
+      ],
+      "surplusWei": 1000000000,
+      "terminalCount": 1
+    },
+    {
+      "callGas": 1342497,
+      "executionBlock": 315089201,
+      "executionDeadlines": [
+        1790974860
+      ],
+      "executionTimestamp": 1790974801,
+      "expectedParseCalls": 0,
+      "expectedUpdateCalls": 1,
+      "fundedWei": 1000000000,
+      "gasCap": 30000000,
+      "immediateRefundWei": 1000000000,
+      "isolationMode": "transaction",
+      "isolationVerified": true,
+      "lifecycleStatuses": [
+        2
+      ],
+      "liveReadChecked": true,
+      "markPrice": 96440236,
+      "markTime": 1790974764,
+      "oracleClaimedWei": 0,
+      "oracleCreditedWei": 0,
+      "oracleDeferredWei": 0,
+      "oracleRefundExercised": false,
+      "orderCommitTimes": [
+        1790974800
+      ],
+      "orderIds": [
+        2
+      ],
+      "outcome": "executed",
+      "payloadBytes": 2271,
+      "pythFeeDeltaWei": 0,
+      "quoteWei": 0,
+      "requiredPublishTimes": [
+        1790974764,
+        1790974764,
+        1790974764,
+        1790974764,
+        1790974764,
+        1790974764
+      ],
+      "routerClaimedWei": 0,
+      "routerCreditedWei": 0,
+      "routerDeferredWei": 0,
+      "routerRefundExercised": true,
+      "scenarioId": "frozen_close",
+      "schemaVersion": 1,
+      "storedPublishTimes": [
+        1790974764,
+        1790974764,
+        1790974764,
+        1790974764,
+        1790974764,
+        1790974764
+      ],
+      "surplusWei": 1000000000,
+      "terminalCount": 1
+    },
+    {
+      "callGas": 2991145,
+      "executionBlock": 311597306,
+      "executionDeadlines": [
+        1790091457,
+        1790091457
+      ],
+      "executionTimestamp": 1790091399,
+      "expectedParseCalls": 1,
+      "expectedUpdateCalls": 1,
+      "fundedWei": 1000000000,
+      "gasCap": 30000000,
+      "immediateRefundWei": 1000000000,
+      "isolationMode": "transaction",
+      "isolationVerified": true,
+      "lifecycleStatuses": [
+        2,
+        2
+      ],
+      "liveReadChecked": true,
+      "markPrice": 97667164,
+      "markTime": 1790091398,
+      "oracleClaimedWei": 0,
+      "oracleCreditedWei": 0,
+      "oracleDeferredWei": 0,
+      "oracleRefundExercised": false,
+      "orderCommitTimes": [
+        1790091397,
+        1790091397
+      ],
+      "orderIds": [
+        1,
+        2
+      ],
+      "outcome": "executed",
+      "payloadBytes": 2271,
+      "pythFeeDeltaWei": 0,
+      "quoteWei": 0,
+      "requiredPublishTimes": [
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398
+      ],
+      "routerClaimedWei": 0,
+      "routerCreditedWei": 0,
+      "routerDeferredWei": 0,
+      "routerRefundExercised": true,
+      "scenarioId": "shared_basket_batch",
+      "schemaVersion": 1,
+      "storedPublishTimes": [
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398,
+        1790091398
+      ],
+      "surplusWei": 1000000000,
+      "terminalCount": 2
+    },
+    {
+      "callGas": 393419,
+      "executionBlock": 311597307,
+      "executionDeadlines": [
+        1790091459
+      ],
+      "executionTimestamp": 1790091400,
+      "expectedParseCalls": 1,
+      "expectedUpdateCalls": 0,
+      "fundedWei": 1000000000,
+      "gasCap": 30000000,
+      "immediateRefundWei": 0,
+      "isolationMode": "transaction",
+      "isolationVerified": true,
+      "lifecycleStatuses": [
+        1
+      ],
+      "liveReadChecked": false,
+      "markPrice": 100000000,
+      "markTime": 1709535600,
+      "oracleClaimedWei": 0,
+      "oracleCreditedWei": 0,
+      "oracleDeferredWei": 0,
+      "oracleRefundExercised": false,
+      "orderCommitTimes": [
+        1790091399
+      ],
+      "orderIds": [
+        1
+      ],
+      "outcome": "pending",
+      "payloadBytes": 2271,
+      "pythFeeDeltaWei": 0,
+      "quoteWei": 0,
+      "requiredPublishTimes": [
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387
+      ],
+      "routerClaimedWei": 1000000000,
+      "routerCreditedWei": 1000000000,
+      "routerDeferredWei": 0,
+      "routerRefundExercised": true,
+      "scenarioId": "unavailable_deferred",
+      "schemaVersion": 1,
+      "storedPublishTimes": [
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387
+      ],
+      "surplusWei": 1000000000,
+      "terminalCount": 0
+    },
+    {
+      "callGas": 418381,
+      "executionBlock": 311597307,
+      "executionDeadlines": [
+        1790091459
+      ],
+      "executionTimestamp": 1790091400,
+      "expectedParseCalls": 1,
+      "expectedUpdateCalls": 0,
+      "fundedWei": 1000000000,
+      "gasCap": 30000000,
+      "immediateRefundWei": 1000000000,
+      "isolationMode": "transaction",
+      "isolationVerified": true,
+      "lifecycleStatuses": [
+        1
+      ],
+      "liveReadChecked": false,
+      "markPrice": 100000000,
+      "markTime": 1709535600,
+      "oracleClaimedWei": 0,
+      "oracleCreditedWei": 0,
+      "oracleDeferredWei": 0,
+      "oracleRefundExercised": false,
+      "orderCommitTimes": [
+        1790091399
+      ],
+      "orderIds": [
+        1
+      ],
+      "outcome": "pending",
+      "payloadBytes": 2271,
+      "pythFeeDeltaWei": 0,
+      "quoteWei": 0,
+      "requiredPublishTimes": [
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387
+      ],
+      "routerClaimedWei": 0,
+      "routerCreditedWei": 0,
+      "routerDeferredWei": 0,
+      "routerRefundExercised": true,
+      "scenarioId": "unavailable_immediate",
+      "schemaVersion": 1,
+      "storedPublishTimes": [
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387,
+        1790091387
+      ],
+      "surplusWei": 1000000000,
+      "terminalCount": 0
+    }
+  ]
+}

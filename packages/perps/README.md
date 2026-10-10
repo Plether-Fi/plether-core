@@ -243,6 +243,13 @@ For valid previews, `postSize`, `postMarginUsdc`, `postEntryPrice`, `postVpiAccr
 
 Close previews expose frozen-market pricing separately from VPI. `frozenSpreadUsdc` is the fixed spread assessed on the reduced notional, `frozenSpreadPaidUsdc` is the portion actually retained or collected for LPs, and `frozenSpreadWaivedUsdc` is the uncollectible portion waived on a terminal full close. These values are zero outside `oracleFrozen`, and a valid preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`. Successful closes with a nonzero assessment emit `FrozenCloseSpreadSettled(account, assessedUsdc, paidUsdc, waivedUsdc)` from `CfdEngineSettlementSidecar`, so the live result is reconstructible from durable logs.
 
+For the next deployment, voluntary full closes release unused position pledge and liquidation reserve after carry
+and capped price-loss settlement, before collecting action charges. Released surplus joins free settlement and is
+spent before pending-order margin. Existing claim balances and execution bounties remain protected. A full close
+still succeeds when eligible funds are exhausted, waiving only the remaining charge; partial-close and liquidation
+policies are unchanged. Planner and settlement changes must ship together with matching previews. Existing deployed
+contracts and historical release artifacts retain their original behavior.
+
 ## Runtime Components
 
 The main runtime and read surfaces are:
@@ -1470,6 +1477,8 @@ Router-attributed live-order reserves and clearinghouse reserved settlement. TP/
 irreversible trigger followed by retryable market-close attempts, never as an automatic or guaranteed-price close.
 
 ## Further Reading
+
+- [`test/perps/TEST_MAP.md`](test/perps/TEST_MAP.md): executable specification coverage, independent models, test profiles, and replay instructions
 
 - [`WORKING_WITH_AI_AGENTS.md`](WORKING_WITH_AI_AGENTS.md): bounded autonomous trading, machine-readable execution,
   and independent intent/outcome verification

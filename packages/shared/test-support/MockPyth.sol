@@ -13,12 +13,25 @@ contract MockPyth {
         uint256 prevPublishTime;
     }
 
+    struct FeedUpdate {
+        bytes32 id;
+        MockPrice price;
+    }
+
     mapping(bytes32 => MockPrice) public prices;
     mapping(bytes32 => MockPrice) public uniquePrices;
     mapping(bytes32 => bool) public hasUniquePrice;
     uint256 public mockFee;
     uint256 public updatePriceFeedsCallCount;
     uint256 public parseUniqueCallCount;
+    // Opt-in compatibility for older perps fixtures that stage unique prices and pass empty blobs.
+    // Explicit FeedUpdate[] payloads never consult the staged historical mapping.
+    bool public synchronizeLegacyUniquePrices;
+    bool internal legacyHistoricalParsePending;
+    bool public failUpdate;
+    bool public skipUpdate;
+    bytes32 public skippedFeed;
+    uint256 public failUpdateAtCall;
     bytes32[] internal registeredFeedIds;
     mapping(bytes32 => bool) internal registeredFeedId;
 
@@ -109,6 +122,28 @@ contract MockPyth {
         mockFee = _fee;
     }
 
+    function setSynchronizeLegacyUniquePrices(
+        bool enabled
+    ) external {
+        synchronizeLegacyUniquePrices = enabled;
+    }
+
+    function setUpdateFailure(
+        bool fail,
+        bool skip,
+        bytes32 feed
+    ) external {
+        failUpdate = fail;
+        skipUpdate = skip;
+        skippedFeed = feed;
+    }
+
+    function setFailUpdateAtCall(
+        uint256 callNumber
+    ) external {
+        failUpdateAtCall = callNumber;
+    }
+
     function getUpdateFee(
         bytes[] calldata
     ) external view returns (uint256) {
@@ -118,7 +153,30 @@ contract MockPyth {
     function updatePriceFeeds(
         bytes[] calldata updateData
     ) external payable {
+        require(msg.value >= mockFee, "insufficient fee");
+        require(!failUpdate, "storage update failed");
         updatePriceFeedsCallCount++;
+        require(updatePriceFeedsCallCount != failUpdateAtCall, "storage update failed");
+        if (skipUpdate) {
+            return;
+        }
+        if (updateData.length > 0 && updateData[0].length > 32) {
+            FeedUpdate[] memory updates = abi.decode(updateData[0], (FeedUpdate[]));
+            for (uint256 i; i < updates.length; ++i) {
+                _applyUpdate(updates[i].id, updates[i].price);
+            }
+            return;
+        }
+        bool syncLegacyHistory = synchronizeLegacyUniquePrices && legacyHistoricalParsePending;
+        legacyHistoricalParsePending = false;
+        if (syncLegacyHistory) {
+            for (uint256 i; i < registeredFeedIds.length; ++i) {
+                bytes32 id = registeredFeedIds[i];
+                if (hasUniquePrice[id]) {
+                    _applyUpdate(id, uniquePrices[id]);
+                }
+            }
+        }
         if (updateData.length == 0 || updateData[0].length != 32) {
             return;
         }
@@ -127,8 +185,22 @@ contract MockPyth {
         int64 intPrice = int64(uint64(price));
         for (uint256 i = 0; i < registeredFeedIds.length; i++) {
             bytes32 feedId = registeredFeedIds[i];
+            if (syncLegacyHistory && hasUniquePrice[feedId]) {
+                continue;
+            }
             prices[feedId] = MockPrice(intPrice, 0, int32(-8), block.timestamp, prices[feedId].publishTime);
         }
+    }
+
+    function _applyUpdate(
+        bytes32 id,
+        MockPrice memory price
+    ) internal {
+        if (id == skippedFeed || price.publishTime <= prices[id].publishTime) {
+            return;
+        }
+        _registerFeed(id);
+        prices[id] = price;
     }
 
     function parsePriceFeedUpdatesUnique(
@@ -137,7 +209,13 @@ contract MockPyth {
         uint64 minPublishTime,
         uint64 maxPublishTime
     ) external payable returns (PythStructs.PriceFeed[] memory priceFeeds) {
+        require(msg.value >= mockFee, "insufficient fee");
         parseUniqueCallCount++;
+        bool explicitPayload = updateData.length > 0 && updateData[0].length > 32;
+        FeedUpdate[] memory updates;
+        if (explicitPayload) {
+            updates = abi.decode(updateData[0], (FeedUpdate[]));
+        }
         bool hasEncodedUpdate = updateData.length > 0 && updateData[0].length == 32;
         uint256 encodedPrice;
         if (hasEncodedUpdate) {
@@ -147,7 +225,21 @@ contract MockPyth {
         priceFeeds = new PythStructs.PriceFeed[](priceIds.length);
         for (uint256 i = 0; i < priceIds.length; i++) {
             MockPrice memory p;
-            if (hasUniquePrice[priceIds[i]]) {
+            if (explicitPayload) {
+                bool found;
+                for (uint256 j; j < updates.length; ++j) {
+                    MockPrice memory candidate = updates[j].price;
+                    if (
+                        updates[j].id == priceIds[i] && candidate.prevPublishTime < minPublishTime
+                            && candidate.publishTime >= minPublishTime && candidate.publishTime <= maxPublishTime
+                    ) {
+                        p = candidate;
+                        found = true;
+                        break;
+                    }
+                }
+                require(found, "feed not found within range");
+            } else if (hasUniquePrice[priceIds[i]]) {
                 p = uniquePrices[priceIds[i]];
             } else if (hasEncodedUpdate) {
                 p = MockPrice(
@@ -165,6 +257,9 @@ contract MockPyth {
             PythStructs.Price memory price =
                 PythStructs.Price({price: p.price, conf: p.conf, expo: p.expo, publishTime: p.publishTime});
             priceFeeds[i] = PythStructs.PriceFeed({id: priceIds[i], price: price, emaPrice: price});
+        }
+        if (!explicitPayload && synchronizeLegacyUniquePrices) {
+            legacyHistoricalParsePending = true;
         }
     }
 

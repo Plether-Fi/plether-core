@@ -1,0 +1,13 @@
+# Strict oracle-handler outcomes
+
+The inherited live-oracle handler accepted any reverted execution when the mark timestamp stayed unchanged, ignored all retry failures, and counted non-reverting pending responses as resolutions. These paths could let campaigns pass without exercising the intended transitions.
+
+The handler now compares exact injected revert data, verifies rollback across oracle/queue/reservation/custody state, and requires the healthy retry to produce an authenticated terminal receipt. Unexpected reverts, missing expected faults, malformed return data, and pending execution outcomes fail the handler. Resolution counters reconcile with executed orders and independently predicted terminal solvency rejections. Commit-time solvency rejection is accepted only when justified by independent liability/buffer arithmetic; fresh account identities advance even when commit fails.
+
+Independent checks cover component rounding, pool liabilities, execution fees, trader custody, keeper bounty credit, reservation release and exact-once settlement. Mark/feed evidence must include the expected parse/write counters, price, timestamp, confidence and exponent. The invariant warm-up proves an executed order and campaign counters distinguish attempts, rejected commits, terminal rejections, executions and healthy retries.
+
+Nineteen deterministic controls invoke the real handler/router. They include healthy and all injected-fault combinations; custom, empty, panic and wrong-argument errors; disappearing injected faults; first-call and retry evaluator failures; apparent oracle success without storage writes; odd-price rounding; persistent transitions; exact solvency liquidity, one atom insufficient, and commit-accepted/execution-price-rejected boundaries. Economic boundary fixtures use real LP deposits, without storage mutation.
+
+Limitations remain explicit: this handler models two equal-weight feeds, zero VPI, fresh accounts, bounded prices and delays within a live calendar. It does not claim frozen/FAD coverage, which belongs to separate scenario suites. Full production-codegen/audit campaigns and external RPC validation remain separate outstanding gates. No production source changed.
+
+Validation before push: formatting, package boundaries, 120 exact coverage-map references and whitespace checks pass. Static independent review corrected initial empty-queue sentinel and fee/reserve expectations. Local Forge compilation and test campaigns remain stopped at the user's request. Hosted CI must validate this new source; previous green results apply to the prior commit.

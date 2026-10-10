@@ -897,6 +897,10 @@ library CfdEnginePlanLib {
         uint256 releasedVpiReserveUsdc =
             delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc - delta.vpiRebateReserveConsumedUsdc;
         uint256 collectibleFreeSettlementUsdc = snap.accountBuckets.freeSettlementUsdc + releasedVpiReserveUsdc;
+        if (terminal) {
+            // The full-close reserve is released before pledge attribution and cash collection.
+            collectibleFreeSettlementUsdc += delta.liquidationReserveReleaseUsdc;
+        }
         uint256 freeConsumedUsdc = actionChargeAfterReserveUsdc < collectibleFreeSettlementUsdc
             ? actionChargeAfterReserveUsdc
             : collectibleFreeSettlementUsdc;

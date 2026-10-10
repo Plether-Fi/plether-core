@@ -30,7 +30,7 @@ interface IPletherOracle {
     /// @param price Action price in 8-decimal units; specialized execution paths may shift it against an account.
     /// @param markPrice Neutral capped basket price in 8-decimal units, before any action-specific adverse shift.
     /// @param publishTime Earliest component publish time as a Unix timestamp.
-    /// @param updateFee Pyth fee quoted for this resolution in wei, or zero for a view read or reused batch cache;
+    /// @param updateFee Funding quoted for this resolution in wei (parse plus update for history), zero for view/cache;
     ///        an unavailable nonreverting historical parse reports the fee even though it is refunded or deferred.
     /// @param maxStaleness Effective maximum component age in seconds for the selected policy.
     /// @param closeOnly Whether current policy prohibits opens and increases; callers enforce this flag.
@@ -110,7 +110,8 @@ interface IPletherOracle {
 
     /// @notice Neutral historical basket that a batch caller may offer for a later compatible order.
     /// @dev Callers should pass through a cache returned by `updateBatchOrderExecutionPrice`; fabricated cache contents
-    ///      are not independently authenticated by the oracle.
+    ///      are not independently authenticated by the oracle. Stored-feed timestamp coverage is checked on reuse.
+    ///      The Router accepts no external cache and only reuses successful results within its current batch.
     /// @param hasHistoricalBasket Whether the remaining fields contain a reusable historical basket.
     /// @param minReusableCommitTime Earliest commit time for which the cached tick was originally proven valid.
     /// @param price Neutral, pre-cap basket price in 8-decimal units.
@@ -158,6 +159,12 @@ interface IPletherOracle {
     /// @param publishTime Earliest basket component publish time.
     /// @param lastMarkTime Engine cached-mark publish time.
     error PletherOracle__PriceOutOfOrder(uint64 publishTime, uint64 lastMarkTime);
+
+    /// @notice Stored Pyth data does not cover a parsed component or a reused historical basket.
+    /// @param feedId Component whose stored timestamp is behind.
+    /// @param storedPublishTime Current stored component timestamp.
+    /// @param requiredPublishTime Minimum timestamp required by this resolution.
+    error PletherOracle__StoredFeedBehind(bytes32 feedId, uint256 storedPublishTime, uint256 requiredPublishTime);
     /// @notice Thrown when a component is future-dated, too old, or required historical data is unavailable.
     /// @param mode Action policy under which validation failed.
     /// @param feedId Failing Pyth feed id, or zero when no individual historical feed is available.
@@ -219,11 +226,12 @@ interface IPletherOracle {
     /// @notice Applies order-execution update data and returns a validated execution price.
     /// @dev Outside frozen-oracle policy, resolves a unique historical basket in
     ///      `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`. Frozen policy instead performs a
-    ///      normal Pyth update and validates the current basket with the relaxed age limit. `price` is shifted against
+    ///      normal Pyth update and validates the current basket with the relaxed age limit. Historical resolution also
+    ///      updates storage from the same payload and verifies coverage before returning. `price` is shifted against
     ///      the requested side by aggregate confidence, except for a frozen voluntary close; `markPrice` stays neutral.
     ///      This function reports but does not enforce close-only policy and ignores `request.targetPrice`. Successful
-    ///      calls do not refund overpayment, so callers should supply exactly Pyth's quoted fee. If a nonreverting
-    ///      historical parse is unavailable, exactly that fee is refunded or deferred and `ok` is false.
+    ///      calls do not refund overpayment; supply exactly `getOrderExecutionFee`. If a nonreverting historical parse
+    ///      is unavailable, the full quote is refunded or deferred and `ok` is false. Synchronization failures revert.
     /// @param refundRecipient Recipient for the Pyth-fee refund when a historical parse is unavailable.
     /// @param pythUpdateData Nonempty Pyth update or unique historical-parse payloads.
     /// @param request Commit, side, close, and unavailable-history inputs; its target price is caller-enforced.
@@ -238,8 +246,9 @@ interface IPletherOracle {
     /// @notice Batch variant that can reuse a historical tick already proven unique for later commits.
     /// @dev Reuse is available only outside frozen policy when the cached publish time is after the new commit, within
     ///      its settlement window, no later than the current time, and covered by `minReusableCommitTime`. Reuse pays no
-    ///      Pyth fee and does not refund any ETH supplied with the call. Otherwise, fee handling and price construction
-    ///      match `updateOrderExecutionPrice`. Only a successful new historical parse extends `nextCache`; a frozen
+    ///      Pyth fee after checking stored-feed coverage; it does not authenticate cache prices or refund supplied ETH.
+    ///      Otherwise, fee handling and price construction
+    ///      match `updateOrderExecutionPrice`. Only a successful new parse and synchronization extends `nextCache`; a frozen
     ///      current basket is never cached.
     /// @param refundRecipient Recipient for the Pyth-fee refund when a historical parse is unavailable.
     /// @param pythUpdateData Pyth payloads, which may be unused when `cache` is reusable.
@@ -352,6 +361,15 @@ interface IPletherOracle {
     function getUpdateFee(
         bytes[] calldata pythUpdateData
     ) external view returns (uint256 pythFee);
+
+    /// @notice Quotes funding for a new execution basket: two Pyth fees for history, one when frozen.
+    /// @dev Historical execution pays separately for unique parsing and stored-feed synchronization. Proven Router
+    ///      batch-cache reuse requires zero funding. This quote does not predict cache reuse. Reverts for empty data.
+    /// @param pythUpdateData Nonempty Pyth payloads used for both historical parsing and storage synchronization.
+    /// @return executionFunding Required funding in wei under the current frozen/live policy.
+    function getOrderExecutionFee(
+        bytes[] calldata pythUpdateData
+    ) external view returns (uint256 executionFunding);
 
     /// @notice Returns whether the market calendar allows frozen-oracle policy.
     /// @dev The recurring window follows Pyth FX hours from Friday 17:00 New York time through Sunday 16:59:59 New York

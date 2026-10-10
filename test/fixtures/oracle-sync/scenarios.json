@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "fixtures": {
+    "historicalA": "test/fixtures/oracle-sync/arbitrum-sepolia.json",
+    "historicalB": "test/fixtures/oracle-sync/historical-b.json",
+    "fridayOpening": "test/fixtures/oracle-sync/friday-opening.json",
+    "fridayClosing": "test/fixtures/oracle-sync/friday-closing.json"
+  }
+}

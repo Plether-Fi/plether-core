@@ -112,7 +112,7 @@ RPC-backed tests cover cross-product behavior against live protocol deployments 
   --fork-url "$MAINNET_RPC_URL" -vvv)
 ```
 
-The real Pyth update test needs an additional Hermes fixture; see the [integration test guide](test/README.md#fork-tests).
+The real Pyth update test needs an additional Hermes fixture; see the [integration test guide](test/README.md#fork-tests-testforktsol).
 
 ## Continuous Integration
 

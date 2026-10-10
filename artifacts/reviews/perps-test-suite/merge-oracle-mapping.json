@@ -1,0 +1,248 @@
+{
+  "recorded_utc": "2026-10-10T09:32:07.263658+00:00",
+  "worktree": "/Users/stan/.codex/worktrees/perps-suite-merge/plether-core",
+  "upstream_sync_sites_in_deleted_sources": 23,
+  "audit_sites": 13,
+  "router_sites": 10,
+  "active_sites_preserved": 22,
+  "obsolete_undiscovered_setup_sites_not_resurrected": 1,
+  "mappings": [
+    {
+      "upstream_file": "packages/perps/test/perps/AuditBlockingAccountingFindingsFailing.t.sol",
+      "upstream_contract": "AuditBlockingAccountingFindingsFailing_SolvencyTiming",
+      "upstream_function": "setUp",
+      "upstream_call": "baseMockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "differential/EngineExecutionParity.t.sol::EngineExecutionParityTest",
+      "disposition": "inherited from automatically merged BasePerpTest through shared/CfdEngineTestBase.sol"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditC1SequencerDriftFailing.t.sol",
+      "upstream_contract": "AuditC1SequencerDriftFailing",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::FuturePublishDelayTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditConfirmedFindingsFailing.t.sol",
+      "upstream_contract": "AuditConfirmedFindingsFailing_StaleKeeperFee",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/keeper/OrderBountyLifecycle.t.sol::ExpiredBatchBountiesTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditConfirmedFindingsFailing.t.sol",
+      "upstream_contract": "AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::StoredMarkOrderingTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditCurrentFindingsVerification.t.sol",
+      "upstream_contract": "AuditCurrentFindingsVerifiedInvalid_Mev",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::FreshPostCommitTickTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditExecutionPathFindingsFailing.t.sol",
+      "upstream_contract": "AuditExecutionPathFindingsFailing_EthRefundFallback",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "accounting/cash-priority/OracleRefundCustody.t.sol::RejectedOracleRefundTest",
+      "disposition": "automatically merged at migrated path"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditLatestFindingsFailing.t.sol",
+      "upstream_contract": "AuditLatestFindingsFailing_MevDrift",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::SameBlockTickOrderingTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditLatestValidFindingsFailing.t.sol",
+      "upstream_contract": "AuditLatestValidFindingsFailing_Mev",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::PostCommitTimestampBoundsTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditRemainingFindingsFailing.t.sol",
+      "upstream_contract": "AuditRemainingFindingsFailing_MevDrift",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::CrossBlockPostCommitTickTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditRemainingFindingsFailing.t.sol",
+      "upstream_contract": "AuditRemainingFindingsFailing_StaleOracleExecution",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::HistoricalTickSafetyTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditV2.t.sol",
+      "upstream_contract": "AuditV2_C03_OracleFrozenCloseTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/FrozenMarketExecution.t.sol::FrozenCloseEligibilityTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditV3.t.sol",
+      "upstream_contract": "AuditV3_C01_FIFODeadlockTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/FrozenMarketExecution.t.sol::ExpiredHeadFrozenQueueTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/AuditVerifiedFindingsFailing.t.sol",
+      "upstream_contract": "AuditVerifiedFindingsFailing_F3_StaleKeeperFee",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/ExecutionClockBoundaries.t.sol::StaleExecutionReservationTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "OrderRouterPythTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "shared/OrderRouterTestBase.sol::OrderRouterPythTestBase",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "OrderRouterPythTest",
+      "upstream_function": "test_OracleConfigTimelock_RotatesPythBasket",
+      "upstream_call": "newPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/admin/OrderRouterOracleConfiguration.t.sol::OrderRouterOracleConfigurationTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "OrderRouterBlockedExecutionTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "disposition": "not resurrected",
+      "reason": "The migration removed this contract because it contains no discoverable tests, only two obsolete uncalled cases. The changed setup has no surviving execution. Current FAD/blocked execution remains covered by domain matrices and the deterministic CloseOnly scenario."
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "FadStalenessTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/FadStaleness.t.sol::FadStalenessTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "InversionTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/OracleBasketInversion.t.sol::InversionTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "MarkPriceStalenessTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/MarkPriceStaleness.t.sol::MarkPriceStalenessTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "StalenessGriefTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/LiveStaleOracle.t.sol::StalenessGriefTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "VpiImrBypassTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/trader/VpiInitialMargin.t.sol::VpiImrBypassTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "KeeperFeeRefundTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/keeper/KeeperFeeRefund.t.sol::KeeperFeeRefundTest",
+      "disposition": "mapped and applied"
+    },
+    {
+      "upstream_file": "packages/perps/test/perps/OrderRouter.t.sol",
+      "upstream_contract": "WeekendArbitrageTest",
+      "upstream_function": "setUp",
+      "upstream_call": "mockPyth.setSynchronizeLegacyUniquePrices(true)",
+      "target": "spec/oracle/FrozenCloseCommitment.t.sol::WeekendArbitrageTest",
+      "disposition": "mapped and applied"
+    }
+  ],
+  "auto_merged_opt_ins_verified": [
+    "BasePerpTest.sol",
+    "accounting/cash-priority/OracleRefundCustody.t.sol",
+    "differential/CfdEnginePlanRegression.t.sol",
+    "spec/oracle/PletherOracle.t.sol",
+    "invariant/BasePerpInvariantTest.sol",
+    "invariant/properties/PerpClosePreviewParityInvariant.t.sol",
+    "invariant/properties/PerpOraclePathInvariant.t.sol"
+  ],
+  "other_auto_merges_verified": [
+    "Shared MockPyth is byte-identical to upstream 64c6ea90.",
+    "ControllablePythGas registers feeds and synchronizes encoded prices.",
+    "Single-head progress asserts exactly one Pyth stored-feed update.",
+    "PerpOracleHandler quotes combined historical-parse and synchronization execution fee."
+  ],
+  "clustered_batch_fee_correction": "Preserved 2 ether funding and call value in test_BatchExecution_ReusesHistoricalTickForClusteredOrders.",
+  "direct_close_gas_fixture": "No opt-in added: upstream does not opt this fixture in; its encoded update price and historical timestamp use the same current timestamp.",
+  "shared_fixture_consumers": [
+    "packages/perps/test/perps/spec/trader/OrderRouterSlippage.t.sol",
+    "packages/perps/test/perps/spec/trader/OrderRouterAdmission.t.sol",
+    "packages/perps/test/perps/spec/oracle/OrderRouterLiquidationFreshness.t.sol",
+    "packages/perps/test/perps/spec/oracle/OrderRouterExecutionFreshness.t.sol",
+    "packages/perps/test/perps/spec/oracle/OrderRouterBasketValidation.t.sol",
+    "packages/perps/test/perps/spec/admin/OrderRouterOracleConfiguration.t.sol",
+    "packages/perps/test/perps/spec/keeper/OrderRouterQueueRecovery.t.sol",
+    "packages/perps/test/perps/spec/keeper/OrderRouterExecutionPayments.t.sol"
+  ],
+  "lexical_affected_test_declarations": 155,
+  "affected_test_declarations_by_file": {
+    "packages/perps/test/perps/shared/OrderRouterTestBase.sol": 0,
+    "packages/perps/test/perps/spec/admin/OrderRouterOracleConfiguration.t.sol": 3,
+    "packages/perps/test/perps/spec/keeper/KeeperFeeRefund.t.sol": 6,
+    "packages/perps/test/perps/spec/keeper/OrderBountyLifecycle.t.sol": 29,
+    "packages/perps/test/perps/spec/keeper/OrderRouterExecutionPayments.t.sol": 15,
+    "packages/perps/test/perps/spec/keeper/OrderRouterQueueRecovery.t.sol": 2,
+    "packages/perps/test/perps/spec/oracle/ExecutionClockBoundaries.t.sol": 13,
+    "packages/perps/test/perps/spec/oracle/FadStaleness.t.sol": 31,
+    "packages/perps/test/perps/spec/oracle/FrozenCloseCommitment.t.sol": 1,
+    "packages/perps/test/perps/spec/oracle/FrozenMarketExecution.t.sol": 4,
+    "packages/perps/test/perps/spec/oracle/LiveStaleOracle.t.sol": 1,
+    "packages/perps/test/perps/spec/oracle/MarkPriceStaleness.t.sol": 4,
+    "packages/perps/test/perps/spec/oracle/OracleBasketInversion.t.sol": 3,
+    "packages/perps/test/perps/spec/oracle/OrderRouterBasketValidation.t.sol": 7,
+    "packages/perps/test/perps/spec/oracle/OrderRouterExecutionFreshness.t.sol": 19,
+    "packages/perps/test/perps/spec/oracle/OrderRouterLiquidationFreshness.t.sol": 2,
+    "packages/perps/test/perps/spec/trader/OrderRouterAdmission.t.sol": 8,
+    "packages/perps/test/perps/spec/trader/OrderRouterSlippage.t.sol": 5,
+    "packages/perps/test/perps/spec/trader/VpiInitialMargin.t.sol": 2
+  },
+  "no_t_sol_imports_added": true,
+  "removed_paths_absent": true,
+  "remaining_merge_conflicts": [],
+  "validation": "Static mapping and git diff --check only; no test process or compile started. Root controls integration validation."
+}
