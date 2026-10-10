@@ -7,6 +7,7 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
@@ -22,6 +23,13 @@ contract PerpOracleHandler is Test {
     address public immutable owner;
 
     address[2] internal actors;
+
+    uint256 public markSyncAttempts;
+    uint256 public successfulMarkSyncs;
+    uint256 public expectedOutOfOrderRejections;
+
+    error PerpOracleHandler__UnexpectedSuccess();
+    error PerpOracleHandler__UnexpectedRevert(bytes reason);
 
     constructor(
         MockUSDC _usdc,
@@ -111,8 +119,25 @@ contract PerpOracleHandler is Test {
         uint256 priceFuzz
     ) external {
         uint256 price = bound(priceFuzz, 0.5e8, 1.5e8);
+        // Boundary selection deliberately moves time backwards. Only that precise engine rejection is expected.
+        bool expectOutOfOrder = block.timestamp < engine.lastMarkTime();
+        ++markSyncAttempts;
         vm.prank(address(router));
-        engine.updateMarkPrice(price, uint64(block.timestamp));
+        try engine.updateMarkPrice(price, uint64(block.timestamp)) {
+            if (expectOutOfOrder) {
+                revert PerpOracleHandler__UnexpectedSuccess();
+            }
+            ++successfulMarkSyncs;
+        } catch (bytes memory reason) {
+            if (
+                !expectOutOfOrder
+                    || keccak256(reason)
+                        != keccak256(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector))
+            ) {
+                revert PerpOracleHandler__UnexpectedRevert(reason);
+            }
+            ++expectedOutOfOrderRejections;
+        }
     }
 
     function configureFadDayTomorrow(

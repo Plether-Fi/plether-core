@@ -13,15 +13,28 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 contract PerpAccountingHandler is Test {
+
+    enum RejectionDomain {
+        Commit,
+        Execution,
+        Liquidation,
+        Claim,
+        Withdrawal
+    }
+    error UnexpectedActionRevert(RejectionDomain domain, bytes reason);
+    error UnexpectedPendingExecution(OrderV3Types.PendingReason reason);
 
     uint8 internal constant GHOST_ORDER_NONE = 0;
     uint8 internal constant GHOST_ORDER_PENDING = 1;
@@ -108,6 +121,9 @@ contract PerpAccountingHandler is Test {
     uint256 public ghostSuccessfulLiquidations;
     uint256 public ghostOrderExecutionAttemptCount;
     uint256 public ghostExecutedOrderCount;
+    uint256 public caughtActionReverts;
+    bytes4 public lastCaughtRevertSelector;
+    mapping(bytes4 => uint256) public caughtRevertsBySelector;
 
     mapping(uint64 => address) internal ghostOrderOwner;
     mapping(uint64 => uint256) internal ghostOrderCommittedMargin;
@@ -117,6 +133,11 @@ contract PerpAccountingHandler is Test {
     mapping(uint64 => uint256) internal ghostReservationConsumed;
     mapping(uint64 => uint256) internal ghostReservationReleased;
     mapping(address => ReachabilityTransition) internal reachabilityTransitions;
+
+    // Observed mirrors check batch/account reconciliation only. The independent claim oracle is
+    // PerpClaimModelHandler; these mirrors must never be described as model-derived accounting.
+    mapping(address => uint256) internal observedTraderClaims;
+    uint256 internal observedTotalTraderClaims;
 
     PriceLossTraderClaimEvent internal lastPriceLossTraderClaimEvent;
     TerminalResidualEvent internal lastTerminalResidualEvent;
@@ -222,6 +243,7 @@ contract PerpAccountingHandler is Test {
         try engine.checkWithdraw(account) {
             attempt.checkWithdrawPasses = true;
         } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Withdrawal, err);
             attempt.checkWithdrawSelector = _revertSelector(err);
         }
 
@@ -232,6 +254,7 @@ contract PerpAccountingHandler is Test {
                 engineAccountLens.getAccountLedgerSnapshot(account);
             _recordReachabilityTransition(account, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
         } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Withdrawal, err);
             attempt.withdrawSelector = _revertSelector(err);
         }
         lastWithdrawParityAttempt = attempt;
@@ -279,7 +302,9 @@ contract PerpAccountingHandler is Test {
         try router.commitOrder(side, sizeDelta, marginDelta, targetPrice, false) {
             lastOpenCommitAttempt.commitSucceeded = true;
             _registerPendingOrder(orderId, account, marginDelta);
-        } catch {}
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Commit, err);
+        }
     }
 
     function warpForward(
@@ -323,7 +348,9 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try router.commitOrder(side, size, 0, targetPrice, true) {
             _registerPendingOrder(orderId, account, 0);
-        } catch {}
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Commit, err);
+        }
     }
 
     /// @notice Commits a strict whole-lot reduction of the account's current position.
@@ -357,7 +384,9 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try router.commitOrder(side, closeLots * CfdTypes.SIZE_QUANTUM, 0, targetPrice, true) {
             _registerPendingOrder(orderId, account, 0);
-        } catch {}
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Commit, err);
+        }
     }
 
     function executeNextOrderBatch(
@@ -379,9 +408,12 @@ contract PerpAccountingHandler is Test {
         uint64 startExecuteId = nextExecuteId;
         uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
         _recordOrderExecutionAttempt();
-        try router.executeOrderBatch(maxOrderId, priceData) {
+        try router.executeOrderBatch(maxOrderId, priceData) returns (OrderV3Types.BatchResult memory result) {
+            _checkPendingReason(result.stopReason);
             _reconcileCommittedMarginAfterProcessedOrders(committedBefore, startExecuteId, router.nextExecuteId(), true);
-        } catch {}
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Execution, err);
+        }
     }
 
     function executeNextOrderModelled() external {
@@ -445,10 +477,7 @@ contract PerpAccountingHandler is Test {
         ModelledOrderPreview memory model
     ) internal {
         _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId(), false);
-        if (model.traderClaimBalanceUsdc > 0) {
-            ghost.increaseTraderClaim(model.account, model.traderClaimBalanceUsdc);
-        }
-        _syncGhostTraderClaim(model.account);
+        _observeTraderClaim(model.account);
         if (model.terminalPriceLoss) {
             _recordPriceLossTraderClaimEvent(
                 model.account, model.legacyDebtDiagnosticUsdc, model.traderClaimBalanceUsdc
@@ -474,7 +503,8 @@ contract PerpAccountingHandler is Test {
         if (model.terminalClose) {
             vm.recordLogs();
         }
-        try router.executeOrder(orderId, priceData) {
+        try router.executeOrder(orderId, priceData) returns (OrderV3Types.ExecutionResult memory result) {
+            _checkPendingReason(result.pendingReason);
             OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             executed = uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Executed);
             processed = executed || uint8(record.status) == uint8(IOrderRouterAccounting.OrderStatus.Failed);
@@ -486,7 +516,8 @@ contract PerpAccountingHandler is Test {
                 }
             }
             return (processed, executed, actionChargeCollectedUsdc);
-        } catch {
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Execution, err);
             if (model.terminalClose) {
                 vm.getRecordedLogs();
             }
@@ -541,7 +572,6 @@ contract PerpAccountingHandler is Test {
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
         bytes[] memory priceData = _nextBlockPriceData(price);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
-        uint256 traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
         uint256 traderWalletBeforeUsdc = usdc.balanceOf(actor);
         uint256 expectedFinalResidualUsdc = preview.settlementRetainedUsdc + preview.traderClaimBalanceUsdc;
         uint256 committedBefore = _trackedCommittedMargin(account);
@@ -551,17 +581,16 @@ contract PerpAccountingHandler is Test {
             _recordLiquidationSuccess(account, actor, preview.badDebtUsdc);
             ghostSuccessfulLiquidations++;
             _reconcileCommittedMarginAfterLiquidation(account, committedBefore);
-            if (traderClaimBalanceUsdc > 0) {
-                ghost.increaseTraderClaim(account, traderClaimBalanceUsdc);
-            }
-            _syncGhostTraderClaim(account);
+            _observeTraderClaim(account);
             if (preview.pnlUsdc < 0) {
                 _recordPriceLossTraderClaimEvent(account, preview.badDebtUsdc, preview.traderClaimBalanceUsdc);
             }
             _recordTerminalResidualEvent(
                 account, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, false
             );
-        } catch {}
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Liquidation, err);
+        }
     }
 
     function _recordLiquidationSuccess(
@@ -593,7 +622,8 @@ contract PerpAccountingHandler is Test {
             vm.prank(actor);
             try router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 20_000e6, 0, false) {
                 _registerPendingOrder(openOrderId, account, 20_000e6);
-            } catch {
+            } catch (bytes memory err) {
+                _recordCaughtRevert(RejectionDomain.Commit, err);
                 return;
             }
 
@@ -601,11 +631,13 @@ contract PerpAccountingHandler is Test {
             uint64 startExecuteId = router.nextExecuteId();
             uint256[4] memory openCommittedBefore = _snapshotTrackedCommittedMargin();
             _recordOrderExecutionAttempt();
-            try router.executeOrderBatch(openOrderId, openPriceData) {
+            try router.executeOrderBatch(openOrderId, openPriceData) returns (OrderV3Types.BatchResult memory result) {
+                _checkPendingReason(result.stopReason);
                 _reconcileCommittedMarginAfterProcessedOrders(
                     openCommittedBefore, startExecuteId, router.nextExecuteId(), true
                 );
-            } catch {
+            } catch (bytes memory err) {
+                _recordCaughtRevert(RejectionDomain.Execution, err);
                 return;
             }
 
@@ -624,7 +656,8 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try router.commitOrder(side, size, 0, 0, true) {
             _registerPendingOrder(closeOrderId, account, 0);
-        } catch {
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Commit, err);
             return;
         }
 
@@ -632,11 +665,14 @@ contract PerpAccountingHandler is Test {
         uint64 closeStartExecuteId = router.nextExecuteId();
         uint256[4] memory closeCommittedBefore = _snapshotTrackedCommittedMargin();
         _recordOrderExecutionAttempt();
-        try router.executeOrderBatch(closeOrderId, closePriceData) {
+        try router.executeOrderBatch(closeOrderId, closePriceData) returns (OrderV3Types.BatchResult memory result) {
+            _checkPendingReason(result.stopReason);
             _reconcileCommittedMarginAfterProcessedOrders(
                 closeCommittedBefore, closeStartExecuteId, router.nextExecuteId(), true
             );
-        } catch {}
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Execution, err);
+        }
     }
 
     function settleTraderClaim(
@@ -646,15 +682,12 @@ contract PerpAccountingHandler is Test {
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         address account = _account(actor);
-        uint256 ghostTraderClaim = ghost.traderClaimSnapshot(account);
-
         vm.prank(actor);
         try engine.settleTraderClaim(account) {
-            if (ghostTraderClaim > 0) {
-                ghost.decreaseTraderClaim(account, ghostTraderClaim);
-            }
-            _syncGhostTraderClaim(account);
-        } catch {}
+            _observeTraderClaim(account);
+        } catch (bytes memory err) {
+            _recordCaughtRevert(RejectionDomain.Claim, err);
+        }
     }
 
     function fundHousePool(
@@ -760,12 +793,103 @@ contract PerpAccountingHandler is Test {
     function traderClaimSnapshot(
         address account
     ) external view returns (uint256) {
-        return ghost.traderClaimSnapshot(account);
+        return observedTraderClaims[account];
     }
 
     function _clearLastPriceLossTraderClaimEvent() internal {
         delete lastPriceLossTraderClaimEvent;
         delete lastTerminalResidualEvent;
+    }
+
+    /// @dev Only documented business rejections for the attempted action are absorbed. Panic, Error(string),
+    ///      empty/malformed bytes, authorization, custody, and queue-integrity errors remain fatal under strict fuzzing.
+    function _checkPendingReason(
+        OrderV3Types.PendingReason reason
+    ) private pure {
+        if (reason == OrderV3Types.PendingReason.EngineFailure || reason == OrderV3Types.PendingReason.ReceiptFailure) {
+            revert UnexpectedPendingExecution(reason);
+        }
+    }
+
+    function _recordCaughtRevert(
+        RejectionDomain domain,
+        bytes memory err
+    ) internal {
+        bytes4 selector = _revertSelector(err);
+        if (!_isExpectedRejection(domain, selector, err)) {
+            revert UnexpectedActionRevert(domain, err);
+        }
+        caughtActionReverts++;
+        lastCaughtRevertSelector = selector;
+        caughtRevertsBySelector[selector]++;
+    }
+
+    function _isExpectedRejection(
+        RejectionDomain domain,
+        bytes4 selector,
+        bytes memory err
+    ) private pure returns (bool) {
+        if (domain == RejectionDomain.Claim) {
+            return err.length == 4
+                && (selector == ICfdEngineTypes.CfdEngine__NoTraderClaim.selector
+                    || selector == ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector);
+        }
+        if (domain == RejectionDomain.Withdrawal) {
+            return err.length == 4
+                && (selector == ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector
+                    || selector == ICfdEngineTypes.CfdEngine__MarkPriceStale.selector
+                    || selector == ICfdEngineTypes.CfdEngine__DegradedMode.selector
+                    || selector == ICfdEngineTypes.CfdEngine__CarryExceedsMargin.selector
+                    || selector == IMarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
+        }
+        if (domain == RejectionDomain.Commit) {
+            if (selector == IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector && err.length == 36) {
+                uint256 code;
+                assembly ("memory-safe") { code := mload(add(err, 36)) }
+                // Commit-time-rejectable planner outcomes only; fee-drained retries and invalid lot encodings
+                // are not expected for this handler's whole-lot calls.
+                return code == 1 || code == 3 || code == 4 || code == 6 || code == 7 || code == 9 || code == 10;
+            }
+            if (selector == IOrderRouterErrors.OrderRouter__CommitValidation.selector && err.length == 36) {
+                uint256 code;
+                assembly ("memory-safe") { code := mload(add(err, 36)) }
+                return code == 11;
+            }
+            if (selector == ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector) {
+                return err.length == 100;
+            }
+            if (selector == ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector) {
+                return err.length == 36;
+            }
+            return err.length == 4
+                && (selector == IOrderRouterErrors.OrderRouter__TooManyPendingOrders.selector
+                    || selector == IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector
+                    || selector == IOrderRouterErrors.OrderRouter__DegradedMode.selector
+                    || selector == IOrderRouterErrors.OrderRouter__VaultRiskBlocked.selector
+                    || selector == IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector
+                    || selector == IOrderRouterErrors.OrderRouter__SideMismatch.selector
+                    || selector == IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector
+                    || selector == IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector
+                    || selector == IMarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector
+                    || selector == ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector
+                    || selector == ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
+        }
+        if (selector == IPletherOracle.PletherOracle__StalePrice.selector) {
+            return err.length == 164;
+        }
+        if (selector == IPletherOracle.PletherOracle__PriceOutOfOrder.selector) {
+            return err.length == 68;
+        }
+        if (domain == RejectionDomain.Liquidation) {
+            return err.length == 4
+                && (selector == ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector
+                    || selector == ICfdEngineTypes.CfdEngine__NoPositionToLiquidate.selector
+                    || selector == ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
+        }
+        return err.length == 4
+            && (selector == IOrderRouterErrors.OrderRouter__NoOrdersToExecute.selector
+                || selector == IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector
+                || selector == IOrderRouterErrors.OrderRouter__MarkPriceOutOfOrder.selector);
     }
 
     function _revertSelector(
@@ -831,20 +955,16 @@ contract PerpAccountingHandler is Test {
         });
     }
 
-    function _syncGhostTraderClaim(
+    function _observeTraderClaim(
         address account
     ) internal {
-        uint256 ghostTraderClaim = ghost.traderClaimSnapshot(account);
         uint256 liveTraderClaim = engine.traderClaimBalanceUsdc(account);
-        if (liveTraderClaim > ghostTraderClaim) {
-            ghost.increaseTraderClaim(account, liveTraderClaim - ghostTraderClaim);
-        } else if (ghostTraderClaim > liveTraderClaim) {
-            ghost.decreaseTraderClaim(account, ghostTraderClaim - liveTraderClaim);
-        }
+        observedTotalTraderClaims = observedTotalTraderClaims - observedTraderClaims[account] + liveTraderClaim;
+        observedTraderClaims[account] = liveTraderClaim;
     }
 
     function totalTraderClaimSnapshot() external view returns (uint256) {
-        return ghost.totalTraderClaimSnapshot();
+        return observedTotalTraderClaims;
     }
 
     function ghostOrderLifecycleState(
@@ -1198,7 +1318,7 @@ contract PerpAccountingHandler is Test {
                 uint8 terminalState = _ghostTerminalStateForOrder(orderId);
                 _finalizeGhostOrder(orderId, terminalState);
                 if (syncProcessedClaims && account != address(0)) {
-                    _syncGhostTraderClaim(account);
+                    _observeTraderClaim(account);
                 }
             }
         }

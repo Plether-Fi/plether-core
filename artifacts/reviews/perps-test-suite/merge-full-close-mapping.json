@@ -1,0 +1,86 @@
+{
+  "worktree": "/Users/stan/.codex/worktrees/perps-suite-merge/plether-core",
+  "pr_head": "6a4ef594",
+  "upstream": "64c6ea90",
+  "merge_base": "75720362a4c1c7e26c99ea15927783e1a1173b80",
+  "mapped_cfd_engine_delta_count": 5,
+  "mapped_deltas": [
+    {
+      "source": "packages/perps/test/perps/CfdEngine.t.sol",
+      "function": "test_PreviewClose_OracleFrozenFullCloseWaivesOnlyUncollectibleSpread",
+      "destination": "packages/perps/test/perps/differential/EngineClosePreview.t.sol",
+      "upstream_function_body_equal_ignoring_whitespace": true,
+      "new_upstream_function": false
+    },
+    {
+      "source": "packages/perps/test/perps/CfdEngine.t.sol",
+      "function": "test_OracleFrozenFullClose_ClaimRecoveryPaysFeeThenBaseThenSpread",
+      "destination": "packages/perps/test/perps/accounting/close/EngineCloseSettlement.t.sol",
+      "upstream_function_body_equal_ignoring_whitespace": true,
+      "new_upstream_function": false
+    },
+    {
+      "source": "packages/perps/test/perps/CfdEngine.t.sol",
+      "function": "test_Close_WaivesExecutionFeeShortfallWithoutConsumingExistingTraderClaim",
+      "destination": "packages/perps/test/perps/accounting/claims/EngineTraderClaims.t.sol",
+      "upstream_function_body_equal_ignoring_whitespace": true,
+      "new_upstream_function": false
+    },
+    {
+      "source": "packages/perps/test/perps/CfdEngine.t.sol",
+      "function": "test_Close_ReleasedReservePaysExecutionFeeWithoutConsumingExistingTraderClaim",
+      "destination": "packages/perps/test/perps/accounting/claims/EngineTraderClaims.t.sol",
+      "upstream_function_body_equal_ignoring_whitespace": true,
+      "new_upstream_function": true
+    },
+    {
+      "source": "packages/perps/test/perps/CfdEngine.t.sol",
+      "function": "_closeWithExistingClaim",
+      "destination": "packages/perps/test/perps/accounting/claims/EngineTraderClaims.t.sol",
+      "upstream_function_body_equal_ignoring_whitespace": true,
+      "new_upstream_function": true
+    }
+  ],
+  "preserved_shared_helpers": [
+    {
+      "function": "_removePnlPledgeAndSyncTerminalCurve",
+      "destination": "packages/perps/test/perps/shared/CfdEngineTestBase.sol",
+      "upstream_function_body_equal_ignoring_whitespace": true
+    },
+    {
+      "function": "_processUnderfundedFeeClose",
+      "destination": "packages/perps/test/perps/shared/CfdEngineTestBase.sol",
+      "upstream_function_body_equal_ignoring_whitespace": true
+    }
+  ],
+  "removed_old_conflict_paths": [
+    "packages/perps/test/perps/CfdEngine.t.sol",
+    "packages/perps/test/perps/AuditRemainingCoverageFindingsFailing.t.sol"
+  ],
+  "audit_delta": {
+    "source": "packages/perps/test/perps/AuditRemainingCoverageFindingsFailing.t.sol",
+    "destination": "packages/perps/test/perps/accounting/close/ReservedMarginCloseSettlement.t.sol",
+    "function": "test_FullCloseUsesReleasedPledgeBeforeQueuedCommittedMargin",
+    "change": "Applied upstream corrected preview.valid assertion message; preserved existing PR exact committed-margin/bounty/queue assertions."
+  },
+  "auto_merge_reviews": [
+    {
+      "path": "packages/perps/test/perps/accounting/carry/MarginFirstCarry.t.sol",
+      "assessment": "Correctly collects terminal unpaid carry from released physical reserve before waiver; keeps claim ineligible and liquidation reserve protected in liquidation."
+    },
+    {
+      "path": "packages/perps/test/perps/differential/CfdClosePreview.t.sol",
+      "assessment": "Correctly makes unreserved assessment, committed preview and execution collect full-close fees from released reserve while preserving committed bounty. Updated obsolete NatSpec mispricing narrative."
+    },
+    {
+      "path": "packages/perps/test/perps/differential/CfdEnginePlanRegression.t.sol",
+      "assessment": "Opt-in legacy MockPyth synchronization matches upstream new atomic-oracle fixture behavior; no full-close expectation conflict."
+    }
+  ],
+  "validation": {
+    "git_diff_cached_check": "passed",
+    "forge_fmt_owned_files": "passed",
+    "targeted_tests": "Root will run final quick/CI and production CI after suite migration; no agent test processes started."
+  },
+  "production_changes_by_this_agent": false
+}

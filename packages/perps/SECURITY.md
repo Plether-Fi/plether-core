@@ -285,31 +285,10 @@ These are the highest-value properties an auditor should expect to hold.
 
 ### Coverage map
 
-The tables above describe the intended safety properties. The suites below are the highest-signal places where those properties are exercised today.
-
-| Invariant family | Primary coverage |
-|-----------|-------------|
-| Buffered entry solvency / margin sufficiency | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/CfdEnginePlanRegression.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol` |
-| Degraded containment / post-op degraded-mode parity | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol`, `packages/perps/test/perps/PreviewExecutionDifferential.t.sol` |
-| Bounded payout / preview-live settlement parity | `packages/perps/test/perps/CfdEngine.t.sol`, `packages/perps/test/perps/invariant/PerpPreviewInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpClosePreviewParityInvariant.t.sol` |
-| Withdrawal firewall / trader-claim seniority | `packages/perps/test/perps/SettlementBuffer.t.sol`, `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpTraderClaimInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol` |
-| Single direction / side symmetry / total-margin conservation | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpMultiAccountInvariant.t.sol` |
-| Global FIFO / binding intents / bounded cleanup | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol` |
-| Permanent idempotency / lifecycle outcomes / receipt authentication | `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
-| Caller financial bounds / planner parity / retryable failure classification | `packages/perps/test/perps/CfdOrderPolicyEvaluator.t.sol`, `packages/perps/test/perps/CfdOrderPolicyEvaluatorParity.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
-| Config-version drift / pinned execution configuration | `packages/perps/test/perps/AdminConfigVersion.t.sol`, `packages/perps/test/perps/OrderLifecycleBook.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
-| Carry-neutral reservation release | `packages/perps/test/perps/MarginClearinghouseReservationRelease.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol` |
-| Risk-off and liquidation receipt/bounty disposition | `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/OrderRouterExecutionSidecar.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol` |
-| Emergency pause atomicity / monotonic risk-off cutoff / bounded cleanup gas | `packages/perps/test/perps/EmergencyPauseCoordinator.t.sol`, `packages/perps/test/perps/OrderRouterRiskOff.t.sol`, `packages/perps/test/perps/EmergencyRiskOffGas.t.sol` |
-| Settlement-monitor binding, fail-soft reads, route diagnostics, and observation digests | `packages/perps/test/perps/SettlementMonitorLens.t.sol` |
-| Bounty conservation / reservation source of truth | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpAccountingInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpEconomicConservationInvariant.t.sol` |
-| Position-protection lifecycle / post-lock safety | `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/PositionProtectionLiquidationBatch.t.sol` |
-| Delegated mark refresh, single/batch liquidation, and LP-epoch isolation | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/PositionProtection.t.sol`, `packages/perps/test/perps/Liquidation.t.sol`, `packages/perps/test/perps/LiquidationBatch.t.sol`, `packages/perps/test/perps/AtomicLpEpochSettlement.t.sol` |
-| Canonical asset boundary / symmetric terminal NAV / high-water-mark protection | `packages/perps/test/perps/PerpInvariant.t.sol`, `packages/perps/test/perps/HousePool.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol`, `packages/perps/test/perps/TerminalNavBookV2.t.sol` |
-| Shared request cutoff / locked-epoch additions | `packages/perps/test/perps/LpRequestCutoff.t.sol`, `packages/perps/test/perps/invariant/GovernedSeniorCapacityInvariant.t.sol` |
-| Activation-aged cooldown / direct deposit-escrow redemption | `packages/perps/test/perps/ClaimableDepositRedeem.t.sol`, `packages/perps/test/perps/PerpsPublicLensDepositCooldown.t.sol`, `packages/perps/test/perps/invariant/PerpHousePoolLifecycleInvariant.t.sol` |
-| Oracle freshness / FAD boundaries / ETH refund custody | `packages/perps/test/perps/OrderRouter.t.sol`, `packages/perps/test/perps/invariant/PerpOracleBoundaryInvariant.t.sol`, `packages/perps/test/perps/invariant/PerpOraclePathInvariant.t.sol` |
-| Fee custody / protocol accounting snapshots | `packages/perps/test/perps/invariant/PerpFeeFlowInvariant.t.sol`, `packages/perps/test/perps/PerpsReadParity.t.sol` |
+The tables above define intended safety properties. Their executable evidence, model independence, fixture limits,
+and execution lanes are indexed in [`test/perps/TEST_MAP.md`](test/perps/TEST_MAP.md). Test coverage is evidence to
+review against this specification; it is not proof that vulnerabilities are absent. Historical audit material remains
+in the audit status section and Git history rather than in executable test narratives.
 
 ## Trust Assumptions
 

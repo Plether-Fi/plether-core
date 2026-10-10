@@ -65,8 +65,9 @@ Core contract logic using mock contracts. No network dependency.
 
 ### Perps Tests (`packages/perps/test/perps/`)
 
-Perps unit, regression, fuzz, audit-history, and stateful invariant suites are fully package-owned. See the perps package
-[`README.md`](../packages/perps/README.md) and [`PRE_AUDIT_GUIDE.md`](../packages/perps/PRE_AUDIT_GUIDE.md) for the suite map.
+Perps specification, accounting, matrix, differential, invariant, compatibility, and gas suites are package-owned.
+Use the [`perps test map`](../packages/perps/test/perps/TEST_MAP.md) for exact critical-rule coverage, fixture limits,
+profile commands, and replay instructions. RPC-dependent package forks run in a separate lane.
 
 ### Invariant Tests (`packages/*/test/**/*Invariant.t.sol`)
 

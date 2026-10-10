@@ -13,9 +13,7 @@ contract PerpGhostLedger {
 
     mapping(address => LiquidationSnapshot) internal liquidationSnapshots;
     mapping(address => uint256) internal committedMarginUsdc;
-    mapping(address => uint256) internal traderClaimBalanceUsdc;
     uint256 internal totalTrackedCommittedMarginUsdc;
-    uint256 internal totalTrackedTraderClaimUsdc;
 
     error PerpGhostLedger__Unauthorized();
 
@@ -63,30 +61,6 @@ contract PerpGhostLedger {
         totalTrackedCommittedMarginUsdc -= amountUsdc;
     }
 
-    function increaseTraderClaim(
-        address account,
-        uint256 amountUsdc
-    ) external {
-        if (msg.sender != handler) {
-            revert PerpGhostLedger__Unauthorized();
-        }
-
-        traderClaimBalanceUsdc[account] += amountUsdc;
-        totalTrackedTraderClaimUsdc += amountUsdc;
-    }
-
-    function decreaseTraderClaim(
-        address account,
-        uint256 amountUsdc
-    ) external {
-        if (msg.sender != handler) {
-            revert PerpGhostLedger__Unauthorized();
-        }
-
-        traderClaimBalanceUsdc[account] -= amountUsdc;
-        totalTrackedTraderClaimUsdc -= amountUsdc;
-    }
-
     function liquidationSnapshot(
         address account
     ) external view returns (LiquidationSnapshot memory) {
@@ -99,18 +73,8 @@ contract PerpGhostLedger {
         return committedMarginUsdc[account];
     }
 
-    function traderClaimSnapshot(
-        address account
-    ) external view returns (uint256) {
-        return traderClaimBalanceUsdc[account];
-    }
-
     function totalCommittedMarginSnapshot() external view returns (uint256) {
         return totalTrackedCommittedMarginUsdc;
-    }
-
-    function totalTraderClaimSnapshot() external view returns (uint256) {
-        return totalTrackedTraderClaimUsdc;
     }
 
 }

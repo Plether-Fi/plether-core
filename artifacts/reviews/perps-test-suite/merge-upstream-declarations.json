@@ -1,0 +1,134 @@
+{
+  "test_ExactFundingPreservesBountyWhileReleasedReservePaysCharges": [
+    "packages/perps/test/perps/differential/CfdClosePreview.t.sol"
+  ],
+  "test_Close_ReleasedReservePaysExecutionFeeWithoutConsumingExistingTraderClaim": [
+    "packages/perps/test/perps/accounting/claims/EngineTraderClaims.t.sol"
+  ],
+  "testFuzz_FullClose_WaiverImpliesNoEligibleCashAtEngineBoundary": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionCharge.t.sol"
+  ],
+  "test_FullClose_FlatUsesReleasedSurplus": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionCharge.t.sol"
+  ],
+  "test_FullClose_LossUsesReleasedSurplus": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionCharge.t.sol"
+  ],
+  "test_FullClose_OnlyResidualChargeConsumesPendingOrdersInFifoOrder": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionCharge.t.sol"
+  ],
+  "test_FullClose_PendingOrderMarginIsPreservedWhenSurplusSuffices": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionCharge.t.sol"
+  ],
+  "test_FullClose_ProfitSmallerThanChargeUsesReleasedSurplus": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionCharge.t.sol"
+  ],
+  "test_RouterFullClose_PreservesPendingOpenMarginAndItsBounty": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionCharge.t.sol"
+  ],
+  "test_RouterFullClose_CarryVpiBackingAndReleasedSurplusBeforeFifoCollection": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargeIntegration.t.sol"
+  ],
+  "testFuzz_FullClose_CashPlacementDoesNotChangeRecovery": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_Close_NearFullCannotUseLiquidationReserveOrCommittedMargin": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_FullClose_CarryPrecedesSurplusAndDoesNotSpendClaim": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_FullClose_PositiveAndNegativeVpiUseSurplusAfterNetting": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_FullClose_PriceLossCapCannotReachLiquidationReserve": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_FullClose_SurplusFundingBoundaries": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_FullClose_SurplusPrecedesCommittedMarginAndProtectsBounty": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_FullClose_VpiClawbackAndReleasedBackingAreNotDoubleCounted": [
+    "packages/perps/test/perps/accounting/close/FullCloseActionChargePlan.t.sol"
+  ],
+  "test_AllSixFeedsAreRequiredAndLastComponentIsChecked": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_CacheReuseRequiresCoverageAndDoesNotRepair": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_CallerSuppliedCacheCannotEnterRouterExecution": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_EqualAndOlderHistoricalMarksKeepOrdering": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_EqualTimestampRepairsStorage": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_FadStillQuotesTwoFeesAndZeroFeeWorks": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_Gas_FrozenCloseExecutesWithOneFee": [
+    "packages/perps/test/perps/gas/OracleSynchronizationGas.t.sol"
+  ],
+  "test_Gas_FrozenUsesOnlySingleUpdate": [
+    "packages/perps/test/perps/gas/OracleSynchronizationGas.t.sol"
+  ],
+  "test_Gas_HistoricalExecutionSynchronizesAndPreservesFill": [
+    "packages/perps/test/perps/gas/OracleSynchronizationGas.t.sol"
+  ],
+  "test_Gas_MixedBatchRequiresTwoParsesAndFourFees": [
+    "packages/perps/test/perps/gas/OracleSynchronizationGas.t.sol"
+  ],
+  "test_Gas_SharedBasketPaysOnceAndBothOrdersExecute": [
+    "packages/perps/test/perps/gas/OracleSynchronizationGas.t.sol"
+  ],
+  "test_Gas_TerminalItemFailureRetainsSynchronizedMark": [
+    "packages/perps/test/perps/gas/OracleSynchronizationGas.t.sol"
+  ],
+  "test_HistoricalSettlementDoesNotAcquireLiveConfidenceOrFreshnessGuards": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_InsufficientExecutionFundingRollsBack": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_InvalidHistoricalBasketRollsBackBeforeStorageUpdate": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_LaterInsufficientFundingRevertsCompletedBatchPrefix": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_LaterSynchronizationFailureRevertsCompletedBatchPrefix": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_NewerStorageNeverChangesHistoricalFillOrMovesBackwards": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_StorageCoverageChecksEachParsedComponentNotOnlyMinimum": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_UnavailableHistoryDefersFullFundingAndClaimRejectsReentry": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_UnavailableHistoryPreservesExistingCacheAndReportsForwardedFunding": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_UnavailableHistoryRefundsFundingExactlyOnce": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "test_UpdateFailureBubblesAndRollsBackParseAndMark": [
+    "packages/perps/test/perps/spec/oracle/OracleSynchronization.t.sol"
+  ],
+  "invariant_AllRequiredPathsRemainExercised": [
+    "packages/perps/test/perps/invariant/properties/OracleEthConservationInvariant.t.sol"
+  ],
+  "invariant_EthConservedAcrossFeesRefundsAndClaims": [
+    "packages/perps/test/perps/invariant/properties/OracleEthConservationInvariant.t.sol"
+  ],
+  "invariant_ExecutionInstalledMarksAlwaysHaveStoredFeedCoverage": [
+    "packages/perps/test/perps/invariant/properties/OracleSynchronizationInvariant.t.sol"
+  ]
+}

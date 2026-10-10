@@ -13,34 +13,48 @@ permissions:
   contents: read
 
 concurrency:
-  group: perps-deep-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
-
-env:
-  FOUNDRY_PROFILE: ci
-  FOUNDRY_INVARIANT_RUNS: 16
-  FOUNDRY_INVARIANT_DEPTH: 500
+  group: perps-deep-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  package-test-perps-shard:
-    name: Perps deep shard ${{ matrix.shard_number }}/4
+  campaign:
     if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:deep-perps') }}
     runs-on: ubuntu-latest
-    # Production via-IR compilation plus deep invariants can exceed 30 minutes
-    # on shared runners. This is a CI wall-time allowance, not an EVM gas limit.
-    timeout-minutes: 45
+    outputs:
+      matrix: ${{ steps.campaign.outputs.matrix }}
+      profile: ${{ steps.campaign.outputs.profile }}
+    steps:
+      - name: Select recorded profile and seeds
+        id: campaign
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          event = os.environ['EVENT_NAME']
+          profile = 'audit' if event in ('schedule', 'workflow_dispatch') else 'ci'
+          seeds = ['0xdeadbeef', '0x1', '0x2'] if event == 'workflow_dispatch' else [
+              hex(int(os.environ['GITHUB_RUN_ID'])) if event == 'schedule' else '0xdeadbeef']
+          matrix = {'include': [{'shard_index': shard, 'shard_number': shard + 1, 'seed': seed}
+                                for seed in seeds for shard in range(4)]}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(matrix) + '\nprofile=' + profile + '\n')
+          print(json.dumps({'profile': profile, 'matrix': matrix}, indent=2))
+          PY
+
+  package-test-perps-shard:
+    name: Perps ${{ needs.campaign.outputs.profile }} shard ${{ matrix.shard_number }}/4 (${{ matrix.seed }})
+    needs: campaign
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - shard_index: 0
-            shard_number: 1
-          - shard_index: 1
-            shard_number: 2
-          - shard_index: 2
-            shard_number: 3
-          - shard_index: 3
-            shard_number: 4
+      matrix: ${{ fromJSON(needs.campaign.outputs.matrix) }}
+    env:
+      FOUNDRY_PROFILE: ${{ needs.campaign.outputs.profile }}
+      FOUNDRY_VIA_IR: 'true'
+      FOUNDRY_FUZZ_SEED: ${{ matrix.seed }}
+      PERPS_ARTIFACT_DIR: artifacts/perps/deep
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,45 +65,75 @@ jobs:
         with:
           version: v1.5.1
 
-      - name: Select fuzz seed
-        id: fuzz-seed
-        shell: bash
+      - name: Validate coverage map and shard completeness
         run: |
-          if [ "${{ github.event_name }}" = schedule ]; then
-            seed="$(printf '0x%064x' "${GITHUB_RUN_ID}")"
-          else
-            seed="0xdeadbeef"
-          fi
-          echo "Using fuzz seed ${seed}"
-          echo "value=${seed}" >> "${GITHUB_OUTPUT}"
+          python3 scripts/check-perps-test-map.py
+          python3 scripts/perps-test-inventory.py
 
       - name: Build production package
         run: bash scripts/run-with-heartbeat.sh forge build --sizes --skip test --skip script --root packages/perps
 
-      - name: Run package test shard
-        env:
-          FOUNDRY_FUZZ_SEED: ${{ steps.fuzz-seed.outputs.value }}
+      - name: Run production package test shard
         run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-package-tests.sh "${{ matrix.shard_index }}" 4
 
-      - name: Upload perps failure corpus
-        if: ${{ failure() || cancelled() }}
+      - name: Upload reproducibility evidence and failure corpus
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perps-deep-failures-${{ matrix.shard_number }}-${{ github.run_id }}
+          name: perps-${{ needs.campaign.outputs.profile }}-${{ matrix.seed }}-shard-${{ matrix.shard_number }}-${{ github.run_id }}
           path: |
-            packages/perps/cache*/fuzz
-            packages/perps/cache*/invariant
-          if-no-files-found: ignore
-          retention-days: 7
+            artifacts/perps/deep
+            packages/perps/cache/fuzz
+            packages/perps/cache/invariant
+          if-no-files-found: warn
+          retention-days: 30
+
+  fork-integration:
+    name: Perps configured RPC integration
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SPONSORED_CLOSE_FORK_RPC_URL: ${{ secrets.SPONSORED_CLOSE_FORK_RPC_URL }}
+      CLOSE_REGRESSION_ARCHIVE_RPC_URL: ${{ secrets.CLOSE_REGRESSION_ARCHIVE_RPC_URL }}
+      FOUNDRY_PROFILE: ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: Run configured pinned-block integration
+        run: |
+          if [ -z "${SPONSORED_CLOSE_FORK_RPC_URL}" ] && [ -z "${CLOSE_REGRESSION_ARCHIVE_RPC_URL}" ]; then
+            mkdir -p artifacts/perps/fork
+            echo 'NOT RUN: neither pinned-block RPC integration lane is configured.' | tee artifacts/perps/fork/status.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            bash scripts/run-with-heartbeat.sh bash scripts/run-perps-fork-tests.sh
+          fi
+      - name: Upload integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perps-fork-${{ github.run_id }}
+          path: artifacts/perps/fork
+          retention-days: 30
 
   package-test-perps:
     name: Perps deep (all shards)
     if: ${{ always() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:deep-perps')) }}
-    needs: package-test-perps-shard
+    needs: [campaign, package-test-perps-shard, fork-integration]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Require every perps package shard
+      - name: Require every selected campaign and configured integration lane
         env:
+          CAMPAIGN_RESULT: ${{ needs.campaign.result }}
           SHARD_RESULT: ${{ needs.package-test-perps-shard.result }}
-        run: test "${SHARD_RESULT}" = success
+          FORK_RESULT: ${{ needs.fork-integration.result }}
+        run: |
+          test "${CAMPAIGN_RESULT}" = success
+          test "${SHARD_RESULT}" = success
+          test "${FORK_RESULT}" = success || test "${FORK_RESULT}" = skipped
