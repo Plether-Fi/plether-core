@@ -151,7 +151,8 @@ done < "${assignment_file}"
 shard_test_rel="${shard_test_dir#"${package_root}/"}"
 echo "Running perps package shard $((shard_index + 1))/${shard_count} (${shard_test_count} test files)"
 
+# Run the complete physical shard in one compilation. Complementary test-name
+# filters make Forge compile overlapping contracts twice; the ordinary-test
+# compilation can otherwise consume the remaining CI timeout after invariants pass.
 FOUNDRY_TEST="${shard_test_rel}" \
-    forge test --offline -vvv --root "${package_root}" --match-test 'testFuzz_|invariant_'
-FOUNDRY_TEST="${shard_test_rel}" \
-    forge test --offline --root "${package_root}" --no-match-test 'testFuzz_|invariant_'
+    forge test --offline -vvv --root "${package_root}"

@@ -34,6 +34,9 @@ jobs:
       - name: Test oracle release evidence tooling
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_oracle*.py' -v
 
+      - name: Test perps shard runner
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_perps_shards.py' -v
+
       - name: Build
         run: forge build --sizes --skip test
 
