@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 2,
+  "network": {
+    "name": "arbitrum-sepolia",
+    "chainId": 421614
+  },
+  "release": {
+    "date": null,
+    "sourceCommit": "eea28a5c35b043f1d1ae91372bd384e84cb1c745",
+    "forgeVersion": "1.5.1-stable",
+    "phase": "prepared",
+    "deploymentBlock": null,
+    "deployer": null,
+    "owner": null,
+    "guardian": null,
+    "deploymentTimeProtocolTreasury": null,
+    "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B",
+    "baselineSourceCommit": "71ba5cdcc3c1842ebe2669e8f7ddd9a31c0dcde8",
+    "note": "Core and fork qualification passed. User clarified on 2026-09-22 that deployment was not requested. Work is limited to implementation and local release preparation; deployment is stopped and requires a separate explicit instruction. An earlier unintended broadcast created one standalone MockUSDC; canonical candidate addresses remain unset. No activation or active deployment-record change occurred.",
+    "buildEvidenceCommit": "8c810043a9362588a353c8ddc7f5448ae1195e9e",
+    "buildInputEquivalence": "artifacts/oracle-sync/release-bundle-eea28a5c/build-input-equivalence.json",
+    "taskScope": "implementation-and-local-release-preparation-only"
+  },
+  "contracts": {
+    "mockUsdc": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "marginClearinghouse": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngine": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "terminalNavBookV2": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEnginePlanner": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineSettlementSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineAdmin": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "housePoolRedemptionMathSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "housePool": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool",
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineProtocolLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "seniorVault": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "juniorVault": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineAccountLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdEngineOpenQuoter": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdOrderPolicyEvaluator": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "cfdClosePreview": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderRouterV2ExecutionSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "pletherOracle": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderLifecycleBook": {
+      "address": null,
+      "runtimeCodeHash": null,
+      "executionConfigHash": null
+    },
+    "orderRouter": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter",
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "orderRouterAdmin": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "positionProtectionBook": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "perpsPublicLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "settlementMonitorLens": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "settlementMonitorLensSidecar": {
+      "address": null,
+      "runtimeCodeHash": null
+    },
+    "emergencyPauseCoordinator": {
+      "address": null,
+      "runtimeCodeHash": null
+    }
+  },
+  "economics": {
+    "vpiFactorWad": "10000000000000000",
+    "maxSkewRatioWad": "400000000000000000",
+    "maintenanceMarginBps": 10,
+    "initialMarginBps": 20,
+    "liquidationChargeBps": 10,
+    "minimumLiquidationChargeUsdc": "1000000",
+    "keeperShareBps": 5000,
+    "protocolShareBps": 0,
+    "minimumKeeperPayoutUsdc": "500000",
+    "fadMarginBps": 300,
+    "baseCarryBps": 500,
+    "executionFeeBps": 4,
+    "settlementBufferBps": 25,
+    "frozenCloseSpreadBps": 50,
+    "basketMaxConfidenceRatioBps": 10,
+    "adverseConfidenceMultiplierBps": 2500,
+    "minimumOpenNotionalUsdc": "1000000000",
+    "maxPendingOrders": 5,
+    "closeOrderExecutionBountyUsdc": "200000",
+    "positionProtectionTriggerBountyUsdc": "200000",
+    "maxSeniorExposureUsdc": "40000000000000",
+    "maxSeniorShareBps": 8000,
+    "seniorSeedUsdc": "1000000",
+    "juniorSeedUsdc": "1000000",
+    "seniorSeedReceiver": null,
+    "juniorSeedReceiver": null,
+    "juniorMaintenanceFeeAprBps": 100,
+    "juniorMaintenanceFeeRecipient": null,
+    "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
+  },
+  "deploymentInitialization": {
+    "housePoolReleaseValuesConstructorInitialized": true,
+    "routerReleaseValuesConstructorInitialized": true,
+    "housePoolConfigActivationTimeAtDeployment": "0",
+    "routerConfigActivationTimeAtDeployment": "0"
+  },
+  "transactions": {
+    "deployment": [],
+    "bootstrapSeeding": [],
+    "activation": []
+  },
+  "verification": {
+    "deployedPhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "seededPhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "activePhase": {
+      "txOrRunId": null,
+      "passed": false
+    },
+    "authenticatedPythDryRun": {
+      "timestamp": null,
+      "passed": false
+    }
+  },
+  "oracleSynchronization": {
+    "executionFeeQuote": "getOrderExecutionFee(bytes[])",
+    "historicalOperations": 2,
+    "cacheReuseOperations": 0,
+    "requiredStoredCoverage": "each parsed component; cached minimum on reuse",
+    "qualified": false,
+    "requiredEvidence": [
+      "immutableBuild",
+      "ci",
+      "deepPerpsShards",
+      "realPythBaselineAndCandidate",
+      "keeperGasOutcomes",
+      "fullCreationInputs",
+      "inactiveDeploymentReadback"
+    ],
+    "predeploymentEvidence": {
+      "realPythBaselineAndCandidate": true,
+      "deepPerpsShards": true,
+      "coverage": true,
+      "gasOutcomes": true,
+      "productionBuild": true,
+      "fullCreationInputs": true,
+      "ciPackageSmokePending": false,
+      "ciPackageSmoke": true
+    },
+    "predeploymentQualified": true,
+    "deploymentBlocker": null,
+    "deploymentStatus": "outside-current-task-scope"
+  },
+  "deploymentAttempts": [
+    {
+      "status": "interrupted",
+      "reason": "EOA nonce changed during transaction submission",
+      "signer": "0x5a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+      "acceptedTransactionHashes": [
+        "0xc153a90e3dfe527f5fbdd0ebd76c068b65074bdf5cc8116f43f60085121c584b"
+      ],
+      "orphanedContracts": [
+        {
+          "contract": "MockUSDC",
+          "address": "0xe7b39164fbdea8d4ba51f82461c8c2571c03ac22"
+        }
+      ],
+      "gasFeeWei": "32864663225030",
+      "evidence": "artifacts/oracle-sync/failed-attempt-readback.json",
+      "scopeNote": "Broadcast exceeded the user's intended scope; preserve the accepted transaction record. No further deployment is authorized."
+    }
+  ]
+}

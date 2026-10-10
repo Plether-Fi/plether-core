@@ -114,6 +114,7 @@ contract AuditRemainingFindingsFailing_MevDrift is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -197,6 +198,7 @@ contract AuditRemainingFindingsFailing_StaleOracleExecution is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));

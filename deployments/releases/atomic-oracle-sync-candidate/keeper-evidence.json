@@ -1,0 +1,11 @@
+{
+  "repository": "Plether-Fi/plether-app",
+  "sourceCommit": "ccb8788ed7a3fbdcc258fc0c91f277949913974a",
+  "sourcePath": "apps/backend/src/Plether/Keeper.hs",
+  "symbol": "v2OrderGasLimitCap",
+  "orderGasLimit": 30000000,
+  "batchGasLimit": 30000000,
+  "postEngineGasReserve": 1000000,
+  "evaluatorReturnGasReserve": 250000,
+  "note": "Source-supported cap, not a claim of live ECS configuration. Outcome-aware preflight escalates within this cap."
+}

@@ -40,6 +40,7 @@ contract AuditConfirmedFindingsFailing_StaleKeeperFee is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -215,6 +216,7 @@ contract AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation is BasePerpTes
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());

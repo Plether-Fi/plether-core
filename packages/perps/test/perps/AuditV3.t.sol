@@ -67,6 +67,7 @@ contract AuditV3_C01_FIFODeadlockTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());

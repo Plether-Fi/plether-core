@@ -70,6 +70,8 @@ contract AuditExecutionPathFindingsFailing_EthRefundFallback is BasePerpTest {
 
         mockPyth = new MockPyth();
 
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
+
         bytes32[] memory feedIds = new bytes32[](2);
         uint256[] memory weights = new uint256[](2);
         uint256[] memory bases = new uint256[](2);

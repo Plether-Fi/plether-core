@@ -55,6 +55,7 @@ contract PerpClosePreviewParityInvariantTest is Test {
 
         housePool = new MockInvariantHousePool(address(usdc), address(engine));
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         mockPyth.setPrice(bytes32(uint256(1)), int64(100_000_000), int32(-8), uint64(SETUP_TIMESTAMP));
         bytes32[] memory feedIds = new bytes32[](1);
         feedIds[0] = bytes32(uint256(1));

@@ -72,6 +72,18 @@ while IFS= read -r source_file; do
             ;;
     esac
 
+    # Move these large mixed test files from the accounting invariant's shard
+    # to the lighter shards. Override after round-robin
+    # allocation so moving them does not shift any other fallback assignment.
+    case "${relative_file}" in
+        perps/CfdEngine.t.sol)
+            assigned_shard=2
+            ;;
+        perps/OrderRouter.t.sol)
+            assigned_shard=3
+            ;;
+    esac
+
     if ! [[ "${assigned_shard}" =~ ^[0-9]+$ ]] || [ "${assigned_shard}" -ge "${shard_count}" ]; then
         echo "invalid shard assignment for perps test entrypoint: ${relative_file}" >&2
         exit 2
@@ -151,7 +163,8 @@ done < "${assignment_file}"
 shard_test_rel="${shard_test_dir#"${package_root}/"}"
 echo "Running perps package shard $((shard_index + 1))/${shard_count} (${shard_test_count} test files)"
 
+# Run the complete physical shard in one compilation. Complementary test-name
+# filters make Forge compile overlapping contracts twice; the ordinary-test
+# compilation can otherwise consume the remaining CI timeout after invariants pass.
 FOUNDRY_TEST="${shard_test_rel}" \
-    forge test --offline -vvv --root "${package_root}" --match-test 'testFuzz_|invariant_'
-FOUNDRY_TEST="${shard_test_rel}" \
-    forge test --offline --root "${package_root}" --no-match-test 'testFuzz_|invariant_'
+    forge test --offline -vvv --root "${package_root}"
