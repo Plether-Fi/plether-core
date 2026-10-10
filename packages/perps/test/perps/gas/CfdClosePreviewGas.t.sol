@@ -10,4 +10,3 @@ contract CfdClosePreviewGasTest is CfdClosePreviewTestFixture {
     }
 
 }
-

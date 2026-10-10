@@ -123,6 +123,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
         engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         feedIds.push(bytes32(uint256(1)));
         feedIds.push(bytes32(uint256(2)));
         weights.push(0.5e18);

@@ -503,4 +503,3 @@ contract EmergencyPauseCoordinatorTest is EmergencyPauseCoordinatorTestFixture {
     }
 
 }
-

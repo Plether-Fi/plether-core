@@ -35,4 +35,3 @@ contract AtomicLpEpochSettlementGasTest is AtomicLpEpochSettlementTestFixture {
     }
 
 }
-

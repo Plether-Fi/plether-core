@@ -10,4 +10,3 @@ contract CfdSponsoredClosePreviewGasTest is CfdSponsoredClosePreviewTestFixture 
     }
 
 }
-

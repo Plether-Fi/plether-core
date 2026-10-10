@@ -61,4 +61,3 @@ contract PositionProtectionLiquidationBatchGasTest is PositionProtectionLiquidat
     }
 
 }
-

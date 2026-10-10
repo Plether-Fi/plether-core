@@ -273,4 +273,3 @@ contract HousePoolWithdrawalReservesTest is HousePoolTestBase {
     }
 
 }
-

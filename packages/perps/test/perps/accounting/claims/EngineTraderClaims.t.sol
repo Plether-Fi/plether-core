@@ -523,6 +523,16 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
     }
 
     function test_Close_WaivesExecutionFeeShortfallWithoutConsumingExistingTraderClaim() public {
+        _closeWithExistingClaim(false);
+    }
+
+    function test_Close_ReleasedReservePaysExecutionFeeWithoutConsumingExistingTraderClaim() public {
+        _closeWithExistingClaim(true);
+    }
+
+    function _closeWithExistingClaim(
+        bool retainLiquidationReserve
+    ) private {
         uint256 poolDepth = 1_000_000 * 1e6;
         address shortAccount = address(uint160(0xD252));
         {
@@ -554,13 +564,22 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         );
 
         _removePnlPledgeAndSyncTerminalCurve(shortAccount);
+        if (!retainLiquidationReserve) {
+            // Exhaust the physical reserve too; a claim alone must never pay action charges.
+            uint256 reserve = clearinghouse.liquidationReserveUsdc(shortAccount);
+            vm.startPrank(address(engine));
+            clearinghouse.releaseLiquidationReserve(shortAccount, reserve);
+            clearinghouse.consumeActionCharge(shortAccount, reserve, 0, 0, address(pool), address(0), 0);
+            vm.stopPrank();
+        }
+        uint256 expectedFee = retainLiquidationReserve ? _engineExecutionFeeUsdc(5000e18, 1e8) : 0;
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.simulateClose(shortAccount, 5000e18, 1e8, poolDepth);
 
         assertTrue(preview.valid, "Terminal action fee shortfall should be waived rather than blocking close");
         assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action fees from price PnL");
         assertEq(preview.badDebtUsdc, 0, "Action-fee shortfall must remain a waiver rather than protocol debt");
-        assertEq(preview.executionFeeUsdc, 0, "Execution fee with no eligible action collateral should be waived");
+        assertEq(preview.executionFeeUsdc, expectedFee, "Only released physical reserve may recover the fee");
         assertEq(preview.existingTraderClaimConsumedUsdc, 0, "Action fees must not consume same-account trader claims");
         assertEq(
             preview.existingTraderClaimRemainingUsdc,
@@ -573,8 +592,8 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
-            feesBefore,
-            "Treasury fees should not consume cash reserved for remaining trader claims"
+            feesBefore + expectedFee,
+            "Treasury fees should come only from released reserve, never trader claims"
         );
         assertEq(
             engine.traderClaimBalanceUsdc(shortAccount),
@@ -632,4 +651,3 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
     }
 
 }
-

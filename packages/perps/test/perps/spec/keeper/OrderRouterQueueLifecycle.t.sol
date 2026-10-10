@@ -284,4 +284,3 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
     }
 
 }
-

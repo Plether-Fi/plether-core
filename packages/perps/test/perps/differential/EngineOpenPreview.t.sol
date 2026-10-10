@@ -55,4 +55,3 @@ contract EngineOpenPreviewTest is CfdEngineTestBase {
     }
 
 }
-

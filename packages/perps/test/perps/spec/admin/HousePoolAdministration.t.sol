@@ -176,4 +176,3 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
     }
 
 }
-

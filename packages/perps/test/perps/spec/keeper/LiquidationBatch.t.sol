@@ -568,4 +568,3 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
     }
 
 }
-

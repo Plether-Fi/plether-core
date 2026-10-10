@@ -95,16 +95,16 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         _lifecycle(CfdTypes.Side.SHORT, SIZE / 2, PRICE, true);
     }
 
-    function test_ExactFundingChangesCollectedCharges() public {
+    function test_ExactFundingPreservesBountyWhileReleasedReservePaysCharges() public {
         _openNormally(CfdTypes.Side.SHORT, 200_000);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
         OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
             address(engine), o, KEEPER, 95_000_000, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
         );
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(o, 95_000_000, KEEPER);
-        assertEq(unreserved.actionChargeCollectedUsdc, 200_000);
-        assertEq(p.assessment.actionChargeCollectedUsdc, 0);
-        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc + 200_000);
+        assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, 95_000_000));
+        assertEq(p.assessment.actionChargeCollectedUsdc, unreserved.actionChargeCollectedUsdc);
+        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc);
     }
 
     function test_OneAtomicUnitShortUsesPledgeAndMatchesCommit() public {
@@ -303,9 +303,9 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         params.baseCarryBps = 500;
     }
 
-    /// @dev Default-risk real-stack regression: the liquidation reserve prevents underflow, but an unreserved
-    ///      assessment spends the bounty backing on fees. The hardened evaluator's guard is not reached here;
-    ///      this successful-path mispricing is shared with the v1.2.3 evaluator.
+    /// @dev Under default risk parameters, a full close pays action fees from released liquidation reserve while
+    ///      preserving the committed execution bounty. Unreserved assessment, committed preview, and live execution
+    ///      must agree on the resulting settlement balances.
     function test_AdverseFullConsumptionRegression() public {
         _fundTrader(ACCOUNT, 250_400_000);
         vm.prank(ACCOUNT);
@@ -322,10 +322,10 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
             address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
         );
-        assertEq(unreserved.actionChargeCollectedUsdc, 200_000);
+        assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, adversePrice));
         (uint64 closeId, CfdClosePreview.ClosePreview memory p) = _commitParity(o, adversePrice, KEEPER);
-        assertEq(p.assessment.actionChargeCollectedUsdc, 0);
-        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc + 200_000);
+        assertEq(p.assessment.actionChargeCollectedUsdc, unreserved.actionChargeCollectedUsdc);
+        assertEq(p.assessment.postSettlementBalanceUsdc, unreserved.postSettlementBalanceUsdc);
 
         bytes[] memory closeUpdate = _mockPythUpdateData(adversePrice);
         vm.prank(KEEPER);

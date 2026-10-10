@@ -21,6 +21,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
     function test_OracleConfigTimelock_RotatesPythBasket() public {
         _startRecordingLogs();
         MockPyth newPyth = new MockPyth();
+        newPyth.setSynchronizeLegacyUniquePrices(true);
         bytes32[] memory newFeedIds = new bytes32[](2);
         uint256[] memory newWeights = new uint256[](2);
         uint256[] memory newBases = new uint256[](2);
@@ -86,4 +87,3 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
     }
 
 }
-

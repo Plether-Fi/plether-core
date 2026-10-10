@@ -247,4 +247,3 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
     }
 
 }
-

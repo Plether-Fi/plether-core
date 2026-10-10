@@ -28,4 +28,3 @@ contract SettlementMonitorLensGasTest is SettlementMonitorLensTestFixture {
     }
 
 }
-

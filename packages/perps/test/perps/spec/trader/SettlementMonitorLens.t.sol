@@ -2808,4 +2808,3 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     }
 
 }
-

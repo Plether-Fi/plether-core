@@ -306,4 +306,3 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
     }
 
 }
-

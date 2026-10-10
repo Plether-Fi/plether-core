@@ -248,4 +248,3 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
 }
-

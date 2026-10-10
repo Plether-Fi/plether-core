@@ -170,4 +170,3 @@ contract OrderRouterBatchesTest is OrderRouterTestBase {
     }
 
 }
-

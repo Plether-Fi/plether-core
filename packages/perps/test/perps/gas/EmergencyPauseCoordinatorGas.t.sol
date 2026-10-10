@@ -28,4 +28,3 @@ contract EmergencyPauseCoordinatorGasTest is EmergencyPauseCoordinatorTestFixtur
     }
 
 }
-

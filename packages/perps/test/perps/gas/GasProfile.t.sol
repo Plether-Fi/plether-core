@@ -34,6 +34,8 @@ contract ControllablePythGas {
     }
 
     mapping(bytes32 => MockPrice) public prices;
+    bytes32[] internal registeredIds;
+    mapping(bytes32 => bool) internal registered;
 
     function setAllPrices(
         bytes32[] memory feedIds,
@@ -42,6 +44,10 @@ contract ControllablePythGas {
         uint256 _publishTime
     ) external {
         for (uint256 i = 0; i < feedIds.length; i++) {
+            if (!registered[feedIds[i]]) {
+                registered[feedIds[i]] = true;
+                registeredIds.push(feedIds[i]);
+            }
             prices[feedIds[i]] = MockPrice(_price, _expo, _publishTime);
         }
     }
@@ -60,8 +66,19 @@ contract ControllablePythGas {
     }
 
     function updatePriceFeeds(
-        bytes[] calldata
-    ) external payable {}
+        bytes[] calldata data
+    ) external payable {
+        if (data.length == 0 || data[0].length != 32) {
+            return;
+        }
+        int64 price = int64(uint64(abi.decode(data[0], (uint256))));
+        for (uint256 i; i < registeredIds.length; ++i) {
+            bytes32 id = registeredIds[i];
+            if (block.timestamp > prices[id].publishTime) {
+                prices[id] = MockPrice(price, -8, block.timestamp);
+            }
+        }
+    }
 
     function parsePriceFeedUpdatesUnique(
         bytes[] calldata updateData,

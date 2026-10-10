@@ -120,6 +120,7 @@ contract WeekendArbitrageTest is RecordedOrderReceipts {
         vm.warp(1_709_100_000);
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0,

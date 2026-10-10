@@ -304,4 +304,3 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
     }
 
 }
-

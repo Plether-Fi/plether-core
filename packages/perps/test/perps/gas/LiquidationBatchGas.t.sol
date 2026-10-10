@@ -69,4 +69,3 @@ contract LiquidationBatchGasTest is LiquidationBatchTestFixture {
     }
 
 }
-

@@ -4,7 +4,6 @@ on:
   push:
     branches: [master, main]
   pull_request:
-    branches: [master, main]
     types: [labeled, synchronize, reopened]
   schedule:
     - cron: "0 2 * * *"

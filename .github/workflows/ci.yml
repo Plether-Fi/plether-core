@@ -4,7 +4,6 @@ on:
   push:
     branches: [master, main]
   pull_request:
-    branches: [master, main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -31,6 +30,12 @@ jobs:
 
       - name: Check package boundaries
         run: bash scripts/check-package-boundaries.sh
+
+      - name: Test oracle release evidence tooling
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_oracle*.py' -v
+
+      - name: Test perps shard runner
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_perps_shards.py' -v
 
       - name: Build
         run: forge build --sizes --skip test
@@ -164,6 +169,13 @@ jobs:
       - name: Filter coverage report
         run: awk -v scope=spot -f scripts/filter-lcov-by-scope.awk lcov-core.raw.info > lcov-core.info
 
+      - name: Preserve coverage evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-core-${{ github.sha }}
+          path: lcov-core.info
+          if-no-files-found: error
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -207,6 +219,13 @@ jobs:
       - name: Filter coverage report
         run: awk -v scope=perps -f scripts/filter-lcov-by-scope.awk lcov-perps.raw.info > lcov-perps.info
 
+      - name: Preserve coverage evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-perps-${{ github.sha }}
+          path: lcov-perps.info
+          if-no-files-found: error
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -239,6 +258,13 @@ jobs:
 
       - name: Filter coverage report
         run: awk -v scope=options -f scripts/filter-lcov-by-scope.awk lcov-options.raw.info > lcov-options.info
+
+      - name: Preserve coverage evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-options-${{ github.sha }}
+          path: lcov-options.info
+          if-no-files-found: error
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -281,6 +307,14 @@ jobs:
         run: |
           slither . --config-file slither.config.json --sarif results-${{ matrix.package }}.sarif --fail-none
           test -s results-${{ matrix.package }}.sarif
+
+      - name: Preserve static-analysis evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: slither-${{ matrix.package }}-${{ github.sha }}
+          path: results-${{ matrix.package }}.sarif
+          if-no-files-found: error
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v4

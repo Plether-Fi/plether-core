@@ -257,15 +257,16 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
 
         assertTrue(preview.valid, "Terminal close should remain live when only spread is uncollectible");
         assertEq(preview.frozenSpreadUsdc, 509_500_000, "Spread should assess 50 bps of $101,900 notional");
+        assertEq(preview.executionFeeUsdc, _engineExecutionFeeUsdc(100_000e18, 1.019e8));
         assertEq(
             preview.frozenSpreadPaidUsdc,
-            0,
-            "PnL pledge consumed by price loss must remain isolated from the frozen action charge"
+            clearinghouse.liquidationReserveUsdc(account) - preview.executionFeeUsdc,
+            "Released liquidation reserve pays the fee before the residual frozen spread"
         );
         assertEq(
             preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc,
-            "A terminal spread with no eligible action cash should be fully waived"
+            preview.frozenSpreadUsdc - preview.frozenSpreadPaidUsdc,
+            "Only the spread exceeding released surplus should be waived"
         );
         assertEq(
             preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
@@ -359,4 +360,3 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
     }
 
 }
-

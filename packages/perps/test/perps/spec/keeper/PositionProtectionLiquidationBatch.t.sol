@@ -191,4 +191,3 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
     }
 
 }
-

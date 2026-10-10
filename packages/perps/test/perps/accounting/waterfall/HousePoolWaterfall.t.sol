@@ -565,4 +565,3 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
     }
 
 }
-

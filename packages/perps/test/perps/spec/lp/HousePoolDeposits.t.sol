@@ -353,4 +353,3 @@ contract HousePoolDepositsTest is HousePoolTestBase {
     }
 
 }
-

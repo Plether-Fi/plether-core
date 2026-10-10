@@ -49,4 +49,3 @@ contract TerminalNavBookV2GasTest is TerminalNavBookV2TestFixture {
     }
 
 }
-

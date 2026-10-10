@@ -401,11 +401,11 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 999);
 
-        vm.deal(address(this), 1 ether);
+        vm.deal(address(this), 2 ether);
         vm.warp(1050);
         vm.roll(block.number + 1);
         uint256 callsBefore = mockPyth.parseUniqueCallCount();
-        router.executeOrderBatch{value: 1 ether}(2, _pythUpdateData());
+        router.executeOrderBatch{value: 2 ether}(2, _pythUpdateData());
 
         assertEq(
             mockPyth.parseUniqueCallCount() - callsBefore,
@@ -460,4 +460,3 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
     }
 
 }
-

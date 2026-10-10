@@ -36,6 +36,10 @@ PRODUCTION_SENSITIVE_TESTS = {
     "test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating",
     "test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund",
     "test_DeferredAdminRefundIsBackedUntilBeneficiaryClaimsExactlyOnce",
+    # These properties run a setup prelude with fixed callback gas caps and burners.
+    # Keep that prelude under production codegen in PRs as well as full CI/audit.
+    "invariant_EthConservedAcrossFeesRefundsAndClaims",
+    "invariant_AllRequiredPathsRemainExercised",
 }
 # Coverage changes generated code and gas usage. These tests still run in normal
 # correctness and production-codegen lanes. No current-defect exclusions belong here.

@@ -60,6 +60,11 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
         assertTrue(engine.isOracleFrozen(), "Setup should be in oracle-frozen mode");
 
         _removePnlPledgeAndSyncTerminalCurve(account);
+        uint256 reserve = clearinghouse.liquidationReserveUsdc(account);
+        vm.startPrank(address(engine));
+        clearinghouse.releaseLiquidationReserve(account, reserve);
+        clearinghouse.consumeActionCharge(account, reserve, 0, 0, address(pool), address(0), 0);
+        vm.stopPrank();
 
         ICfdEngineTypes.ClosePreview memory withoutClaim = engineLens.previewClose(account, size, closePrice);
         uint256 assessedFeeUsdc = _engineExecutionFeeUsdc(size, closePrice);
@@ -303,4 +308,3 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
     }
 
 }
-

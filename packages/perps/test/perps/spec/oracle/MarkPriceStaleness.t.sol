@@ -73,6 +73,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         engine.setPool(address(pool));
 
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         feedIds.push(FEED_A);
         feedIds.push(FEED_B);
         weights.push(0.5e18);

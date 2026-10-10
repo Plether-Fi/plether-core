@@ -46,6 +46,7 @@ contract FuturePublishDelayTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -131,6 +132,7 @@ contract StoredMarkOrderingTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -285,6 +287,7 @@ contract FreshPostCommitTickTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -393,6 +396,7 @@ contract SameBlockTickOrderingTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -478,6 +482,7 @@ contract PostCommitTimestampBoundsTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = _deployEngine(_riskParams());
@@ -578,6 +583,7 @@ contract CrossBlockPostCommitTickTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -662,6 +668,7 @@ contract HistoricalTickSafetyTest is BasePerpTest {
     function setUp() public override {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         baseMockPyth = mockPyth;
 
         clearinghouse = new MarginClearinghouse(address(usdc));
@@ -792,6 +799,7 @@ contract StaleExecutionReservationTest is Test {
     function setUp() public {
         usdc = new MockUSDC();
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
 
         clearinghouse = new MarginClearinghouse(address(usdc));
         engine = new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), 50);

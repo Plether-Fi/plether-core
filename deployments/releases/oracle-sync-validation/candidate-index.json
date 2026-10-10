@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "candidate": "core-oracle-synchronization-v3",
+  "currentEvidence": "v3-59323014/manifest.json",
+  "sourceCommit": "593230140be1aebfe6e227264ad5e50742121ea4",
+  "localQualificationComplete": true,
+  "deployedQualificationComplete": false,
+  "activeDeploymentRecordChanged": false,
+  "historicalEvidence": [
+    "../atomic-oracle-sync-candidate/manifest.json"
+  ]
+}

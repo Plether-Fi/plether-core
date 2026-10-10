@@ -576,4 +576,3 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
     }
 
 }
-

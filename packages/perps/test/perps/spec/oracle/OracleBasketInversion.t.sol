@@ -16,6 +16,7 @@ contract InversionTest is RecordedOrderReceipts {
 
     function setUp() public {
         mockPyth = new MockPyth();
+        mockPyth.setSynchronizeLegacyUniquePrices(true);
         vm.warp(1001);
     }
 

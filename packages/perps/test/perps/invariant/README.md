@@ -7,7 +7,7 @@ perps system. Coverage descriptions below refer to the assertions and actor doma
 ## Evidence and failure handling
 
 - **Independent reference models** compute expected state from initial conditions and action inputs. The claim,
-  fee, VPI/frozen-spread, and waterfall campaigns below have explicit bounded domains; none proves every interaction.
+  fee, ETH refund, VPI/frozen-spread, and waterfall campaigns below have explicit bounded domains; none proves every interaction.
 - **Reconciliation** checks agreement among observed storage, custody, snapshots, and tracked ownership. In particular,
   `PerpAccountingHandler` keeps observed claim mirrors for batch/account reconciliation. Those mirrors are separate
   from `PerpGhostLedger` and are not an independent oracle for the correctness of claim amounts.
@@ -26,12 +26,16 @@ perps system. Coverage descriptions below refer to the assertions and actor doma
   frozen/capacity rejection and exact `NoLpEpochProgress` from all other failures. Positive value-conservation
   fixtures require their setup calls to succeed and distinguish the intentional slippage rejection from a successful
   close. Snapshot scenarios persist outcome counters after restoring economic state.
+- `OracleSynchronizationHandler` is a narrower exception to execution-error classification: it catches every first
+  execution error while checking mark rollback, then ignores retry errors. Its resolution count includes every
+  nonreverting response, not just successful fills. `fail_on_revert` still rejects setup/commit failures outside
+  these catches. This campaign is stored-feed consistency evidence, not proof of sustained successful execution.
 - Deterministic reachability and deliberately perturbed accounting tests establish that the new models exercise
   successful transitions and detect incorrect balances. More runs cannot replace these checks.
 
 ## Campaign entrypoints
 
-There are 20 invariant entrypoints. Each retained campaign has a domain name describing its checks; reconciliation
+There are 23 invariant entrypoints. Each retained campaign has a domain name describing its checks; reconciliation
 and parity names do not claim independent economic modeling. The 17 former `invariant_job1`/`invariant_job2` pairs
 called the same `_assertAllInvariants()` body with identical setup, targets and configuration. Each second wrapper
 was removed and both baseline entries map to the retained, renamed entrypoint. Assertion bodies, actor domains,
@@ -80,6 +84,19 @@ bounded by each handler's actor set and input range.
   model. Both seeded tranches retain their owners. Router authorization and the Engine-only recapitalization inflow
   are explicit harness boundaries; issuance/redemption, carry, VPI, deferred claims, and raw-cash shortage remain
   outside this model. Existing lifecycle and capacity campaigns cover those LP queue paths separately.
+
+- `properties/OracleEthConservationInvariant.t.sol`: persistent independent ETH accounting across three actors,
+  Oracle refunds, Admin refunds and paid Pyth fees. Three 1-ETH actor budgets are funded only at setup; expected
+  parse/update fees, immediate refunds and both claim ledgers advance from scenario inputs and callback modes.
+  A deterministic prelude reaches all eleven families (ordinary/shared/mixed execution, frozen/FAD close,
+  unavailable history with/without a completed prefix, outer rollback, caught item failure, paused cleanup and
+  zero-fee surplus), all five rollback kinds, rejected/gas-burning/reentrant callbacks and both directions of
+  cross-ledger claims. Rollback hashes are before/after reconciliation; finalized receipts establish that a prefix
+  executed before rollback, without supplying expected ETH amounts. Fees are bounded to 0–1 gwei and surplus to
+  0–5 gwei. Every bounded scenario creates fresh traders, drains its queue and closes opened positions; ETH debt
+  and counters persist, but this is not a general persistent USDC model. Prices are fixed, frozen/FAD predicates
+  mocked, and real Pyth verification, liquidation, LP flow and forced ETH are outside the domain. Bounded callback
+  gas makes both properties production-compiler gates in PR, post-merge and audit lanes.
 
 ## Suites
 
@@ -182,6 +199,14 @@ bounded by each handler's actor set and input range.
     effective supply includes pending dilution, fee materialization credits only the configured recipient, and
     fee-only checkpoints preserve pool economics and escrows. It checks effective-supply deposit/redemption pricing,
     redemption-before-deposit ordering, fee accrual during settlement holds, and raw supply across known holders
+
+- `OracleSynchronizationInvariant.t.sol`
+  - Reconciles every tracked MockPyth stored-feed timestamp against the installed Engine mark after a nonreverting
+    Router resolution, and checks caught execution failures do not retain a changed mark timestamp
+  - Uses two feeds, fresh alternating-side traders, ±1% prices and 1–10 second delays; positions accumulate
+  - Seeds one nonreverting resolution, but does not decode terminal status or classify caught execution/retry
+    errors. It therefore does not establish sustained successful fills or independent accounting correctness
+  - Shared action logic is in `handlers/OracleSynchronizationHandler.sol`; executable property is in `properties/`
 
 - `PerpOraclePathInvariant.t.sol`
   - Catches state drift across successful and rejected mark-refresh paths

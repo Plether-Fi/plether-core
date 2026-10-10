@@ -880,4 +880,3 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
     }
 
 }
-
