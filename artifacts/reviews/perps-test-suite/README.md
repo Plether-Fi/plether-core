@@ -1,6 +1,8 @@
 # Perps test-suite review evidence
 
-This draft changes tests, fixtures, documentation and CI. Production contracts are unchanged. Full acceptance remains pending.
+This draft changes tests, fixtures, documentation and CI. Production contracts match current master. Full acceptance remains pending.
+
+Master conflicts are resolved in an isolated checkout; see the [integration report](merge-resolution.md) for the new source, preserved coverage and pending integrated validation. The counts below describe the earlier frozen baseline.
 
 ## Review order
 
@@ -28,6 +30,6 @@ These investigations confirmed test defects, not a production vulnerability.
 - Five package fork cases and external root integration coverage were not run because RPC endpoints are unavailable.
 - Instrumented coverage ran six focused cases; compiler source-anchor warnings prevent claiming complete line/branch coverage.
 
-The validated source is based on `75720362a4c1c7e26c99ea15927783e1a1173b80`. Remote master subsequently merged production fixes #103 and #104 at `64c6ea90a537f58f14b1da3c48d296a254ab85c7`. Their integration and validation remain required before merge. The running campaigns retain the frozen validated source. Git commit metadata can differ between batches created before and after the PR commit; the common source manifest identifies the actual tested bytes.
+The validated source is based on `75720362a4c1c7e26c99ea15927783e1a1173b80`. Remote master subsequently merged production fixes #103 and #104 at `64c6ea90a537f58f14b1da3c48d296a254ab85c7`. Their integration is now complete in the merge report; validation of the resulting source remains required before merge. The running campaigns retain the frozen validated source. Git commit metadata can differ between batches created before and after the PR commit; the common source manifest identifies the actual tested bytes.
 
 The committed snapshot excludes large machine-local logs, caches and failure corpora. Recorded CI runners publish replay evidence as workflow artifacts. Local campaign evidence remains under `artifacts/perps-suite-review` and `artifacts/perps-resumable-audit-final`.
