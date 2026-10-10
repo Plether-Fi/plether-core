@@ -13,6 +13,17 @@ interface IMarginAccount {
         uint256 amount
     ) external;
 
+    /// @notice Deposits the caller's USDC into an account's free settlement balance without recipient authorization.
+    /// @dev Requires a nonzero account, positive amount, prior caller allowance, and exact token receipt. Does not
+    ///      allocate position margin or checkpoint carry; pending carry remains due on normal account actions.
+    ///      The payer receives no withdrawal or trading authority. Self-funding and undeployed accounts are allowed.
+    /// @param account Account receiving the settlement credit
+    /// @param amount Exact USDC amount pulled from the caller
+    function depositFor(
+        address account,
+        uint256 amount
+    ) external;
+
     /// @notice Withdraws USDC from the caller's canonical margin account.
     /// @dev Carry and engine withdrawal guards are applied after a provisional debit; the remaining settlement must
     ///      still cover all locked buckets. A zero amount is allowed but still runs the checks and hooks.

@@ -77,11 +77,14 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice The caller is not the engine or the engine-derived integration authorized for the operation.
     error MarginClearinghouse__NotOperator();
 
-    /// @notice A user attempted to deposit to or withdraw from an account other than its own address.
+    /// @notice A legacy owner-authenticated deposit or withdrawal named an account other than the caller.
     error MarginClearinghouse__NotAccountOwner();
 
     /// @notice An operation that requires a nonzero amount received zero.
     error MarginClearinghouse__ZeroAmount();
+
+    /// @notice The settlement token delivered a different amount than requested by a third-party deposit.
+    error MarginClearinghouse__UnexpectedTransferAmount(uint256 expected, uint256 received);
 
     /// @notice The account's settlement balance cannot cover a requested user withdrawal.
     error MarginClearinghouse__InsufficientBalance();
@@ -132,6 +135,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @param asset Settlement token transferred in
     /// @param amount Amount transferred and credited, in the token's native units
     event Deposit(address indexed account, address indexed asset, uint256 amount);
+
+    /// @notice Identifies the payer of a credit-only deposit; its matching `Deposit` event records the same credit.
+    /// @dev Indexers must not count this metadata event as an additional settlement credit.
+    event DepositFor(address indexed payer, address indexed account, uint256 amount);
 
     /// @notice Emitted after settlement tokens are debited from an account and transferred to its owner.
     /// @param account Account debited by the withdrawal
@@ -320,6 +327,38 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 amount
     ) external nonReentrant {
         _deposit(msg.sender, msg.sender, amount);
+    }
+
+    /// @notice Transfers the caller's USDC into custody and credits another account's free settlement.
+    /// @dev Requires an exact, nonzero token transfer and a nonzero beneficiary. Does not allocate position margin,
+    ///      checkpoint carry, or give the payer authority over the beneficiary. Existing carry remains due and is
+    ///      projected or collected by the normal account actions. Self-funding and counterfactual accounts are allowed.
+    /// @param account Account whose free settlement balance receives the deposit
+    /// @param amount Exact settlement-token amount to pull from the caller, in six-decimal USDC units
+    function depositFor(
+        address account,
+        uint256 amount
+    ) external nonReentrant {
+        if (account == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        if (amount == 0) {
+            revert MarginClearinghouse__ZeroAmount();
+        }
+
+        IERC20 asset = IERC20(settlementAsset);
+        uint256 balanceBefore = asset.balanceOf(address(this));
+        asset.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = asset.balanceOf(address(this));
+        uint256 received = balanceAfter >= balanceBefore ? balanceAfter - balanceBefore : 0;
+        if (received != amount) {
+            revert MarginClearinghouse__UnexpectedTransferAmount(amount, received);
+        }
+
+        _creditSettlementUsdc(account, amount);
+
+        emit Deposit(account, settlementAsset, amount);
+        emit DepositFor(msg.sender, account, amount);
     }
 
     /// @notice Debits the caller's margin account and transfers settlement USDC to the caller.

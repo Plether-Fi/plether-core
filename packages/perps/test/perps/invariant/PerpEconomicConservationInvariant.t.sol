@@ -25,7 +25,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
-        bytes4[] memory selectors = new bytes4[](10);
+        bytes4[] memory selectors = new bytes4[](11);
         selectors[0] = handler.depositCollateral.selector;
         selectors[1] = handler.withdrawCollateral.selector;
         selectors[2] = handler.commitOpenOrder.selector;
@@ -36,9 +36,95 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         selectors[7] = handler.settleTraderClaim.selector;
         selectors[8] = handler.fundHousePool.selector;
         selectors[9] = handler.setPoolAssets.selector;
+        selectors[10] = handler.depositCollateralFor.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
+    }
+
+    function test_RepeatedThirdPartyFundingDefersCarryUntilWithdrawalAndConservesUsdc() public {
+        handler.setPoolAssets(100_000e6);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 20, 1000e6, 1e8);
+        handler.executeNextOrderModelled();
+
+        address account = handler.actorAt(0);
+        assertGt(_positionSize(account), 0, "Position must be live before funding");
+        (uint256 borrowBaseBefore, uint256 indexBefore, uint64 timestampBefore) = engine.positionCarryState(account);
+        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 poolBefore = housePool.totalAssets();
+        uint256 mintedBefore = handler.ghostTotalTraderMinted();
+
+        for (uint256 i; i < 3; ++i) {
+            handler.warpForward(1 hours);
+            handler.depositCollateralFor(0, i, 100e6);
+            (uint256 borrowBaseAfter, uint256 indexAfter, uint64 timestampAfter) = engine.positionCarryState(account);
+            assertEq(borrowBaseAfter, borrowBaseBefore, "Funding must preserve the position's carry basis");
+            assertEq(indexAfter, indexBefore, "Funding must not advance the position carry checkpoint");
+            assertEq(timestampAfter, timestampBefore, "Repeated funding must not reset the carry interval");
+            assertEq(clearinghouse.pnlPledgeUsdc(account), marginBefore, "Funding must not allocate or consume pledge");
+            assertEq(housePool.totalAssets(), poolBefore, "Funding must not collect carry into the pool");
+            _assertAllInvariants();
+        }
+
+        assertEq(handler.ghostTotalTraderMinted() - mintedBefore, 300e6, "Each payer mint must be counted once");
+        assertEq(clearinghouse.balanceUsdc(account), settlementBefore + 300e6, "Every credit must remain in custody");
+        handler.syncMarkNow(1e8);
+        // At the unchanged entry mark with no claims, the lens's equity reduction is the deferred carry debit.
+        AccountLensViewTypes.AccountLedgerSnapshot memory projected =
+            engineAccountLens.getAccountLedgerSnapshot(account);
+        assertEq(projected.unrealizedPnlUsdc, 0, "Carry comparison needs unchanged price PnL");
+        assertGt(projected.netEquityUsdc, 0, "The funded position must remain healthy");
+        uint256 projectedCarry = marginBefore - uint256(projected.netEquityUsdc);
+        assertGt(projectedCarry, 0, "The sequence must accrue collectible carry");
+
+        handler.withdrawCollateral(0, 100e6);
+        assertTrue(handler.lastWithdrawParityAttemptSnapshot().withdrawPasses, "Funded withdrawal must succeed");
+        assertEq(
+            clearinghouse.balanceUsdc(account),
+            settlementBefore + 200e6 - projectedCarry,
+            "Withdrawal must collect the full deferred carry exactly once"
+        );
+        assertEq(housePool.totalAssets(), poolBefore + projectedCarry, "Collected carry must reach the pool");
+        assertEq(clearinghouse.pnlPledgeUsdc(account), marginBefore - projectedCarry, "Carry remains margin-first");
+        assertEq(engine.unsettledCarryUsdc(account), 0, "Fully funded carry must leave no arrears");
+        _assertAllInvariants();
+    }
+
+    function test_ThirdPartyCreditsFundTradingAndWithdrawalWithoutChangingClaimGhosts() public {
+        address account = handler.actorAt(0);
+        handler.withdrawCollateral(0, clearinghouse.balanceUsdc(account));
+        assertEq(clearinghouse.balanceUsdc(account), 0, "Remove seeded collateral before third-party funding");
+        uint256 mintedBefore = handler.ghostTotalTraderMinted();
+        for (uint256 i; i < 3; ++i) {
+            handler.depositCollateralFor(0, i, 1000e6);
+            _assertAllInvariants();
+        }
+        assertEq(handler.ghostTotalTraderMinted() - mintedBefore, 3000e6, "Track third-party funding exactly once");
+        assertEq(handler.traderClaimSnapshot(account), 0, "Free funding must not create a claim ghost");
+        assertEq(handler.committedMarginSnapshot(account), 0, "Free funding must not create an order reservation");
+
+        uint256 executedBefore = handler.ghostExecutedOrderCount();
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 20, 1000e6, 1e8);
+        handler.executeNextOrderModelled();
+        assertGt(_positionSize(account), 0, "Third-party credit must fund a real open");
+        assertEq(handler.ghostTotalTraderMinted() - mintedBefore, 3000e6, "Opening must not need self-deposit top-up");
+        _assertAllInvariants();
+
+        handler.commitCloseOrder(0, 1e8);
+        handler.executeNextOrderModelled();
+        assertEq(_positionSize(account), 0, "Funded position must close through the existing order path");
+        assertEq(handler.ghostExecutedOrderCount(), executedBefore + 2, "Both trade actions must actually execute");
+        _assertAllInvariants();
+
+        uint256 freeSettlement = clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc;
+        assertGt(freeSettlement, 1e6, "Terminal settlement must leave withdrawable funding");
+        handler.withdrawCollateral(0, freeSettlement);
+        assertTrue(
+            handler.lastWithdrawParityAttemptSnapshot().withdrawPasses, "Recipient must withdraw remaining credit"
+        );
+        assertEq(clearinghouse.balanceUsdc(account), 0, "All unspent terminal credit must leave custody");
+        _assertAllInvariants();
     }
 
     function test_BatchSynchronizesClaimsForEveryProcessedOrderOwner() public {

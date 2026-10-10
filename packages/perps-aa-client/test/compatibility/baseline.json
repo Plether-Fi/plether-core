@@ -17,6 +17,7 @@
     "buildCancelProtectionAction",
     "buildCloseOrderV3",
     "buildCreateProtectionAction",
+    "buildDepositForCalls",
     "buildExpireOrderV3",
     "buildPlaceOrderAction",
     "buildPlaceOrderV3Action",
@@ -42,6 +43,7 @@
     "hashOrderReceiptV4",
     "hashPletherSponsorship",
     "mapPerpsExecutionError",
+    "marginClearinghouseFundingAbi",
     "marginClearinghouseTraderAbi",
     "normalizePaymasterResponse",
     "orderLifecycleV4Abi",
@@ -55,7 +57,8 @@
     "sendSponsoredAction",
     "splitEip3009Signature",
     "validateAuthorization",
-    "validatePletherPaymasterEnvelope"
+    "validatePletherPaymasterEnvelope",
+    "verifyBridgeFundingDeployment"
   ],
   "envelope": {
     "paymasterAndData": "0x7777777777777777777777777777777777777777000000000000000000000000000186a0000000000000000000000000000000000000713fb3000000713fb1d4000000000000000000038d7ea4c68000424242424242424242424242424242424242424242424242424242424242424224242424242424242424242424242424242424242424242424242424242424249999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",

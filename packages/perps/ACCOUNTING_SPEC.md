@@ -437,6 +437,36 @@ Rules:
   applying the explicit same-account price-loss netting once,
 - pending-order reservations and execution bounty reserves must be handled explicitly rather than assumed to be free cash.
 
+### Credit-only account funding
+
+`MarginClearinghouse.depositFor(account, amount)` changes custody and settlement credit only. It pulls exactly
+`amount` of the configured settlement token from the payer and requires the clearinghouse token-balance increase to
+match. Both the beneficiary and amount must be nonzero. On success:
+
+```text
+clearinghouse USDC custody += amount
+settlementBalances[account] += amount
+all position, order, liquidation, action, and VPI reserve buckets are unchanged
+```
+
+For an otherwise consistent account, free settlement increases by the same amount. The call performs no Engine hook,
+carry collection/checkpoint, mark update, position allocation, or terminal-NAV mutation. It changes neither pool assets
+nor trader claims. Pending carry remains due and is projected or collected by ordinary subsequent account actions;
+free settlement does not itself enter the account's terminal price-PnL cap. Increasing a live position's PnL pledge
+requires the owner's ordinary margin-allocation action.
+
+The credit is recorded by `Deposit(account, asset, amount)`. `DepositFor(payer, account, amount)` identifies the payer
+of that same credit and must not be summed as a second deposit. Existing owner-only `deposit(account, amount)` and
+`depositMargin(amount)` retain their post-credit carry behavior.
+
+Canonical USDC delivered to an Across destination handler remains outside clearinghouse custody until a successful
+`depositFor` transfers it to the beneficiary's settlement balance. The payer in `DepositFor` is that handler. An
+announced source-chain payment, provider status, or token balance is not clearinghouse credit: attribution requires
+the intent's canonical destination fill, exact quote marker, and matching confirmed clearinghouse events. If destination
+execution falls back to the trading-account beneficiary, the returned tokens remain wallet USDC (`needs-deposit`) and require a
+separate deposit before they are margin. Once credited, normal withdrawal and carry rules apply. See
+[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md).
+
 ## Snapshot Boundaries
 
 Snapshot structs are boundary objects between engine accounting and downstream consumers.
@@ -608,7 +638,8 @@ Rules:
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
 - carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
-- on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
+- on owner `deposit` / `depositMargin`, realized carry may be collected from post-deposit settlement in the same
+  transaction. Credit-only `depositFor` skips the checkpoint and leaves existing carry due,
 - on withdraw, carry is realized before settlement balance is reduced,
 - close and liquidation planners project this same allocation before calculating price-loss caps, residual margin,
   action charges, and pool solvency. Live settlement invokes the shared collector before applying the remaining plan,

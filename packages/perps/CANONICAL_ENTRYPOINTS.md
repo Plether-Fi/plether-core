@@ -9,7 +9,12 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 
 ## Traders
 
-- Margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
+- Owner margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
+- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact USDC amount and
+  credits the beneficiary's free settlement without a carry checkpoint or position-margin allocation. Funding gives
+  the payer no authority over the beneficiary. `DepositFor` is payer metadata for the same credit recorded by
+  `Deposit`; indexers must not count both. See [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for the Across
+  destination-call integration and provider/deployment requirements.
 - Ordinary trade action: `OrderRouter.commitOrder(OrderV3Types.OrderRequest request)`
 - Fresh external V3 requests must set `expectedConfigHash` to the current nonzero value returned by
   `OrderLifecycleBook.currentExecutionConfigHash()`; the public commit path rejects zero for a new intent.
@@ -58,6 +63,19 @@ Use these interfaces:
 Do not use the wide clearinghouse reservation API or detailed accounting lenses as the canonical trader integration
 surface. `CfdEngineLens.previewClose(...)` remains a planner diagnostic; it does not project a new close commitment's
 carry and bounty reservation.
+
+### Across destination funding
+
+The provider route targets the reviewed existing Across destination handler. Its approved destination calls approve
+the clearinghouse for canonical USDC and invoke `depositFor(beneficiary, amount)` using the handler's actual balance.
+The remaining required calls clear that allowance and emit the unique quote marker through the known Across emitter.
+The explicit fallback recipient must be the same verified trading-account beneficiary. No per-intent receiver,
+factory deployment, or permissionless flush entrypoint is part of this integration.
+
+Match the destination fill and quote marker to the persisted source intent, then verify its confirmed clearinghouse
+credit before using the funds as margin. A fallback pays wallet USDC to the beneficiary and remains `needs-deposit`, never ready
+to trade on that evidence alone. The destination must already implement `depositFor`; configuring an Across route
+does not upgrade an existing clearinghouse or resolve the application's V3 trading and AA release compatibility.
 
 ## LPs
 
