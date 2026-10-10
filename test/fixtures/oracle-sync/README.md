@@ -14,3 +14,25 @@ ARB_SEPOLIA_RPC_URL=https://arbitrum-sepolia.gateway.tenderly.co \
 The public-transaction path never reads or sends `PYTH_API_KEY`. Omitting `--source-transaction` uses the configured Hermes endpoint and optional `PYTH_API_KEY`; never commit credentials. Timestamp decoding follows Pyth's [accumulator price-message format](https://github.com/pyth-network/pyth-crosschain/blob/main/target_chains/ethereum/contracts/contracts/pyth/PythAccumulator.sol). The on-chain Pyth implementation, not this decoder, verifies signatures and the unique-tick window during fork replay.
 
 The fixture is required, not silently skipped. It pins the fork block/hash and initial storage, six release feeds, unique-tick window, payload checksum and baseline source commit. Missing/invalid/otherwise-ineligible data cannot qualify a release. Commit the fixture and candidate, then run `scripts/run-oracle-sync-fork.py FIXTURE NEW_OUTPUT_DIRECTORY` with `ARB_SEPOLIA_RPC_URL` set. The runner executes the same test twice: baseline must reproduce the ordering failure, candidate must synchronize and preserve identical historical prices. Do not edit or replace Pyth state/code in either run.
+
+## V3 qualification matrix
+
+`scenarios.json` references four immutable fixtures. The historical pair contains ticks at `1790091398` and `1790091433`; the second commit cannot reuse the first basket. The full combined `bytes[]` is quoted for each new resolution. Historical settlement uses each order's own window even when execution occurs after that window.
+
+The Friday opening tick is `1790970892` (2026-10-02 19:54:52 UTC), before the natural FAD window. The closing tick is `1790974764` (20:59:24 UTC), shortly before the natural 21:00 UTC freeze. The V3 suite opens before FAD and closes after the natural freeze without changing oracle policy or signed data. Each additional fixture records the public transaction that supplied its exact bytes; recapture it with the same command above and its `payloadSource.transactionHash`.
+
+Run the original regression plus all required V3 scenarios from a committed, clean checkout:
+
+```sh
+ARB_SEPOLIA_RPC_URL=https://arbitrum-sepolia.gateway.tenderly.co \
+  python3 scripts/run-oracle-sync-fork.py \
+  test/fixtures/oracle-sync/arbitrum-sepolia.json \
+  artifacts/oracle-sync/NEW_REVISION/fork \
+  --scenario-manifest test/fixtures/oracle-sync/scenarios.json
+```
+
+The required matrix covers historical single, shared and distinct baskets, natural frozen close, caught target failure, and immediate/deferred unavailable-history refunds. It uses the unchanged 30,000,000-gas cap and isolated Forge transaction contexts. Evidence records execution outcomes, exact ETH allocations, stored coverage and measured call gas. Call gas excludes transaction intrinsic gas and Arbitrum data fees; it is not a live transaction fee estimate.
+
+The supported Pyth deployment quotes `q = 0` at these captured blocks. The suite preserves that authentic fee configuration and adds a positive 1-gwei keeper surplus to exercise actual immediate and deferred RouterAdmin refunds. Evidence records whether each refund channel moved positive value. A zero Oracle allocation does not exercise a nonzero Oracle claim: those fee and liability paths are covered by the separate six-feed randomized invariant, which ranges `q` from zero to 1 gwei. These fixtures cannot establish production gas costs for nonzero Pyth fee transfers.
+
+Only a complete, zero-skip matrix can qualify the follow-up. Missing fixtures or RPC data, invalid windows, unexpected pending outcomes, evidence omissions, or changed source inputs fail qualification. All remote operations are reads; no signer or transaction broadcast is involved.
