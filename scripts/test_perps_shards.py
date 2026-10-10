@@ -34,7 +34,8 @@ class PerpsShardRunnerTest(unittest.TestCase):
         self.runner = self.root / "scripts/run-perps-package-tests.sh"
         self.runner.parent.mkdir(parents=True)
         for name in ("run-perps-package-tests.sh", "perps-test-inventory.py", "perps-shard-weights.json",
-                     "run-perps-recorded.py", "perps_forge_json.py"):
+                     "run-perps-recorded.py", "perps_forge_json.py", "run-perps-fast-tests.sh",
+                     "check-perps-pr-selection.py"):
             shutil.copyfile(SCRIPTS / name, self.runner.parent / name)
         # Exercise the real filename inventory, including newly added entrypoints.
         self.entrypoints = {
@@ -50,7 +51,7 @@ class PerpsShardRunnerTest(unittest.TestCase):
         fake_bin.mkdir()
         fake_forge = fake_bin / "forge"
         fake_forge.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, sys
+import json, os, pathlib, re, sys
 args = sys.argv[1:]
 if args == ['--version']:
     print('forge mocked shard fixture')
@@ -64,17 +65,26 @@ with open(os.environ['SHARD_TEST_LOG'], 'a') as out:
     out.write(json.dumps(record) + '\\n')
 if args[0] == 'config':
     print(json.dumps({'fuzz': {'runs': 2000}, 'invariant': {'runs': 32, 'depth': 256},
-                      'via_ir': True, 'cache_path': 'cache', 'test': os.environ['FOUNDRY_TEST']}))
+                      'via_ir': os.environ.get('FOUNDRY_VIA_IR') == 'true', 'cache_path': 'cache', 'test': os.environ['FOUNDRY_TEST']}))
     sys.exit(0)
 entrypoints = [p for p in files if p.endswith('.t.sol')]
 if os.environ.get('SHARD_TEST_EMPTY_ENTRYPOINT') == '1':
     entrypoints = entrypoints[1:]
 paths = [str((test / p).relative_to(package)) for p in entrypoints]
+names = ['test_behavior']
+if os.environ.get('SHARD_TEST_PR') == '1':
+    names += ['test_gas_budget']
+    for flag, keep in [('--match-test', True), ('--no-match-test', False)]:
+        if flag in args:
+            pattern = args[args.index(flag) + 1]
+            names = [n for n in names if bool(re.search(pattern, n)) == keep]
+    if os.environ.get('SHARD_TEST_DROP_CORRECTNESS') == '1' and '--no-match-test' in args:
+        paths = paths[1:]
 if '--list' in args:
-    print(json.dumps({p: {'Example': ['test_behavior']} for p in paths}))
+    print(json.dumps({p: {'Example': names} for p in paths}))
     sys.exit(0)
 print(json.dumps({p + ':Example': {'test_results': {
-    'test_behavior()': {'status': 'Success', 'duration': {'secs': 0, 'nanos': 1}}
+    name + '()': {'status': 'Success', 'duration': {'secs': 0, 'nanos': 1}} for name in names
 }} for p in paths}))
 sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
 ''')
@@ -153,6 +163,61 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
                 self.assertEqual(coverage["unexpected_results"], [])
                 self.assert_cleaned()
         self.assertEqual(seen, self.entrypoints - self.forks)
+
+    def test_pr_shards_preserve_exact_partition_codegen_budgets_and_replay(self):
+        seen = set()
+        for shard in range(4):
+            result = self.run_shard(shard, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            production, correctness = self.executions()[-2:]
+            self.assertEqual(production["settings"]["FOUNDRY_VIA_IR"], "true")
+            self.assertEqual(correctness["settings"]["FOUNDRY_VIA_IR"], "false")
+            for call in (production, correctness):
+                self.assertEqual(call["args"][call["args"].index("--threads") + 1], "1")
+                self.assertEqual(call["settings"]["FOUNDRY_PROFILE"], "ci")
+                self.assertEqual(call["settings"]["FOUNDRY_FUZZ_SEED"], "0xdeadbeef")
+                for setting in ("FOUNDRY_FUZZ_RUNS", "FOUNDRY_INVARIANT_RUNS", "FOUNDRY_INVARIANT_DEPTH"):
+                    self.assertNotIn(setting, call["settings"])
+            assigned = {p for p in production["files"] if p.endswith(".t.sol")}
+            self.assertEqual(assigned, {p for p in correctness["files"] if p.endswith(".t.sol")})
+            self.assertFalse(seen & assigned)
+            seen.update(assigned)
+            evidence = self.root / "artifacts/perps"
+            partition = json.loads((evidence / "pr-selection.json").read_text())
+            self.assertEqual(partition["discovered"], 2 * len(assigned))
+            for field in ("missing", "unexpected", "overlap", "missing_entrypoints"):
+                self.assertEqual(partition[field], [])
+            for lane in ("production-gates", "correctness"):
+                replay = (evidence / lane / "replay.sh").read_text()
+                self.assertIn(f"PERPS_SHARD_MODE=pr bash scripts/run-perps-package-tests.sh {shard} 4", replay)
+            self.assert_cleaned()
+        self.assertEqual(seen, self.entrypoints - self.forks)
+
+    def test_pr_replay_keeps_source_identity_from_either_lane(self):
+        identities = []
+        for via_ir in ("true", "false"):
+            result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", FOUNDRY_VIA_IR=via_ir)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            identities.append((self.root / "artifacts/perps/shard-0-scratch.txt").read_text())
+        self.assertEqual(identities[0], identities[1])
+        self.assert_cleaned()
+
+    def test_pr_partition_rejects_tests_dropped_from_both_filtered_lanes(self):
+        result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_DROP_CORRECTNESS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not an exact discovery partition", result.stderr)
+        partition = json.loads((self.root / "artifacts/perps/pr-selection.json").read_text())
+        self.assertTrue(partition["missing"])
+        self.assert_cleaned()
+
+    def test_pr_partition_rejects_overlapping_lanes(self):
+        # The baseline fake Forge deliberately ignores filters: both lanes report
+        # the same test. An apparent pair of passes must not satisfy the gate.
+        result = self.run_shard(0, PERPS_SHARD_MODE="pr")
+        self.assertNotEqual(result.returncode, 0)
+        partition = json.loads((self.root / "artifacts/perps/pr-selection.json").read_text())
+        self.assertTrue(partition["overlap"])
+        self.assert_cleaned()
 
     def test_list_only_preserves_executed_inventory_without_running_forge(self):
         for shard in range(4):

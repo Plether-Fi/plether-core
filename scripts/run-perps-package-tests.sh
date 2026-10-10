@@ -6,6 +6,11 @@ if [ "$#" -ne 2 ] || ! [[ "$1" =~ ^[0-3]$ ]] || [ "$2" != 4 ]; then
     exit 2
 fi
 shard_index="$1"
+mode="${PERPS_SHARD_MODE:-full}"
+if [ "${mode}" != full ] && [ "${mode}" != pr ]; then
+    echo "PERPS_SHARD_MODE must be full or pr" >&2
+    exit 2
+fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_root="${repo_root}/packages/perps"
 export FOUNDRY_PROFILE="${FOUNDRY_PROFILE:-quick}"
@@ -20,7 +25,10 @@ mkdir -p "${PERPS_ARTIFACT_DIR}"
 python3 "${repo_root}/scripts/perps-test-inventory.py" > "${PERPS_ARTIFACT_DIR}/inventory.json"
 # Stable source names keep compiled test/handler metadata identical on replay.
 # mkdir atomically rejects a concurrent or interrupted run with the same identity.
-scratch_id="$(python3 - "${FOUNDRY_PROFILE}" "${FOUNDRY_FUZZ_SEED:-0xdeadbeef}" "${shard_index}" "${FOUNDRY_VIA_IR:-true}" <<'PY'
+scratch_codegen="${FOUNDRY_VIA_IR:-true}"
+# Both PR codegen lanes share one stable physical tree, including on replay.
+if [ "${mode}" = pr ]; then scratch_codegen=pr; fi
+scratch_id="$(python3 - "${FOUNDRY_PROFILE}" "${FOUNDRY_FUZZ_SEED:-0xdeadbeef}" "${shard_index}" "${scratch_codegen}" "${mode}" <<'PY'
 import hashlib, json, sys
 print(hashlib.sha256(json.dumps(sys.argv[1:]).encode()).hexdigest()[:20])
 PY
@@ -52,6 +60,12 @@ awk -F '\t' -v shard="${shard_index}" '$1 == shard { print $2 }' "${shard_work_d
     > "${PERPS_EXPECTED_ENTRYPOINTS}"
 export FOUNDRY_TEST="${shard_test_dir#"${package_root}/"}"
 export PERPS_REPLAY_COMMAND="bash scripts/run-perps-package-tests.sh ${shard_index} 4"
+if [ "${mode}" = pr ]; then
+    # Replay reconstructs this same physical shard and both code-generation lanes.
+    export PERPS_REPLAY_COMMAND="PERPS_SHARD_MODE=pr bash scripts/run-perps-package-tests.sh ${shard_index} 4"
+    bash "${repo_root}/scripts/run-perps-fast-tests.sh"
+    exit 0
+fi
 # A single invocation saves the complete per-test result and invariant call statistics.
 python3 "${repo_root}/scripts/run-perps-recorded.py" "shard-${shard_index}" -- \
     forge test --offline -vvv --root "${package_root}"

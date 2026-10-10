@@ -185,7 +185,11 @@ PERPS_SHARD_LIST_ONLY=1 bash scripts/run-perps-package-tests.sh 0 4
 | `ci` | 2,000 | 32 | 256 | PR and post-merge |
 | `audit` | 20,000 | 256 | 1,000 | Nightly and pre-audit |
 
-PR runners use production via-IR for benchmarks and deployment gates, and non-via-IR for other correctness tests.
+PR CI uses four physical shards, each running Forge with one thread. Each shard uses production via-IR for
+benchmarks and deployment gates, and non-via-IR for other correctness tests. `pr-selection.json` verifies that
+those two lanes exactly partition unfiltered discovery, with no missing or duplicate tests. The `Package (perps)`
+aggregate check passes only when all four jobs succeed. To replay one PR shard:
+`PERPS_SHARD_MODE=pr FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef bash scripts/run-perps-package-tests.sh 0 4`.
 Post-merge and audit shards run production via-IR throughout. PR seed is `0xdeadbeef`; scheduled seeds derive from the
 recorded run ID. The pre-audit target and dispatched deep workflow execute `0xdeadbeef`, `0x1`, and `0x2`.
 No runner silently lowers these budgets. Explicit environment overrides are captured in the effective configuration.

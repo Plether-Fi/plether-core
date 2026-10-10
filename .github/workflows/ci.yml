@@ -109,10 +109,21 @@ jobs:
           node scripts/perps-aa-artifact.mjs pack "$RUNNER_TEMP/perps-aa-client"
           node scripts/perps-aa-artifact.mjs smoke "$RUNNER_TEMP/perps-aa-client"
 
-  package-test-perps:
-    name: Package (perps)
+  package-test-perps-shard:
+    name: Perps PR shard ${{ matrix.number }}/4
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {shard: 0, number: 1}
+          - {shard: 1, number: 2}
+          - {shard: 2, number: 3}
+          - {shard: 3, number: 4}
+    env:
+      FOUNDRY_FUZZ_SEED: '0xdeadbeef'
+      HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -124,7 +135,7 @@ jobs:
           version: v1.5.1
 
       - name: Build package
-        run: bash scripts/run-with-heartbeat.sh forge build --sizes --skip test --skip script --root packages/perps
+        run: bash scripts/run-with-heartbeat.sh forge build --threads 1 --sizes --skip test --skip script --root packages/perps
 
       - name: Validate suite inventory, map, and runner behavior
         run: |
@@ -132,20 +143,33 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_perps_runners.py'
           python3 scripts/perps-test-inventory.py > /tmp/perps-test-inventory.json
 
-      - name: Run PR correctness and production gas/size gates
+      - name: Run shard correctness and production gas/size gates
         env:
-          FOUNDRY_FUZZ_SEED: '0xdeadbeef'
-          HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
-        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-fast-tests.sh
+          PERPS_SHARD_MODE: pr
+        run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-package-tests.sh "${{ matrix.shard }}" 4
 
       - name: Upload perps run evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perps-pr-evidence-${{ github.run_id }}
+          name: perps-pr-evidence-${{ github.run_id }}-shard-${{ matrix.shard }}
           path: artifacts/perps
           if-no-files-found: warn
           retention-days: 14
+
+  # Preserve the existing required-check name; cancellation, skipping, or any
+  # failed shard must prevent this aggregate gate from passing.
+  package-test-perps:
+    name: Package (perps)
+    if: ${{ always() }}
+    needs: package-test-perps-shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require all four perps shards
+        env:
+          SHARD_RESULT: ${{ needs.package-test-perps-shard.result }}
+        run: test "${SHARD_RESULT}" = success
 
   coverage-core:
     name: Coverage (core protocol)
