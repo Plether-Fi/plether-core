@@ -14,6 +14,7 @@ contract OracleSynchronizationInvariantTest is BasePerpTest {
         handler =
             new OracleSynchronizationHandler(router, engine, clearinghouse, baseMockPyth, usdc, _basePythFeedIds());
         handler.execute(0, 0, false, false);
+        assertEq(handler.executed(), 1, "warm-up must execute an order");
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = handler.execute.selector;
         targetSelector(FuzzSelector(address(handler), selectors));
@@ -21,8 +22,18 @@ contract OracleSynchronizationInvariantTest is BasePerpTest {
     }
 
     function invariant_ExecutionInstalledMarksAlwaysHaveStoredFeedCoverage() public view {
-        assertGt(handler.resolutions(), 0, "must exercise real oracle resolutions");
-        assertFalse(handler.coverageViolation(), "execution retained an uncovered mark");
+        assertGt(handler.executed(), 0, "must exercise authenticated executed orders");
+        assertEq(handler.resolutions(), handler.executed() + handler.plannerRejected(), "terminal outcome accounting");
+        assertEq(
+            handler.attempts(), handler.resolutions() + handler.commitRejected(), "all attempted actions accounted for"
+        );
+        assertEq(
+            handler.healthyRetries(),
+            handler.injectedWriteFailures() + handler.injectedCoverageFailures(),
+            "all injected faults retried"
+        );
+        assertGe(baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_A).publishTime, engine.lastMarkTime());
+        assertGe(baseMockPyth.getPriceUnsafe(BASE_PYTH_FEED_B).publishTime, engine.lastMarkTime());
     }
 
 }
