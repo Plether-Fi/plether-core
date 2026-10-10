@@ -1447,6 +1447,8 @@ irreversible trigger followed by retryable market-close attempts, never as an au
 
 ## Further Reading
 
+- [`test/perps/TEST_MAP.md`](test/perps/TEST_MAP.md): executable specification coverage, independent models, test profiles, and replay instructions
+
 - [`WORKING_WITH_AI_AGENTS.md`](WORKING_WITH_AI_AGENTS.md): bounded autonomous trading, machine-readable execution,
   and independent intent/outcome verification
 - [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md): full accounting and reserve model

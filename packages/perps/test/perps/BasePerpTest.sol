@@ -1000,24 +1000,6 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         return _sideState(side).totalMargin;
     }
 
-    // Historical helper name retained for obsolete carry/spread regression context.
-    // The live system does not maintain a legacy side-index state; this helper is intentionally zero.
-    function _legacySideIndexZero(
-        CfdTypes.Side side
-    ) internal pure returns (int256) {
-        side;
-        return 0;
-    }
-
-    // Historical helper name retained for obsolete carry/spread regression context.
-    // The live carry model does not use a legacy side-entry index; this helper is intentionally zero.
-    function _legacySideEntryIndexZero(
-        CfdTypes.Side side
-    ) internal pure returns (int256) {
-        side;
-        return 0;
-    }
-
     function _sideMaxProfit(
         CfdTypes.Side side
     ) internal view returns (uint256) {

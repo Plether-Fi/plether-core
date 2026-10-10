@@ -1,0 +1,1682 @@
+{
+  "summary": {
+    "original_files": 24,
+    "original_tests": 168,
+    "obsolete_helpers": 8,
+    "retained_tests": 165,
+    "files": [
+      "packages/perps/test/perps/spec/keeper/OrderBountyLifecycle.t.sol",
+      "packages/perps/test/perps/accounting/close/ReservedMarginCloseSettlement.t.sol",
+      "packages/perps/test/perps/accounting/waterfall/SeniorCouponCheckpoints.t.sol",
+      "packages/perps/test/perps/spec/oracle/ExecutionClockBoundaries.t.sol",
+      "packages/perps/test/perps/accounting/waterfall/TrancheRecoveryBehavior.t.sol",
+      "packages/perps/test/perps/spec/lp/DepositCooldownBehavior.t.sol",
+      "packages/perps/test/perps/spec/trader/PositionAdmissionBehavior.t.sol",
+      "packages/perps/test/perps/accounting/liquidation/ReserveFundedLiquidation.t.sol",
+      "packages/perps/test/perps/accounting/liquidation/TerminalPriceWriteoff.t.sol",
+      "packages/perps/test/perps/spec/oracle/AccountAndPoolFreshness.t.sol",
+      "packages/perps/test/perps/accounting/cash-priority/OracleRefundCustody.t.sol",
+      "packages/perps/test/perps/spec/trader/WithdrawalEligibility.t.sol",
+      "packages/perps/test/perps/differential/LpEntryExitNavParity.t.sol",
+      "packages/perps/test/perps/spec/lp/EntryAndActivationBehavior.t.sol",
+      "packages/perps/test/perps/accounting/carry/CarryCheckpointBoundaries.t.sol",
+      "packages/perps/test/perps/accounting/close/DegradedSettlementBehavior.t.sol",
+      "packages/perps/test/perps/spec/admin/ConfigurationBoundaries.t.sol",
+      "packages/perps/test/perps/differential/AccountAndPoolViewParity.t.sol",
+      "packages/perps/test/perps/accounting/cash-priority/TreasuryFeeCustody.t.sol",
+      "packages/perps/test/perps/accounting/close/VpiRoundTripAccounting.t.sol",
+      "packages/perps/test/perps/spec/keeper/GasBoundedExecution.t.sol",
+      "packages/perps/test/perps/spec/oracle/FrozenMarketExecution.t.sol",
+      "packages/perps/test/perps/spec/keeper/QueuedOrderTransitions.t.sol",
+      "packages/perps/test/perps/support/BehaviorScenarioHelpers.sol"
+    ],
+    "dispositions": {
+      "retain": 135,
+      "rewrite": 30,
+      "merge": 2,
+      "delete": 1
+    },
+    "independence_note": "Migrated behavior scenarios and production-view comparisons are not independent economic models; source/spec assertions and same-state execution checks are distinguished in the paths and reasons."
+  },
+  "tests": [
+    {
+      "source": "AuditBindingAndReleaseFindingsFailing.t.sol",
+      "contract": "AuditBindingAndReleaseFindingsFailing",
+      "test": "test_H1_ExecutionReleaseMustNotUnlockConsumedCommittedMargin",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::ConsumedCommitmentReleaseTest.test_ExecutionReleaseMustNotUnlockConsumedCommittedMargin",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBindingAndReleaseFindingsFailing.t.sol",
+      "contract": "AuditBindingAndReleaseFindingsFailing",
+      "test": "test_H2_BindingInvalidOpenOrderClearsQueueWithoutExecutorReward",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::ConsumedCommitmentReleaseTest.test_ExpiredOpenClearsQueueAndCreditsReservedBounty",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Expiry now asserts Failed/Expired, exact trader debit and clearinghouse keeper credit, released reservations, empty queue, and unchanged keeper wallet. Original no-reward claim only measured wallet custody."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_SolvencyTiming",
+      "test": "test_H2_SolvencyCheckInputsMustMatchCommittedPostOpSideMargins",
+      "disposition": "delete",
+      "replacement": "differential/EngineExecutionParity.t.sol::EngineExecutionParityTest.test_PreviewClose_TriggersDegradedModeMatchesLiveClose",
+      "spec": "ACCOUNTING_SPEC.md#1-risk-increasing-solvency-view",
+      "related_tests": [
+        "differential/PlanApplyRegression.t.sol::PlanApplyRegressionTest.test_PartialClose_PreviewMatchesExecution_WithCarryAccrual"
+      ],
+      "reason": "Invalid constant-zero harness and equality removed; it had no accounting sensitivity. Referenced existing same-state execution tests cover post-close solvency and carry-adjusted position state with explicit reachability. They are parity evidence, not an independent economic model or a repair to production."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin",
+      "test": "test_H1_PartialCloseWithPendingOrderDoesNotRevert",
+      "disposition": "retain",
+      "replacement": "accounting/close/ReservedMarginCloseSettlement.t.sol::PartialCloseCommitmentIsolationTest.test_PartialCloseWithPendingOrderDoesNotRevert",
+      "spec": "ACCOUNTING_SPEC.md#close-settlement",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_PartialCloseWithCommittedMargin",
+      "test": "test_H1_PartialCloseLossLeavesQueuedCommittedMarginUntouched",
+      "disposition": "retain",
+      "replacement": "accounting/close/ReservedMarginCloseSettlement.t.sol::PartialCloseCommitmentIsolationTest.test_PartialCloseLossLeavesQueuedCommittedMarginUntouched",
+      "spec": "ACCOUNTING_SPEC.md#close-settlement",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_ReservedBounty",
+      "test": "test_H2_FullyUtilizedTraderCanFundCloseOrderFromPositionMargin",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PositionFundedCloseBountyTest.test_FullyUtilizedTraderCanFundCloseOrderFromPositionMargin",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_ReservedBounty",
+      "test": "test_H2_HeadCloseOrderMustBeEconomicallyBackedAtCommit",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PositionFundedCloseBountyTest.test_HeadCloseOrderMustBeEconomicallyBackedAtCommit",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_ReservedBounty",
+      "test": "test_H2_SlippageFailedHeadCloseCreditsKeeperInClearinghouseOnly",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PositionFundedCloseBountyTest.test_SlippageFailedHeadCloseCreditsKeeperInClearinghouseOnly",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_ReservedBounty",
+      "test": "test_H2_ExpiredHeadCloseMustStillPayKeeper",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PositionFundedCloseBountyTest.test_ExpiredHeadCloseMustStillPayKeeper",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_ReservedBounty",
+      "test": "test_H2_LiquidationWithQueuedCloseOrderTransfersOnlyReservedBounty",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PositionFundedCloseBountyTest.test_LiquidationWithQueuedCloseOrderTransfersOnlyReservedBounty",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_ReservedBounty",
+      "test": "test_H2_OpenOrderStillRevertsWhenFullyUtilized",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PositionFundedCloseBountyTest.test_SubLotIncreaseRejectedOnFullyUtilizedAccount",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Pin InvalidSizeQuantum for the actual sub-lot request and rename accordingly; this fixture does not establish funding rejection."
+    },
+    {
+      "source": "AuditBlockingAccountingFindingsFailing.t.sol",
+      "contract": "AuditBlockingAccountingFindingsFailing_StaleSeniorCoupon",
+      "test": "test_L1_FinalizeSeniorRate_StaleMarkMustNotApplyRateChange",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::StaleRateFinalizationTest.test_FinalizeSeniorRate_StaleMarkMustNotApplyRateChange",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditC1SequencerDriftFailing.t.sol",
+      "contract": "AuditC1SequencerDriftFailing",
+      "test": "test_C1_FuturePublishTimeRejectedBeforeDelayBypass",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::FuturePublishDelayTest.test_FuturePublishTimeRejectedBeforeDelayBypass",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_StaleKeeperFee",
+      "test": "test_C1_ExpiredOpenBatchExecutionPaysClearerFromReservedBounty",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::ExpiredBatchBountiesTest.test_ExpiredOpenBatchExecutionPaysClearerFromReservedBounty",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_StaleKeeperFee",
+      "test": "test_C1_BatchMixedExpiredAndSuccessPaysReservedBounties",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::ExpiredBatchBountiesTest.test_BatchMixedExpiredAndSuccessPaysReservedBounties",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_StaleKeeperFee",
+      "test": "test_C1_StaleSingleExecuteRefundsUserNotKeeper",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::ExpiredBatchBountiesTest.test_StaleExecutionPreservesOrderAndReservedBounty",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "A stale-price revert now verifies internal trader/keeper balances, reserved margin, and unchanged FIFO head. Removed misleading refund/cancellation language."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation",
+      "test": "test_H2_OlderButFreshSingleExecutionMustLeaveOrderPending",
+      "disposition": "rewrite",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::StoredMarkOrderingTest.test_OlderEligibleTickTerminatesOrderWithoutRollingBackCachedMark",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Rename to the actual terminal historical-tick behavior; preserve mark monotonicity checks and add exact internal reserved-bounty credit plus empty account queue."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_OutOfOrderMarkCancellation",
+      "test": "test_H2_OlderButFreshBatchExecutionMustLeaveQueuedOrdersPending",
+      "disposition": "rewrite",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::StoredMarkOrderingTest.test_OlderEligibleTickTerminatesBatchWithoutRollingBackCachedMark",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Rename to the actual terminal historical-tick batch behavior; preserve mark monotonicity checks and add exact sum of both internal reserved-bounty credits plus empty account queue."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_HwmRouteConsistency",
+      "test": "test_M1_PostWipeoutRequiresExplicitRecapForHwmReset",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::SeniorHighWaterRecoveryTest.test_PostWipeoutRequiresExplicitRecapForHwmReset",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_TrancheCooldownGrief",
+      "test": "test_H1_ThirdPartyDustDepositToExistingHolderReverts",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::ExistingHolderDustDepositsTest.test_ThirdPartyDustDepositToExistingHolderReverts",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_EntryNotionalRounding",
+      "test": "test_H2_ScalingLargePositionRejectsSubLotIncreaseWithoutChangingExactBasis",
+      "disposition": "retain",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::PositionLotAdmissionTest.test_ScalingLargePositionRejectsSubLotIncreaseWithoutChangingExactBasis",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_OpenSkewCap",
+      "test": "test_C3_OpenSkewCapMustUseSingleSizeDelta",
+      "disposition": "retain",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::SingleDeltaSkewAdmissionTest.test_OpenSkewCapMustUseSingleSizeDelta",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_KeeperReserveLiquidation",
+      "test": "test_C4_KeeperFeeReserveMustReduceLiquidationEquity",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::ReservedBountyEquityTest.test_FreeFundedCloseBountyPreservesPriceRiskEquity",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsFailing",
+      "test": "test_C3_DiagnosticPriceWriteoffShouldNotBeDoubleCounted",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/TerminalPriceWriteoff.t.sol::TerminalEconomicStateWriteoffTest.test_DiagnosticPriceWriteoffShouldNotBeDoubleCounted",
+      "spec": "ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsFailing",
+      "test": "test_H1_UpdateMarkPriceMustRejectOlderPublishTime",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::TerminalEconomicStateOracleTest.test_UpdateMarkPriceMustRejectOlderPublishTime",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsFailing",
+      "test": "test_H2_SeniorHighWaterMarkMustSurviveFullWipeout",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::TerminalEconomicStateRecoveryTest.test_SeniorHighWaterMarkMustSurviveFullWipeout",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsFailing_BountyCap",
+      "test": "test_M2_KeeperBountyShouldUseExplicitSubsidyModel",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::PositiveResidualChargeCapTest.test_PositiveEquityKeeperBountyUsesDedicatedReserve",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsVerifiedInvalid",
+      "test": "test_M1_WipedTrancheRejectsOrdinaryRecapitalizationDeposits",
+      "disposition": "merge",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::AccountPriceCollateralRecoveryTest.test_WipedTrancheRejectsNewDeposits",
+      "reason": "Duplicate: Function body duplicates retained behavior case (comments/whitespace excluded); keep one canonical assertion set."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsVerifiedInvalid",
+      "test": "test_C2_ZeroSizeMarginUpdateRejectedAtCommit",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::ZeroSizeOrderAdmissionTest.test_ZeroSizeMarginUpdateRejectedAtCommit",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Require the exact ZeroSize rejection rather than any revert."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsVerifiedInvalid_Mev",
+      "test": "test_C1_FreshPriceAfterCommitIsAllowed",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::FreshPostCommitTickTest.test_FreshPriceAfterCommitIsAllowed",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity",
+      "test": "test_M1_RebateIlliquidityIsTypedAsSolvencyInvalidation",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::RebateAdmissionFailureTest.test_RebateOpenPreviewIdentifiesUnfundedVpiReserve",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsVerifiedInvalid_RebateIlliquidity",
+      "test": "test_M1_RebateIlliquidityPaysClearerBounty",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::RebateAdmissionFailureTest.test_FailedRebateOpenPaysReservedClearerBounty",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditCurrentFindingsVerification.t.sol",
+      "contract": "AuditCurrentFindingsFuturePublishSafety",
+      "test": "test_FutureLastMarkTime_DoesNotBreakWithdrawGuardOrReconcile",
+      "disposition": "rewrite",
+      "replacement": "spec/oracle/AccountAndPoolFreshness.t.sol::SyntheticFutureStoredMarkTest.test_SyntheticFutureStoredMarkPreservesGuardAndReconcileLiveness",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Label trusted-router future-mark injection as synthetic; assert custody is unchanged and reconciliation checkpoints current time without underflow. This does not claim that external oracle validation accepts future publications."
+    },
+    {
+      "source": "AuditExecutionPathFindingsFailing.t.sol",
+      "contract": "AuditExecutionPathFindingsFailing_EthRefundFallback",
+      "test": "test_H1_FallbackRefundMustFundPletherOracleClaimBalance",
+      "disposition": "retain",
+      "replacement": "accounting/cash-priority/OracleRefundCustody.t.sol::RejectedOracleRefundTest.test_FallbackRefundMustFundPletherOracleClaimBalance",
+      "spec": "SECURITY.md#router-and-reservation-accounting",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditExecutionPathFindingsFailing.t.sol",
+      "contract": "AuditExecutionPathFindingsFailing_CommitPrefilterFeeParity",
+      "test": "test_H2_CommitPrefilterMustRejectFeeDrainedOpen",
+      "disposition": "retain",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::FeeAdjustedAdmissionTest.test_CommitPrefilterMustRejectFeeDrainedOpen",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditC01_HwmInflation",
+      "test": "test_C01_DepositInflatesDeficit",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::ImpairedSeniorEntryTest.test_ImpairedSeniorRejectsNewDepositRequests",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditC02_KeeperFeeRefund",
+      "test": "test_C02_FailedOrderRefunds100Percent",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::TerminalSlippageBountyTest.test_SlippageFailurePaysReservedBountyAsInternalCredit",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Correct LONG slippage target from 1 (which executed) to 1.5e8 at a 1e8 execution price. Require Failed/Slippage, exact internal bounty debit/credit, reservation cleanup, and unchanged wallet custody."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditC03_MarginCheck",
+      "test": "test_C03_PostFeeMarginBelowImr",
+      "disposition": "retain",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::PostFeeInitialMarginTest.test_PostFeeMarginBelowImr",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditC04_StaleOracleMtmBypass",
+      "test": "test_C04_JuniorWithdrawsAtStaleNAV",
+      "disposition": "retain",
+      "replacement": "spec/oracle/AccountAndPoolFreshness.t.sol::StaleLpSettlementFreshnessTest.test_MatureRedemptionCannotSettleAgainstStaleLiveMark",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditC04_StaleOracleMtmBypass",
+      "test": "test_C04_StaleReconcileDoesNotCreateUnpaidDebt",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::StaleLpSettlementCouponTest.test_StaleReconcileDoesNotCreateUnpaidDebt",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditC05_ImpairedDeposit",
+      "test": "test_C05_DepositAllowedWhenImpaired",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::ImpairedTrancheAdmissionTest.test_ImpairedTrancheRejectsOrdinaryEntry",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditH01_MarkTimeLookback",
+      "test": "test_H01_UpdateMarkUsesPublishTime",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::MarkPublicationTimestampTest.test_UpdateMarkUsesPublishTime",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditH02_WithdrawBlocked",
+      "test": "test_H02_WithdrawBlockedWithAnyPosition",
+      "disposition": "retain",
+      "replacement": "spec/trader/WithdrawalEligibility.t.sol::OpenPositionWithdrawalTest.test_HealthyOpenPositionAllowsFreeSettlementWithdrawal",
+      "spec": "ACCOUNTING_SPEC.md#4-trader-reachability--terminal-settlement-view",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditH03_DustPosition",
+      "test": "test_H03_PartialCloseLeavesLiquidatableExactWholeLotResidual",
+      "disposition": "retain",
+      "replacement": "accounting/close/ReservedMarginCloseSettlement.t.sol::WholeLotResidualCloseTest.test_PartialCloseLeavesLiquidatableExactWholeLotResidual",
+      "spec": "ACCOUNTING_SPEC.md#close-settlement",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditN01_TransferBypassesCooldown",
+      "test": "test_N01_TransferRecipientBypassesCooldown",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::TransferredShareCooldownTest.test_ShareTransferPreservesRecipientCooldown",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFindings.t.sol",
+      "contract": "AuditH04_SeniorCouponWithdrawalAccounting",
+      "test": "test_H04_UnpaidYieldDebtRemovedAndHwmScales",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::SeniorRedemptionHighWaterTest.test_SeniorCouponCreditsPrincipalAndRedemptionScalesHighWaterMark",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_DepositPricingMatchesWithdrawalNavForDeltaNeutralExposure",
+      "disposition": "retain",
+      "replacement": "differential/LpEntryExitNavParity.t.sol::PendingDepositLifecycleNavTest.test_DepositPricingMatchesWithdrawalNavForDeltaNeutralExposure",
+      "spec": "ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_DepositPricingMatchesWithdrawalNavAfterUnrealizedProfit",
+      "disposition": "retain",
+      "replacement": "differential/LpEntryExitNavParity.t.sol::PendingDepositLifecycleNavTest.test_DepositPricingMatchesWithdrawalNavAfterUnrealizedProfit",
+      "spec": "ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_DepositPricingAllowsDiscountedSharesAfterRealJuniorLoss",
+      "disposition": "retain",
+      "replacement": "differential/LpEntryExitNavParity.t.sol::PendingDepositLifecycleNavTest.test_DepositPricingAllowsDiscountedSharesAfterRealJuniorLoss",
+      "spec": "ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_OpenPositionsBlockImmediateJuniorDepositsBeforeLiquidation",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_OpenPositionAllowsDepositRequestButNotUnfinalizedClaim",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_PendingJuniorDepositFinalizesAtPostLiquidationNav",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_PendingJuniorDepositFinalizesAtPostLiquidationNav",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_PendingDepositCanCancelOnlyBeforeActivationEpoch",
+      "disposition": "rewrite",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_HealthyPendingDepositCanCancelOnlyBeforeActivationEpoch",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Require DepositEpochAlreadyActive for a healthy matured request and name the healthy-state qualification; separate impaired-state cancellation cases remain."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_ActivePendingDepositCanCancelWhenSeniorImpairmentBlocksFinalization",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_ActivePendingDepositCanCancelWhenSeniorImpairmentBlocksFinalization",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_PendingDepositClaimsAllocateAllFinalizedShares",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_PendingDepositClaimsAllocateAllFinalizedShares",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_FinalizedPendingDepositSharesAreEscrowedBeforeClaim",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_FinalizedPendingDepositSharesAreEscrowedBeforeClaim",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_PendingSeniorDepositUsesSameDelayedActivationFlow",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_PendingSeniorDepositUsesSameDelayedActivationFlow",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_OpenInterestBlocksImmediateDepositsEvenWhenMaxLiabilityIsZero",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::PendingDepositLifecycleEntryTest.test_ZeroLiabilityOpenInterestStillUsesDelayedDepositClaims",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_CarryCheckpointsChargeIndexedBorrowBaseAcrossPriceSwing",
+      "disposition": "retain",
+      "replacement": "accounting/carry/CarryCheckpointBoundaries.t.sol::PendingDepositLifecycleCarryTest.test_CarryCheckpointsChargeIndexedBorrowBaseAcrossPriceSwing",
+      "spec": "ACCOUNTING_SPEC.md#lp-capital-carry",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_AddingPositionMarginUpdatesBorrowBaseOnlyAfterOldCarryAccrues",
+      "disposition": "retain",
+      "replacement": "accounting/carry/CarryCheckpointBoundaries.t.sol::PendingDepositLifecycleCarryTest.test_AddingPositionMarginUpdatesBorrowBaseOnlyAfterOldCarryAccrues",
+      "spec": "ACCOUNTING_SPEC.md#lp-capital-carry",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionTest",
+      "test": "test_UnderwaterFullCloseFreeFundedBountyCanCommitAndPaysKeeperOnFailure",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PendingDepositLifecycleBountyTest.test_UnderwaterFullCloseFreeFundedBountyCanCommitAndPaysKeeperOnFailure",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixRegression.t.sol",
+      "contract": "AuditFixRegressionConservativePendingDepositImpairmentTest",
+      "test": "test_ActivePendingDepositCanCancelWhenSymmetricNavImpairsSenior",
+      "disposition": "retain",
+      "replacement": "spec/lp/EntryAndActivationBehavior.t.sol::SymmetricNavEntryCancellationTest.test_ActivePendingDepositCanCancelWhenSymmetricNavImpairsSenior",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixes.t.sol",
+      "contract": "AuditFixesTest",
+      "test": "test_CloseClearsUnsettledCarryAfterSettlement",
+      "disposition": "retain",
+      "replacement": "accounting/carry/CarryCheckpointBoundaries.t.sol::SyntheticCarryCacheSettlementTest.test_CloseClearsUnsettledCarryAfterSettlement",
+      "spec": "ACCOUNTING_SPEC.md#lp-capital-carry",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFixes.t.sol",
+      "contract": "AuditFixesTest",
+      "test": "test_LiquidationClearsUnsettledCarryAfterSettlement",
+      "disposition": "retain",
+      "replacement": "accounting/carry/CarryCheckpointBoundaries.t.sol::SyntheticCarryCacheSettlementTest.test_LiquidationClearsUnsettledCarryAfterSettlement",
+      "spec": "ACCOUNTING_SPEC.md#lp-capital-carry",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_CloseSolvency",
+      "test": "test_C3_ProfitableCloseEntersDegradedModeInsteadOfReverting",
+      "disposition": "retain",
+      "replacement": "accounting/close/DegradedSettlementBehavior.t.sol::CloseContainmentTransitionsTest.test_ProfitableCloseLatchesDegradedModeWhenBackingFallsBelowLiability",
+      "spec": "ACCOUNTING_SPEC.md#degraded-mode",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_CloseSolvency",
+      "test": "test_C3_DegradedModeBlocksNewOpensUntilRecapitalized",
+      "disposition": "rewrite",
+      "replacement": "accounting/close/DegradedSettlementBehavior.t.sol::CloseContainmentTransitionsTest.test_DegradedModeBlocksNewOpensUntilRecapitalized",
+      "spec": "ACCOUNTING_SPEC.md#degraded-mode",
+      "reason": "Repair the unreachable authorization context: precompute pool depth before vm.prank(router), require the exact degraded-mode rejection from the typed Engine call, and assert the attempted position remains unchanged. The original low-level failure-only assertion passed because nested pool.totalAssets() consumed the prank."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_CloseSolvency",
+      "test": "test_C3_OwnerCanClearDegradedModeAfterRecapitalization",
+      "disposition": "retain",
+      "replacement": "accounting/close/DegradedSettlementBehavior.t.sol::CloseContainmentTransitionsTest.test_OwnerCanClearDegradedModeAfterRecapitalization",
+      "spec": "ACCOUNTING_SPEC.md#degraded-mode",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_CloseSolvency",
+      "test": "test_C3_TraderClaimDoesNotRequireDegradedModeWithoutOpenLiability",
+      "disposition": "retain",
+      "replacement": "accounting/close/DegradedSettlementBehavior.t.sol::CloseContainmentTransitionsTest.test_TraderClaimDoesNotRequireDegradedModeWithoutOpenLiability",
+      "spec": "ACCOUNTING_SPEC.md#degraded-mode",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_LiquidationBadDebt",
+      "test": "test_C1_LiquidationConsumesReachableBalanceWithoutArtificialBadDebt",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/TerminalPriceWriteoff.t.sol::ReachableLiquidationWriteoffTest.test_LiquidationConsumesReachableBalanceWithoutArtificialBadDebt",
+      "spec": "ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_LiquidationBounty",
+      "test": "test_H1_PositiveEquityLiquidationUsesExplicitSubsidy",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::DedicatedReserveChargeTest.test_PositiveEquityLiquidationUsesDedicatedReserve",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_TrancheComposability",
+      "test": "test_M1_SmallThirdPartyTopUpForExistingHolderReverts",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::ExistingHolderTopUpTest.test_SmallThirdPartyTopUpForExistingHolderReverts",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_TrancheCooldownBypass",
+      "test": "test_H1_TwoContractThirdPartyDepositForExistingHolderMustRevert",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::IntermediatedTopUpTest.test_TwoContractThirdPartyDepositForExistingHolderMustRevert",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_AsyncCloseIntent",
+      "test": "test_M2_CloseIntentBehindPendingOpenIsRejected",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::PendingOpenCloseAdmissionTest.test_CloseIntentBehindPendingOpenIsRejected",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Pin the observed canonical Engine.NoOpenPosition rejection; preserve the unchanged queue-id assertion."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_SkewCap",
+      "test": "test_M1_IncreaseMustRejectPostTradeSkewAboveMaxSkewRatio",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::PostTradeSkewAdmissionTest.test_IncreaseMustRejectPostTradeSkewAboveMaxSkewRatio",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Require the typed ProtocolStateInvalidated/SKEW_TOO_HIGH open failure instead of any revert."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_RiskParamValidation",
+      "test": "test_M2_ProposeRiskParamsRejectsMaxSkewRatioAboveOne",
+      "disposition": "rewrite",
+      "replacement": "spec/admin/ConfigurationBoundaries.t.sol::RiskRatioValidationTest.test_ProposeRiskParamsRejectsMaxSkewRatioAboveOne",
+      "spec": "SECURITY.md#timelocked-admin-state",
+      "reason": "Require CfdEngineAdmin.InvalidRiskParams for a ratio above one instead of any revert."
+    },
+    {
+      "source": "AuditFullSecurityFailing.t.sol",
+      "contract": "AuditFullSecurityFailing_LiquidationFreeUsdc",
+      "test": "test_C1_LiquidationMustConsumeFreeUsdcCountedInEquity",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::LiquidationSettlementResidualTest.test_LiveLiquidationResidualMatchesPreview",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditFullSecurityFailing.t.sol",
+      "contract": "AuditFullSecurityFailing_CooldownBypass",
+      "test": "test_M1_ThirdPartyDepositMustNotBypassCooldown",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::ThirdPartyActivationCooldownTest.test_ThirdPartyDepositMustNotBypassCooldown",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFullSecurityFailing.t.sol",
+      "contract": "AuditFullSecurityFailing_SeniorRateRetroactive",
+      "test": "test_M2_FinalizedSeniorRateMustNotBackApplyAcrossStalePeriod",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::StaleRateCheckpointTest.test_FinalizedSeniorRateMustNotBackApplyAcrossStalePeriod",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditFullSecurityFailing.t.sol",
+      "contract": "AuditFullSecurityFailing_PriceWriteoff",
+      "test": "test_L1_UncollectiblePriceTailIsWrittenOffWithoutMutableDebtState",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/TerminalPriceWriteoff.t.sol::TerminalPriceTailAccountingTest.test_UncollectiblePriceTailIsWrittenOffWithoutMutableDebtState",
+      "spec": "ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditHousePoolViewFindingsFailing.t.sol",
+      "contract": "AuditHousePoolViewFindingsFailing_ZeroPrincipalCapture",
+      "test": "test_H1_ZeroPrincipalRecapitalizationCashMustNotBeCapturableByNextJuniorDepositor",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::UnassignedRecapitalizationTest.test_ZeroPrincipalRecapitalizationCashMustNotBeCapturableByNextJuniorDepositor",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditHousePoolViewFindingsFailing.t.sol",
+      "contract": "AuditHousePoolViewFindingsFailing_EmptyJuniorRevenue",
+      "test": "test_M1_ReconcileMustNotAssignRevenueToZeroSupplyJuniorTranche",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::EmptyTrancheRevenueTest.test_RevenueBelongsToPermanentJuniorSeedAfterPublicExit",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditHousePoolViewFindingsFailing.t.sol",
+      "contract": "AuditHousePoolViewFindingsFailing_StaleYieldBackfill",
+      "test": "test_L1_StaleReconcileMustPreserveClock",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::StaleReconcileClockTest.test_StaleReconcileMustPreserveClock",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditHousePoolViewFindingsFailing.t.sol",
+      "contract": "AuditHousePoolViewFindingsFailing_ProjectedLegacySpreadViews",
+      "test": "test_L2_SimpleHealthViewsMustUseProjectedCarryState",
+      "disposition": "rewrite",
+      "replacement": "differential/AccountAndPoolViewParity.t.sol::ProjectedCarryHealthTest.test_SimpleHealthViewsMustUseProjectedCarryState",
+      "spec": "ACCOUNTING_SPEC.md#snapshot-boundaries",
+      "reason": "Replace assertion-free view calls with positive projected carry debit, snapshot/liquidation equity and health parity, read non-mutation, actual checkpoint pledge/cash delta, and no double carry charge. This is differential evidence, not an independent model."
+    },
+    {
+      "source": "AuditHousePoolViewFindingsFailing.t.sol",
+      "contract": "AuditHousePoolViewFindingsFailing_WithdrawalCapLiveness",
+      "test": "test_L3_WithdrawalCapGettersMustZeroWhenWithdrawalsAreNotLive",
+      "disposition": "retain",
+      "replacement": "differential/AccountAndPoolViewParity.t.sol::WithdrawalCapacityLivenessTest.test_WithdrawalCapGettersMustZeroWhenWithdrawalsAreNotLive",
+      "spec": "ACCOUNTING_SPEC.md#snapshot-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditHousePoolViewFindingsFailing.t.sol",
+      "contract": "AuditHousePoolViewFindingsFailing_GrossAssetsReconstruction",
+      "test": "test_M2_GrossAssetsMustNotExceedActualCashWhenFeesExceedCash",
+      "disposition": "retain",
+      "replacement": "differential/AccountAndPoolViewParity.t.sol::GrossCashAssetBoundaryTest.test_GrossAssetsMustNotExceedActualCashWhenFeesExceedCash",
+      "spec": "ACCOUNTING_SPEC.md#snapshot-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestFindingsFailing.t.sol",
+      "contract": "AuditLatestFindingsFailing_Core",
+      "test": "test_C1_PriceWriteoffShouldNotBeDoubleCountedInExactTerminalNav",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/TerminalPriceWriteoff.t.sol::AccountPriceCollateralWriteoffTest.test_PriceWriteoffShouldNotBeDoubleCountedInExactTerminalNav",
+      "spec": "ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestFindingsFailing.t.sol",
+      "contract": "AuditLatestFindingsFailing_Core",
+      "test": "test_H1_MarginOnlyUpdateViaRouterReverts",
+      "disposition": "retain",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::AccountPriceCollateralPositionTest.test_MarginOnlyUpdateViaRouterReverts",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestFindingsFailing.t.sol",
+      "contract": "AuditLatestFindingsFailing_Core",
+      "test": "test_I1_CloseWithMarginDeltaMustRevert",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::AccountPriceCollateralPositionTest.test_CloseWithMarginDeltaMustRevert",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Replace low-level failure-only check with the direct typed close request, exact CloseWithPositiveMargin error, and unchanged pending-order count."
+    },
+    {
+      "source": "AuditLatestFindingsFailing.t.sol",
+      "contract": "AuditLatestFindingsFailing_Core",
+      "test": "test_M1_ExecutionFeesAccrueToProtocolNotLpEquity",
+      "disposition": "retain",
+      "replacement": "accounting/cash-priority/TreasuryFeeCustody.t.sol::AccountPriceCollateralFeesTest.test_ExecutionFeesAccrueToProtocolNotLpEquity",
+      "spec": "ACCOUNTING_SPEC.md#treasury-fee-withdrawals",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestFindingsFailing.t.sol",
+      "contract": "AuditLatestFindingsFailing_Core",
+      "test": "test_M2_WipedTrancheRejectsNewDeposits",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::AccountPriceCollateralRecoveryTest.test_WipedTrancheRejectsNewDeposits",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestFindingsFailing.t.sol",
+      "contract": "AuditLatestFindingsFailing_VPI",
+      "test": "test_C2_DepthManipulationShouldNotBeProfitable",
+      "disposition": "retain",
+      "replacement": "accounting/close/VpiRoundTripAccounting.t.sol::LiquidityDepthRoundTripTest.test_DepthManipulationShouldNotBeProfitable",
+      "spec": "ACCOUNTING_SPEC.md#close-settlement",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestFindingsFailing.t.sol",
+      "contract": "AuditLatestFindingsFailing_MevDrift",
+      "test": "test_H2_SameBlockPublishAfterCommitReturnsPending",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::SameBlockTickOrderingTest.test_SameBlockPublishAfterCommitReturnsPending",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_KeeperReserveStripsMargin",
+      "test": "test_C1_KeeperReserveUsesPledgeButProtectsLiquidationReserve",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::PledgeFundedBountyIsolationTest.test_KeeperReserveUsesPledgeButProtectsLiquidationReserve",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_QueueEconomics",
+      "test": "test_H1_TinyInvalidCloseBehindQueuedIntentIsRejectedAtCommit",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::TinyCloseAdmissionTest.test_TinyInvalidCloseBehindQueuedIntentIsRejectedAtCommit",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Require InvalidSizeQuantum for the one-atom close and preserve the single original pending order."
+    },
+    {
+      "source": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_TrancheCooldownBypass",
+      "test": "test_M1_SmallThirdPartyTopUpForExistingHolderReverts",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::ThirdPartyCooldownMutationsTest.test_SmallThirdPartyTopUpForExistingHolderReverts",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_TrancheCooldownBypass",
+      "test": "test_M2_ThirdPartyWithdrawZeroCannotResetCooldown",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::ThirdPartyCooldownMutationsTest.test_ThirdPartyWithdrawZeroCannotResetCooldown",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_TrancheCooldownBypass",
+      "test": "test_M2_ThirdPartyRedeemZeroCannotResetCooldown",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::ThirdPartyCooldownMutationsTest.test_ThirdPartyRedeemZeroCannotResetCooldown",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_SeniorCouponCheckpoint",
+      "test": "test_M2_FinalizeSeniorRateMustNotEraseCouponCheckpointDuringStaleMarkPeriod",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::StaleConfigurationCouponTest.test_FinalizeSeniorRateMustNotEraseCouponCheckpointDuringStaleMarkPeriod",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_StaleSeniorMutationCoupon",
+      "test": "test_H1_StaleSeniorMutationMustPreserveCouponValue",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::StaleSeniorMutationTest.test_StaleSeniorMutationMustPreserveCouponValue",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestValidFindingsFailing.t.sol",
+      "contract": "AuditLatestValidFindingsFailing_Mev",
+      "test": "test_C1_SameBlockPublishAfterCommitReturnsPending",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::PostCommitTimestampBoundsTest.test_SameBlockPublishAfterCommitReturnsPending",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditLatestValidFindingsFailing.t.sol",
+      "contract": "AuditLatestValidFindingsFailing_Mev",
+      "test": "test_H1_FutureDatedVaaShouldNotPanic",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::PostCommitTimestampBoundsTest.test_FutureDatedVaaShouldNotPanic",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_ReservationShielding",
+      "test": "test_C1_FullCloseUsesReleasedPledgeBeforeQueuedCommittedMargin",
+      "disposition": "retain",
+      "replacement": "accounting/close/ReservedMarginCloseSettlement.t.sol::PriceAndActionReservePriorityCloseTest.test_FullCloseUsesReleasedPledgeBeforeQueuedCommittedMargin",
+      "spec": "ACCOUNTING_SPEC.md#close-settlement",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_ReservationShielding",
+      "test": "test_H1_LiquidationMustConsumeQueuedCommittedMarginBeforeWaivingActionCharge",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::PriceAndActionReservePriorityLiquidationTest.test_LiquidationMustConsumeQueuedCommittedMarginBeforeWaivingActionCharge",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_LiquidationBounty",
+      "test": "test_H2_PositiveEquityLiquidationBountyUsesExplicitSubsidy",
+      "disposition": "merge",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::DedicatedReserveChargeTest.test_PositiveEquityLiquidationUsesDedicatedReserve",
+      "reason": "Duplicate: Function body duplicates retained behavior case (comments/whitespace excluded); keep one canonical assertion set."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_ForfeitedOrderBountyFees",
+      "test": "test_L1_LiquidationForfeitedOrderBountyMustAccrueProtocolFees",
+      "disposition": "retain",
+      "replacement": "accounting/cash-priority/TreasuryFeeCustody.t.sol::LiquidationBountyForfeitureTest.test_LiquidationForfeitedOrderBountyMustAccrueProtocolFees",
+      "spec": "ACCOUNTING_SPEC.md#treasury-fee-withdrawals",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_DustQueueEconomics",
+      "test": "test_H3_DustOrdersMustReserveMinimumKeeperReserve",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::MinimumOrderBountyTest.test_DustOrdersMustReserveMinimumKeeperReserve",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_TrancheCooldownDocs",
+      "test": "test_M1_FivePercentThirdPartyTopUpForExistingHolderReverts",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::MaterialThirdPartyTopUpTest.test_FivePercentThirdPartyTopUpForExistingHolderReverts",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees",
+      "test": "test_H4_ProfitableCloseMustNotBeDroppedWhenPoolLacksImmediateCash",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::IlliquidPoolCloseBountyTest.test_ProfitableCloseMustNotBeDroppedWhenPoolLacksImmediateCash",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees",
+      "test": "test_M2_CloseCommitRequiresPrefundedKeeperBounty",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::IlliquidPoolCloseBountyTest.test_FreeSettlementFundsCommittedCloseBounty",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_CloseLiquidityAndFees",
+      "test": "test_H5_CloseKeeperRewardMustCreditFromReservedMarginDespiteVaultCashShortage",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::IlliquidPoolCloseBountyTest.test_CloseKeeperRewardMustCreditFromReservedMarginDespiteVaultCashShortage",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_TerminalLiveness",
+      "test": "test_H6_LiquidationKeeperRewardMustCreditFromTraderMarginDespiteVaultCashShortage",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::TerminalActionLivenessTest.test_LiquidationKeeperRewardMustCreditFromTraderMarginDespiteVaultCashShortage",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingCoverageFindingsFailing.t.sol",
+      "contract": "AuditRemainingCoverageFindingsFailing_TerminalLiveness",
+      "test": "test_M3_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::TerminalActionLivenessTest.test_TerminalCloseMustRemainExecutableUnderBoundedForeignQueue",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing",
+      "test": "test_H1_UserCanAddMarginWithoutChangingSize",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::MarginAndReservationAdmissionPositionTest.test_UserCanAddMarginWithoutChangingSize",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Add the missing exact position-size assertion alongside the margin increase."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing",
+      "test": "test_M1_ExecutionFeesAreProtocolRevenue",
+      "disposition": "retain",
+      "replacement": "accounting/cash-priority/TreasuryFeeCustody.t.sol::MarginAndReservationAdmissionFeesTest.test_ExecutionFeesAreProtocolRevenue",
+      "spec": "ACCOUNTING_SPEC.md#treasury-fee-withdrawals",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing",
+      "test": "test_H2_LiquidationMustRespectFreeUsdcCollateral",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::MarginAndReservationAdmissionLiquidationTest.test_FreeSettlementDoesNotIncreasePriceRiskEquity",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing",
+      "test": "test_H3_RouterCannotTransferReservedSettlement",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::MarginAndReservationAdmissionBountyTest.test_RouterCannotTransferReservedSettlement",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing_MevDrift",
+      "test": "test_H2_CrossBlockPublishAfterCommitExecutesWhenPublishTimeIsAfterCommit",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::CrossBlockPostCommitTickTest.test_CrossBlockPublishAfterCommitExecutesWhenPublishTimeIsAfterCommit",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing_StaleOracleExecution",
+      "test": "test_M3_ExecuteOrderRejectsStaleOracleWithoutFreshUpdateData",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::HistoricalTickSafetyTest.test_ExecuteOrderRejectsStaleOracleWithoutFreshUpdateData",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing_StaleOracleExecution",
+      "test": "test_C2_ExecutingOlderOrderCannotRollbackMarkPriceForWithdrawal",
+      "disposition": "retain",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::HistoricalTickSafetyTest.test_ExecutingOlderOrderCannotRollbackMarkPriceForWithdrawal",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditRemainingFindingsFailing.t.sol",
+      "contract": "AuditRemainingFindingsFailing_CarryPathDependence",
+      "test": "test_M4_CarryRealizationShouldBePathIndependent",
+      "disposition": "retain",
+      "replacement": "accounting/carry/CarryCheckpointBoundaries.t.sol::CarryCollectionTimingTest.test_MarkRefreshPreservesSameTimeCarrySettlement",
+      "spec": "ACCOUNTING_SPEC.md#lp-capital-carry",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditTightenedFindingsFailing.t.sol",
+      "contract": "AuditTightenedFindingsFailing",
+      "test": "test_H1_WithdrawScenarioNowBlocksOnOpenPosition",
+      "disposition": "retain",
+      "replacement": "spec/trader/WithdrawalEligibility.t.sol::CarryAndMarginCheckpointWithdrawTest.test_WithdrawScenarioNowBlocksOnOpenPosition",
+      "spec": "ACCOUNTING_SPEC.md#4-trader-reachability--terminal-settlement-view",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditTightenedFindingsFailing.t.sol",
+      "contract": "AuditTightenedFindingsFailing",
+      "test": "test_H2_LowGasKeeperCallMustNotConsumeValidOrder",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/GasBoundedExecution.t.sol::CarryAndMarginCheckpointGasTest.test_LowGasBudgetPreservesEligibleOrderAndCustody",
+      "spec": "PRE_AUDIT_GUIDE.md#failure-policy-table",
+      "reason": "Advance block/time with an eligible unique tick, prove identical-state high-gas execution succeeds, then require low-gas revert or InsufficientGas pending status with no partial position, custody, bounty, or reservation mutation. GasBudget name selects production-codegen checks."
+    },
+    {
+      "source": "AuditTightenedFindingsFailing.t.sol",
+      "contract": "AuditTightenedFindingsFailing",
+      "test": "test_M1_FullCloseMustZeroFundedSideMargin",
+      "disposition": "retain",
+      "replacement": "accounting/carry/CarryCheckpointBoundaries.t.sol::CarryAndMarginCheckpointCarryTest.test_FullCloseMustZeroFundedSideMargin",
+      "spec": "ACCOUNTING_SPEC.md#lp-capital-carry",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditTightenedFindingsFailing.t.sol",
+      "contract": "AuditTightenedFindingsFailing",
+      "test": "test_M2_NewDepositResetsCooldownTimestamp",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::CarryAndMarginCheckpointCooldownTest.test_NewDepositResetsCooldownTimestamp",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditTightenedFindingsFailing.t.sol",
+      "contract": "AuditTightenedFindingsFailing",
+      "test": "test_L1_StaleIntervalsCheckpointSeniorCoupon",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::CarryAndMarginCheckpointCouponTest.test_FreshReconcileIncludesCouponAccruedAcrossStaleInterval",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_C01_WithdrawGuardTest",
+      "test": "test_C01_WithdrawWhilePositionUnderwater",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/WithdrawalEligibility.t.sol::UnderwaterWithdrawalGuardTest.test_UnderwaterPositionBlocksWithdrawal",
+      "spec": "ACCOUNTING_SPEC.md#4-trader-reachability--terminal-settlement-view",
+      "reason": "Require WithdrawBlockedByOpenPosition for the explicitly unhealthy price state instead of any revert."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_C02_ReconcileTimeConsumptionTest",
+      "test": "test_C02_FrozenWindowReconcile_DoesNotDestroySeniorCouponCheckpointing",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::FrozenCouponCheckpointTest.test_FrozenWindowReconcile_DoesNotDestroySeniorCouponCheckpointing",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_C03_OracleFrozenCloseTest",
+      "test": "test_C03_CloseOrderBlockedDuringOracleFrozen",
+      "disposition": "retain",
+      "replacement": "spec/oracle/FrozenMarketExecution.t.sol::FrozenCloseEligibilityTest.test_CloseExecutesDuringOracleFreeze",
+      "spec": "PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_H01_DepositStaleMark",
+      "test": "test_H01_SeniorDepositAtStaleNAV",
+      "disposition": "retain",
+      "replacement": "spec/oracle/AccountAndPoolFreshness.t.sol::StaleMarkDepositAdmissionTest.test_StaleLiveMarkBlocksSeniorDepositRequest",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_H01_DepositStaleMark",
+      "test": "test_H01_JuniorDepositAtStaleNAV",
+      "disposition": "retain",
+      "replacement": "spec/oracle/AccountAndPoolFreshness.t.sol::StaleMarkDepositAdmissionTest.test_StaleLiveMarkBlocksJuniorDepositRequest",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_H02_WeekendWithdrawalDoS",
+      "test": "test_H02_WeekendWithdrawalBlockedByHardcodedStaleness",
+      "disposition": "retain",
+      "replacement": "spec/oracle/FrozenMarketExecution.t.sol::FrozenLpRedemptionTest.test_FrozenWindowAllowsMatureLpRedemption",
+      "spec": "PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_M01_VPIRebateIMRTest",
+      "test": "test_M01_ZeroMarginPositionViaVPIRebate",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::VpiCollateralAdmissionTest.test_ZeroMarginVpiRebateOpenRejectsUnfundedRebateReserve",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Trace showed VPI_REBATE_RESERVE_UNFUNDED (code10), not an isolated initial-margin rejection. Pin its UserInvalid typed error and accurately name the unfunded-reserve scenario."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_M01_VPIRebateIMRTest",
+      "test": "test_M01_NonzeroMarginRebateOpenProjectsFreshVpiLiability",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::VpiCollateralAdmissionTest.test_NonzeroMarginRebateOpenProjectsFreshVpiLiability",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Require typed UserInvalid/INSUFFICIENT_INITIAL_MARGIN, matching the independently asserted preview code."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_M02_GasGriefingTest",
+      "test": "test_M02_BatchTryCatchEnablesGasGriefing",
+      "disposition": "retain",
+      "replacement": "spec/keeper/QueuedOrderTransitions.t.sol::SuccessfulBatchExecutionTest.test_ValidBatchExecutesWithSufficientGas",
+      "spec": "PRE_AUDIT_GUIDE.md#order-lifecycle-state-machine",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV2.t.sol",
+      "contract": "AuditV2_M03_ImmutablePythArraysTest",
+      "test": "test_M03_NoPythFeedUpdateMechanism",
+      "disposition": "retain",
+      "replacement": "spec/admin/ConfigurationBoundaries.t.sol::ImmutableRouterBindingTest.test_EngineRouterBindingCannotBeReassigned",
+      "spec": "SECURITY.md#timelocked-admin-state",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_C01_FIFODeadlockTest",
+      "test": "test_C01_OpenOrderHardRevertsInsteadOfSoftFailing",
+      "disposition": "retain",
+      "replacement": "spec/oracle/FrozenMarketExecution.t.sol::ExpiredHeadFrozenQueueTest.test_ExpiredOpenIsClearedDuringFrozenWindow",
+      "spec": "PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_C01_FIFODeadlockTest",
+      "test": "test_C01_CloseOrderBlockedByOpenInFrozenQueue",
+      "disposition": "rewrite",
+      "replacement": "spec/oracle/FrozenMarketExecution.t.sol::ExpiredHeadFrozenQueueTest.test_ExpiredHeadCanBeClearedBeforeFrozenClose",
+      "spec": "PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior",
+      "reason": "Require both low-level calls to succeed and both terminal orders to leave the FIFO; preserve the closed-position assertion and rename the expiry-first successful path."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_C03_AsymmetricStalenessTest",
+      "test": "test_C03_ReconcileEarlyReturnDoesNotAdvanceLastReconcileTime",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::FrozenFreshnessCouponTest.test_FrozenFreshMarkAdvancesReconcileClock",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_C03_AsymmetricStalenessTest",
+      "test": "test_C03_ReconcileRunsDuringFADWhenMarkIsFreshEnough",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::FrozenFreshnessCouponTest.test_FrozenFreshMarkCheckpointsSeniorCoupon",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_H01_KeeperFeeTheftTest",
+      "test": "test_H01_KeeperReceivesFullFeeOnExpiredOrder",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::InternalBountyCustodyTest.test_ExpiredOrderCreditsInternalBountyWithoutWalletTransfer",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Replace ETH-only checks with explicit failed lifecycle, exact reserved internal debit/credit, reservation and queue cleanup, and unchanged USDC/ETH wallets."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_H01_KeeperFeeTheftTest",
+      "test": "test_H01_FinalizeExecutionSuccessParamIsDeadCode",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::InternalBountyCustodyTest.test_SuccessAndExpiryBothCreditInternalBounties",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Replace wallet-only inference with one asserted successful position open and one Failed/Expired successor, each paying its own exact internal bounty without wallet transfer or extra position growth."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_H02_JuniorWipeoutDilutionTest",
+      "test": "test_H02_OneDollarDepositCannotRecapWipedTranche",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::JuniorWipeoutAdmissionTest.test_OneDollarDepositCannotRecapWipedTranche",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_M01_MissingGasFloorTest",
+      "test": "test_M01_ExecuteOrderHasGasFloor",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/GasBoundedExecution.t.sol::ExecutionGasFloorTest.test_ExecutionGasBudgetFloorPreservesEligibleOrderAndCustody",
+      "spec": "PRE_AUDIT_GUIDE.md#failure-policy-table",
+      "reason": "Use an eligible unique tick and successful identical-state high-gas control; assert the 450k call preserves all custody/reservations and position state with explicit gas failure. GasBudget name selects production-codegen checks."
+    },
+    {
+      "source": "AuditV3Failing.t.sol",
+      "contract": "AuditV3Failing_QueueGriefing",
+      "test": "test_1_CommitOrderDoesNotRequireEth",
+      "disposition": "retain",
+      "replacement": "spec/keeper/QueuedOrderTransitions.t.sol::FundedCommitLifetimeTest.test_CommitOrderDoesNotRequireEth",
+      "spec": "PRE_AUDIT_GUIDE.md#order-lifecycle-state-machine",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditV3Failing.t.sol",
+      "contract": "AuditV3Failing_QueueGriefing",
+      "test": "test_1_MaxExecutionWindowSecondsShouldBeNonZeroByDefault",
+      "disposition": "retain",
+      "replacement": "spec/keeper/QueuedOrderTransitions.t.sol::FundedCommitLifetimeTest.test_MaxExecutionWindowSecondsShouldBeNonZeroByDefault",
+      "spec": "PRE_AUDIT_GUIDE.md#order-lifecycle-state-machine",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditV3Failing.t.sol",
+      "contract": "AuditV3Failing_FadStaleness",
+      "test": "test_2_CheckWithdrawAcceptsStaleMarkDuringLiveMarketFadWindow",
+      "disposition": "retain",
+      "replacement": "spec/oracle/AccountAndPoolFreshness.t.sol::LiveFadFreshnessTest.test_LiveFadStaleMarkBlocksTraderWithdrawal",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV3Failing.t.sol",
+      "contract": "AuditV3Failing_FadStaleness",
+      "test": "test_2_HousePoolAcceptsStaleMarkDuringLiveMarketFadWindow",
+      "disposition": "retain",
+      "replacement": "spec/oracle/AccountAndPoolFreshness.t.sol::LiveFadFreshnessTest.test_LiveFadStaleMarkBlocksLpDepositRequest",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditV3Failing.t.sol",
+      "contract": "AuditV3Failing_JuniorWipeout",
+      "test": "test_4_JuniorCannotBeRecapitalizedAfterWipeoutViaOrdinaryDeposit",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::TerminalJuniorEntryTest.test_JuniorCannotBeRecapitalizedAfterWipeoutViaOrdinaryDeposit",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditV3Failing.t.sol",
+      "contract": "AuditV3Failing_SeniorImpairment",
+      "test": "test_4_SeniorCannotBeRecapitalizedAfterFullWipeoutViaOrdinaryDeposit",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::TerminalSeniorEntryTest.test_SeniorCannotBeRecapitalizedAfterFullWipeoutViaOrdinaryDeposit",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditV3Failing.t.sol",
+      "contract": "AuditV3Failing_CloseSlippageInversion",
+      "test": "test_5_RouterAllowsQueuedCloseWithMismatchedSide",
+      "disposition": "retain",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::CloseSideAdmissionTest.test_CloseCommitRejectsMismatchedSide",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailing",
+      "test": "test_C1_CommitMustLockMargin",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::ReservedSettlementBehaviorBountyTest.test_CommitMustLockMargin",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailing",
+      "test": "test_H1_FailedSingleExecutePaysReservedUsdcBountyWithoutNativeEthTransfer",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::ReservedSettlementBehaviorBountyTest.test_FailedSingleExecutePaysReservedUsdcBountyWithoutNativeEthTransfer",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailing",
+      "test": "test_C2_ExactMtmCapsLossesAtAccountPriceCollateral",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/TerminalPriceWriteoff.t.sol::ReservedSettlementBehaviorWriteoffTest.test_ExactMtmCapsLossesAtAccountPriceCollateral",
+      "spec": "ACCOUNTING_SPEC.md#exact-terminal-price-pnl-terms",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailing",
+      "test": "test_H2_LiquidationBountyShouldNotIncreaseAfterCrossingZeroEquity",
+      "disposition": "retain",
+      "replacement": "accounting/liquidation/ReserveFundedLiquidation.t.sol::ReservedSettlementBehaviorLiquidationTest.test_LiquidationBountyShouldNotIncreaseAfterCrossingZeroEquity",
+      "spec": "ACCOUNTING_SPEC.md#liquidation-settlement",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailing",
+      "test": "test_H4_SeniorRequiresExplicitRecapAfterFullWipeout",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::ReservedSettlementBehaviorRecoveryTest.test_SeniorRequiresExplicitRecapAfterFullWipeout",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailing",
+      "test": "test_M1_WithdrawMustRevertWhenMarkIsStale",
+      "disposition": "rewrite",
+      "replacement": "spec/oracle/AccountAndPoolFreshness.t.sol::ReservedSettlementBehaviorFreshnessTest.test_WithdrawMustRevertWhenMarkIsStale",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Require MarkPriceStale instead of accepting unrelated withdrawal failures."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailing",
+      "test": "test_M2_StaleReconcileMustNotAdvanceClock",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/SeniorCouponCheckpoints.t.sol::ReservedSettlementBehaviorCouponTest.test_StaleReconcileMustNotAdvanceClock",
+      "spec": "SECURITY.md#senior-coupon-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValidFindingsFailing.t.sol",
+      "contract": "AuditValidFindingsFailingVpi",
+      "test": "test_M3_MarketMakerShouldKeepNetVpiRebate",
+      "disposition": "retain",
+      "replacement": "accounting/close/VpiRoundTripAccounting.t.sol::MarketMakerVpiRoundTripTest.test_VpiClampPreventsNetRebateExtraction",
+      "spec": "ACCOUNTING_SPEC.md#close-settlement",
+      "reason": "Retained assertions and distinct fixture; test renamed to state its actual expected behavior instead of the historical allegation. Normative rule reviewed against current specification."
+    },
+    {
+      "source": "AuditValueConservationInvariantsFailing.t.sol",
+      "contract": "AuditValueConservationInvariant_FullCloseBounty",
+      "test": "test_Invariant_FailedFullClosePaysOnlyTheSnapshottedBackedBounty",
+      "disposition": "rewrite",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::SnapshottedCloseBountyTest.test_FailedFullClosePaysOnlyTheSnapshottedBackedBounty",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Remove silent pass when close commitment fails; require successful commitment, exact Failed/Slippage outcome, unchanged position size, and only the backed pledge/bounty delta. Classified as a deterministic scenario, not a stateful invariant."
+    },
+    {
+      "source": "AuditValueConservationInvariantsFailing.t.sol",
+      "contract": "AuditValueConservationInvariant_MtmDepositPricing",
+      "test": "test_Invariant_DeltaNeutralZeroPnlCannotDiscountNewJuniorDeposits",
+      "disposition": "retain",
+      "replacement": "differential/LpEntryExitNavParity.t.sol::DeltaNeutralDepositNavTest.test_DeltaNeutralZeroPnlCannotDiscountNewJuniorDeposits",
+      "spec": "ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValueConservationInvariantsFailing.t.sol",
+      "contract": "AuditValueConservationInvariant_CarryTiming",
+      "test": "test_Invariant_CarryCheckpointCannotForgiveHistoricalLpBackedTime",
+      "disposition": "retain",
+      "replacement": "accounting/carry/CarryCheckpointBoundaries.t.sol::HistoricalCarryCheckpointTest.test_CarryCheckpointCannotForgiveHistoricalLpBackedTime",
+      "spec": "ACCOUNTING_SPEC.md#lp-capital-carry",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditValueConservationInvariantsFailing.t.sol",
+      "contract": "AuditValueConservationInvariant_PendingRevenue",
+      "test": "test_Invariant_PendingRevenueCannotDisappearDuringRecapitalization",
+      "disposition": "retain",
+      "replacement": "accounting/waterfall/TrancheRecoveryBehavior.t.sol::RecapitalizationRevenueOwnershipTest.test_PendingRevenueCannotDisappearDuringRecapitalization",
+      "spec": "ACCOUNTING_SPEC.md#ownership-routing-for-pool-inflows",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F2_SkewCapBypass",
+      "test": "test_F2_EmptyMarketShouldStillEnforceMaxSkewRatio",
+      "disposition": "rewrite",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::EmptyMarketSkewAdmissionTest.test_EmptyMarketShouldStillEnforceMaxSkewRatio",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Require typed ProtocolStateInvalidated/SKEW_TOO_HIGH in an empty market rather than any revert."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F2_SkewDoubleCount",
+      "test": "test_F2_SkewCapShouldUseSinglePostTradeSizeDelta",
+      "disposition": "retain",
+      "replacement": "spec/trader/PositionAdmissionBehavior.t.sol::SingleTradeSkewAdmissionTest.test_SkewCapShouldUseSinglePostTradeSizeDelta",
+      "spec": "ACCOUNTING_SPEC.md#open-projection",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F3_StaleKeeperFee",
+      "test": "test_F3_StaleOracleCancellationMustNotPayKeeperUsdc",
+      "disposition": "rewrite",
+      "replacement": "spec/oracle/ExecutionClockBoundaries.t.sol::StaleExecutionReservationTest.test_StaleOracleKeepsOrderPendingWithoutBountyDistribution",
+      "spec": "ACCOUNTING_SPEC.md#oracle-and-freshness-policy",
+      "reason": "Replace keeper wallet-only observation with unchanged internal keeper/trader settlement, locked margin, and FIFO head after StalePrice. Rename from cancellation to nonterminal pending behavior."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F4_PartialCloseLosses",
+      "test": "test_F4_UnderwaterPartialCloseMustRevertInsteadOfSocializingLosses",
+      "disposition": "rewrite",
+      "replacement": "accounting/close/ReservedMarginCloseSettlement.t.sol::UnderwaterPartialCloseTest.test_UnderwaterPartialCloseMustRevertInsteadOfSocializingLosses",
+      "spec": "ACCOUNTING_SPEC.md#close-settlement",
+      "reason": "Require typed UserInvalid/PARTIAL_CLOSE_UNHEALTHY on the documented partial-close branch instead of any revert."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F5_CooldownBypass",
+      "test": "test_F5_ThirdPartyDepositIntoProxyMustStillStartCooldown",
+      "disposition": "retain",
+      "replacement": "spec/lp/DepositCooldownBehavior.t.sol::ProxyDepositCooldownTest.test_ThirdPartyDepositIntoProxyMustStillStartCooldown",
+      "spec": "ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F6_KeeperFeeReserveFreeEquity",
+      "test": "test_F6_CommitReserveMustNotReduceUsdcBelowLockedMargin",
+      "disposition": "retain",
+      "replacement": "spec/keeper/OrderBountyLifecycle.t.sol::BountyReserveFreeEquityTest.test_CommitReserveMustNotReduceUsdcBelowLockedMargin",
+      "spec": "ACCOUNTING_SPEC.md#pending-order-reservation-model",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F8_LiquidationDegradedMode",
+      "test": "test_F8_LiquidationThatCreatesInsolvencyMustLatchDegradedMode",
+      "disposition": "retain",
+      "replacement": "accounting/close/DegradedSettlementBehavior.t.sol::LiquidationContainmentTest.test_LiquidationThatCreatesInsolvencyMustLatchDegradedMode",
+      "spec": "ACCOUNTING_SPEC.md#degraded-mode",
+      "reason": "Preserve the unique setup and asserted current behavior; classify by normative rule and remove misleading provenance identifiers."
+    }
+  ],
+  "obsolete_helpers": [
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_RiskParams",
+      "test": "obsolete_M1_ProposeRiskParamsRejectsEqualKinkAndMaxSkew",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_RiskParams",
+      "test": "obsolete_M1_ProposeRiskParamsRejectsZeroKinkSkew",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_RiskParams",
+      "test": "obsolete_M1_ProposeRiskParamsRejectsKinkAboveMaxSkew",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    },
+    {
+      "source": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_LegacySpreadReserve",
+      "test": "obsolete_C2_GetFreeUsdcMustReserveCappedLegacySpreadLiability",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_LegacySpreadReserve",
+      "test": "obsolete_H2_GetFreeUsdcMustReservePositiveLegacySpreadWithoutNettingAgainstGlobalMargin",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    },
+    {
+      "source": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_RiskParamValidation",
+      "test": "obsolete_M2_ProposeRiskParamsRejectsBaseApyAboveMaxApy",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    },
+    {
+      "source": "AuditV3.t.sol",
+      "contract": "AuditV3_M02_CarryDesyncTest",
+      "test": "obsolete_M02_UpdateMarkPriceDoesNotRealizeCarry",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    },
+    {
+      "source": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency",
+      "test": "obsolete_F1_CappedLegacySpreadShouldNetCollectibleReceivablesAgainstLiabilities",
+      "disposition": "delete",
+      "replacement": null,
+      "spec": "ACCOUNTING_SPEC.md#canonical-quantities",
+      "reason": "Obsolete, undiscovered helper: Undiscovered historical helper asserts retired legacy-spread/risk-parameter behavior; current production/spec no longer use that model."
+    }
+  ],
+  "empty_contracts_removed": [
+    {
+      "file": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_RiskParams",
+      "rationale": "Contains no discoverable test function."
+    },
+    {
+      "file": "AuditConfirmedFindingsFailing.t.sol",
+      "contract": "AuditConfirmedFindingsFailing_LegacySpreadReserve",
+      "rationale": "Contains no discoverable test function."
+    },
+    {
+      "file": "AuditFollowupFindingsFailing.t.sol",
+      "contract": "AuditFollowupFindingsFailing_LegacySpreadReserve",
+      "rationale": "Contains no discoverable test function."
+    },
+    {
+      "file": "AuditLatestStateFindingsFailing.t.sol",
+      "contract": "AuditLatestStateFindingsFailing_LiquidationBounty",
+      "rationale": "Contains no discoverable test function."
+    },
+    {
+      "file": "AuditLatestValidFindingsFailing.t.sol",
+      "contract": "AuditLatestValidFindingsFailing",
+      "rationale": "Contains no discoverable test function."
+    },
+    {
+      "file": "AuditV3.t.sol",
+      "contract": "AuditV3_M02_CarryDesyncTest",
+      "rationale": "Contains no discoverable test function."
+    },
+    {
+      "file": "AuditVerifiedFindingsFailing.t.sol",
+      "contract": "AuditVerifiedFindingsFailing_F1_LegacySpreadSolvency",
+      "rationale": "Contains no discoverable test function."
+    }
+  ],
+  "verification": {
+    "non_via_ir": {
+      "passed": 165,
+      "failed": 0,
+      "skipped": 0,
+      "log": "/private/tmp/perps-suite-review/test-run-final.log",
+      "exit_code": 0
+    },
+    "format": "forge fmt --check passed for all output files",
+    "original_function_mapping": 168,
+    "resolved_replacement_symbols": 168,
+    "production_gas_checks": "Root task executing the two GasBudget test functions with production codegen."
+  }
+}
