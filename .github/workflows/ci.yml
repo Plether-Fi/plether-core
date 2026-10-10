@@ -135,6 +135,7 @@ jobs:
       - name: Run PR correctness and production gas/size gates
         env:
           FOUNDRY_FUZZ_SEED: '0xdeadbeef'
+          HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
         run: bash scripts/run-with-heartbeat.sh bash scripts/run-perps-fast-tests.sh
 
       - name: Upload perps run evidence
@@ -191,7 +192,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FOUNDRY_PROFILE: quick
-      PERPS_COVERAGE_SHARDS: 4
+      # Smaller compiler batches preserve the same exhaustive test partition.
+      # Both previous attempts lost their runner during shard 2 compilation.
+      PERPS_COVERAGE_SHARDS: 8
+      HEARTBEAT_RESOURCE_DIAGNOSTICS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
