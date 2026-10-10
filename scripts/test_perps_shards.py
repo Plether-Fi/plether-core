@@ -127,6 +127,32 @@ class PerpsShardRunnerTest(unittest.TestCase):
                 self.assertEqual(set(listed.stdout.splitlines()), files)
                 self.assert_cleaned()
 
+    def test_only_two_large_entrypoints_move_from_the_legacy_assignment(self):
+        legacy = {}
+        fallback_index = 0
+        for entrypoint in sorted(self.entrypoints):
+            if entrypoint in PINNED:
+                legacy[entrypoint] = PINNED[entrypoint]
+            else:
+                legacy[entrypoint] = fallback_index % 4
+                fallback_index += 1
+
+        actual = {}
+        for shard in range(4):
+            result = self.run_shard(shard, PERPS_SHARD_LIST_ONLY="1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for entrypoint in result.stdout.splitlines():
+                self.assertNotIn(entrypoint, actual)
+                actual[entrypoint] = shard
+        self.assertEqual(set(actual), self.entrypoints)
+        self.assertEqual(
+            {entrypoint: (legacy[entrypoint], actual[entrypoint]) for entrypoint in legacy
+             if legacy[entrypoint] != actual[entrypoint]},
+            {"perps/CfdEngine.t.sol": (0, 2), "perps/OrderRouter.t.sol": (0, 3)},
+        )
+        self.assertEqual(self.invocations(), [])
+        self.assert_cleaned()
+
     def test_forge_failure_is_propagated_without_retry_and_worktree_is_cleaned(self):
         result = self.run_shard(0, SHARD_TEST_EXIT="19")
         self.assertEqual(result.returncode, 19)

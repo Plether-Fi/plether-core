@@ -26,7 +26,9 @@ jobs:
     name: Perps deep shard ${{ matrix.shard_number }}/4
     if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:deep-perps') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Production via-IR compilation plus deep invariants can exceed 30 minutes
+    # on shared runners. This is a CI wall-time allowance, not an EVM gas limit.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

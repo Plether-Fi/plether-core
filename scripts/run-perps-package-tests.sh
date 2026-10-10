@@ -72,6 +72,18 @@ while IFS= read -r source_file; do
             ;;
     esac
 
+    # Move these large mixed test files from the accounting invariant's shard
+    # to the lighter shards. Override after round-robin
+    # allocation so moving them does not shift any other fallback assignment.
+    case "${relative_file}" in
+        perps/CfdEngine.t.sol)
+            assigned_shard=2
+            ;;
+        perps/OrderRouter.t.sol)
+            assigned_shard=3
+            ;;
+    esac
+
     if ! [[ "${assigned_shard}" =~ ^[0-9]+$ ]] || [ "${assigned_shard}" -ge "${shard_count}" ]; then
         echo "invalid shard assignment for perps test entrypoint: ${relative_file}" >&2
         exit 2
