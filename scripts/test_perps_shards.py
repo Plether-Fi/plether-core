@@ -127,7 +127,7 @@ class PerpsShardRunnerTest(unittest.TestCase):
                 self.assertEqual(set(listed.stdout.splitlines()), files)
                 self.assert_cleaned()
 
-    def test_only_two_large_entrypoints_move_from_the_legacy_assignment(self):
+    def legacy_assignments(self):
         legacy = {}
         fallback_index = 0
         for entrypoint in sorted(self.entrypoints):
@@ -136,7 +136,9 @@ class PerpsShardRunnerTest(unittest.TestCase):
             else:
                 legacy[entrypoint] = fallback_index % 4
                 fallback_index += 1
+        return legacy
 
+    def assert_fixed_assignments_preserve_other_fallbacks(self, legacy):
         actual = {}
         for shard in range(4):
             result = self.run_shard(shard, PERPS_SHARD_LIST_ONLY="1")
@@ -145,13 +147,34 @@ class PerpsShardRunnerTest(unittest.TestCase):
                 self.assertNotIn(entrypoint, actual)
                 actual[entrypoint] = shard
         self.assertEqual(set(actual), self.entrypoints)
+        # A fixed destination may already match the inventory's natural shard.
+        # Check the final mapping without requiring either file to have moved.
         self.assertEqual(
-            {entrypoint: (legacy[entrypoint], actual[entrypoint]) for entrypoint in legacy
-             if legacy[entrypoint] != actual[entrypoint]},
-            {"perps/CfdEngine.t.sol": (0, 2), "perps/OrderRouter.t.sol": (0, 3)},
+            actual,
+            {**legacy, "perps/CfdEngine.t.sol": 2, "perps/OrderRouter.t.sol": 3},
         )
         self.assertEqual(self.invocations(), [])
         self.assert_cleaned()
+
+    def test_fixed_assignments_preserve_other_fallbacks(self):
+        self.assert_fixed_assignments_preserve_other_fallbacks(self.legacy_assignments())
+
+    def test_fixed_assignments_survive_inventory_changes(self):
+        natural_origins = {"perps/CfdEngine.t.sol": set(), "perps/OrderRouter.t.sol": set()}
+        for added_count in range(4):
+            with self.subTest(added_count=added_count):
+                if added_count:
+                    entrypoint = f"perps/AaaShardInventoryShift{added_count}.t.sol"
+                    self.assertNotIn(entrypoint, self.entrypoints)
+                    self.write_source(entrypoint, "// Additional test entrypoint\n")
+                    self.entrypoints.add(entrypoint)
+                legacy = self.legacy_assignments()
+                for entrypoint, origins in natural_origins.items():
+                    origins.add(legacy[entrypoint])
+                self.assert_fixed_assignments_preserve_other_fallbacks(legacy)
+        # Exercise every origin, including each file already being in its fixed shard.
+        for entrypoint, origins in natural_origins.items():
+            self.assertEqual(origins, {0, 1, 2, 3}, entrypoint)
 
     def test_forge_failure_is_propagated_without_retry_and_worktree_is_cleaned(self):
         result = self.run_shard(0, SHARD_TEST_EXIT="19")
