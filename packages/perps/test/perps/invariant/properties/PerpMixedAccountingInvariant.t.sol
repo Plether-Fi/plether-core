@@ -2,13 +2,13 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
-import {PerpMixedAccountingHandler} from "../handlers/PerpMixedAccountingHandler.sol";
+import {MixedLpTestHarness} from "../support/MixedLpTestHarness.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 
 contract PerpMixedAccountingInvariantTest is BasePerpTest {
 
-    PerpMixedAccountingHandler internal handler;
+    MixedLpTestHarness internal handler;
 
     function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
         params = super._riskParams();
@@ -29,7 +29,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
 
     function setUp() public override {
         super.setUp();
-        handler = new PerpMixedAccountingHandler(
+        handler = new MixedLpTestHarness(
             usdc,
             baseMockPyth,
             engine,
@@ -41,6 +41,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
             address(this)
         );
         handler.assertModel();
+        _seedInterimLpClaims();
         handler.openOrIncrease(0, 300, 120_000_003);
         handler.requestJuniorDeposit(0, 1500e6);
         handler.openOrIncrease(1, 100, 80_000_001);
@@ -71,12 +72,19 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         handler.exerciseArrearsAndReuse();
         handler.settleJuniorEpoch(true);
         handler.claimJuniorDeposit(1);
+        handler.exerciseLiquidationHistory(0, 2);
+        handler.exerciseLiquidationHistory(1, 3);
+        handler.exerciseLiquidationHistory(2, 10);
+        handler.exerciseLiquidationHistory(3, 11);
         handler.openOrIncrease(0, 251, 120_000_003);
         handler.openOrIncrease(1, 117, 80_000_001);
+        handler.exercisePendingHistories();
 
-        bytes4[] memory selectors = new bytes4[](17);
-        selectors[0] = handler.openOrIncrease.selector;
-        selectors[1] = handler.close.selector;
+        // Commitments persist across independently generated economic actions. The synchronous helpers above
+        // remain deterministic setup conveniences; generated trading uses the public queue lifecycle below.
+        bytes4[] memory selectors = new bytes4[](28);
+        selectors[0] = handler.commitOpen.selector;
+        selectors[1] = handler.commitClose.selector;
         selectors[2] = handler.advanceAndCheckpoint.selector;
         selectors[3] = handler.addCollateral.selector;
         selectors[4] = handler.freezeOrThaw.selector;
@@ -91,9 +99,41 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         selectors[13] = handler.refreshMark.selector;
         selectors[14] = handler.liquidateAndReuse.selector;
         selectors[15] = handler.withdrawFreeCollateral.selector;
-        selectors[16] = handler.createDeferredClaimHistory.selector;
+        selectors[16] = handler.claimJuniorRedeemShares.selector;
+        selectors[17] = handler.claimJuniorWithdraw.selector;
+        selectors[18] = handler.claimJuniorRedeemRefund.selector;
+        selectors[19] = handler.executeHead.selector;
+        selectors[20] = handler.executeBatch.selector;
+        selectors[21] = handler.expirePending.selector;
+        selectors[22] = handler.replayPending.selector;
+        selectors[23] = handler.rejectSixthOrder.selector;
+        selectors[24] = handler.pendingSameBlock.selector;
+        selectors[25] = handler.pendingMevBoundary.selector;
+        selectors[26] = handler.executeSlippageFailure.selector;
+        selectors[27] = handler.riskOffPending.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
+    }
+
+    function _seedInterimLpClaims() private {
+        handler.requestJuniorDeposit(0, 3000e6);
+        handler.settleJuniorEpoch(false);
+        handler.claimJuniorDeposit(0);
+        handler.advanceAndCheckpoint(1 hours);
+        handler.requestJuniorRedeem(0);
+        uint256 elapsed = handler.lpState(0).redeemEpoch * 1 hours - handler.expectedCouponTime();
+        uint256 seniorAtSettlement =
+            handler.expectedSenior() + handler.expectedSenior() * 800 * elapsed / (10_000 * 365 days);
+        uint256 originalCash = handler.expectedPoolCash();
+        handler.changeRawPoolCash(seniorAtSettlement + (seniorAtSettlement + 9998) / 9999 + 10_000);
+        handler.settleJuniorEpoch(false);
+        assertEq(handler.lpState(0).claimRedeemAssets, 10_000, "independent partial-funding budget");
+        handler.claimJuniorRedeemShares(0, 2);
+        handler.claimJuniorWithdraw(0, 2);
+        handler.changeRawPoolCash(originalCash - 10_000);
+        handler.settleJuniorEpoch(false);
+        handler.claimJuniorRedeem(0);
+        handler.assertModel();
     }
 
     function invariant_PersistentPublicMixedAccounting() public view {
@@ -120,10 +160,55 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         assertGt(handler.lpRedemptionSettlements(), 0);
         assertGt(handler.lpRedemptionClaims(), 0);
         assertGt(handler.lpRedemptionCancellations(), 0);
+        assertGt(handler.liquidationsBySide(0), 0);
+        assertGt(handler.liquidationsBySide(1), 0);
+        assertGt(handler.claimBearingLiquidations(), 0);
+        assertGt(handler.unpaidCarryLiquidations(), 0);
+        assertGt(handler.positivePnlLiquidations(), 0);
+        assertGt(handler.immediateLiquidationPayouts(), 0);
+        assertGt(handler.deferredLiquidationPayouts(), 0);
+        assertGt(handler.negativeVpiLiquidations(), 0);
+        assertGt(handler.lpNonterminalClaims(), 0);
+        assertGt(handler.lpClaimsAfterFurtherFunding(), 0);
+        assertGt(handler.lpShareClaims(), 0);
+        assertGt(handler.lpAssetClaims(), 0);
+        assertEq(handler.maximumLiveOrders(), 20);
+        assertGe(handler.rejectedSixthOrders(), 4);
+        assertGt(handler.overlappingCommits(), 0);
+        assertGt(handler.executedDelayedOrders(), 0);
+        assertGt(handler.replayedOrders(), 0);
+        assertGt(handler.conflictingReplays(), 0);
+        assertGt(handler.pendingSameBlockResults(), 0);
+        assertGt(handler.pendingMevRejections(), 0);
+        assertGt(handler.expiredOrders(), 0);
+        assertGt(handler.rejectedEarlyExpiry(), 0);
+        assertGt(handler.slippageFailures(), 0);
+        assertGt(handler.riskOffOrders(), 0);
+        assertGt(handler.completedBatches(), 0);
+        assertGt(handler.pendingMarginConsumed(), 0);
     }
 
     function test_MandatoryPreludeExercisesMixedHistories() public view {
         invariant_PersistentPublicMixedAccounting();
+    }
+
+    function test_RegressionQueuedProjectionDoesNotSatisfyLiveMinimumOpenNotional() public {
+        // Audit seed 0xdeadbeef, minimized without changing the submitted action inputs.
+        handler.commitClose(327_902_434_968_705_076_393_652_476_002_501_640_834_577_837_043_204_913, 32, true);
+        handler.executeHead(true);
+        handler.commitOpen(
+            100_826_436_524_508_443_061_163_191_620_634_453_116_513_966_566_681_300_926_347_450_229_074_697_899_425,
+            661_326_185_454_140_425_211_893_155_309_651_039_604_447,
+            770
+        );
+        uint256 rejectionsBefore = handler.rejectedOpenCommitments();
+        uint64 cursorBefore = handler.orders().nextId();
+        handler.commitOpen(17_905, 14_527, 73_760);
+        assertEq(handler.rejectedOpenCommitments(), rejectionsBefore + 1);
+        assertEq(handler.orders().nextId(), cursorBefore, "rejected five-lot open allocates no new identity");
+        assertEq(handler.orders().count(1), 1, "the earlier 495-lot reservation remains pending");
+        assertEq(handler.traderState(1).lots, 0);
+        handler.assertModel();
     }
 
     function test_RegressionTinyCarryCashCapsPositiveVpiAfterExternalShock() public {

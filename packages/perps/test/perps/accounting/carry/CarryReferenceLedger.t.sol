@@ -138,6 +138,220 @@ contract CarryReferenceArithmeticTest is Test {
         assertEq(ledger.accountState(address(2)).borrowBase, 150e6);
     }
 
+    function test_OfflineRecoveryVectorsDistinguishPhysicalCashFromWithheldGain() public {
+        CarryReferenceVectors.RecoveryVector[] memory vectors = CarryReferenceVectors.recoveries();
+        for (uint256 i; i < vectors.length; ++i) {
+            CarryReferenceVectors.RecoveryVector memory v = vectors[i];
+            CarryReferenceLedger ledger = _recover(v);
+            _assertRecovery(ledger, v);
+            assertEq(ledger.sideState(0).timestamp, v.elapsed, "terminal recovery preserves checkpoint clock");
+            assertEq(ledger.sideState(0).index, v.expectedIndex, "terminal recovery preserves checkpoint index");
+            assertEq(ledger.accountState(address(1)).protectedFunds, v.protectedFunds - v.physicalPaid);
+        }
+    }
+
+    function test_OfflinePassiveDepthVectorsPreserveBothClocksUntilAssessment() public {
+        CarryReferenceVectors.PassiveDepthVector[] memory vectors = CarryReferenceVectors.passiveDepths();
+        for (uint256 i; i < vectors.length; ++i) {
+            CarryReferenceVectors.PassiveDepthVector memory v = vectors[i];
+            CarryReferenceLedger ledger = new CarryReferenceLedger(v.initialDepth, 0, v.annualBps);
+            ledger.initializeAccount(address(1), 0, v.longBase, 0, 0, 0, 0);
+            ledger.initializeAccount(address(2), 1, v.shortBase, 0, 0, 0, 0);
+            ledger.changeDepthWithoutCheckpoint(v.finalDepth);
+            assertEq(ledger.sideState(0).timestamp, 0, "passive cash change must not checkpoint Long");
+            assertEq(ledger.sideState(1).timestamp, 0, "passive cash change must not checkpoint Short");
+            assertEq(ledger.sideState(0).index, 0);
+            assertEq(ledger.sideState(1).index, 0);
+            bytes32 beforePreview = _ledgerDigest(ledger);
+            assertEq(ledger.previewCheckpoint(address(1), v.elapsed).newCarry, v.expectedLongCarry);
+            assertEq(ledger.previewCheckpoint(address(2), v.elapsed).newCarry, v.expectedShortCarry);
+            assertEq(_ledgerDigest(ledger), beforePreview, "independent projection is read-only");
+            assertEq(ledger.checkpoint(address(1), v.elapsed).newCarry, v.expectedLongCarry);
+            assertEq(ledger.checkpoint(address(2), v.elapsed).newCarry, v.expectedShortCarry);
+            assertEq(ledger.sideState(0).index, v.expectedLongIndex);
+            assertEq(ledger.sideState(1).index, v.expectedShortIndex);
+            assertEq(ledger.poolDepth(), v.finalDepth, "unpaid carry creates no cash");
+        }
+    }
+
+    function test_PreviewCollectsNewClaimBackingBeforeClassifyingStoredArrears() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(90, 0, 10_000);
+        ledger.initializeAccount(address(1), 0, 100, 10, 3, 7, 0);
+        ledger.checkpoint(address(1), 365 days);
+        ledger.creditClaim(address(1), 100, 100, 365 days);
+        assertEq(ledger.accountState(address(1)).arrears, 77, "claim credit preserves old arrears");
+        assertEq(ledger.accountState(address(1)).pledge, 100, "new claim credit remains available");
+        bytes32 beforePreview = _ledgerDigest(ledger);
+        CarryReferenceLedger.Collection memory projected = ledger.previewCheckpoint(address(1), 365 days);
+        assertEq(projected.newCarry, 0);
+        assertEq(projected.assessed, 77);
+        assertEq(projected.fromMargin, 77);
+        assertEq(projected.fromFree, 0);
+        assertEq(projected.unpaid, 0, "stored arrears alone do not prove uncovered carry");
+        assertEq(_ledgerDigest(ledger), beforePreview, "health projection cannot collect or advance carry");
+        CarryReferenceLedger.Collection memory actual = ledger.checkpoint(address(1), 365 days);
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(projected)));
+        assertEq(ledger.accountState(address(1)).pledge, 23);
+        assertEq(ledger.poolDepth(), 80);
+    }
+
+    function test_ReservationReclassificationPreservesClocksArrearsAndEconomicCollections() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(90, 0, 10_000);
+        ledger.initializeAccount(address(1), 0, 100, 10, 3, 7, 0);
+        ledger.checkpoint(address(1), 365 days);
+        ledger.creditClaim(address(1), 40, 40, 365 days);
+        ledger.creditFree(address(1), 9, 365 days);
+        // The bounty credit collected the existing pledge before preserving its own newly credited free cash.
+        assertEq(ledger.accountState(address(1)).arrears, 37);
+        ledger.creditClaim(address(1), 20, 20, 365 days);
+        assertEq(ledger.accountState(address(1)).arrears, 28);
+        assertEq(ledger.accountState(address(1)).pledge, 20);
+        ledger.creditFree(address(1), 9, 365 days);
+        assertEq(ledger.accountState(address(1)).arrears, 8);
+        // New backing may coexist with stored arrears. Classification-only cleanup must preserve that distinction.
+        ledger.releaseToPledgeWithoutCheckpoint(address(1), 5);
+        ledger.reserveBountyWithoutCheckpoint(address(1), 7, 3);
+        assertEq(ledger.accountState(address(1)).pledge, 2);
+        assertEq(ledger.accountState(address(1)).free, 2);
+        assertEq(ledger.accountState(address(1)).protectedFunds, 12);
+        assertEq(ledger.accountState(address(1)).borrowBase, 98);
+        ledger.releaseProtectedWithoutCheckpoint(address(1), 4);
+        ledger.releaseToPledgeWithoutCheckpoint(address(1), 3);
+        ledger.consumeProtectedWithoutCheckpoint(address(1), 2);
+        CarryReferenceLedger.Account memory state = ledger.accountState(address(1));
+        assertEq(state.pledge, 5);
+        assertEq(state.free, 6);
+        assertEq(state.protectedFunds, 3);
+        assertEq(state.borrowBase, 95);
+        assertEq(state.arrears, 8, "reservations and cleanup do not collect retained arrears");
+        assertEq(state.totalNewCarry, 90);
+        assertEq(state.totalCollected, 82);
+        assertEq(state.lastTime, 365 days);
+        assertEq(state.lastIndex, 1e18);
+        assertEq(ledger.sideState(0).timestamp, 365 days);
+        assertEq(ledger.sideState(0).index, 1e18);
+        assertEq(ledger.sideState(0).borrowBase, 95);
+    }
+
+    function test_ExcessReservationAndRecoveryRevertWithoutLosingEconomicHistory() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(90, 0, 10_000);
+        ledger.initializeAccount(address(1), 0, 100, 10, 3, 7, 0);
+        bytes32 before = _ledgerDigest(ledger);
+        vm.expectRevert(CarryReferenceLedger.InsufficientFree.selector);
+        ledger.reserveBountyWithoutCheckpoint(address(1), 4, 0);
+        vm.expectRevert(CarryReferenceLedger.InsufficientPledge.selector);
+        ledger.reserveBountyWithoutCheckpoint(address(1), 3, 11);
+        vm.expectRevert(CarryReferenceLedger.InsufficientProtected.selector);
+        ledger.releaseProtectedWithoutCheckpoint(address(1), 8);
+        vm.expectRevert(CarryReferenceLedger.InsufficientProtected.selector);
+        ledger.releaseToPledgeWithoutCheckpoint(address(1), 8);
+        vm.expectRevert(CarryReferenceLedger.InsufficientProtected.selector);
+        ledger.consumeProtectedWithoutCheckpoint(address(1), 8);
+        assertEq(_ledgerDigest(ledger), before, "failed classification is atomic");
+        ledger.checkpoint(address(1), 365 days);
+        before = _ledgerDigest(ledger);
+        vm.expectRevert(CarryReferenceLedger.InvalidArrearsSettlement.selector);
+        ledger.settleActionArrears(address(1), 7, 50, 21);
+        assertEq(_ledgerDigest(ledger), before, "over-recovery cannot erase or duplicate arrears");
+        ledger.settleActionArrears(address(1), 7, 50, 20);
+        before = _ledgerDigest(ledger);
+        vm.expectRevert(CarryReferenceLedger.InvalidArrearsSettlement.selector);
+        ledger.settleActionArrears(address(1), 0, 1, 0);
+        assertEq(_ledgerDigest(ledger), before, "duplicate terminal recovery cannot collect twice");
+    }
+
+    function test_RecoveryGoldenRejectsPhantomCashAndDoubleEconomicCollection() public {
+        CarryReferenceVectors.RecoveryVector memory v = CarryReferenceVectors.recoveries()[2];
+        CarryReferenceLedger ledger = _recover(v);
+        this.assertRecoveryGolden(ledger, v);
+        vm.mockCall(
+            address(ledger), abi.encodeCall(ledger.poolDepth, ()), abi.encode(v.expectedPoolDepth + v.gainWithheld)
+        );
+        vm.expectRevert();
+        this.assertRecoveryGolden(ledger, v);
+        vm.clearMockedCalls();
+        vm.mockCall(
+            address(ledger), abi.encodeCall(ledger.totalCollected, ()), abi.encode(v.expectedCollected + v.gainWithheld)
+        );
+        vm.expectRevert();
+        this.assertRecoveryGolden(ledger, v);
+        vm.clearMockedCalls();
+        this.assertRecoveryGolden(ledger, v);
+    }
+
+    function test_VpiOffsetDischargesCarryWithoutCashOrWithheldPriceGain() public {
+        CarryReferenceVectors.RecoveryVector memory v = CarryReferenceVectors.recoveries()[9];
+        CarryReferenceLedger ledger = _recover(v);
+        this.assertRecoveryGolden(ledger, v);
+        assertEq(ledger.totalVpiOffset(), 77, "rebate credit independently discharges all terminal arrears");
+        assertEq(ledger.totalWithheld(), 0, "no fresh price gain was withheld");
+        assertEq(ledger.poolDepth(), 103, "only the ordinary thirteen-atom carry collection enters pool cash");
+        assertEq(ledger.totalCollected(), 90, "ordinary cash plus noncash offset conserves economic carry");
+        vm.mockCall(address(ledger), abi.encodeCall(ledger.totalVpiOffset, ()), abi.encode(uint256(0)));
+        vm.expectRevert();
+        this.assertRecoveryGolden(ledger, v);
+        vm.clearMockedCalls();
+        this.assertRecoveryGolden(ledger, v);
+        bytes32 before = _ledgerDigest(ledger);
+        vm.expectRevert(CarryReferenceLedger.InvalidArrearsSettlement.selector);
+        ledger.settleActionArrears(address(1), 0, 0, 1, 0);
+        assertEq(_ledgerDigest(ledger), before, "the same carry cannot be offset twice");
+    }
+
+    function assertRecoveryGolden(
+        CarryReferenceLedger ledger,
+        CarryReferenceVectors.RecoveryVector memory v
+    ) external view {
+        _assertRecovery(ledger, v);
+    }
+
+    function _recover(
+        CarryReferenceVectors.RecoveryVector memory v
+    ) private returns (CarryReferenceLedger ledger) {
+        ledger = new CarryReferenceLedger(v.initialDepth, 0, v.annualBps);
+        ledger.initializeAccount(address(1), 0, v.maxProfit, v.pledge, v.free, v.protectedFunds, 0);
+        assertEq(ledger.checkpoint(address(1), v.elapsed).newCarry, v.expectedNewCarry);
+        ledger.consumeProtectedWithoutCheckpoint(address(1), v.physicalPaid);
+        ledger.settleActionArrears(address(1), v.physicalPaid, v.gainWithheld, v.vpiOffset, v.waived);
+    }
+
+    function _assertRecovery(
+        CarryReferenceLedger ledger,
+        CarryReferenceVectors.RecoveryVector memory v
+    ) private view {
+        CarryReferenceLedger.Account memory state = ledger.accountState(address(1));
+        assertEq(ledger.poolDepth(), v.expectedPoolDepth, "only physically recovered carry increases pool cash");
+        assertEq(ledger.totalCollected(), v.expectedCollected, "cash and gain withholding recover carry once");
+        assertEq(ledger.totalWithheld(), v.gainWithheld);
+        assertEq(ledger.totalVpiOffset(), v.vpiOffset);
+        assertEq(ledger.totalWaived(), v.waived);
+        assertEq(state.totalCollected, v.expectedCollected);
+        assertEq(state.totalWithheld, v.gainWithheld);
+        assertEq(state.totalVpiOffset, v.vpiOffset);
+        assertEq(state.arrears, v.expectedRemainingArrears);
+        assertEq(state.borrowBase, v.expectedBorrowBase);
+        assertEq(ledger.totalNewCarry(), ledger.totalCollected() + ledger.totalWaived() + state.arrears);
+    }
+
+    function _ledgerDigest(
+        CarryReferenceLedger ledger
+    ) private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                ledger.accountState(address(1)),
+                ledger.accountState(address(2)),
+                ledger.sideState(0),
+                ledger.sideState(1),
+                ledger.poolDepth(),
+                ledger.totalNewCarry(),
+                ledger.totalCollected(),
+                ledger.totalWithheld(),
+                ledger.totalVpiOffset(),
+                ledger.totalWaived()
+            )
+        );
+    }
+
 }
 
 /// @notice Reachable carry accrual and collection against an independently advanced ledger. Trade setup uses the

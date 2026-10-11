@@ -495,4 +495,334 @@ library CarryReferenceVectors {
         result[42].expectedAmount = 85_365_394_579_191_054_821_473_368;
     }
 
+    struct RecoveryVector {
+        uint256 initialDepth;
+        uint256 maxProfit;
+        uint256 pledge;
+        uint256 free;
+        uint256 protectedFunds;
+        uint256 annualBps;
+        uint256 elapsed;
+        uint256 physicalPaid;
+        uint256 gainWithheld;
+        uint256 vpiOffset;
+        uint256 waived;
+        uint256 expectedNewCarry;
+        uint256 expectedRemainingArrears;
+        uint256 expectedPoolDepth;
+        uint256 expectedCollected;
+        uint256 expectedBorrowBase;
+        uint256 expectedIndex;
+    }
+
+    function recoveries() internal pure returns (RecoveryVector[] memory result) {
+        result = new RecoveryVector[](13);
+        // all-withheld
+        result[0].initialDepth = 90;
+        result[0].maxProfit = 100;
+        result[0].pledge = 10;
+        result[0].free = 3;
+        result[0].protectedFunds = 7;
+        result[0].annualBps = 10_000;
+        result[0].elapsed = 31_536_000;
+        result[0].physicalPaid = 0;
+        result[0].gainWithheld = 77;
+        result[0].vpiOffset = 0;
+        result[0].waived = 0;
+        result[0].expectedNewCarry = 90;
+        result[0].expectedRemainingArrears = 0;
+        result[0].expectedPoolDepth = 103;
+        result[0].expectedCollected = 90;
+        result[0].expectedBorrowBase = 100;
+        result[0].expectedIndex = 1_000_000_000_000_000_000;
+        // all-waived
+        result[1].initialDepth = 90;
+        result[1].maxProfit = 100;
+        result[1].pledge = 10;
+        result[1].free = 3;
+        result[1].protectedFunds = 7;
+        result[1].annualBps = 10_000;
+        result[1].elapsed = 31_536_000;
+        result[1].physicalPaid = 0;
+        result[1].gainWithheld = 0;
+        result[1].vpiOffset = 0;
+        result[1].waived = 77;
+        result[1].expectedNewCarry = 90;
+        result[1].expectedRemainingArrears = 0;
+        result[1].expectedPoolDepth = 103;
+        result[1].expectedCollected = 13;
+        result[1].expectedBorrowBase = 100;
+        result[1].expectedIndex = 1_000_000_000_000_000_000;
+        // physical-withheld-and-waived
+        result[2].initialDepth = 90;
+        result[2].maxProfit = 100;
+        result[2].pledge = 10;
+        result[2].free = 3;
+        result[2].protectedFunds = 7;
+        result[2].annualBps = 10_000;
+        result[2].elapsed = 31_536_000;
+        result[2].physicalPaid = 7;
+        result[2].gainWithheld = 50;
+        result[2].vpiOffset = 0;
+        result[2].waived = 20;
+        result[2].expectedNewCarry = 90;
+        result[2].expectedRemainingArrears = 0;
+        result[2].expectedPoolDepth = 110;
+        result[2].expectedCollected = 70;
+        result[2].expectedBorrowBase = 100;
+        result[2].expectedIndex = 1_000_000_000_000_000_000;
+        // partial-resolution-retains-arrears
+        result[3].initialDepth = 90;
+        result[3].maxProfit = 100;
+        result[3].pledge = 10;
+        result[3].free = 3;
+        result[3].protectedFunds = 7;
+        result[3].annualBps = 10_000;
+        result[3].elapsed = 31_536_000;
+        result[3].physicalPaid = 7;
+        result[3].gainWithheld = 11;
+        result[3].vpiOffset = 0;
+        result[3].waived = 13;
+        result[3].expectedNewCarry = 90;
+        result[3].expectedRemainingArrears = 46;
+        result[3].expectedPoolDepth = 110;
+        result[3].expectedCollected = 31;
+        result[3].expectedBorrowBase = 100;
+        result[3].expectedIndex = 1_000_000_000_000_000_000;
+        // utilization-floor-and-mixed-recovery
+        result[4].initialDepth = 333;
+        result[4].maxProfit = 217;
+        result[4].pledge = 17;
+        result[4].free = 2;
+        result[4].protectedFunds = 11;
+        result[4].annualBps = 10_000;
+        result[4].elapsed = 31_536_000;
+        result[4].physicalPaid = 11;
+        result[4].gainWithheld = 83;
+        result[4].vpiOffset = 0;
+        result[4].waived = 7;
+        result[4].expectedNewCarry = 120;
+        result[4].expectedRemainingArrears = 0;
+        result[4].expectedPoolDepth = 363;
+        result[4].expectedCollected = 113;
+        result[4].expectedBorrowBase = 217;
+        result[4].expectedIndex = 600_600_000_000_000_000;
+        // half-year-account-floor
+        result[5].initialDepth = 300;
+        result[5].maxProfit = 101;
+        result[5].pledge = 1;
+        result[5].free = 0;
+        result[5].protectedFunds = 0;
+        result[5].annualBps = 10_000;
+        result[5].elapsed = 15_768_000;
+        result[5].physicalPaid = 0;
+        result[5].gainWithheld = 14;
+        result[5].vpiOffset = 0;
+        result[5].waived = 1;
+        result[5].expectedNewCarry = 16;
+        result[5].expectedRemainingArrears = 0;
+        result[5].expectedPoolDepth = 301;
+        result[5].expectedCollected = 15;
+        result[5].expectedBorrowBase = 101;
+        result[5].expectedIndex = 166_650_000_000_000_000;
+        // zero-recovery-preserves-arrears
+        result[6].initialDepth = 90;
+        result[6].maxProfit = 100;
+        result[6].pledge = 10;
+        result[6].free = 3;
+        result[6].protectedFunds = 7;
+        result[6].annualBps = 10_000;
+        result[6].elapsed = 31_536_000;
+        result[6].physicalPaid = 0;
+        result[6].gainWithheld = 0;
+        result[6].vpiOffset = 0;
+        result[6].waived = 0;
+        result[6].expectedNewCarry = 90;
+        result[6].expectedRemainingArrears = 77;
+        result[6].expectedPoolDepth = 103;
+        result[6].expectedCollected = 13;
+        result[6].expectedBorrowBase = 100;
+        result[6].expectedIndex = 1_000_000_000_000_000_000;
+        // zero-time-no-assessment
+        result[7].initialDepth = 90;
+        result[7].maxProfit = 100;
+        result[7].pledge = 10;
+        result[7].free = 3;
+        result[7].protectedFunds = 7;
+        result[7].annualBps = 10_000;
+        result[7].elapsed = 0;
+        result[7].physicalPaid = 0;
+        result[7].gainWithheld = 0;
+        result[7].vpiOffset = 0;
+        result[7].waived = 0;
+        result[7].expectedNewCarry = 0;
+        result[7].expectedRemainingArrears = 0;
+        result[7].expectedPoolDepth = 90;
+        result[7].expectedCollected = 0;
+        result[7].expectedBorrowBase = 90;
+        result[7].expectedIndex = 0;
+        // physical-only-compatibility
+        result[8].initialDepth = 90;
+        result[8].maxProfit = 100;
+        result[8].pledge = 10;
+        result[8].free = 3;
+        result[8].protectedFunds = 77;
+        result[8].annualBps = 10_000;
+        result[8].elapsed = 31_536_000;
+        result[8].physicalPaid = 77;
+        result[8].gainWithheld = 0;
+        result[8].vpiOffset = 0;
+        result[8].waived = 0;
+        result[8].expectedNewCarry = 90;
+        result[8].expectedRemainingArrears = 0;
+        result[8].expectedPoolDepth = 180;
+        result[8].expectedCollected = 90;
+        result[8].expectedBorrowBase = 100;
+        result[8].expectedIndex = 1_000_000_000_000_000_000;
+        // all-vpi-offset-no-gain-or-cash
+        result[9].initialDepth = 90;
+        result[9].maxProfit = 100;
+        result[9].pledge = 10;
+        result[9].free = 3;
+        result[9].protectedFunds = 7;
+        result[9].annualBps = 10_000;
+        result[9].elapsed = 31_536_000;
+        result[9].physicalPaid = 0;
+        result[9].gainWithheld = 0;
+        result[9].vpiOffset = 77;
+        result[9].waived = 0;
+        result[9].expectedNewCarry = 90;
+        result[9].expectedRemainingArrears = 0;
+        result[9].expectedPoolDepth = 103;
+        result[9].expectedCollected = 90;
+        result[9].expectedBorrowBase = 100;
+        result[9].expectedIndex = 1_000_000_000_000_000_000;
+        // partial-vpi-offset-and-waiver
+        result[10].initialDepth = 90;
+        result[10].maxProfit = 100;
+        result[10].pledge = 10;
+        result[10].free = 3;
+        result[10].protectedFunds = 7;
+        result[10].annualBps = 10_000;
+        result[10].elapsed = 31_536_000;
+        result[10].physicalPaid = 0;
+        result[10].gainWithheld = 0;
+        result[10].vpiOffset = 6;
+        result[10].waived = 71;
+        result[10].expectedNewCarry = 90;
+        result[10].expectedRemainingArrears = 0;
+        result[10].expectedPoolDepth = 103;
+        result[10].expectedCollected = 19;
+        result[10].expectedBorrowBase = 100;
+        result[10].expectedIndex = 1_000_000_000_000_000_000;
+        // all-three-recoveries-plus-waiver
+        result[11].initialDepth = 90;
+        result[11].maxProfit = 100;
+        result[11].pledge = 10;
+        result[11].free = 3;
+        result[11].protectedFunds = 7;
+        result[11].annualBps = 10_000;
+        result[11].elapsed = 31_536_000;
+        result[11].physicalPaid = 7;
+        result[11].gainWithheld = 11;
+        result[11].vpiOffset = 13;
+        result[11].waived = 46;
+        result[11].expectedNewCarry = 90;
+        result[11].expectedRemainingArrears = 0;
+        result[11].expectedPoolDepth = 110;
+        result[11].expectedCollected = 44;
+        result[11].expectedBorrowBase = 100;
+        result[11].expectedIndex = 1_000_000_000_000_000_000;
+        // partial-vpi-offset-retains-arrears
+        result[12].initialDepth = 90;
+        result[12].maxProfit = 100;
+        result[12].pledge = 10;
+        result[12].free = 3;
+        result[12].protectedFunds = 7;
+        result[12].annualBps = 10_000;
+        result[12].elapsed = 31_536_000;
+        result[12].physicalPaid = 0;
+        result[12].gainWithheld = 0;
+        result[12].vpiOffset = 19;
+        result[12].waived = 0;
+        result[12].expectedNewCarry = 90;
+        result[12].expectedRemainingArrears = 58;
+        result[12].expectedPoolDepth = 103;
+        result[12].expectedCollected = 32;
+        result[12].expectedBorrowBase = 100;
+        result[12].expectedIndex = 1_000_000_000_000_000_000;
+    }
+
+    struct PassiveDepthVector {
+        uint256 initialDepth;
+        uint256 finalDepth;
+        uint256 longBase;
+        uint256 shortBase;
+        uint256 annualBps;
+        uint256 elapsed;
+        uint256 expectedLongIndex;
+        uint256 expectedShortIndex;
+        uint256 expectedLongCarry;
+        uint256 expectedShortCarry;
+    }
+
+    function passiveDepths() internal pure returns (PassiveDepthVector[] memory result) {
+        result = new PassiveDepthVector[](5);
+        // passive-cash-increases-depth
+        result[0].initialDepth = 1000;
+        result[0].finalDepth = 2000;
+        result[0].longBase = 500;
+        result[0].shortBase = 700;
+        result[0].annualBps = 500;
+        result[0].elapsed = 31_536_000;
+        result[0].expectedLongIndex = 12_500_000_000_000_000;
+        result[0].expectedShortIndex = 17_500_000_000_000_000;
+        result[0].expectedLongCarry = 6;
+        result[0].expectedShortCarry = 12;
+        // passive-loss-increases-utilization
+        result[1].initialDepth = 2000;
+        result[1].finalDepth = 999;
+        result[1].longBase = 500;
+        result[1].shortBase = 700;
+        result[1].annualBps = 500;
+        result[1].elapsed = 31_536_000;
+        result[1].expectedLongIndex = 25_025_000_000_000_000;
+        result[1].expectedShortIndex = 35_035_000_000_000_000;
+        result[1].expectedLongCarry = 12;
+        result[1].expectedShortCarry = 24;
+        // cash-shortage-saturates-both-sides
+        result[2].initialDepth = 1000;
+        result[2].finalDepth = 0;
+        result[2].longBase = 500;
+        result[2].shortBase = 700;
+        result[2].annualBps = 500;
+        result[2].elapsed = 31_536_000;
+        result[2].expectedLongIndex = 50_000_000_000_000_000;
+        result[2].expectedShortIndex = 50_000_000_000_000_000;
+        result[2].expectedLongCarry = 25;
+        result[2].expectedShortCarry = 35;
+        // dust-changes-floor-boundary
+        result[3].initialDepth = 10_001;
+        result[3].finalDepth = 10_000;
+        result[3].longBase = 1;
+        result[3].shortBase = 9999;
+        result[3].annualBps = 10_000;
+        result[3].elapsed = 31_536_000;
+        result[3].expectedLongIndex = 100_000_000_000_000;
+        result[3].expectedShortIndex = 999_900_000_000_000_000;
+        result[3].expectedLongCarry = 0;
+        result[3].expectedShortCarry = 9998;
+        // one-second-rounding
+        result[4].initialDepth = 300;
+        result[4].finalDepth = 333;
+        result[4].longBase = 200;
+        result[4].shortBase = 101;
+        result[4].annualBps = 777;
+        result[4].elapsed = 1;
+        result[4].expectedLongIndex = 1_479_788_812;
+        result[4].expectedShortIndex = 747_285_958;
+        result[4].expectedLongCarry = 0;
+        result[4].expectedShortCarry = 0;
+    }
+
 }

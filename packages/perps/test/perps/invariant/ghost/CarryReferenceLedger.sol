@@ -33,6 +33,8 @@ contract CarryReferenceLedger {
         uint256 arrears;
         uint256 totalNewCarry;
         uint256 totalCollected;
+        uint256 totalWithheld;
+        uint256 totalVpiOffset;
         uint256 totalWaived;
     }
 
@@ -50,6 +52,8 @@ contract CarryReferenceLedger {
     uint256 public annualBps;
     uint256 public totalNewCarry;
     uint256 public totalCollected;
+    uint256 public totalWithheld;
+    uint256 public totalVpiOffset;
     uint256 public totalWaived;
 
     error AlreadyInitialized();
@@ -57,6 +61,8 @@ contract CarryReferenceLedger {
     error InvalidSide();
     error CheckpointRequired();
     error InsufficientFree();
+    error InsufficientPledge();
+    error InsufficientProtected();
     error CarryDelinquency();
     error InsufficientClaimLiquidity();
     error InvalidArrearsSettlement();
@@ -143,6 +149,15 @@ contract CarryReferenceLedger {
         poolDepth = newDepth;
     }
 
+    /// @notice Replace input-derived effective depth for a passive cash change that does not checkpoint either side.
+    /// @dev External token shocks and terminal LP dust transfers change physical cash without advancing carry clocks.
+    ///      The next checkpoint observes this depth over its entire still-uncheckpointed interval, as specified.
+    function changeDepthWithoutCheckpoint(
+        uint256 newDepth
+    ) external {
+        poolDepth = newDepth;
+    }
+
     function changeRate(
         uint256 newAnnualBps,
         uint256 timestamp
@@ -180,6 +195,29 @@ contract CarryReferenceLedger {
         totalCollected += paid;
         _refreshBorrowBase(state);
         poolDepth += paid;
+    }
+
+    /// @notice Project collection solely from this ledger's submitted action history, without changing any clock.
+    /// @dev Stored arrears may have newly credited backing. Eligibility must use unpaid after this projection,
+    ///      not arrears alone; claim/bounty credits deliberately do not collect their new backing a second time.
+    function previewCheckpoint(
+        address account,
+        uint256 timestamp
+    ) external view returns (Collection memory result) {
+        Account storage state = _account(account);
+        if (!state.active) {
+            return result;
+        }
+        Side storage side = _sides[state.side];
+        uint256 projectedIndex = side.index;
+        if (timestamp > side.timestamp) {
+            projectedIndex += indexIncrement(side.borrowBase, poolDepth, annualBps, timestamp - side.timestamp);
+        }
+        result.newCarry = amountFromIndex(state.borrowBase, projectedIndex - state.lastIndex);
+        result.assessed = state.arrears + result.newCarry;
+        result.fromMargin = _min(result.assessed, state.pledge);
+        result.fromFree = _min(result.assessed - result.fromMargin, state.free);
+        result.unpaid = result.assessed - result.fromMargin - result.fromFree;
     }
 
     /// @notice Ordinary deposits are credited BEFORE collection; the new deposit can pay retained arrears now.
@@ -300,6 +338,56 @@ contract CarryReferenceLedger {
         state.protectedFunds += amount;
     }
 
+    /// @notice Reserve an independently split close bounty after its commitment checkpoint.
+    /// @dev Moving pledge into a bounty increases borrow base immediately; neither accrued carry nor clocks reset.
+    function reserveBountyWithoutCheckpoint(
+        address account,
+        uint256 freePart,
+        uint256 pledgePart
+    ) external {
+        Account storage state = _account(account);
+        if (freePart > state.free) {
+            revert InsufficientFree();
+        }
+        if (pledgePart > state.pledge) {
+            revert InsufficientPledge();
+        }
+        state.free -= freePart;
+        state.pledge -= pledgePart;
+        state.protectedFunds += freePart + pledgePart;
+        _refreshBorrowBase(state);
+    }
+
+    /// @notice Release an order's independently tracked remaining reservation without collecting source carry.
+    function releaseProtectedWithoutCheckpoint(
+        address account,
+        uint256 amount
+    ) external {
+        Account storage state = _account(account);
+        _consumeProtected(state, amount);
+        state.free += amount;
+    }
+
+    /// @notice Restore a pledge-funded refund to the same active position generation, as classified by the caller.
+    function releaseToPledgeWithoutCheckpoint(
+        address account,
+        uint256 amount
+    ) external {
+        Account storage state = _account(account);
+        _consumeProtected(state, amount);
+        state.pledge += amount;
+        _refreshBorrowBase(state);
+    }
+
+    /// @notice Debit protected settlement paid or forfeited by an independently modeled terminal order outcome.
+    /// @dev This does not credit a recipient or the pool: the action ledger supplies that separate destination flow.
+    function consumeProtectedWithoutCheckpoint(
+        address account,
+        uint256 amount
+    ) external {
+        _consumeProtected(_account(account), amount);
+    }
+
     /// @notice Apply separately modeled trade/cleanup classifications, after checkpointing an active position.
     /// @dev This is not a synchronization API: all amounts must come from the caller's independent action ledger.
     ///      Existing arrears are preserved. Resolve a terminal action's paid/waived arrears explicitly first.
@@ -324,22 +412,64 @@ contract CarryReferenceLedger {
         _replace(account, side, maxProfit, pledge, free, protectedFunds, active, timestamp);
     }
 
-    /// @notice Resolve carry using independently calculated terminal action sources, including an explicit waiver.
+    /// @notice Resolve carry paid entirely by physical settlement, retaining the existing caller convention.
     function settleActionArrears(
         address account,
         uint256 paid,
         uint256 waived
     ) external {
+        _settleActionArrears(account, paid, 0, 0, waived);
+    }
+
+    /// @notice Distinguish physical carry recovery from carry recovered by withholding a newly created gain.
+    /// @dev totalCollected includes both economic recoveries, while totalWithheld records its gain-funded portion.
+    ///      Only physicalPaid enters the pool. A withheld gain reduces the outgoing payout; adding it to cash would
+    ///      count the same value twice. The caller separately debits independently classified settlement sources.
+    function settleActionArrears(
+        address account,
+        uint256 physicalPaid,
+        uint256 gainWithheld,
+        uint256 waived
+    ) external {
+        _settleActionArrears(account, physicalPaid, gainWithheld, 0, waived);
+    }
+
+    /// @notice Resolve a net action's carry, separating physical cash, withheld price gain, VPI offset and waiver.
+    /// @dev A negative VPI credit can economically discharge carry without new price gain or cash entering the pool.
+    ///      The independently calculated action ledger supplies that attribution; it must not label the offset a
+    ///      cash receipt, gain withholding, or waiver. All three recovery sources contribute to totalCollected.
+    function settleActionArrears(
+        address account,
+        uint256 physicalPaid,
+        uint256 gainWithheld,
+        uint256 vpiOffset,
+        uint256 waived
+    ) external {
+        _settleActionArrears(account, physicalPaid, gainWithheld, vpiOffset, waived);
+    }
+
+    function _settleActionArrears(
+        address account,
+        uint256 physicalPaid,
+        uint256 gainWithheld,
+        uint256 vpiOffset,
+        uint256 waived
+    ) private {
         Account storage state = _account(account);
+        uint256 paid = physicalPaid + gainWithheld + vpiOffset;
         if (paid + waived > state.arrears) {
             revert InvalidArrearsSettlement();
         }
         state.arrears -= paid + waived;
         state.totalCollected += paid;
+        state.totalWithheld += gainWithheld;
+        state.totalVpiOffset += vpiOffset;
         state.totalWaived += waived;
         totalCollected += paid;
+        totalWithheld += gainWithheld;
+        totalVpiOffset += vpiOffset;
         totalWaived += waived;
-        poolDepth += paid;
+        poolDepth += physicalPaid;
     }
 
     /// @notice Integer bps are floored before annualization; utilization saturates before any multiplication.
@@ -445,6 +575,16 @@ contract CarryReferenceLedger {
         if (!state.initialized) {
             revert UnknownAccount();
         }
+    }
+
+    function _consumeProtected(
+        Account storage state,
+        uint256 amount
+    ) private {
+        if (amount > state.protectedFunds) {
+            revert InsufficientProtected();
+        }
+        state.protectedFunds -= amount;
     }
 
     function _min(

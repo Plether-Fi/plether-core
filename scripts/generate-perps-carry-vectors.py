@@ -68,6 +68,72 @@ def vectors() -> list[tuple]:
     return cases
 
 
+def recovery_vectors() -> list[tuple]:
+    """Terminal carry recovery after an ordinary collection: economic recovery is not necessarily cash."""
+    inputs = [
+        ("all-withheld", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 77, 0),
+        ("all-waived", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 77),
+        ("physical-withheld-and-waived", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 50, 20),
+        ("partial-resolution-retains-arrears", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 11, 13),
+        ("utilization-floor-and-mixed-recovery", 333, 217, 17, 2, 11, 10_000, YEAR, 11, 83, 7),
+        ("half-year-account-floor", 300, 101, 1, 0, 0, 10_000, YEAR // 2, 0, 14, 1),
+        ("zero-recovery-preserves-arrears", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 0),
+        ("zero-time-no-assessment", 90, 100, 10, 3, 7, 10_000, 0, 0, 0, 0),
+        ("physical-only-compatibility", 90, 100, 10, 3, 77, 10_000, YEAR, 77, 0, 0),
+    ]
+    inputs = [(*row[:-1], 0, row[-1]) for row in inputs]
+    inputs += [
+        ("all-vpi-offset-no-gain-or-cash", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 77, 0),
+        ("partial-vpi-offset-and-waiver", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 6, 71),
+        ("all-three-recoveries-plus-waiver", 90, 100, 10, 3, 7, 10_000, YEAR, 7, 11, 13, 46),
+        ("partial-vpi-offset-retains-arrears", 90, 100, 10, 3, 7, 10_000, YEAR, 0, 0, 19, 0),
+    ]
+    rows = []
+    for name, depth, maximum, pledge, free, protected, rate, elapsed, physical, withheld, offset, waived in inputs:
+        ordinary = vector(name, maximum - pledge, depth, rate, elapsed)
+        index, new_carry = ordinary[-2:]
+        margin_paid = min(pledge, new_carry)
+        free_paid = min(free, new_carry - margin_paid)
+        remaining = new_carry - margin_paid - free_paid - physical - withheld - offset - waived
+        assert remaining >= 0 and physical <= protected
+        rows.append((name, depth, maximum, pledge, free, protected, rate, elapsed, physical, withheld, offset, waived,
+                     new_carry, remaining, depth + margin_paid + free_paid + physical,
+                     margin_paid + free_paid + physical + withheld + offset, maximum - pledge + margin_paid, index))
+    return rows
+
+
+def passive_depth_vectors() -> list[tuple]:
+    """A cash change without checkpointing alters the depth observed at the later assessment."""
+    inputs = [
+        ("passive-cash-increases-depth", 1000, 2000, 500, 700, 500, YEAR),
+        ("passive-loss-increases-utilization", 2000, 999, 500, 700, 500, YEAR),
+        ("cash-shortage-saturates-both-sides", 1000, 0, 500, 700, 500, YEAR),
+        ("dust-changes-floor-boundary", 10_001, 10_000, 1, 9999, 10_000, YEAR),
+        ("one-second-rounding", 300, 333, 200, 101, 777, 1),
+    ]
+    rows = []
+    for name, initial, final, long_base, short_base, rate, elapsed in inputs:
+        long = vector(name, long_base, final, rate, elapsed)
+        short = vector(name, short_base, final, rate, elapsed)
+        rows.append((name, initial, final, long_base, short_base, rate, elapsed,
+                     long[-2], short[-2], long[-1], short[-1]))
+    return rows
+
+
+def render_extra(name: str, function: str, rows: list[tuple], fields: tuple[str, ...]) -> list[str]:
+    lines = ["", f"    struct {name} {{"]
+    lines += [f"        uint256 {field};" for field in fields]
+    lines += ["    }", "", f"    function {function}() internal pure returns ({name}[] memory result) {{",
+              f"        result = new {name}[]({len(rows)});"]
+    for i, (label, *values) in enumerate(rows):
+        lines.append(f"        // {label}")
+        for field, value in zip(fields, values, strict=True):
+            literal = f"{value:_}" if value >= 10_000 else str(value)
+            lines.append(f"        result[{i}].{field} = {literal};")
+    lines += ["    }"]
+    return lines
+
+
 def render() -> str:
     rows = vectors()
     lines = [
@@ -101,7 +167,15 @@ def render() -> str:
         for field, value in zip(fields, values):
             literal = f"{value:_}" if value >= 10_000 else str(value)
             lines.append(f"        result[{i}].{field} = {literal};")
-    lines += ["    }", "", "}", ""]
+    lines += ["    }"]
+    lines += render_extra("RecoveryVector", "recoveries", recovery_vectors(),
+                          ("initialDepth", "maxProfit", "pledge", "free", "protectedFunds", "annualBps", "elapsed",
+                           "physicalPaid", "gainWithheld", "vpiOffset", "waived", "expectedNewCarry", "expectedRemainingArrears",
+                           "expectedPoolDepth", "expectedCollected", "expectedBorrowBase", "expectedIndex"))
+    lines += render_extra("PassiveDepthVector", "passiveDepths", passive_depth_vectors(),
+                          ("initialDepth", "finalDepth", "longBase", "shortBase", "annualBps", "elapsed",
+                           "expectedLongIndex", "expectedShortIndex", "expectedLongCarry", "expectedShortCarry"))
+    lines += ["", "}", ""]
     return "\n".join(lines)
 
 
@@ -113,10 +187,12 @@ def main() -> None:
     if args.check:
         if not OUTPUT.exists() or OUTPUT.read_text() != rendered:
             raise SystemExit("Carry reference vectors are stale; run scripts/generate-perps-carry-vectors.py")
-        print(f"Verified {len(vectors())} exact-rational carry vectors")
+        print(f"Verified {len(vectors())} accrual, {len(recovery_vectors())} recovery and "
+              f"{len(passive_depth_vectors())} passive-depth exact-rational carry vectors")
     else:
         OUTPUT.write_text(rendered)
-        print(f"Wrote {len(vectors())} exact-rational carry vectors to {OUTPUT.relative_to(ROOT)}")
+        print(f"Wrote {len(vectors())} accrual, {len(recovery_vectors())} recovery and "
+              f"{len(passive_depth_vectors())} passive-depth exact-rational carry vectors to {OUTPUT.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":
