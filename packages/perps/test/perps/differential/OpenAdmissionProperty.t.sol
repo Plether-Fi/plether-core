@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../BasePerpTest.sol";
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
@@ -71,14 +72,122 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
         }
     }
 
+    /// @notice This classified domain has no VPI, carry, pool shortage or skew rejection. Every input has a
+    /// predetermined result; unlike the broad conditional property, an unjustified rejection fails the test.
+    function testFuzz_ClassifiedOpenAndIncreaseInitialMarginBoundary(
+        bool existing,
+        bool isShort,
+        bool highPrice,
+        uint256 lotSeed,
+        uint8 boundarySeed
+    ) public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.baseCarryBps = 0;
+        _setRiskParams(params);
+        _fundTrader(ACCOUNT, 20_000e6);
+        CfdTypes.Side side = isShort ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
+        uint256 price = highPrice ? 120_000_000 : 80_000_000;
+        // Per 100-token lot: $120 or $80 notional, 1.5% price pledge, separate 0.1% reserve, and the mandatory 4-bps execution fee.
+        uint256 pledgePerLot = highPrice ? 1_800_000 : 1_200_000;
+        uint256 reservePerLot = highPrice ? 120_000 : 80_000;
+        uint256 feePerLot = highPrice ? 48_000 : 32_000;
+        uint256 priorLots = existing ? 17 : 0;
+        if (existing) {
+            _open(
+                ACCOUNT,
+                side,
+                priorLots * CfdTypes.SIZE_QUANTUM,
+                priorLots * (pledgePerLot + reservePerLot + feePerLot),
+                price
+            );
+        }
+        uint256 addedLots = bound(lotSeed, 17, 251);
+        uint256 boundary = bound(uint256(boundarySeed), 0, 2);
+        uint256 supplied = addedLots * (pledgePerLot + reservePerLot + feePerLot) + boundary - 1;
+        bytes32 beforeState = _admissionState();
+        uint256 depth = pool.totalAssets();
+        if (boundary == 0) {
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                    CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                    uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+                    false
+                )
+            );
+        }
+        _open(ACCOUNT, side, addedLots * CfdTypes.SIZE_QUANTUM, supplied, price, depth);
+        if (boundary == 0) {
+            assertEq(_admissionState(), beforeState, "Initial-margin rejection must roll back every observed ledger");
+        } else {
+            (uint256 installedSize,,,,,,) = engine.positions(ACCOUNT);
+            uint256 totalLots = priorLots + addedLots;
+            assertEq(installedSize, totalLots * CfdTypes.SIZE_QUANTUM);
+            assertEq(engine.positionEntryCostUsdcAtoms(ACCOUNT), totalLots * price);
+            assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), totalLots * pledgePerLot + boundary - 1);
+            assertEq(clearinghouse.liquidationReserveUsdc(ACCOUNT), totalLots * reservePerLot);
+            assertEq(
+                clearinghouse.balanceUsdc(ACCOUNT),
+                20_000e6 - totalLots * feePerLot,
+                "Only execution fees debit custody"
+            );
+            assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
+        }
+    }
+
+    function _carryState() private view returns (bytes32) {
+        (uint256 borrowBase, uint256 lastIndex, uint64 lastTimestamp) = engine.positionCarryState(ACCOUNT);
+        return keccak256(
+            abi.encode(
+                borrowBase,
+                lastIndex,
+                lastTimestamp,
+                engine.sideCarryIndex(0),
+                engine.sideCarryIndex(1),
+                engine.sideCarryTimestamp(0),
+                engine.sideCarryTimestamp(1)
+            )
+        );
+    }
+
+    function _admissionState() private view returns (bytes32) {
+        (bool ok, bytes memory position) =
+            address(engine).staticcall(abi.encodeWithSignature("positions(address)", ACCOUNT));
+        assertTrue(ok);
+        return keccak256(
+            abi.encode(
+                position,
+                _carryState(),
+                engine.positionEntryCostUsdcAtoms(ACCOUNT),
+                engineProtocolLens.getProtocolAccountingSnapshot(),
+                _custodyState(),
+                engine.traderClaimBalanceUsdc(ACCOUNT),
+                engine.unsettledCarryUsdc(ACCOUNT),
+                terminalNavBook.curveHashOf(ACCOUNT)
+            )
+        );
+    }
+
+    function _custodyState() private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                clearinghouse.balanceUsdc(ACCOUNT),
+                clearinghouse.lockedMarginUsdc(ACCOUNT),
+                clearinghouse.liquidationReserveUsdc(ACCOUNT),
+                clearinghouse.vpiRebateReserveUsdc(ACCOUNT),
+                usdc.balanceOf(address(pool)),
+                usdc.balanceOf(address(clearinghouse)),
+                clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT)
+            )
+        );
+    }
+
     function _tryOpenAndCheck(
         CfdTypes.Side side,
         uint256 size,
         uint256 margin
     ) private returns (bool success) {
-        uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
-        bytes32 curveBefore = terminalNavBook.curveHashOf(ACCOUNT);
-        uint256 poolCashBefore = usdc.balanceOf(address(pool));
+        bytes32 beforeState = _admissionState();
         CfdTypes.Order memory order = CfdTypes.Order({
             account: ACCOUNT,
             sizeDelta: size,
@@ -101,9 +210,25 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
                 ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
                 "No unexpected execution revert"
             );
-            assertEq(clearinghouse.balanceUsdc(ACCOUNT), settlementBefore, "Rejected admission rolls back custody");
-            assertEq(terminalNavBook.curveHashOf(ACCOUNT), curveBefore, "Rejected admission preserves risk curve");
-            assertEq(usdc.balanceOf(address(pool)), poolCashBefore);
+            assertEq(reason.length, 100, "Typed failure must include its complete category, code and action");
+            uint256 category;
+            uint256 code;
+            uint256 isClose;
+            assembly {
+                category := mload(add(reason, 36))
+                code := mload(add(reason, 68))
+                isClose := mload(add(reason, 100))
+            }
+            assertEq(category, uint256(CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid));
+            assertEq(isClose, 0, "Open admission cannot report a close failure");
+            assertTrue(
+                code == uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES)
+                    || code == uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN)
+                    || code == uint8(CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED)
+                    || code == uint8(CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED),
+                "This collateral-only domain cannot justify a protocol, skew or input-shape rejection"
+            );
+            assertEq(_admissionState(), beforeState, "Rejected admission rolls back custody, risk and carry ledgers");
         }
     }
 

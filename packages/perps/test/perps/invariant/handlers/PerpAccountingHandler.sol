@@ -126,6 +126,8 @@ contract PerpAccountingHandler is Test {
     mapping(bytes4 => uint256) public caughtRevertsBySelector;
 
     mapping(uint64 => address) internal ghostOrderOwner;
+    mapping(uint64 => uint256) public ghostOrderGeneration;
+    mapping(address => uint64[]) internal accountOrderHistory;
     mapping(uint64 => uint256) internal ghostOrderCommittedMargin;
     mapping(uint64 => uint8) internal ghostOrderState;
     mapping(uint64 => bool) internal ghostExecutedOrderCounted;
@@ -203,10 +205,6 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(_account(actor));
         uint256 amount = bound(amountFuzz, 1e6, 250_000e6);
@@ -223,10 +221,6 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
         address account = _account(actor);
         uint256 freeSettlement = _freeSettlementUsdc(account);
         if (freeSettlement < 1e6) {
@@ -250,6 +244,7 @@ contract PerpAccountingHandler is Test {
         vm.prank(actor);
         try clearinghouse.withdraw(account, amount) {
             attempt.withdrawPasses = true;
+            ghost.recordWithdrawal(account, amount);
             AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
             _recordReachabilityTransition(account, REACHABILITY_ACTION_WITHDRAW, beforeSnapshot, afterSnapshot);
@@ -270,14 +265,10 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
         uint256 targetPrice = bound(targetPriceFuzz, 0.5e8, 1.5e8);
         uint256 sizeDelta = bound(sizeFuzz, 10, 1000) * CfdTypes.SIZE_QUANTUM;
         uint256 marginDelta = bound(marginDeltaFuzz, 0, 50_000e6);
-        uint256 neededUsdc = marginDelta + 2e6;
+        uint256 neededUsdc = marginDelta + router.maxOpenOrderExecutionBountyUsdc();
         _ensureFreeSettlement(actor, neededUsdc);
 
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
@@ -332,10 +323,6 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
         address account = _account(actor);
         (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
         if (size == 0) {
@@ -363,10 +350,6 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
         address account = _account(actor);
         if (router.pendingOrderCounts(account) != 0) {
             return;
@@ -559,10 +542,6 @@ contract PerpAccountingHandler is Test {
     ) external {
         _clearLastPriceLossTraderClaimEvent();
         address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
         address account = _account(actor);
         (uint256 size,,,,,,) = engine.positions(account);
         if (size == 0) {
@@ -578,7 +557,7 @@ contract PerpAccountingHandler is Test {
         _recordTerminalReservationSet(account);
 
         try router.executeLiquidation(account, priceData) {
-            _recordLiquidationSuccess(account, actor, preview.badDebtUsdc);
+            _recordLiquidationSuccess(account, preview.badDebtUsdc);
             ghostSuccessfulLiquidations++;
             _reconcileCommittedMarginAfterLiquidation(account, committedBefore);
             _observeTraderClaim(account);
@@ -595,10 +574,9 @@ contract PerpAccountingHandler is Test {
 
     function _recordLiquidationSuccess(
         address account,
-        address actor,
         uint256 legacyDebtDiagnosticUsdc
     ) internal {
-        ghost.recordLiquidation(account, usdc.balanceOf(actor), legacyDebtDiagnosticUsdc);
+        ghost.recordLiquidation(account, legacyDebtDiagnosticUsdc);
     }
 
     function createTraderClaim(
@@ -606,10 +584,6 @@ contract PerpAccountingHandler is Test {
     ) external {
         _clearLastPriceLossTraderClaimEvent();
         address actor = actors[actorIndex % actors.length];
-        if (_isLiquidated(actor)) {
-            return;
-        }
-
         address account = _account(actor);
         if (router.pendingOrderCounts(account) != 0) {
             return;
@@ -1171,6 +1145,7 @@ contract PerpAccountingHandler is Test {
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
 
+        ghost.recordMintAndDeposit(account, amount);
         ghostTotalTraderMinted += amount;
     }
 
@@ -1180,6 +1155,8 @@ contract PerpAccountingHandler is Test {
         uint256 committedMarginUsdc
     ) internal {
         ghostOrderOwner[orderId] = account;
+        ghostOrderGeneration[orderId] = ghost.accountGeneration(account);
+        accountOrderHistory[account].push(orderId);
         ghostOrderCommittedMargin[orderId] = committedMarginUsdc;
         ghostOrderState[orderId] = GHOST_ORDER_PENDING;
         if (committedMarginUsdc > 0) {
@@ -1446,10 +1423,31 @@ contract PerpAccountingHandler is Test {
         return actor;
     }
 
-    function _isLiquidated(
-        address actor
-    ) internal view returns (bool) {
-        return ghost.liquidationSnapshot(_account(actor)).liquidated;
+    /// @notice Historical cleanup remains checked after an account deposits, trades and liquidates again.
+    /// @dev New-generation orders are deliberately excluded; old orders can never become live again.
+    function liquidatedGenerationExposure(
+        address account
+    ) external view returns (uint256 pendingOrders, uint256 liveReserves, uint256 reservedUsdc) {
+        uint256 currentGeneration = ghost.accountGeneration(account);
+        if (currentGeneration == 0) {
+            return (0, 0, 0);
+        }
+        uint64[] storage history = accountOrderHistory[account];
+        for (uint256 i; i < history.length; ++i) {
+            uint64 orderId = history[i];
+            if (ghostOrderGeneration[orderId] >= currentGeneration) {
+                break;
+            }
+            OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
+            if (record.status == IOrderRouterAccounting.OrderStatus.Pending) {
+                pendingOrders++;
+            }
+            uint256 committed = _remainingCommittedMargin(orderId);
+            reservedUsdc += record.executionBountyUsdc + committed;
+            if (record.executionBountyUsdc != 0 || committed != 0) {
+                liveReserves++;
+            }
+        }
     }
 
 }

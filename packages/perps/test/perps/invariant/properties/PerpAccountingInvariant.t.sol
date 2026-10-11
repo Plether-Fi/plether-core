@@ -4,9 +4,9 @@ pragma solidity 0.8.35;
 import {OrderRouterDebugLens} from "../../../utils/OrderRouterDebugLens.sol";
 
 import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
-import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
 import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
@@ -129,6 +129,200 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         vm.clearMockedCalls();
     }
 
+    function test_LiquidatedAccountWithdrawsResidualAndReusesTwoGenerations() public {
+        address actor = handler.actorAt(0);
+        _openReusableActor();
+        uint64 firstOrderId = router.nextCommitId() - 1;
+        assertEq(handler.ghostOrderGeneration(firstOrderId), 0);
+        handler.liquidate(0, 1.69e8);
+        assertEq(handler.ghostSuccessfulLiquidations(), 1, "first position must actually liquidate");
+        assertEq(handler.ghost().accountGeneration(actor), 1);
+        // Opening spends the entire $5,000 commitment (fee, pledge and liquidation reserve),
+        // plus the capped $0.20 execution bounty. The loss exhausts the pledge but cannot take free cash.
+        uint256 residual = 44_999_800_000;
+        assertEq(clearinghouse.balanceUsdc(actor), residual, "independent first-generation residual");
+        _assertAllInvariants();
+
+        vm.prank(actor);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
+        clearinghouse.withdraw(actor, residual + 1);
+        handler.withdrawCollateral(0, residual);
+        assertEq(clearinghouse.balanceUsdc(actor), 0);
+        assertEq(usdc.balanceOf(actor), residual, "requested residual belongs to the liquidated trader");
+        vm.prank(actor);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
+        clearinghouse.withdraw(actor, 1);
+        _assertAllInvariants();
+
+        handler.depositCollateral(0, 50_000e6);
+        _openReusableActor();
+        uint64 secondOrderId = router.nextCommitId() - 1;
+        assertEq(handler.ghostOrderGeneration(secondOrderId), 1);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 17, 1000e6, 1.2e8);
+        uint64 pendingOrderId = router.nextCommitId() - 1;
+        assertEq(router.pendingOrderCounts(actor), 1, "new generation may legitimately own pending orders");
+        assertGt(handler.accountExecutionBountyReserve(actor), 0);
+        _assertAllInvariants();
+
+        handler.liquidate(0, 1.69e8);
+        assertEq(handler.ghostSuccessfulLiquidations(), 2, "reused account must liquidate a second time");
+        assertEq(handler.ghost().accountGeneration(actor), 2);
+        assertEq(handler.ghostOrderGeneration(pendingOrderId), 1);
+        assertEq(router.pendingOrderCounts(actor), 0);
+        assertEq(_remainingCommittedMargin(pendingOrderId), 0);
+        assertEq(
+            clearinghouse.balanceUsdc(actor),
+            44_999_600_000,
+            "second generation also forfeits its pending order's capped $0.20 bounty"
+        );
+        assertEq(usdc.balanceOf(actor), residual, "reopening and liquidation cannot seize prior wallet entitlement");
+        _assertAllInvariants();
+    }
+
+    function test_ZeroResidualLiquidationCannotWithdrawAndCanReopen() public {
+        address actor = handler.actorAt(0);
+        // Leave exactly $5,000 commitment plus the $0.20 opening bounty; no automatic funding is needed.
+        handler.withdrawCollateral(0, 44_999_800_000);
+        _openReusableActor();
+        handler.liquidate(0, 1.69e8);
+        assertEq(handler.ghostSuccessfulLiquidations(), 1);
+        assertEq(clearinghouse.balanceUsdc(actor), 0, "fully spent funding leaves no recoverable entitlement");
+        vm.prank(actor);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
+        clearinghouse.withdraw(actor, 1);
+        handler.depositCollateral(0, 50_000e6);
+        _openReusableActor();
+        _assertAllInvariants();
+    }
+
+    function test_WalletFlowCheckDetectsUnrequestedCredit() public {
+        address actor = handler.actorAt(0);
+        handler.withdrawCollateral(0, 100e6);
+        _assertAllInvariants();
+        usdc.mint(actor, 1);
+        vm.expectRevert();
+        this.invariant_OrderReservationsQueuesAndTerminalStateReconcile();
+    }
+
+    function test_WalletFlowCheckDetectsDuplicateWithdrawalCredit() public {
+        address actor = handler.actorAt(0);
+        handler.withdrawCollateral(0, 100e6);
+        _assertAllInvariants();
+        usdc.mint(actor, 100e6);
+        vm.expectRevert();
+        this.invariant_OrderReservationsQueuesAndTerminalStateReconcile();
+    }
+
+    function test_LiquidatedActorCanCreateSettleAndWithdrawNewClaims() public {
+        address actor = handler.actorAt(0);
+        _openReusableActor();
+        handler.liquidate(0, 1.69e8);
+        assertEq(handler.ghostSuccessfulLiquidations(), 1);
+        handler.createTraderClaim(0);
+        // 10,000 tokens gain $0.50 each; the close withholds $2 (4 bps of $5,000 notional).
+        uint256 claim = 4998e6;
+        assertEq(engine.traderClaimBalanceUsdc(actor), claim, "independent new deferred claim");
+        handler.fundHousePool(claim + 1000e6);
+        handler.settleTraderClaim(0);
+        assertEq(engine.traderClaimBalanceUsdc(actor), 0);
+        assertEq(usdc.balanceOf(actor), 0, "claim settlement credits custody rather than the wallet");
+        handler.restoreSolvencyAndClearDegradedMode();
+        // $44,999.80 residual - $4 open fee - two $0.20 bounties + $4,998 net claim.
+        uint256 settlement = 49_993_400_000;
+        assertEq(clearinghouse.balanceUsdc(actor), settlement, "independent profit and claim entitlement");
+        handler.withdrawCollateral(0, settlement);
+        assertEq(usdc.balanceOf(actor), settlement);
+        assertEq(handler.ghost().accountGeneration(actor), 1);
+        _assertAllInvariants();
+    }
+
+    function test_ReusedLiquidationPreservesAndPaysRemainingClaimEntitlement() public {
+        address actor = handler.actorAt(0);
+        _openReusableActor();
+        handler.liquidate(0, 1.69e8);
+        handler.createTraderClaim(0);
+        assertEq(engine.traderClaimBalanceUsdc(actor), 4998e6);
+        assertEq(clearinghouse.balanceUsdc(actor), 44_995_400_000);
+        // Replenish the mock pool without settling this account's outstanding claim.
+        handler.restoreSolvencyAndClearDegradedMode();
+        handler.setPoolAssets(1_000_000_000e6);
+        handler.syncMarkNow(1.2e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 1000, 500e6, 1.2e8);
+        handler.executeNextOrderModelled();
+        (uint256 size,,,,,,) = engine.positions(actor);
+        assertEq(size, 1000 * CfdTypes.SIZE_QUANTUM);
+        // A $4,200 price loss consumes only the claim, leaving $798. With $344 pledge, equity
+        // is $1,142 < $1,242 maintenance. The liquidation charge is capped at the $108 reserve.
+        handler.liquidate(0, 1.242e8);
+        assertEq(handler.ghostSuccessfulLiquidations(), 2);
+        assertEq(engine.traderClaimBalanceUsdc(actor), 798e6, "claim remainder survives liquidation");
+        assertEq(clearinghouse.balanceUsdc(actor), 44_839_200_000, "free cash plus surviving pledge entitlement");
+        handler.settleTraderClaim(0);
+        assertEq(engine.traderClaimBalanceUsdc(actor), 0);
+        assertEq(clearinghouse.balanceUsdc(actor), 45_637_200_000);
+        handler.withdrawCollateral(0, 45_637_200_000);
+        assertEq(usdc.balanceOf(actor), 45_637_200_000);
+        vm.prank(actor);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
+        clearinghouse.withdraw(actor, 1);
+        _assertAllInvariants();
+    }
+
+    function test_IndependentResidualCheckRejectsInflatedProductionBalance() public {
+        _openReusableActor();
+        handler.liquidate(0, 1.69e8);
+        this.checkFirstGenerationResidual();
+        vm.mockCall(
+            address(clearinghouse),
+            abi.encodeCall(clearinghouse.balanceUsdc, (handler.actorAt(0))),
+            abi.encode(uint256(44_999_800_001))
+        );
+        vm.expectRevert();
+        this.checkFirstGenerationResidual();
+        vm.clearMockedCalls();
+    }
+
+    function checkFirstGenerationResidual() external view {
+        assertEq(
+            clearinghouse.balanceUsdc(handler.actorAt(0)),
+            44_999_800_000,
+            "input-derived residual must not accept an inflated production balance"
+        );
+    }
+
+    function test_GenerationCleanupStillDetectsAnOldReservationAfterReopening() public {
+        _openReusableActor();
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 17, 1000e6, 1.2e8);
+        uint64 oldReservationId = router.nextCommitId() - 1;
+        handler.liquidate(0, 1.69e8);
+        assertEq(handler.ghostSuccessfulLiquidations(), 1);
+        handler.depositCollateral(0, 50_000e6);
+        handler.syncMarkNow(1.2e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 17, 1000e6, 1.2e8);
+        assertEq(router.pendingOrderCounts(handler.actorAt(0)), 1);
+        _assertAllInvariants();
+
+        IMarginClearinghouse.OrderReservation memory stale = clearinghouse.getOrderReservation(oldReservationId);
+        stale.remainingAmountUsdc = 1;
+        vm.mockCall(
+            address(clearinghouse),
+            abi.encodeCall(clearinghouse.getOrderReservation, (oldReservationId)),
+            abi.encode(stale)
+        );
+        vm.expectRevert();
+        this.invariant_OrderReservationsQueuesAndTerminalStateReconcile();
+        vm.clearMockedCalls();
+        _assertAllInvariants();
+    }
+
+    function _openReusableActor() internal {
+        handler.syncMarkNow(1.2e8);
+        handler.commitOpenOrder(0, uint8(CfdTypes.Side.LONG), 1000, 5000e6, 1.2e8);
+        handler.executeNextOrderModelled();
+        (uint256 size,,,,,,) = engine.positions(handler.actorAt(0));
+        assertEq(size, 1000 * CfdTypes.SIZE_QUANTUM, "reused account must execute a full new position");
+    }
+
     function _assertInvariant_ClearinghouseReservationsMatchLiveExecutionBounties() internal view {
         assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody execution bounty reserves");
         assertEq(
@@ -214,65 +408,33 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function _assertInvariant_LiquidatedActorsHaveNoPendingOrders() internal view {
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
-            address account = _account(handler.actorAt(i));
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated) {
-                continue;
-            }
-
-            assertEq(router.pendingOrderCounts(account), 0, "Liquidated accounts must not keep pending orders");
+    function _assertInvariant_LiquidatedGenerationsHaveNoLiveOrdersOrReserves() internal view {
+        for (uint256 i; i < handler.actorCount(); ++i) {
+            (uint256 pending, uint256 liveReserves, uint256 reserved) =
+                handler.liquidatedGenerationExposure(handler.actorAt(i));
+            assertEq(pending, 0, "Liquidated generations must not keep pending orders");
+            assertEq(liveReserves, 0, "Liquidated generations must not retain live reserves");
+            assertEq(reserved, 0, "Liquidated generations must not retain reserved settlement");
         }
     }
 
-    function _assertInvariant_LiquidatedActorsHaveNoLiveReserves() internal view {
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
-            address account = _account(handler.actorAt(i));
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated) {
-                continue;
-            }
-
-            assertEq(
-                handler.accountExecutionBountyReserve(account),
-                0,
-                "Liquidated accounts must not retain execution bounty reserves"
-            );
-            assertEq(handler.accountLiveReserveCount(account), 0, "Liquidated accounts must not retain live reserves");
-        }
-    }
-
-    function _assertInvariant_LiquidatedActorsCannotRecoverWalletUsdc() internal view {
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
+    function _assertInvariant_WalletsMatchSubmittedFlows() internal view {
+        for (uint256 i; i < handler.actorCount(); ++i) {
             address actor = handler.actorAt(i);
-            address account = _account(actor);
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated) {
-                continue;
-            }
-
-            assertLe(usdc.balanceOf(actor), snapshot.walletUsdc, "Liquidated actors must not recover wallet USDC later");
+            assertEq(
+                usdc.balanceOf(actor),
+                handler.ghost().expectedWalletFromSubmittedFlows(actor),
+                "Wallet credits must equal submitted withdrawal flows"
+            );
         }
     }
 
     function _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() internal view {
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
-            address account = _account(handler.actorAt(i));
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated) {
-                continue;
-            }
-
+        for (uint256 i; i < handler.actorCount(); ++i) {
             assertEq(
-                snapshot.legacyDebtDiagnosticUsdc,
+                handler.ghost().liquidationDebtDiagnosticTotal(handler.actorAt(i)),
                 0,
-                "Liquidation price tails must remain diagnostic writeoffs, never protocol debt"
-            );
-            assertEq(
-                handler.accountExecutionBountyReserve(account),
-                0,
-                "Terminal liquidation must exhaust same-account execution bounty reservations"
+                "Every liquidation price tail must remain a diagnostic writeoff, never protocol debt"
             );
         }
     }
@@ -657,9 +819,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
     function _assertAllInvariants() internal view {
         _assertInvariant_ClearinghouseReservationsMatchLiveExecutionBounties();
         _assertInvariant_TerminalNavBookMatchesCanonicalEngineState();
-        _assertInvariant_LiquidatedActorsHaveNoPendingOrders();
-        _assertInvariant_LiquidatedActorsHaveNoLiveReserves();
-        _assertInvariant_LiquidatedActorsCannotRecoverWalletUsdc();
+        _assertInvariant_LiquidatedGenerationsHaveNoLiveOrdersOrReserves();
+        _assertInvariant_WalletsMatchSubmittedFlows();
         _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion();
         _assertInvariant_GhostCommittedMarginMatchesAccountReservation();
         _assertInvariant_OrderReservationModuleSummariesMatchAccountReservation();
