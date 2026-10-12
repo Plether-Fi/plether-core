@@ -339,7 +339,8 @@
       "0x5348d1522931127a9154e07daab62ee8519962442c4699535949bc3e82949de5"
     ],
     "oracleRefresh": [
-      "0xc74825a5d24345d44d1343b5824d3dd89d1e9bbde721df93dba4a7d6ff6d46bb"
+      "0xc74825a5d24345d44d1343b5824d3dd89d1e9bbde721df93dba4a7d6ff6d46bb",
+      "0xa59ce9b55014c5009095f33b61cc7c38d858a9620a6263e94f4ed71da8553ee4"
     ],
     "activation": [
       "0xdb6dc7805f0e60a5fd6f2b124cce385cdba79ea94e2cc8f9c1e24d10bc6e7adc"
@@ -423,7 +424,9 @@
     "seededCheckpointEvidence": "bootstrap-evidence.json",
     "activeCheckpointEvidence": "active-verification.json",
     "residualApprovalUsdc": "0",
-    "seedSharesArePermanent": true
+    "seedSharesArePermanent": true,
+    "finalActiveCheckpointBlock": 318403643,
+    "freshMarkAtFinalCheckpoint": true
   },
   "governance": {
     "poolConfigProposal": "none",

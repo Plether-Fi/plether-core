@@ -8,7 +8,7 @@
   "activePhasePassed": true,
   "deployedContractCount": 29,
   "deploymentReceiptCount": 32,
-  "bootstrapOracleActivationReceiptCount": 6,
+  "bootstrapOracleActivationReceiptCount": 7,
   "runtimeAndCreationInputsMatchQualifiedBuild": true,
   "consumerAbiCount": 87,
   "productionCodeUnchangedFromQualifiedV130": true,
