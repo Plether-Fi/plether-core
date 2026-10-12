@@ -1,0 +1,1046 @@
+{
+  "schema_version": 2,
+  "validation_generation": "mixed-accounting-extensions-final1",
+  "status": "passed",
+  "acceptance_complete": true,
+  "recorded_utc": "2026-10-11T10:34:58.305881+00:00",
+  "scope": "Complete nonfork quick/CI runner partitions and full CI production codegen; one changed main-mixed invariant entrypoint at three full audit seeds.",
+  "source": {
+    "archive": {
+      "bytes": 1984366,
+      "path": "artifacts/perps-extensions/final1-frozen/tested-source.tar.gz",
+      "sha256": "1462043ff731e9802d1c9f08fd8b164013312b68b1d9ca516e00f5841afeff0f"
+    },
+    "base_commit": "340c63119ee67d931eb352ac4b6f3c789089ce8e",
+    "content_sha256": "723b0bff82c9b242eb6ec387bc1af8aebec0e22c2c7da2a5599f11131a1c291a",
+    "dependencies": {
+      "forge-std": {
+        "actual_revision": "f5495c9b993bfc6e79dd52adfdcb7dac0a1da918",
+        "gitlink_revision": "f5495c9b993bfc6e79dd52adfdcb7dac0a1da918",
+        "runtime_checkout": "/Users/stan/Code/Plether/plether-core/lib/forge-std"
+      },
+      "morpho-blue": {
+        "actual_revision": "55d2d99304fb3fb930c688462ae2ccabb1d533ad",
+        "gitlink_revision": "55d2d99304fb3fb930c688462ae2ccabb1d533ad",
+        "runtime_checkout": "/Users/stan/Code/Plether/plether-core/lib/morpho-blue"
+      },
+      "openzeppelin-contracts": {
+        "actual_revision": "fcbae5394ae8ad52d8e580a3477db99814b9d565",
+        "gitlink_revision": "fcbae5394ae8ad52d8e580a3477db99814b9d565",
+        "runtime_checkout": "/Users/stan/Code/Plether/plether-core/lib/openzeppelin-contracts"
+      }
+    },
+    "dependency_environment": {
+      "bytes": 449,
+      "path": "artifacts/perps-extensions/final1-frozen/validation-dependencies.env.sh",
+      "sha256": "0fb712033deed338bd40c8f2df65401ab935fe5fd5aaa47791a549e5c0cc9e7c"
+    },
+    "manifest": {
+      "bytes": 158313,
+      "path": "artifacts/perps-extensions/final1-frozen/source-manifest.json",
+      "sha256": "48b92bf4f61516fe74f2cf2e05280cc59c0f246a06b46b8610b54c0e0860b6f0"
+    },
+    "revision_note": "Uncommitted implementation on the recorded base commit, identified by the frozen content hash. The only execution-source change after testing is the derived shard timing refresh; documentation is outside that identity.",
+    "execution_source_file_count": 1104
+  },
+  "execution_report": {
+    "path": "artifacts/perps-extensions/final1-execution-report.json",
+    "bytes": 255375,
+    "sha256": "9be3cb7d1a9f7abd37195e70b9c5ef079e0809fa25fc91b3017f49ebfc933d4a"
+  },
+  "evidence_report_normalization": {
+    "note": "The frozen helper compares recomputed Python tuples with JSON-decoded arrays. A report-only adapter normalizes the recomputed closure through JSON; all original acceptance assertions remain in force.",
+    "adapter": {
+      "path": "artifacts/perps-extensions/final1-report-adapter.py",
+      "bytes": 750,
+      "sha256": "8fa27ea0f848728610e7d1786f6af8e17449a1df35cb33debea00319eead3b0f"
+    },
+    "diagnosis": {
+      "path": "artifacts/perps-extensions/final1-report-normalization.json",
+      "bytes": 635,
+      "sha256": "dec0d1a043239f47385fe5c55b072270078dd1e34db05c3a1d94d21fa6cdffbc"
+    }
+  },
+  "partitions": {
+    "ci": {
+      "artifacts": {
+        "all-tests.json": {
+          "bytes": 145202,
+          "path": "artifacts/perps-extensions/final1-fast-ci/all-tests.json",
+          "sha256": "d1f57f2ab646c5a40d6aa1df2ed99afb4658030c4878e961ecd3019e5a8b2297"
+        },
+        "inventory.json": {
+          "bytes": 59577,
+          "path": "artifacts/perps-extensions/final1-fast-ci/inventory.json",
+          "sha256": "df4f96e42c2fb8d0c2a618b879638f3dbea35409e820a94f49b90adf6afc0ade"
+        },
+        "pr-selection.json": {
+          "bytes": 151,
+          "path": "artifacts/perps-extensions/final1-fast-ci/pr-selection.json",
+          "sha256": "f3158e440c6ecb5944b780b1c529e62926fdca160acb057ab699d1eea90ae90d"
+        }
+      },
+      "correctness": 2071,
+      "entrypoints": 215,
+      "production_gates": 77,
+      "tests": 2148,
+      "universe_sha256": "447e1cc984c119845c41272749b169790def2a379046cc404b7c266bf95ec039"
+    },
+    "quick": {
+      "artifacts": {
+        "all-tests.json": {
+          "bytes": 145202,
+          "path": "artifacts/perps-extensions/final1-fast-quick/all-tests.json",
+          "sha256": "d1f57f2ab646c5a40d6aa1df2ed99afb4658030c4878e961ecd3019e5a8b2297"
+        },
+        "inventory.json": {
+          "bytes": 59577,
+          "path": "artifacts/perps-extensions/final1-fast-quick/inventory.json",
+          "sha256": "df4f96e42c2fb8d0c2a618b879638f3dbea35409e820a94f49b90adf6afc0ade"
+        },
+        "pr-selection.json": {
+          "bytes": 151,
+          "path": "artifacts/perps-extensions/final1-fast-quick/pr-selection.json",
+          "sha256": "f3158e440c6ecb5944b780b1c529e62926fdca160acb057ab699d1eea90ae90d"
+        }
+      },
+      "correctness": 2071,
+      "entrypoints": 215,
+      "production_gates": 77,
+      "tests": 2148,
+      "universe_sha256": "447e1cc984c119845c41272749b169790def2a379046cc404b7c266bf95ec039"
+    }
+  },
+  "lanes": [
+    {
+      "id": "quick-production-gates",
+      "status": "passed",
+      "profile": "quick",
+      "seed": "0xdeadbeef",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": true
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 77,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 0,
+        "Invariant": 2,
+        "Unit": 75
+      },
+      "configured_budgets": {
+        "fuzz_runs": 256,
+        "invariant_depth": 128,
+        "invariant_runs": 16
+      },
+      "actual_fuzz_runs_per_fuzz_test": null,
+      "actual_invariant_execution": {
+        "tests": 2,
+        "runs_per_test_min": 16,
+        "runs_per_test_max": 16,
+        "total_calls": 4096,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 152.911,
+      "selected_test_id_sha256": "4e69d38f7c855246857a625e26a4444837ef213111668c30d7895cbbbb3d3716",
+      "per_test_evidence_sha256": "384fe8a5b9264ad9e1005f2225163f6294d85ceb3d0d8061f50787782c39363b",
+      "artifacts": {
+        "run.json": {
+          "bytes": 10951,
+          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/run.json",
+          "sha256": "3a26d7e0a83db68e0bd956afb432a2e3288a6033109ff7bf4d5f6beff2f98301"
+        },
+        "results.json": {
+          "bytes": 14868467,
+          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/results.json",
+          "sha256": "6a1a13a76005ef158ad5b8188c5052338d1fc816b22002512c269470e5b882de"
+        },
+        "execution-coverage.json": {
+          "bytes": 84,
+          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/execution-coverage.json",
+          "sha256": "75ca6b6dbf853c10ca9141fdb59714de36fc2cfdf661c387f36418c6919c3d8d"
+        },
+        "replay.sh": {
+          "bytes": 515,
+          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/replay.sh",
+          "sha256": "cb33405d46daa6fcaab201b7916276306af890ad69e006c13ea5ec4b64ecc0b0"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 774,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-result.json",
+          "sha256": "ee7defbc45f98835831cde666a5d0968e9c8028f8e50b4eec175ffff775cec11"
+        },
+        "source-guard-start.json": {
+          "bytes": 679,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-start.json",
+          "sha256": "9e82a82db033b2f93e5f1153e67124dc9138802d0b3002ba932e19c819168ab9"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-after.json",
+          "sha256": "4aaf783e220538e21b0aeceed37269c2320ecf4703808b5739f9b048ac0db558"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-before.json",
+          "sha256": "faf4d2ddc0cbe15015f49763e091176a2ba1c3b36411f9b1e1cfa059ee5480d1"
+        }
+      }
+    },
+    {
+      "id": "quick-correctness",
+      "status": "passed",
+      "profile": "quick",
+      "seed": "0xdeadbeef",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": false
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 2071,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 67,
+        "Invariant": 22,
+        "Unit": 1982
+      },
+      "configured_budgets": {
+        "fuzz_runs": 256,
+        "invariant_depth": 128,
+        "invariant_runs": 16
+      },
+      "actual_fuzz_runs_per_fuzz_test": 256,
+      "actual_invariant_execution": {
+        "tests": 22,
+        "runs_per_test_min": 16,
+        "runs_per_test_max": 16,
+        "total_calls": 45056,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 3058.874,
+      "selected_test_id_sha256": "fbd7dd88346ee6978a53f1fdbcd08a82c9f0a0255c630805d54bc4e8e14fb1f4",
+      "per_test_evidence_sha256": "44b8ff598c875938a3945669a1e2a62ca371666f9bfb7a97e400c93e937d981e",
+      "artifacts": {
+        "run.json": {
+          "bytes": 11016,
+          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/run.json",
+          "sha256": "e72d3bad5f1e7cdb91ada074c934d8b648c1217bed636bca3247fa87657cea1a"
+        },
+        "results.json": {
+          "bytes": 80064741,
+          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/results.json",
+          "sha256": "6d5c70ce6fbafcd057cad79dbd0cc6cc5407dcf7c2f5f5aadea501cc8fe35993"
+        },
+        "execution-coverage.json": {
+          "bytes": 88,
+          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/execution-coverage.json",
+          "sha256": "8bdf2a0091c0523d11678d0592911b9139ec84c6adec648c7e4c903f3436d879"
+        },
+        "replay.sh": {
+          "bytes": 516,
+          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/replay.sh",
+          "sha256": "1f92a9fa039a3e290e23d797e6a04ab578600a7aa1891953b61382f310402f00"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 774,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-result.json",
+          "sha256": "ee7defbc45f98835831cde666a5d0968e9c8028f8e50b4eec175ffff775cec11"
+        },
+        "source-guard-start.json": {
+          "bytes": 679,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-start.json",
+          "sha256": "9e82a82db033b2f93e5f1153e67124dc9138802d0b3002ba932e19c819168ab9"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-after.json",
+          "sha256": "4aaf783e220538e21b0aeceed37269c2320ecf4703808b5739f9b048ac0db558"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-before.json",
+          "sha256": "faf4d2ddc0cbe15015f49763e091176a2ba1c3b36411f9b1e1cfa059ee5480d1"
+        }
+      }
+    },
+    {
+      "id": "ci-production-gates",
+      "status": "passed",
+      "profile": "ci",
+      "seed": "0xdeadbeef",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": true
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 77,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 0,
+        "Invariant": 2,
+        "Unit": 75
+      },
+      "configured_budgets": {
+        "fuzz_runs": 2000,
+        "invariant_depth": 256,
+        "invariant_runs": 32
+      },
+      "actual_fuzz_runs_per_fuzz_test": null,
+      "actual_invariant_execution": {
+        "tests": 2,
+        "runs_per_test_min": 32,
+        "runs_per_test_max": 32,
+        "total_calls": 16384,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 247.57,
+      "selected_test_id_sha256": "4e69d38f7c855246857a625e26a4444837ef213111668c30d7895cbbbb3d3716",
+      "per_test_evidence_sha256": "14b0aa650c74dc64d57da4a8fd1ef96dc48a77212afcc291eef29341e6ce7497",
+      "artifacts": {
+        "run.json": {
+          "bytes": 10936,
+          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/run.json",
+          "sha256": "38064567b642c0b6a5f3d0e04e82e730ba8e612186a1217963e7ae89a0cd24ab"
+        },
+        "results.json": {
+          "bytes": 20109996,
+          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/results.json",
+          "sha256": "bc9f3c154789d4b4d112a11b4b2b9da991a54af3fb6d6f48055a895820130dcb"
+        },
+        "execution-coverage.json": {
+          "bytes": 84,
+          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/execution-coverage.json",
+          "sha256": "75ca6b6dbf853c10ca9141fdb59714de36fc2cfdf661c387f36418c6919c3d8d"
+        },
+        "replay.sh": {
+          "bytes": 512,
+          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/replay.sh",
+          "sha256": "2dda903515dbd2bb6bb54b91738e44803647eda18ba3f6134d2d9e367c466b4c"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 771,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-result.json",
+          "sha256": "43d79500bc4c67a6b52562f44b26f6318635ede10ca582a47e8a28d75ce5e1b4"
+        },
+        "source-guard-start.json": {
+          "bytes": 676,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-start.json",
+          "sha256": "105ac40eb2933b765273f99336bd3f97a32d1d9d10839c479f93d441a1d92b96"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-after.json",
+          "sha256": "4294c8a8e52931aabab97a16ff7635f4fdccca09469008170679c6121aa6dbc0"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-before.json",
+          "sha256": "297642ccfe32237343eeb75c5ed90602153ecfd4f59c77a663ca7a441e1e64d1"
+        }
+      }
+    },
+    {
+      "id": "ci-correctness",
+      "status": "passed",
+      "profile": "ci",
+      "seed": "0xdeadbeef",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": false
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 2071,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 67,
+        "Invariant": 22,
+        "Unit": 1982
+      },
+      "configured_budgets": {
+        "fuzz_runs": 2000,
+        "invariant_depth": 256,
+        "invariant_runs": 32
+      },
+      "actual_fuzz_runs_per_fuzz_test": 2000,
+      "actual_invariant_execution": {
+        "tests": 22,
+        "runs_per_test_min": 32,
+        "runs_per_test_max": 32,
+        "total_calls": 180224,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 3638.219,
+      "selected_test_id_sha256": "fbd7dd88346ee6978a53f1fdbcd08a82c9f0a0255c630805d54bc4e8e14fb1f4",
+      "per_test_evidence_sha256": "2758a2339e7465ec45253c07f79b46438932413eac0d56d17d082cdaab0ccd06",
+      "artifacts": {
+        "run.json": {
+          "bytes": 11002,
+          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/run.json",
+          "sha256": "3bdfa936cb4868a4a41cfae783f7e601811c0823542e5cd04f97e8456109097d"
+        },
+        "results.json": {
+          "bytes": 88740440,
+          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/results.json",
+          "sha256": "c43743bc74eed768540e342b2b345990dba50c7485e4cf8a2685e4d3cdb171ef"
+        },
+        "execution-coverage.json": {
+          "bytes": 88,
+          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/execution-coverage.json",
+          "sha256": "8bdf2a0091c0523d11678d0592911b9139ec84c6adec648c7e4c903f3436d879"
+        },
+        "replay.sh": {
+          "bytes": 513,
+          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/replay.sh",
+          "sha256": "e9ced25f1e9c5f97674b6a7c49f1be86078110bfb1cb355327a500d0dee67d53"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 771,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-result.json",
+          "sha256": "43d79500bc4c67a6b52562f44b26f6318635ede10ca582a47e8a28d75ce5e1b4"
+        },
+        "source-guard-start.json": {
+          "bytes": 676,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-start.json",
+          "sha256": "105ac40eb2933b765273f99336bd3f97a32d1d9d10839c479f93d441a1d92b96"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-after.json",
+          "sha256": "4294c8a8e52931aabab97a16ff7635f4fdccca09469008170679c6121aa6dbc0"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-before.json",
+          "sha256": "297642ccfe32237343eeb75c5ed90602153ecfd4f59c77a663ca7a441e1e64d1"
+        }
+      }
+    },
+    {
+      "id": "full-production-ci",
+      "status": "passed",
+      "profile": "ci",
+      "seed": "0xdeadbeef",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": true
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 2148,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 67,
+        "Invariant": 24,
+        "Unit": 2057
+      },
+      "configured_budgets": {
+        "fuzz_runs": 2000,
+        "invariant_depth": 256,
+        "invariant_runs": 32
+      },
+      "actual_fuzz_runs_per_fuzz_test": 2000,
+      "actual_invariant_execution": {
+        "tests": 24,
+        "runs_per_test_min": 32,
+        "runs_per_test_max": 32,
+        "total_calls": 196608,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 2844.79,
+      "selected_test_id_sha256": "447e1cc984c119845c41272749b169790def2a379046cc404b7c266bf95ec039",
+      "per_test_evidence_sha256": "c0ef73af8238a01ebfceaad244d428dd3312b2a065afb3065d6c5fd5a5789f37",
+      "artifacts": {
+        "run.json": {
+          "bytes": 3172,
+          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/run.json",
+          "sha256": "5c071acc969d4e53f31d14a383b2ba06ade8c7c29b2c73cdb155978dbc9f168c"
+        },
+        "results.json": {
+          "bytes": 108415107,
+          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/results.json",
+          "sha256": "932a81515fb2e84a4e170709b6a284dcd4b3a62056111a45d1e4f7b9f1f6a27e"
+        },
+        "execution-coverage.json": {
+          "bytes": 88,
+          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/execution-coverage.json",
+          "sha256": "cb88ae4b7d42ce538ccdb15a6d23fb0dbf68d0cce0d43e98da434b5fb05a625d"
+        },
+        "replay.sh": {
+          "bytes": 891,
+          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/replay.sh",
+          "sha256": "08dcb09d6ea7d28c06e39522cf4143275a8c751618e0ed47a21cf00b3fb165f6"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 965,
+          "path": "artifacts/perps-extensions/final1-production-ci/source-guard-result.json",
+          "sha256": "41a87a58397090d81ca6830bb873b4138acc7cb6eb806eae1f0aadb5f8f56ab5"
+        },
+        "source-guard-start.json": {
+          "bytes": 870,
+          "path": "artifacts/perps-extensions/final1-production-ci/source-guard-start.json",
+          "sha256": "c3a2e8cf0100634d3f09c3876c15fea39d6d482627fa8da4ab832b628d2f6f6b"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-production-ci/source-manifest-after.json",
+          "sha256": "5f35bb818f2c3ddc37185a51553ea86585ef3d3ac208ddb30219b50441efd0de"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-production-ci/source-manifest-before.json",
+          "sha256": "acabccb1b2f936426ad056f27717f3e9cd0d1ddaa781ec6ce677acf2cd09d916"
+        }
+      }
+    },
+    {
+      "id": "mixed-audit-0xdeadbeef",
+      "status": "passed",
+      "profile": "audit",
+      "seed": "0xdeadbeef",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": true
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 10,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 0,
+        "Invariant": 1,
+        "Unit": 9
+      },
+      "configured_budgets": {
+        "fuzz_runs": 20000,
+        "invariant_depth": 1000,
+        "invariant_runs": 256
+      },
+      "actual_fuzz_runs_per_fuzz_test": null,
+      "actual_invariant_execution": {
+        "tests": 1,
+        "runs_per_test_min": 256,
+        "runs_per_test_max": 256,
+        "total_calls": 256000,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 1264.205,
+      "selected_test_id_sha256": "7507868b20bdb0fec24db4e68afe0e406e4e1afe54a67bafee67f94223f4f086",
+      "per_test_evidence_sha256": "7beed4a52288b99521149254127ae4e7b737f2d10ec238afea3ee5b327cc1da9",
+      "artifacts": {
+        "run.json": {
+          "bytes": 3291,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/run.json",
+          "sha256": "3d07915c71cb15b5e4d1ec7e3a27a0a3fdb4152fe883c603b024d1d36301e83e"
+        },
+        "results.json": {
+          "bytes": 12391808,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/results.json",
+          "sha256": "330464cbd1d3e6bae1782d7d388b2bfd73a98f7447cfeebd8b95947cb3f94233"
+        },
+        "execution-coverage.json": {
+          "bytes": 84,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/execution-coverage.json",
+          "sha256": "9fac80450ad29c95a103da8b9000b89ea5dc1a5ee0317e287ee5cf4a88d84649"
+        },
+        "replay.sh": {
+          "bytes": 961,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/replay.sh",
+          "sha256": "42f9533795a2906b0c9bf86c4db9e16f9942aea7fcca5002c15691975ef87812"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 1017,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-guard-result.json",
+          "sha256": "c3eada4d1a09ea1647e9371fce37f4193164faa4e7f8afb58ec830a7ae06487d"
+        },
+        "source-guard-start.json": {
+          "bytes": 922,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-guard-start.json",
+          "sha256": "597551cb65bec85b005a3bb6ea119b8bc2817864b6a91dafdc95b37cd0254a77"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-manifest-after.json",
+          "sha256": "ef8d236e27c3d26561e95a951f31b5e3d948f1dc584ea2ef328fc3fcf2a79ffb"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-manifest-before.json",
+          "sha256": "fd18764c72c079b4887fba339feb5366ad9ac3aaee4750320a2709084aae4176"
+        }
+      }
+    },
+    {
+      "id": "mixed-audit-0x1",
+      "status": "passed",
+      "profile": "audit",
+      "seed": "0x1",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": true
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 10,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 0,
+        "Invariant": 1,
+        "Unit": 9
+      },
+      "configured_budgets": {
+        "fuzz_runs": 20000,
+        "invariant_depth": 1000,
+        "invariant_runs": 256
+      },
+      "actual_fuzz_runs_per_fuzz_test": null,
+      "actual_invariant_execution": {
+        "tests": 1,
+        "runs_per_test_min": 256,
+        "runs_per_test_max": 256,
+        "total_calls": 256000,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 1267.424,
+      "selected_test_id_sha256": "7507868b20bdb0fec24db4e68afe0e406e4e1afe54a67bafee67f94223f4f086",
+      "per_test_evidence_sha256": "92ef358459db78f4c4dbc32516468b4f21fd17db7dcdaf9207df0b02a48ace5d",
+      "artifacts": {
+        "run.json": {
+          "bytes": 3235,
+          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/run.json",
+          "sha256": "01e41b35f6565493c8d26c49eef3dca05795a31e85bd7ed1d093d05eb7265ffc"
+        },
+        "results.json": {
+          "bytes": 12586385,
+          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/results.json",
+          "sha256": "2c6ccf1d4179e02cb561dc4caa50705be1edc0b7a72617bf4d50f6558b0adc34"
+        },
+        "execution-coverage.json": {
+          "bytes": 84,
+          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/execution-coverage.json",
+          "sha256": "9fac80450ad29c95a103da8b9000b89ea5dc1a5ee0317e287ee5cf4a88d84649"
+        },
+        "replay.sh": {
+          "bytes": 940,
+          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/replay.sh",
+          "sha256": "d76ee19de06edc935494299f13a218eb2f7536807ad8fc35153b26569205bcf9"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 1010,
+          "path": "artifacts/perps-extensions/final1-audit-1/source-guard-result.json",
+          "sha256": "f2f9643e61faaca4c7a5263c282303aa36c69b36da46e70db22ed615d7e3a2e9"
+        },
+        "source-guard-start.json": {
+          "bytes": 915,
+          "path": "artifacts/perps-extensions/final1-audit-1/source-guard-start.json",
+          "sha256": "21c3ad15d92daea46c1e539e4a10b392d22ca50619dbef6e2e54616b189a4eb3"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-audit-1/source-manifest-after.json",
+          "sha256": "5c44d52c4a065a6dc79c49b71516b842385ebaf3b306de68145806eb9701e0a9"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-audit-1/source-manifest-before.json",
+          "sha256": "531bdea0452c112346f2daab05c96aff082ca8c170266abcf9bc001b5bc971ad"
+        }
+      }
+    },
+    {
+      "id": "mixed-audit-0x2",
+      "status": "passed",
+      "profile": "audit",
+      "seed": "0x2",
+      "compiler": {
+        "optimizer": true,
+        "optimizer_runs": 200,
+        "solc": "0.8.35",
+        "via_ir": true
+      },
+      "counts": {
+        "failed": 0,
+        "passed": 10,
+        "skipped": 0
+      },
+      "test_kinds": {
+        "Fuzz": 0,
+        "Invariant": 1,
+        "Unit": 9
+      },
+      "configured_budgets": {
+        "fuzz_runs": 20000,
+        "invariant_depth": 1000,
+        "invariant_runs": 256
+      },
+      "actual_fuzz_runs_per_fuzz_test": null,
+      "actual_invariant_execution": {
+        "tests": 1,
+        "runs_per_test_min": 256,
+        "runs_per_test_max": 256,
+        "total_calls": 256000,
+        "total_reverts": 0,
+        "failed_corpus_replays": 0,
+        "handler_discards": 0
+      },
+      "duration_seconds": 1261.092,
+      "selected_test_id_sha256": "7507868b20bdb0fec24db4e68afe0e406e4e1afe54a67bafee67f94223f4f086",
+      "per_test_evidence_sha256": "262dc7c896278f2b2d0e8dac71b0d1e01a2553676f71a6893268535cbb3813b7",
+      "artifacts": {
+        "run.json": {
+          "bytes": 3235,
+          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/run.json",
+          "sha256": "8af1893546a8178a7e1ae16b7efbafce93cb005dec344bc8c78d7932946655bb"
+        },
+        "results.json": {
+          "bytes": 12276968,
+          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/results.json",
+          "sha256": "b91a872ba406224f8f1e9df108e744cf838344da8bc187f9a3855a55452a7b1d"
+        },
+        "execution-coverage.json": {
+          "bytes": 84,
+          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/execution-coverage.json",
+          "sha256": "9fac80450ad29c95a103da8b9000b89ea5dc1a5ee0317e287ee5cf4a88d84649"
+        },
+        "replay.sh": {
+          "bytes": 940,
+          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/replay.sh",
+          "sha256": "7b303500dbebe3d86957571ec41c4bbfaa61e2995a239831e27360cc2c4604e1"
+        }
+      },
+      "source_guard": {
+        "source-guard-result.json": {
+          "bytes": 1010,
+          "path": "artifacts/perps-extensions/final1-audit-2/source-guard-result.json",
+          "sha256": "959401d1d67848a51b9996a9e5ee719973cdb2d7f2e1e24481b69cb3df7db2cd"
+        },
+        "source-guard-start.json": {
+          "bytes": 915,
+          "path": "artifacts/perps-extensions/final1-audit-2/source-guard-start.json",
+          "sha256": "1f32aa1238907c286fe8e74ea1193c75b2d4e2dfea44038f363c8978ee0c3058"
+        },
+        "source-manifest-after.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-audit-2/source-manifest-after.json",
+          "sha256": "29931d67222513439548066f8cfbab0382debc11ef62b30774e6865dee33fe19"
+        },
+        "source-manifest-before.json": {
+          "bytes": 158313,
+          "path": "artifacts/perps-extensions/final1-audit-2/source-manifest-before.json",
+          "sha256": "6b97d1fad0ee18172ed86493ce98615bf68637a8526f5334b20418b6069f0cd0"
+        }
+      }
+    }
+  ],
+  "changed_invariant_audit": {
+    "audit_policy": "Three audit seeds cover new/changed invariant test campaigns and changed test-support closures. Transitive production-source impact is reported separately and receives complete production CI; it is not represented as a complete package audit.",
+    "distinct_invariants": [
+      "packages/perps/test/perps/invariant/properties/PerpMixedAccountingInvariant.t.sol:PerpMixedAccountingInvariantTest::invariant_PersistentPublicMixedAccounting"
+    ],
+    "seeds": [
+      "0xdeadbeef",
+      "0x1",
+      "0x2"
+    ],
+    "selection_basis": {
+      "bytes": 91552,
+      "path": "artifacts/perps-extensions/final1-frozen/invariant-dependency-closure.json",
+      "sha256": "fb7ff0709effc4dc0bf203ad4a1534061def9d26dceb6a055c3f636f44e4cf8a"
+    },
+    "total_calls": 768000,
+    "transitive_runtime_invariant_entrypoints": [
+      "packages/perps/test/perps/invariant/properties/GovernedSeniorCapacityInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/OracleEthConservationInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/OracleSynchronizationInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpAccountingInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpClosePreviewParityInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpEconomicConservationInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpExplicitAccountingInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpFeeFlowInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpHousePoolLifecycleInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpIndependentClaimInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpMixedAccountingInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpMultiAccountInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpOracleBoundaryInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpOraclePathInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpPreviewInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpTerminalNavBruteForceInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpTraderClaimInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpValueConservationInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpVpiFrozenAccountingInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpWaterfallReferenceInvariant.t.sol"
+    ]
+  },
+  "production_fix": {
+    "summary": "A flat historical-price open checkpoints both carry indexes using the old side borrowing bases and depth before adding new exposure, while preserving a newer cached accounting mark.",
+    "source": "packages/perps/src/CfdEngine.sol",
+    "source_sha256": "e709a8f9dfb5b904622e5d3ba3f246c49497a79ae0ba128b9e9d0824a52a0758",
+    "regression": "packages/perps/test/perps/accounting/carry/HistoricalOpenCarry.t.sol",
+    "regression_sha256": "d33fdf20de4f4276f008b95eb0de6b561bfd68dfca46f6bec4d7abb3c63e31b7",
+    "proof": {
+      "path": "artifacts/perps-extensions/final1-preflight/perps-historical-open-size-safe-proof/manifest.json",
+      "bytes": 2340,
+      "sha256": "96b3eff015028d59fda61eb453c5b7ae247f29a47b4fb487afba9dc0a53e80a8"
+    },
+    "fail_before": {
+      "compiler_mode": "non-IR",
+      "passed": 0,
+      "failed": 3,
+      "skipped": 0
+    },
+    "pass_after": {
+      "compiler_mode": "production via-IR",
+      "regressions_passed": 3,
+      "unchanged_runtime_gate_passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "runtime_bytes": 24423,
+    "unchanged_runtime_gate_bytes": 24439,
+    "api_abi_storage_layout_changes": false
+  },
+  "supplementary_existing_carry_regressions": {
+    "counts": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "run": {
+      "path": "artifacts/perps-extensions/final1-carry-smoke3/existing-increases/run.json",
+      "bytes": 3800,
+      "sha256": "84607c948916fb47c4b4ca77f717e61848d2d6238a1b4a1721752d16fbae2c33"
+    },
+    "coverage": {
+      "path": "artifacts/perps-extensions/final1-carry-smoke3/existing-increases/execution-coverage.json",
+      "bytes": 82,
+      "sha256": "e2d4e480a1522b7f125af6ec91d63ae27477461307337b9ecc8707e7ecc03f11"
+    },
+    "results": {
+      "path": "artifacts/perps-extensions/final1-carry-smoke3/existing-increases/results.json",
+      "bytes": 71141,
+      "sha256": "ee0043c821854bb1c36af5cf38d117dd54ae156018d0e83fc715088b481e5f52"
+    },
+    "source_guard": {
+      "path": "artifacts/perps-extensions/final1-carry-smoke3/source-guard-result.json",
+      "bytes": 1270,
+      "sha256": "75392e23e3bfdd48c77cc6595be2a25e1efe5c8a4730db24ca97a91c9e000fbf"
+    }
+  },
+  "repository_checks": {
+    "status": "passed",
+    "report": {
+      "path": "artifacts/perps-extensions/final1-static-final/results.json",
+      "bytes": 2922,
+      "sha256": "a7e1cdfd06ade788188afbeb9b820d9843b78f40218c2d1958a06b4c5ae36362"
+    },
+    "checks": [
+      {
+        "name": "format",
+        "command": [
+          "forge",
+          "fmt",
+          "--check",
+          "packages",
+          "test",
+          "script"
+        ],
+        "started_utc": "2026-10-11T10:31:53.852479+00:00",
+        "finished_utc": "2026-10-11T10:31:54.180566+00:00",
+        "exit_code": 0,
+        "log": "artifacts/perps-extensions/final1-static-final/format.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "diff",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "started_utc": "2026-10-11T10:31:54.181039+00:00",
+        "finished_utc": "2026-10-11T10:31:54.203416+00:00",
+        "exit_code": 0,
+        "log": "artifacts/perps-extensions/final1-static-final/diff.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "boundaries",
+        "command": [
+          "bash",
+          "scripts/check-package-boundaries.sh"
+        ],
+        "started_utc": "2026-10-11T10:31:54.203771+00:00",
+        "finished_utc": "2026-10-11T10:31:54.321062+00:00",
+        "exit_code": 0,
+        "log": "artifacts/perps-extensions/final1-static-final/boundaries.log",
+        "sha256": "7c017733d9e25d79e1cb4dcbf83fa1b42bad5141a67e787c65d16927a4c489ee"
+      },
+      {
+        "name": "test-map",
+        "command": [
+          "python3",
+          "scripts/check-perps-test-map.py"
+        ],
+        "started_utc": "2026-10-11T10:31:54.321871+00:00",
+        "finished_utc": "2026-10-11T10:31:54.457835+00:00",
+        "exit_code": 0,
+        "log": "artifacts/perps-extensions/final1-static-final/test-map.log",
+        "sha256": "9ca818cb61663e0130bf5067933859cb8cefd5deea070a651bac055ee5c4e9a0"
+      },
+      {
+        "name": "vectors",
+        "command": [
+          "python3",
+          "scripts/generate-perps-carry-vectors.py",
+          "--check"
+        ],
+        "started_utc": "2026-10-11T10:31:54.458484+00:00",
+        "finished_utc": "2026-10-11T10:31:54.502204+00:00",
+        "exit_code": 0,
+        "log": "artifacts/perps-extensions/final1-static-final/vectors.log",
+        "sha256": "92f4e525f83c58f6ab5fc173527a245b8223384753608cc1f192fc0018a4f53c"
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "python3",
+          "scripts/perps-test-inventory.py"
+        ],
+        "started_utc": "2026-10-11T10:31:54.502545+00:00",
+        "finished_utc": "2026-10-11T10:31:54.590589+00:00",
+        "exit_code": 0,
+        "log": "artifacts/perps-extensions/final1-static-final/inventory.log",
+        "sha256": "3dbc2498a8b6efd2acdf43750e4399bdbb2318bebcb21077e1f32b718127b1ea"
+      },
+      {
+        "name": "runner-tests",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "scripts",
+          "-p",
+          "test_perps*.py"
+        ],
+        "started_utc": "2026-10-11T10:31:54.591274+00:00",
+        "finished_utc": "2026-10-11T10:32:22.343684+00:00",
+        "exit_code": 0,
+        "log": "artifacts/perps-extensions/final1-static-final/runner-tests.log",
+        "sha256": "9c9ec54f59741982fca1308f5dc923ad3ca197b1cec581da187a6067c68f335e"
+      }
+    ],
+    "runner_tests_passed": 34,
+    "test_map_references": 170,
+    "checked_in_carry_vectors": 61
+  },
+  "current_fault_controls": {
+    "evidence_scope": "Named tests in the complete current-source execution selections; not a claim to have rerun historical compiled-production mutation campaigns.",
+    "files": [
+      "packages/perps/test/perps/accounting/carry/CarryReferenceLedger.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpMixedAccountingInvariant.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpMixedLiquidation.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpMixedLpLifecycle.t.sol",
+      "packages/perps/test/perps/invariant/properties/PerpMixedPendingOrders.t.sol"
+    ],
+    "detected_faults": [
+      "Double carry collection, lost arrears and phantom carry cash",
+      "Cross-account settlement credit and unrecorded pool cash",
+      "Corrupted old claims, terminal arrears, retained cash and keeper credits",
+      "Stale LP pricing, corrupted cumulative entitlements, wrong withdrawal rounding and premature dust sweep",
+      "Missing pending margin and lost queue head"
+    ]
+  },
+  "post_test_derived_metadata": {
+    "scripts/perps-shard-weights.json": {
+      "current_sha256": "6f5c7e15d8aaee9e7c44911dbf412cfcec28b3822cb8742b9278e0e63741a32b",
+      "tested_sha256": "7694d67dcfd934543a3f0eba3fcf604827c0062f3de75b111fd87364de500a6d"
+    }
+  },
+  "historical_evidence": {
+    "immutable_git_pointer": {
+      "commit": "340c63119ee67d931eb352ac4b6f3c789089ce8e",
+      "git_blob": "2a557f1ee1cf12fb7be6823afcc26e0eedbc8fb8",
+      "path": "packages/perps/test/perps/VALIDATION.json",
+      "sha256": "b4fc3a140cb32598356bfc72eecd9c3d56d6fac9b85b00fdec29885649fd48e2"
+    },
+    "prior_validation": {
+      "bytes": 275030,
+      "path": "artifacts/perps-extensions/final1-frozen/historical/VALIDATION.previous.json",
+      "sha256": "b4fc3a140cb32598356bfc72eecd9c3d56d6fac9b85b00fdec29885649fd48e2"
+    },
+    "status": "historical; does not establish current-source acceptance"
+  },
+  "preflight_evidence": {
+    "manifest": {
+      "path": "artifacts/perps-extensions/final1-preflight/manifest.json",
+      "bytes": 2827,
+      "sha256": "12c0287c0687f1d6cc20a8a2b508de9ff170b206aaaaa00bdbcdc793cb821f1e"
+    },
+    "note": "Preserves unsuccessful preflight classifications, the original runtime-size failure and focused runs. These are historical development evidence, not substitutes for final-source acceptance."
+  },
+  "limitations": [
+    "No fork/live-network or instrumented coverage run is asserted by this report.",
+    "Three targeted main-mixed audit seeds are not a complete package audit.",
+    "Finite input domains and mocked oracle data do not establish complete economic correctness or real-network verification.",
+    "Recorded corpus locations do not alone prove empty starting corpora.",
+    "Artifacts are local; these hashes do not establish remote availability.",
+    "Replay requires the preserved dependency environment and a fresh artifact destination; recorded replay scripts may otherwise overwrite evidence."
+  ],
+  "evidence_availability": "Detailed logs, results and source archives are local ignored artifacts. Their hashes and replay metadata are recorded here; remote availability is not asserted. The previous tracked validation is retained by the immutable Git pointer."
+}

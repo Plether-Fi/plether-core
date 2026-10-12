@@ -2,7 +2,6 @@
 pragma solidity 0.8.35;
 
 import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
-import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
 import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
@@ -765,22 +764,20 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
     }
 
     function _assertInvariant_LiquidationWriteoffsNeverBecomeDebtOrPreserveExecutionBounties() internal view {
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
+        for (uint256 i; i < handler.actorCount(); ++i) {
             address account = _account(handler.actorAt(i));
-            PerpGhostLedger.LiquidationSnapshot memory snapshot = handler.liquidationSnapshot(account);
-            if (!snapshot.liquidated) {
-                continue;
-            }
-
             assertEq(
-                snapshot.legacyDebtDiagnosticUsdc,
+                handler.ghost().liquidationDebtDiagnosticTotal(account),
                 0,
-                "Liquidation price-loss shortfall must remain a diagnostic writeoff"
+                "Every liquidation price-loss shortfall must remain a diagnostic writeoff"
             );
+            (, uint256 liveReserves, uint256 reserved) = handler.liquidatedGenerationExposure(account);
+            assertEq(liveReserves, 0, "Liquidated generations must forfeit all reservations");
+            assertEq(reserved, 0, "Liquidation must forfeit old-generation bounty and margin reserves");
             assertEq(
-                handler.accountExecutionBountyReserve(account),
-                0,
-                "Liquidation must forfeit tracked execution bounty reserves"
+                usdc.balanceOf(account),
+                handler.ghost().expectedWalletFromSubmittedFlows(account),
+                "Wallet credits must equal submitted withdrawal flows"
             );
         }
     }

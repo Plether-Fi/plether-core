@@ -31,7 +31,8 @@ The follow-up cleanup also removes `HousePool.recordProtocolInflow`, its unused 
 and the retired clearinghouse selectors `reserveCloseExecutionBountyFromPositionMargin` and
 `reserveStaleCloseExecutionBountyFromPositionMargin`. Engine and sidecar inflows continue through
 `recordClaimantInflow`; owner-admitted raw donations use `accountExcess`. The two retired bounty selectors previously
-always reverted. Close bounties continue to use the maintained free-settlement path.
+always reverted. Current close-bounty funding uses the Engine commitment path, taking post-carry free settlement
+first and eligible position pledge second.
 
 Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
 `OrderOraclePolicyLib`. Maintained planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
@@ -560,10 +561,9 @@ Profitable closes and some liquidation residuals can create a trader claim balan
 
 Order and liquidation bounties are margin transfers inside `MarginClearinghouse`.
 
-- Open execution bounties are locked from free settlement as action reserve. Close commitment first collects carry,
-  then funds the bounty from free settlement followed by eligible position pledge. Pledge-funded reservation reduces
-  position margin and updates its borrow base without moving custody; partial commitments must retain strict
-  maintenance/FAD health for the exposed position.
+- Open execution bounties are locked from free settlement as action reserve at commit time. Close execution bounties
+  use post-carry free settlement first, then reclassify eligible PnL pledge as action reserve without moving tokens.
+  Pledge-funded reservation reduces position margin and updates its borrowing basis and terminal curve immediately.
 - Live-position custody is split between a price-PnL pledge and a dedicated liquidation-charge reserve. Pending-order
   and action reserves are separate again; only the PnL pledge enters the terminal price-loss cap.
 - Position protection snapshots and reserves a trigger bounty plus a linked-close execution bounty at creation. The
@@ -1076,11 +1076,13 @@ authorizes settlement.
 - Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.01 USDC, 0.20 USDC]`.
 - Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
 - Position protection reserves a governance-configured trigger bounty capped at `1 USDC` plus the snapshotted close
-  bounty. Both protection bounties come from free settlement.
+  bounty. Both come from free settlement; a generated close attempt receives that existing reservation.
 - Partial close size is floored by the engine `minBountyUsdc / bountyBps` notional threshold at the commit reference price, preventing dust closes from occupying the FIFO queue for a flat bounty.
 - Open bounties come from free settlement.
-- Ordinary close bounties use free settlement after carry collection, then eligible position pledge if needed. Claims,
-  unrealized gains, liquidation reserve, VPI backing, and other orders' reservations cannot fund them.
+- Close bounties use free settlement first, then eligible position pledge after carry collection. Partial commitments
+  require no unpaid carry and strict post-reservation maintenance/FAD health; zero-bounty commitments still validate
+  admission. Claims and other protected reserves cannot fund the bounty. Funding provenance and position-generation
+  refund rules are specified in [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy).
 - Failed-order rewards stay independent from pool liquidity because they are paid from clearinghouse-reserved trader value rather than LP cash.
 
 ### Execute rules

@@ -19,11 +19,8 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
-import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 
-import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
-import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
@@ -283,136 +280,6 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
             healingShortTrader, CfdTypes.Side.SHORT, healingSize, 1000e6, 1e8, uint64(block.timestamp)
         );
         assertTrue(preview.valid, "Preview should admit an incremental skew reduction above the cap");
-    }
-
-}
-
-contract BasketPriceHarness {
-
-    IPyth internal localPyth;
-    bytes32[] internal localPythFeedIds;
-    uint256[] internal localQuantities;
-    uint256[] internal localBasePrices;
-    bool[] internal localInversions;
-
-    constructor(
-        address _pyth,
-        bytes32[] memory _feedIds,
-        uint256[] memory _quantities,
-        uint256[] memory _basePrices,
-        bool[] memory _inversions
-    ) {
-        if (
-            _feedIds.length == 0 || _feedIds.length != _quantities.length || _feedIds.length != _basePrices.length
-                || _feedIds.length != _inversions.length
-        ) {
-            revert IPletherOracle.PletherOracle__ArrayLengthMismatch(
-                _feedIds.length, _quantities.length, _basePrices.length, _inversions.length
-            );
-        }
-        localPyth = IPyth(_pyth);
-        localPythFeedIds = _feedIds;
-        localQuantities = _quantities;
-        localBasePrices = _basePrices;
-        localInversions = _inversions;
-    }
-
-    function computeBasketPrice(
-        uint256 maxStaleness,
-        uint256 maxPublishTimeDivergence
-    ) external view returns (uint256, uint256) {
-        uint256 minPublishTime = type(uint256).max;
-        uint256 maxPublishTime;
-        uint256 basketPrice;
-
-        for (uint256 i = 0; i < localPythFeedIds.length; i++) {
-            PythStructs.Price memory p = localPyth.getPriceUnsafe(localPythFeedIds[i]);
-            if (p.publishTime > block.timestamp || block.timestamp - p.publishTime > maxStaleness) {
-                revert IPletherOracle.PletherOracle__StalePrice(
-                    IPletherOracle.PriceMode.OrderExecution,
-                    localPythFeedIds[i],
-                    p.publishTime,
-                    maxStaleness,
-                    block.timestamp
-                );
-            }
-
-            uint256 norm =
-                localInversions[i] ? _localInvertPythPrice(p.price, p.expo) : _localNormalizePythPrice(p.price, p.expo);
-            basketPrice += (norm * localQuantities[i])
-                / (localBasePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
-
-            if (p.publishTime < minPublishTime) {
-                minPublishTime = p.publishTime;
-            }
-            if (p.publishTime > maxPublishTime) {
-                maxPublishTime = p.publishTime;
-            }
-        }
-
-        if (maxPublishTime > minPublishTime + maxPublishTimeDivergence) {
-            revert IPletherOracle.PletherOracle__PublishTimeDivergence(
-                IPletherOracle.PriceMode.OrderExecution, minPublishTime, maxPublishTime, maxPublishTimeDivergence
-            );
-        }
-        if (basketPrice == 0) {
-            revert IPletherOracle.PletherOracle__ZeroBasketPrice();
-        }
-
-        return (basketPrice, minPublishTime);
-    }
-
-    function _localInvertPythPrice(
-        int64 price,
-        int32 expo
-    ) internal pure returns (uint256 normalizedPrice) {
-        if (price <= 0) {
-            revert IPletherOracle.PletherOracle__InvalidPrice(bytes32(0), price);
-        }
-        uint256 positivePrice = uint256(uint64(price));
-        uint256 scaledPrecision = 10 ** uint256(uint32(26 - expo));
-        uint256 scaledInverse = (scaledPrecision + (positivePrice / 2)) / positivePrice;
-        return scaledInverse / 1e18;
-    }
-
-    function _localNormalizePythPrice(
-        int64 price,
-        int32 expo
-    ) internal pure returns (uint256 normalizedPrice) {
-        if (price <= 0) {
-            revert IPletherOracle.PletherOracle__InvalidPrice(bytes32(0), price);
-        }
-
-        uint256 rawPrice = uint256(uint64(price));
-        if (expo == -8) {
-            return rawPrice;
-        }
-        if (expo > -8) {
-            return rawPrice * (10 ** uint256(uint32(expo + 8)));
-        }
-        return rawPrice / (10 ** uint256(uint32(-8 - expo)));
-    }
-
-}
-
-contract NormalizePythHarness {
-
-    function normalizePythPrice(
-        int64 price,
-        int32 expo
-    ) external pure returns (uint256) {
-        if (price <= 0) {
-            revert IPletherOracle.PletherOracle__InvalidPrice(bytes32(0), price);
-        }
-
-        uint256 rawPrice = uint256(uint64(price));
-        if (expo == -8) {
-            return rawPrice;
-        }
-        if (expo > -8) {
-            return rawPrice * (10 ** uint256(uint32(expo + 8)));
-        }
-        return rawPrice / (10 ** uint256(uint32(-8 - expo)));
     }
 
 }

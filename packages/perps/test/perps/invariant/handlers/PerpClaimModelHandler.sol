@@ -10,17 +10,25 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
-/// @notice Persistent claim reference model for funded, whole-position trades at a fixed timestamp.
+/// @notice Persistent claim and withdrawal-reserve model for funded whole-position trades at a fixed timestamp.
 /// @dev Expected claims use only this ledger and submitted lots/prices/fee rate. No planner, preview, event, or
 ///      production claim balance supplies an expected value. Router authorization and the real LP waterfall are
 ///      outside this Engine-settlement harness; its mock pool deliberately controls physical payout liquidity.
+///      Generated entries span 17–251 lots and $0.80000001–$1.20000003, including exact-basis and buffer dust.
 contract PerpClaimModelHandler is Test {
 
-    uint256 internal constant LOTS = 100;
-    uint256 internal constant ENTRY_PRICE = 1e8;
     uint256 internal constant PRICE_MOVE = 0.5e8;
-    uint256 internal constant PNL_USDC = LOTS * PRICE_MOVE;
     uint256 internal constant MARGIN_USDC = 20_000e6;
+    uint256 internal constant CAP_PRICE = 2e8;
+
+    struct CloseAmounts {
+        uint256 lots;
+        uint256 price;
+        uint256 fee;
+        uint256 pnl;
+        uint256 poolBefore;
+        uint256 settlementBefore;
+    }
 
     CfdEngine public immutable engine;
     MarginClearinghouse public immutable clearinghouse;
@@ -35,6 +43,8 @@ contract PerpClaimModelHandler is Test {
     mapping(address => uint256) public expectedClaim;
     mapping(address => bool) public expectedOpen;
     mapping(address => CfdTypes.Side) public expectedSide;
+    mapping(address => uint256) public expectedLots;
+    mapping(address => uint256) public expectedEntryCostUsdc;
     uint256 public expectedTotalClaims;
     uint256 public attempts;
     uint256 public skipped;
@@ -82,6 +92,25 @@ contract PerpClaimModelHandler is Test {
         uint256 actorSeed,
         bool shortSide
     ) external {
+        _open(actorSeed, shortSide, 100, 1e8);
+    }
+
+    /// @notice Broader entry domain for persistent reserve and claim transitions, retaining the fixed examples above.
+    function openAt(
+        uint256 actorSeed,
+        bool shortSide,
+        uint256 lotsSeed,
+        uint256 entryPriceSeed
+    ) external {
+        _open(actorSeed, shortSide, bound(lotsSeed, 17, 251), bound(entryPriceSeed, 80_000_001, 120_000_003));
+    }
+
+    function _open(
+        uint256 actorSeed,
+        bool shortSide,
+        uint256 lots,
+        uint256 entryPrice
+    ) internal {
         address account = accounts[actorSeed % accounts.length];
         if (expectedOpen[account]) {
             skipped++;
@@ -103,15 +132,17 @@ contract PerpClaimModelHandler is Test {
         CfdTypes.Side side = shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
         uint256 poolBefore = usdc.balanceOf(address(pool));
-        (bool ok, bytes memory err) = _trade(account, side, ENTRY_PRICE, false);
+        (bool ok, bytes memory err) = _trade(account, side, lots, entryPrice, false);
         if (!ok) {
             _unexpected(err);
             return;
         }
         expectedOpen[account] = true;
         expectedSide[account] = side;
+        expectedLots[account] = lots;
+        expectedEntryCostUsdc[account] = lots * entryPrice;
         successfulOpens++;
-        uint256 fee = LOTS * ENTRY_PRICE * feeBps / 10_000;
+        uint256 fee = lots * entryPrice * feeBps / 10_000;
         cashMismatch = cashMismatch || clearinghouse.balanceUsdc(account) != settlementBefore - fee
             || usdc.balanceOf(address(pool)) != poolBefore;
     }
@@ -127,28 +158,34 @@ contract PerpClaimModelHandler is Test {
             return;
         }
         attempts++;
-        uint256 poolBefore = liquidPool ? expectedTotalClaims + 100_000_000e6 : 0;
-        pool.setAssets(poolBefore);
-        CfdTypes.Side side = expectedSide[account];
-        bool lowerPrice = profitable == (side == CfdTypes.Side.LONG);
-        uint256 price = lowerPrice ? ENTRY_PRICE - PRICE_MOVE : ENTRY_PRICE + PRICE_MOVE;
-        uint256 fee = LOTS * price * feeBps / 10_000;
-        uint256 claimBefore = expectedClaim[account];
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        CloseAmounts memory amounts;
+        amounts.poolBefore = liquidPool ? expectedTotalClaims + 100_000_000e6 : 0;
+        pool.setAssets(amounts.poolBefore);
+        amounts.lots = expectedLots[account];
+        {
+            bool lowerPrice = profitable == (expectedSide[account] == CfdTypes.Side.LONG);
+            uint256 entryPrice = expectedEntryCostUsdc[account] / amounts.lots;
+            amounts.price = lowerPrice ? entryPrice - PRICE_MOVE : entryPrice + PRICE_MOVE;
+        }
+        amounts.fee = amounts.lots * amounts.price * feeBps / 10_000;
+        amounts.pnl = amounts.lots * PRICE_MOVE;
+        amounts.settlementBefore = clearinghouse.balanceUsdc(account);
 
-        (bool ok, bytes memory err) = _trade(account, side, price, true);
+        (bool ok, bytes memory err) = _trade(account, expectedSide[account], amounts.lots, amounts.price, true);
         if (!ok) {
             _unexpected(err);
             return;
         }
         expectedOpen[account] = false;
-        uint256 expectedPoolAfter = poolBefore;
-        uint256 expectedSettlementAfter = settlementBefore;
+        delete expectedLots[account];
+        delete expectedEntryCostUsdc[account];
+        uint256 expectedPoolAfter = amounts.poolBefore;
+        uint256 expectedSettlementAfter = amounts.settlementBefore;
         if (profitable) {
-            uint256 payout = PNL_USDC - fee;
+            uint256 payout = amounts.pnl - amounts.fee;
             if (liquidPool) {
                 immediateCloses++;
-                expectedPoolAfter -= PNL_USDC;
+                expectedPoolAfter -= amounts.pnl;
                 expectedSettlementAfter += payout;
             } else {
                 deferredCloses++;
@@ -157,13 +194,14 @@ contract PerpClaimModelHandler is Test {
             }
         } else {
             lossCloses++;
-            uint256 consumedClaim = claimBefore < PNL_USDC ? claimBefore : PNL_USDC;
+            uint256 claim = expectedClaim[account];
+            uint256 consumedClaim = claim < amounts.pnl ? claim : amounts.pnl;
             expectedClaim[account] -= consumedClaim;
             expectedTotalClaims -= consumedClaim;
             claimConsumptionUsdc += consumedClaim;
-            uint256 collectedPledge = PNL_USDC - consumedClaim;
+            uint256 collectedPledge = amounts.pnl - consumedClaim;
             expectedPoolAfter += collectedPledge;
-            expectedSettlementAfter -= collectedPledge + fee;
+            expectedSettlementAfter -= collectedPledge + amounts.fee;
         }
         cashMismatch = cashMismatch || usdc.balanceOf(address(pool)) != expectedPoolAfter
             || clearinghouse.balanceUsdc(account) != expectedSettlementAfter;
@@ -229,11 +267,11 @@ contract PerpClaimModelHandler is Test {
             if (!expectedOpen[account]) {
                 continue;
             }
-            // All reference positions have 100 lots at the submitted 1e8 entry, with a 2e8 price cap.
+            // Endpoint payoffs derive from submitted entries, not Engine side aggregates or displayed averages.
             if (expectedSide[account] == CfdTypes.Side.LONG) {
-                longLiability += LOTS * ENTRY_PRICE;
+                longLiability += expectedEntryCostUsdc[account];
             } else {
-                shortLiability += LOTS * (2e8 - ENTRY_PRICE);
+                shortLiability += expectedLots[account] * CAP_PRICE - expectedEntryCostUsdc[account];
             }
         }
         uint256 liability = longLiability > shortLiability ? longLiability : shortLiability;
@@ -259,8 +297,12 @@ contract PerpClaimModelHandler is Test {
                 revert ClaimModelMismatch(account, expectedClaim[account], actual);
             }
             total += expectedClaim[account];
-            (uint256 size,,,,,,) = engine.positions(account);
-            if (size != (expectedOpen[account] ? LOTS * CfdTypes.SIZE_QUANTUM : 0)) {
+            (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
+            if (
+                size != expectedLots[account] * CfdTypes.SIZE_QUANTUM
+                    || engine.positionEntryCostUsdcAtoms(account) != expectedEntryCostUsdc[account]
+                    || (expectedOpen[account] && side != expectedSide[account])
+            ) {
                 revert PositionModelMismatch(account);
             }
         }
@@ -276,12 +318,13 @@ contract PerpClaimModelHandler is Test {
     function _trade(
         address account,
         CfdTypes.Side side,
+        uint256 lots,
         uint256 price,
         bool isClose
     ) internal returns (bool, bytes memory) {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
-            sizeDelta: LOTS * CfdTypes.SIZE_QUANTUM,
+            sizeDelta: lots * CfdTypes.SIZE_QUANTUM,
             marginDelta: isClose ? 0 : MARGIN_USDC,
             targetPrice: price,
             commitTime: uint64(block.timestamp),

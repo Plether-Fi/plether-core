@@ -1258,11 +1258,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ) internal {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
-        CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         if (pos.lots > 0) {
             _realizeCarryFromSettlement(delta.account, pos);
-            currentPosition = _loadPosition(delta.account);
+        } else {
+            // A historical fill can predate the cached mark, so settlement may leave mark state untouched.
+            // Checkpoint old aggregate borrowing before the new position changes side bases or pool depth.
+            _advanceAllCarryIndexes(block.timestamp);
         }
+        CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
         settlementSidecar.executeOpen(delta, currentPosition, publishTime);
         _endTerminalCurveMutation(delta.account, expectedOldHash);
 
