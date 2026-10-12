@@ -1,0 +1,18 @@
+Start verifying contract `0x1B73BBF4b730da5664618C1186bE7917Ecf8470e` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+
+Submitting verification for [packages/perps/src/OrderRecoverySidecar.sol:OrderRecoverySidecar] 0x1B73BBF4b730da5664618C1186bE7917Ecf8470e.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `acqjt6s2j5eiceztv7ygb8mjsgfe6sdbcinlbsqn1xdjfscznr`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

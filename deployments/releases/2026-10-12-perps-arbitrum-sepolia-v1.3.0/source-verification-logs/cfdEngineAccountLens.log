@@ -1,0 +1,19 @@
+Start verifying contract `0x12ca3776d001FBE12895783A9c93149eE8b5a1e5` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0
+
+Submitting verification for [packages/perps/src/CfdEngineAccountLens.sol:CfdEngineAccountLens] 0x12ca3776d001FBE12895783A9c93149eE8b5a1e5.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `67vb1wnkafnpjf1qwgcuwcalkehaqnba81kqqbgws4h23tb2aj`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

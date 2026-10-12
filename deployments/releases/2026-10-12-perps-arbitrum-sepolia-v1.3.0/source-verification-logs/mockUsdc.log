@@ -1,0 +1,42 @@
+Start verifying contract `0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+
+Submitting verification for [script/DeployPerpsArbitrumSepolia.s.sol:MockUSDC] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `mgqpqe4c745c7zmiyxgxywdavffs74gvzp2ubdmsvpvzwereh4`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (6 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (5 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (4 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (3 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (2 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (1 tries remaining)

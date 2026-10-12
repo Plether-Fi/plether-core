@@ -1,0 +1,17 @@
+✔ an empty template is explicitly inspectable but never accepted as a release (3.766792ms)
+✔ runtime fields, schema, pins, and source allowlists fail closed (5.30225ms)
+✔ verifies all pinned contracts and reciprocal funding bindings at one block with mined depositFor evidence (1.467417ms)
+✔ requires matching explicit clearinghouse and provider pins before any RPC verification (3.553333ms)
+✔ rejects wrong chain, empty code, substituted code, and a legacy clearinghouse at the probe block (3.081708ms)
+✔ rejects a changed or invalid proxy implementation slot even when all code pins match (0.797084ms)
+✔ rejects every mixed-deployment binding and wrong token decimals (4.970542ms)
+✔ requires successful direct third-party depositFor evidence, not an arbitrary success receipt (4.048333ms)
+✔ rejects an indexing gap, insufficient confirmations, and reorganized evidence (1.998167ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 90.470333

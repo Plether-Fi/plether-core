@@ -1,0 +1,18 @@
+Start verifying contract `0xef91017698FAde5f985b1419D2F71E5c8601D854` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+
+Submitting verification for [packages/perps/src/CfdEngineOpenQuoter.sol:CfdEngineOpenQuoter] 0xef91017698FAde5f985b1419D2F71E5c8601D854.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `bs7xjeqfeqpqrn9xnqhs9ez5buzfxpiabvgl83msnppltcfylm`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

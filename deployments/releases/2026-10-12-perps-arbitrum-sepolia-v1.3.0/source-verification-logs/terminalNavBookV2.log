@@ -1,0 +1,19 @@
+Start verifying contract `0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0000000000000000000000000000000000000000000000000000000000bebc200
+
+Submitting verification for [packages/perps/src/TerminalNavBookV2.sol:TerminalNavBookV2] 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `juskdqmv3znuibn2yaf445hqcumtkw1nw7mughe7kqtifcnqx1`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

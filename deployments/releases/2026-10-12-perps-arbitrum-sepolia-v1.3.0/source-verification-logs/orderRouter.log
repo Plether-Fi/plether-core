@@ -1,0 +1,43 @@
+Start verifying contract `0x5e6b97a9b8f9fd43aD098462d5cc5852A74ddC70` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0000000000000000000000000069b3c61377009c79e48d94bf947b414a7fd3600000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad000000000000000000000000076b6461880be19aba592c16975611be8b6eaf6e5000000000000000000000000b392fbfc729ceaa3ebc5208f3d69d19a78d601f8000000000000000000000000ec050dde46f13848b4018b304e8609ffcc1997ad0000000000000000000000000f33d9c9c4bb480ce2dd95f1da5e544b74445a5f000000000000000000000000fc22e0532c52101bbfe742e7754a4578af297f68
+
+Submitting verification for [script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter] 0x5e6b97a9b8f9fd43aD098462d5cc5852A74ddC70.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `71vlcqtmtjtbq432ckkcf5nwsmypr5uzpja91mt2yb55eimtzq`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (6 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (5 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (4 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (3 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (2 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (1 tries remaining)

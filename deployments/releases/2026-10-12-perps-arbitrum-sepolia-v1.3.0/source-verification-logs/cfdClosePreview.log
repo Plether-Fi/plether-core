@@ -1,0 +1,19 @@
+Start verifying contract `0x041b37223268f098eEbfa77A78d250Ef1F49B1a6` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0
+
+Submitting verification for [packages/perps/src/CfdClosePreview.sol:CfdClosePreview] 0x041b37223268f098eEbfa77A78d250Ef1F49B1a6.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `xj1nx66p2mxvrdberyivizgcwjugu1dr7pbv1xmtw85unwf4l9`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

@@ -1,0 +1,342 @@
+{
+  "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
+  "transactionCount": 32,
+  "contracts": {
+    "mockUsdc": {
+      "address": "0x653b0cebe3cda9ec51de171cc2bb9e454a156e45",
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:MockUSDC",
+      "buildArtifact": "compiler-artifacts/DeployPerpsArbitrumSepolia.s.sol/MockUSDC.json",
+      "creationTransactionHash": "0xf2376fdbb4af883d327c420517395374524d80758e67f86a9271a2e4eca813b1",
+      "constructorArgs": "0x",
+      "fullCreationInputBytes": 2511,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 1697
+    },
+    "marginClearinghouse": {
+      "address": "0x3c1f9fdd4882fef4650ee03dcc4703860dd8d1c0",
+      "artifact": "packages/perps/src/MarginClearinghouse.sol:MarginClearinghouse",
+      "buildArtifact": "compiler-artifacts/MarginClearinghouse.sol/MarginClearinghouse.json",
+      "creationTransactionHash": "0xc21f89e6d61b6d5f383746366e45745679b0c3476b672ec186799bc594e1bfce",
+      "constructorArgs": "0x000000000000000000000000653b0cebe3cda9ec51de171cc2bb9e454a156e45",
+      "fullCreationInputBytes": 22072,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 21733
+    },
+    "cfdEngine": {
+      "address": "0x95462ce6a0088170ffabc0f93b2f93b17ba2c8b0",
+      "artifact": "packages/perps/src/CfdEngine.sol:CfdEngine",
+      "buildArtifact": "compiler-artifacts/CfdEngine.sol/CfdEngine.json",
+      "creationTransactionHash": "0xe2e0548693fa8ad794063de2ef9d9cc8055bda1830c4debbc678277cfc4cfe76",
+      "constructorArgs": "0x000000000000000000000000653b0cebe3cda9ec51de171cc2bb9e454a156e450000000000000000000000003c1f9fdd4882fef4650ee03dcc4703860dd8d1c0000000000000000000000000000000000000000000000000000000000bebc200000000000000000000000000000000000000000000000000002386f26fc10000000000000000000000000000000000000000000000000000058d15e176280000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000012c00000000000000000000000000000000000000000000000000000000000001f400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000138800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000032",
+      "fullCreationInputBytes": 25844,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 24423
+    },
+    "terminalNavBookV2": {
+      "address": "0xd6e94db3bb26e89183563719b8f4a66c1e0a1872",
+      "artifact": "packages/perps/src/TerminalNavBookV2.sol:TerminalNavBookV2",
+      "buildArtifact": "compiler-artifacts/TerminalNavBookV2.sol/TerminalNavBookV2.json",
+      "creationTransactionHash": "0x8cb0681daa729e6a3a8d7674543285d3eb279cf5fa24e2bd521da7c10f943506",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0000000000000000000000000000000000000000000000000000000000bebc200",
+      "fullCreationInputBytes": 9709,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 9356
+    },
+    "cfdEnginePlanner": {
+      "address": "0x1e0420b749ea85d0a1f70db4a715458008606f44",
+      "artifact": "packages/perps/src/CfdEnginePlanner.sol:CfdEnginePlanner",
+      "buildArtifact": "compiler-artifacts/CfdEnginePlanner.sol/CfdEnginePlanner.json",
+      "creationTransactionHash": "0xb6a17fb16a3f96e6cd602da9bfdf4a4e0af637687177d3954b891fe2831396bc",
+      "constructorArgs": "0x",
+      "fullCreationInputBytes": 21817,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 21791
+    },
+    "cfdEngineSettlementSidecar": {
+      "address": "0x7336290349ee4f4149173dc93b89ab951321c9af",
+      "artifact": "packages/perps/src/CfdEngineSettlementSidecar.sol:CfdEngineSettlementSidecar",
+      "buildArtifact": "compiler-artifacts/CfdEngineSettlementSidecar.sol/CfdEngineSettlementSidecar.json",
+      "creationTransactionHash": "0x6decc92a6eb563185e4865593e3d9cf9798f7c01777432160352b036393802e9",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0",
+      "fullCreationInputBytes": 23781,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 23570
+    },
+    "cfdEngineAdmin": {
+      "address": "0xeb5ccf3d63ff78541d33f56a3772d3e78341954a",
+      "artifact": "packages/perps/src/CfdEngineAdmin.sol:CfdEngineAdmin",
+      "buildArtifact": "compiler-artifacts/CfdEngineAdmin.sol/CfdEngineAdmin.json",
+      "creationTransactionHash": "0x00057acf18f257d59c4cd18793d9461d6c257f4841d71cea2581a60ea4906d70",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b00000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+      "fullCreationInputBytes": 5096,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 4721
+    },
+    "housePoolRedemptionMathSidecar": {
+      "address": "0xa89d01d5ba82bd9d2e5e897194e6203d15a88829",
+      "artifact": "packages/perps/src/HousePoolRedemptionMathSidecar.sol:HousePoolRedemptionMathSidecar",
+      "buildArtifact": "compiler-artifacts/HousePoolRedemptionMathSidecar.sol/HousePoolRedemptionMathSidecar.json",
+      "creationTransactionHash": "0x0bce3c0d69ade297ddb5606e521ffecfe473627bcc0eea5ce07ac1cfb1537205",
+      "constructorArgs": "0x",
+      "fullCreationInputBytes": 1068,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 1042
+    },
+    "housePool": {
+      "address": "0xfafdc23a0879b56f580914d594c29423501cbad0",
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool",
+      "buildArtifact": "compiler-artifacts/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseHousePool.json",
+      "creationTransactionHash": "0xae279c0212bf02c12020fc94da24d06bf38d7c200b7eccfd120f5f792959080b",
+      "constructorArgs": "0x000000000000000000000000653b0cebe3cda9ec51de171cc2bb9e454a156e4500000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0000000000000000000000000a89d01d5ba82bd9d2e5e897194e6203d15a88829",
+      "fullCreationInputBytes": 29283,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 23848
+    },
+    "cfdEngineProtocolLens": {
+      "address": "0xcb3141511d7c8fc58ec45815ce35a5bc7a2e9f57",
+      "artifact": "packages/perps/src/CfdEngineProtocolLens.sol:CfdEngineProtocolLens",
+      "buildArtifact": "compiler-artifacts/CfdEngineProtocolLens.sol/CfdEngineProtocolLens.json",
+      "creationTransactionHash": "0xae279c0212bf02c12020fc94da24d06bf38d7c200b7eccfd120f5f792959080b",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0",
+      "fullCreationInputBytes": 4408,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain execution trace",
+      "runtimeTemplateBytes": 4223
+    },
+    "seniorVault": {
+      "address": "0xd1893d4c3a3e1dc3b3634c59310c8212409c1aaa",
+      "artifact": "packages/perps/src/TrancheVault.sol:TrancheVault",
+      "buildArtifact": "compiler-artifacts/TrancheVault.sol/TrancheVault.json",
+      "creationTransactionHash": "0x0cbdb93fae9a7dcc35ce23f18aa536bcac80f7da2bf48b12373b028e2fd1cbb5",
+      "constructorArgs": "0x000000000000000000000000653b0cebe3cda9ec51de171cc2bb9e454a156e45000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011506c65746865722053656e696f72204c50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000470734c5000000000000000000000000000000000000000000000000000000000",
+      "fullCreationInputBytes": 26450,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 23879
+    },
+    "juniorVault": {
+      "address": "0xfbcf57e732a6b2420e22acc0bd976648f4aaf029",
+      "artifact": "packages/perps/src/TrancheVault.sol:TrancheVault",
+      "buildArtifact": "compiler-artifacts/TrancheVault.sol/TrancheVault.json",
+      "creationTransactionHash": "0xa16409ed9e1ea2d0fc685ef886c82754b35cea7a2d0b1eef02fd19c574b5a0c7",
+      "constructorArgs": "0x000000000000000000000000653b0cebe3cda9ec51de171cc2bb9e454a156e45000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000640000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b0000000000000000000000000000000000000000000000000000000000000011506c6574686572204a756e696f72204c500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004706a4c5000000000000000000000000000000000000000000000000000000000",
+      "fullCreationInputBytes": 26450,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 23879
+    },
+    "cfdEngineAccountLens": {
+      "address": "0x12ca3776d001fbe12895783a9c93149ee8b5a1e5",
+      "artifact": "packages/perps/src/CfdEngineAccountLens.sol:CfdEngineAccountLens",
+      "buildArtifact": "compiler-artifacts/CfdEngineAccountLens.sol/CfdEngineAccountLens.json",
+      "creationTransactionHash": "0x00fef5290d13d51c16183ccf4e97d0b160aa8f040cd9fafb0ad28bc2d02f90b5",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0",
+      "fullCreationInputBytes": 10905,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 10593
+    },
+    "cfdEngineLens": {
+      "address": "0x069b3c61377009c79e48d94bf947b414a7fd3600",
+      "artifact": "packages/perps/src/CfdEngineLens.sol:CfdEngineLens",
+      "buildArtifact": "compiler-artifacts/CfdEngineLens.sol/CfdEngineLens.json",
+      "creationTransactionHash": "0x0e39ca1517136050e0023c73d38653fbf9084929df29a6a256ba434535725837",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0",
+      "fullCreationInputBytes": 32013,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 21234
+    },
+    "cfdEngineOpenQuoter": {
+      "address": "0xef91017698fade5f985b1419d2f71e5c8601d854",
+      "artifact": "packages/perps/src/CfdEngineOpenQuoter.sol:CfdEngineOpenQuoter",
+      "buildArtifact": "compiler-artifacts/CfdEngineOpenQuoter.sol/CfdEngineOpenQuoter.json",
+      "creationTransactionHash": "0x0e39ca1517136050e0023c73d38653fbf9084929df29a6a256ba434535725837",
+      "constructorArgs": "0x",
+      "fullCreationInputBytes": 10246,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain execution trace",
+      "runtimeTemplateBytes": 10220
+    },
+    "cfdOrderPolicyEvaluator": {
+      "address": "0xec050dde46f13848b4018b304e8609ffcc1997ad",
+      "artifact": "packages/perps/src/CfdOrderPolicyEvaluator.sol:CfdOrderPolicyEvaluator",
+      "buildArtifact": "compiler-artifacts/CfdOrderPolicyEvaluator.sol/CfdOrderPolicyEvaluator.json",
+      "creationTransactionHash": "0xc103edce4eb9011ff625a78636e3cd48b59e9f46302f779e488b16fe914e6e01",
+      "constructorArgs": "0x",
+      "fullCreationInputBytes": 19545,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 19519
+    },
+    "cfdClosePreview": {
+      "address": "0x041b37223268f098eebfa77a78d250ef1f49b1a6",
+      "artifact": "packages/perps/src/CfdClosePreview.sol:CfdClosePreview",
+      "buildArtifact": "compiler-artifacts/CfdClosePreview.sol/CfdClosePreview.json",
+      "creationTransactionHash": "0xc75b0fe888801737828355d2cee077b0b2b945b48bf483b811f4ce22b515ab39",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0",
+      "fullCreationInputBytes": 21905,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 21732
+    },
+    "orderRouterExecutionSidecar": {
+      "address": "0x0f33d9c9c4bb480ce2dd95f1da5e544b74445a5f",
+      "artifact": "packages/perps/src/OrderRouterExecutionSidecar.sol:OrderRouterExecutionSidecar",
+      "buildArtifact": "compiler-artifacts/OrderRouterExecutionSidecar.sol/OrderRouterExecutionSidecar.json",
+      "creationTransactionHash": "0x741a3e9cb4a17a139bea1d06c6a32133c63380da49d1955f151207c3a2937f82",
+      "constructorArgs": "0x",
+      "fullCreationInputBytes": 31888,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 23163
+    },
+    "orderRecoverySidecar": {
+      "address": "0x1b73bbf4b730da5664618c1186be7917ecf8470e",
+      "artifact": "packages/perps/src/OrderRecoverySidecar.sol:OrderRecoverySidecar",
+      "buildArtifact": "compiler-artifacts/OrderRecoverySidecar.sol/OrderRecoverySidecar.json",
+      "creationTransactionHash": "0x741a3e9cb4a17a139bea1d06c6a32133c63380da49d1955f151207c3a2937f82",
+      "constructorArgs": "0x",
+      "fullCreationInputBytes": 8576,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain execution trace",
+      "runtimeTemplateBytes": 8517
+    },
+    "pletherOracle": {
+      "address": "0x76b6461880be19aba592c16975611be8b6eaf6e5",
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle",
+      "buildArtifact": "compiler-artifacts/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseOracle.json",
+      "creationTransactionHash": "0x60829af28563b5040fdf2480581e0a6b886d0963f69b594ff8fb669b0b3681b7",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad00000000000000000000000000b73614636c855bf23f342f307fb981a3e47f42b00000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000003800000000000000000000000000000000000000000000000000000000000000006a995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30bef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd5284c2dde9633d93d1bcad84e7dc41c9d56578b7ec52fabedc1f335d673df0a7c13112b03a41c910ed446852aacf67118cb1bec67b2cd0b9a214c58cc0eaa2ecca8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc6760b1e3297e69f162877b577b0d6a47a0d63b2392bc8499e6540da4187a63e28f8000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000007fe5cf2bea0000000000000000000000000000000000000000000000000000001e32b478974000000000000000000000000000000000000000000000000000001a6c5de9845800000000000000000000000000000000000000000000000000001434c04928f8000000000000000000000000000000000000000000000000000009536c708910000000000000000000000000000000000000000000000000000007fe5cf2bea00000000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000700e860000000000000000000000000000000000000000000000000000000000009bc3000000000000000000000000000000000000000000000000000000000080400800000000000000000000000000000000000000000000000000000000004580f800000000000000000000000000000000000000000000000000000000000a5b5e000000000000000000000000000000000000000000000000000000000078422200000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001",
+      "fullCreationInputBytes": 17107,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 14084
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "address": "0xb392fbfc729ceaa3ebc5208f3d69d19a78d601f8",
+      "artifact": "packages/perps/src/OrderRouterLiquidationBatchSidecar.sol:OrderRouterLiquidationBatchSidecar",
+      "buildArtifact": "compiler-artifacts/OrderRouterLiquidationBatchSidecar.sol/OrderRouterLiquidationBatchSidecar.json",
+      "creationTransactionHash": "0x93b61dbde57aa454562b0964e5a27ab8cee2727960bfe19debc42f3534e31227",
+      "constructorArgs": "0x0000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc70",
+      "fullCreationInputBytes": 20172,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 19968
+    },
+    "orderLifecycleBook": {
+      "address": "0xfc22e0532c52101bbfe742e7754a4578af297f68",
+      "artifact": "packages/perps/src/OrderLifecycleBook.sol:OrderLifecycleBook",
+      "buildArtifact": "compiler-artifacts/OrderLifecycleBook.sol/OrderLifecycleBook.json",
+      "creationTransactionHash": "0x4290743dc40d8a6fa8124541b49c950e0c07bfab68d407e2adced7dfcc0b234f",
+      "constructorArgs": "0x0000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc7000000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b00000000000000000000000003c1f9fdd4882fef4650ee03dcc4703860dd8d1c0000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad0",
+      "fullCreationInputBytes": 15762,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 15230
+    },
+    "orderRouter": {
+      "address": "0x5e6b97a9b8f9fd43ad098462d5cc5852a74ddc70",
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter",
+      "buildArtifact": "compiler-artifacts/DeployPerpsArbitrumSepolia.s.sol/ArbitrumSepoliaReleaseRouter.json",
+      "creationTransactionHash": "0xec74a4bfe234a69e7136f746fb8557f31a6a8c7e5ebdef54f015f4c878bb6a1e",
+      "constructorArgs": "0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0000000000000000000000000069b3c61377009c79e48d94bf947b414a7fd3600000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad000000000000000000000000076b6461880be19aba592c16975611be8b6eaf6e5000000000000000000000000b392fbfc729ceaa3ebc5208f3d69d19a78d601f8000000000000000000000000ec050dde46f13848b4018b304e8609ffcc1997ad0000000000000000000000000f33d9c9c4bb480ce2dd95f1da5e544b74445a5f000000000000000000000000fc22e0532c52101bbfe742e7754a4578af297f68",
+      "fullCreationInputBytes": 46871,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 20928
+    },
+    "orderRouterAdmin": {
+      "address": "0xef255d9a937b1d482970ad3f0541a61c2aaf7c6a",
+      "artifact": "packages/perps/src/OrderRouterAdmin.sol:OrderRouterAdmin",
+      "buildArtifact": "compiler-artifacts/OrderRouterAdmin.sol/OrderRouterAdmin.json",
+      "creationTransactionHash": "0xec74a4bfe234a69e7136f746fb8557f31a6a8c7e5ebdef54f015f4c878bb6a1e",
+      "constructorArgs": "0x0000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc700000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+      "fullCreationInputBytes": 5695,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain execution trace",
+      "runtimeTemplateBytes": 5289
+    },
+    "positionProtectionBook": {
+      "address": "0xff43e35ad574fe30e69769741abb0fff3273a812",
+      "artifact": "packages/perps/src/PositionProtectionBook.sol:PositionProtectionBook",
+      "buildArtifact": "compiler-artifacts/PositionProtectionBook.sol/PositionProtectionBook.json",
+      "creationTransactionHash": "0xec74a4bfe234a69e7136f746fb8557f31a6a8c7e5ebdef54f015f4c878bb6a1e",
+      "constructorArgs": "0x0000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc7000000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0",
+      "fullCreationInputBytes": 17573,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain execution trace",
+      "runtimeTemplateBytes": 17128
+    },
+    "perpsPublicLens": {
+      "address": "0x88cba0d30ff0b1c13ab49f8e54ed22e75745e7c5",
+      "artifact": "packages/perps/src/PerpsPublicLens.sol:PerpsPublicLens",
+      "buildArtifact": "compiler-artifacts/PerpsPublicLens.sol/PerpsPublicLens.json",
+      "creationTransactionHash": "0x3f4bdd171e48864c3161b78dd06e0e2a9904e274a746fe2019bc113ba18e4335",
+      "constructorArgs": "0x00000000000000000000000012ca3776d001fbe12895783a9c93149ee8b5a1e500000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b00000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc70000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad0",
+      "fullCreationInputBytes": 14943,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 14461
+    },
+    "settlementMonitorLens": {
+      "address": "0xa2cad103857aed976a063219ee6b8366a758d9ea",
+      "artifact": "packages/perps/src/SettlementMonitorLens.sol:SettlementMonitorLens",
+      "buildArtifact": "compiler-artifacts/SettlementMonitorLens.sol/SettlementMonitorLens.json",
+      "creationTransactionHash": "0xdf0c0c5c4048577dbf8c7dbb9089cbd6ea2e0855ce9024bff808a118576667da",
+      "constructorArgs": "0x0000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc70",
+      "fullCreationInputBytes": 49057,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 23339
+    },
+    "settlementMonitorLensSidecar": {
+      "address": "0xca44e01506f4463e22a7ca02dbfb0dbbfb77de9b",
+      "artifact": "packages/perps/src/SettlementMonitorLensSidecar.sol:SettlementMonitorLensSidecar",
+      "buildArtifact": "compiler-artifacts/SettlementMonitorLensSidecar.sol/SettlementMonitorLensSidecar.json",
+      "creationTransactionHash": "0xdf0c0c5c4048577dbf8c7dbb9089cbd6ea2e0855ce9024bff808a118576667da",
+      "constructorArgs": "0x0000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc70",
+      "fullCreationInputBytes": 20751,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain execution trace",
+      "runtimeTemplateBytes": 19345
+    },
+    "emergencyPauseCoordinator": {
+      "address": "0xe5e2386d153c20db34227b46c72c021bc10a667a",
+      "artifact": "packages/perps/src/EmergencyPauseCoordinator.sol:EmergencyPauseCoordinator",
+      "buildArtifact": "compiler-artifacts/EmergencyPauseCoordinator.sol/EmergencyPauseCoordinator.json",
+      "creationTransactionHash": "0xdeecb96dedb1f8c567cae9b50cfafa2d4c6c5f8af7fc94bb3e0f708ae1f318ee",
+      "constructorArgs": "0x000000000000000000000000ef255d9a937b1d482970ad3f0541a61c2aaf7c6a000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad00000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b",
+      "fullCreationInputBytes": 3353,
+      "creationCodeMatchesBuild": true,
+      "creationInputSource": "onchain transaction input",
+      "runtimeTemplateBytes": 2788
+    }
+  },
+  "executionTraces": {
+    "0xae279c0212bf02c12020fc94da24d06bf38d7c200b7eccfd120f5f792959080b": {
+      "available": true
+    },
+    "0x0e39ca1517136050e0023c73d38653fbf9084929df29a6a256ba434535725837": {
+      "available": true
+    },
+    "0x741a3e9cb4a17a139bea1d06c6a32133c63380da49d1955f151207c3a2937f82": {
+      "available": true
+    },
+    "0xec74a4bfe234a69e7136f746fb8557f31a6a8c7e5ebdef54f015f4c878bb6a1e": {
+      "available": true
+    },
+    "0xdf0c0c5c4048577dbf8c7dbb9089cbd6ea2e0855ce9024bff808a118576667da": {
+      "available": true
+    }
+  }
+}

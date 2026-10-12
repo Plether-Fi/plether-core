@@ -1,0 +1,18 @@
+Start verifying contract `0xEC050dDe46F13848B4018B304e8609FfCC1997ad` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+
+Submitting verification for [packages/perps/src/CfdOrderPolicyEvaluator.sol:CfdOrderPolicyEvaluator] 0xEC050dDe46F13848B4018B304e8609FfCC1997ad.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `qie5fxi3mqfkif6eevxppkdf4jrnczf2tkybx6fjt6gwm46zge`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

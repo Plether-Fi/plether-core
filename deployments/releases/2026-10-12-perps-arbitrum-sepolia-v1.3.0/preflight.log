@@ -1,0 +1,817 @@
+Package dependency boundaries are valid.
+Running no-broadcast deployment simulation from cf86189bcca4813f39d6405a338b77176783eb42...
+Compiling 162 files with Solc 0.8.35
+Solc 0.8.35 finished in 72.96s
+Compiler run successful with warnings:
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1339:9:
+     |
+1339 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1353:9:
+     |
+1353 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1361:79:
+     |
+1361 |     function assertApproxEqAbs(uint256 left, uint256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                               ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1368:77:
+     |
+1368 |     function assertApproxEqAbs(int256 left, int256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1385:9:
+     |
+1385 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1403:9:
+     |
+1403 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1413:86:
+     |
+1413 |     function assertApproxEqRel(uint256 left, uint256 right, uint256 maxPercentDelta, string calldata error)
+     |                                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1424:84:
+     |
+1424 |     function assertApproxEqRel(int256 left, int256 right, uint256 maxPercentDelta, string calldata error) external pure;
+     |                                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1431:77:
+     |
+1431 |     function assertEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1438:75:
+     |
+1438 |     function assertEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1444:46:
+     |
+1444 |     function assertEq(bool left, bool right, string calldata error) external pure;
+     |                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1450:68:
+     |
+1450 |     function assertEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1456:66:
+     |
+1456 |     function assertEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1462:68:
+     |
+1462 |     function assertEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1468:74:
+     |
+1468 |     function assertEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1474:72:
+     |
+1474 |     function assertEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1483:74:
+     |
+1483 |     function assertEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1489:74:
+     |
+1489 |     function assertEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1495:72:
+     |
+1495 |     function assertEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1501:70:
+     |
+1501 |     function assertEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1504:52:
+     |
+1504 |     function assertEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1510:50:
+     |
+1510 |     function assertEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1516:52:
+     |
+1516 |     function assertEq(address left, address right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1522:52:
+     |
+1522 |     function assertEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1528:42:
+     |
+1528 |     function assertFalse(bool condition, string calldata error) external pure;
+     |                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1536:77:
+     |
+1536 |     function assertGeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1544:75:
+     |
+1544 |     function assertGeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1551:52:
+     |
+1551 |     function assertGe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1558:50:
+     |
+1558 |     function assertGe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1566:77:
+     |
+1566 |     function assertGtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1574:75:
+     |
+1574 |     function assertGtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1581:52:
+     |
+1581 |     function assertGt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1588:50:
+     |
+1588 |     function assertGt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1596:77:
+     |
+1596 |     function assertLeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1604:75:
+     |
+1604 |     function assertLeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1611:52:
+     |
+1611 |     function assertLe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1618:50:
+     |
+1618 |     function assertLe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1626:77:
+     |
+1626 |     function assertLtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1634:75:
+     |
+1634 |     function assertLtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1641:52:
+     |
+1641 |     function assertLt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1648:50:
+     |
+1648 |     function assertLt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1655:80:
+     |
+1655 |     function assertNotEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                                ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1662:78:
+     |
+1662 |     function assertNotEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1668:49:
+     |
+1668 |     function assertNotEq(bool left, bool right, string calldata error) external pure;
+     |                                                 ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1674:71:
+     |
+1674 |     function assertNotEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1680:69:
+     |
+1680 |     function assertNotEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1686:71:
+     |
+1686 |     function assertNotEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1692:77:
+     |
+1692 |     function assertNotEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1698:75:
+     |
+1698 |     function assertNotEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1707:77:
+     |
+1707 |     function assertNotEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1713:77:
+     |
+1713 |     function assertNotEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1719:75:
+     |
+1719 |     function assertNotEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1725:73:
+     |
+1725 |     function assertNotEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1728:55:
+     |
+1728 |     function assertNotEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1734:53:
+     |
+1734 |     function assertNotEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1740:55:
+     |
+1740 |     function assertNotEq(address left, address right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1746:55:
+     |
+1746 |     function assertNotEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1752:41:
+     |
+1752 |     function assertTrue(bool condition, string calldata error) external pure;
+     |                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:201:9:
+    |
+201 |         _deposit(_msgSender(), receiver, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:203:9:
+    |
+203 |         return shares;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:214:9:
+    |
+214 |         _deposit(_msgSender(), receiver, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:216:9:
+    |
+216 |         return assets;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:227:9:
+    |
+227 |         _withdraw(_msgSender(), receiver, owner, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:229:9:
+    |
+229 |         return shares;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:240:9:
+    |
+240 |         _withdraw(_msgSender(), receiver, owner, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:242:9:
+    |
+242 |         return assets;
+    |         ^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:952:13:
+    |
+952 |             uint256 vpiFactor,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:953:13:
+    |
+953 |             uint256 maxSkewRatio,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:954:13:
+    |
+954 |             uint256 maintMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:955:13:
+    |
+955 |             uint256 initMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:956:13:
+    |
+956 |             uint256 fadMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:957:13:
+    |
+957 |             uint256 baseCarryBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:958:13:
+    |
+958 |             uint256 minBountyUsdc,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:959:13:
+    |
+959 |             uint256 bountyBps,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:960:13:
+    |
+960 |             uint256 keeperShareBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:961:13:
+    |
+961 |             uint256 protocolShareBps
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> packages/perps/src/CfdOrderPolicyEvaluatorBase.sol:144:5:
+    |
+144 |     function _assessSnapshot(
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> packages/perps/src/CfdClosePreview.sol:336:5:
+    |
+336 |     function _validatePartialClose(
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1031:5:
+     |
+1031 |     function _revertIfOpenInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1043:5:
+     |
+1043 |     function _revertIfCloseInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+2026-10-12T08:48:48.272068Z  WARN foundry_fork_db::cache: Failed to read cache file err=Os { code: 2, kind: NotFound, message: "No such file or directory" } path="/Users/stan/.foundry/cache/rpc/arbitrum-sepolia/318361472"
+2026-10-12T08:48:50.948878Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:50.949883Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:50.950750Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:50.957200Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.101360Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.101562Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.196817Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.196869Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.196877Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.239696Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.240724Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.251110Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.257430Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.342375Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.345054Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.392176Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.394936Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.396953Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.407357Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.422170Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.541587Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.561486Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.576150Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.579678Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.612711Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.631198Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.631251Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.662556Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.694027Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.719705Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.739859Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.740604Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.740729Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.764496Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.816303Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.830948Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.847426Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.874406Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:51.878887Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.906916Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:51.962298Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.000731Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.026731Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.026873Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.026989Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.028425Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.028495Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.030776Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.057801Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.156969Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.177991Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.178082Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.182556Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.209868Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.234172Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.315642Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.339408Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.362164Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.390146Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.451828Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.460053Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.462137Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.474500Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.482842Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.493639Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.500407Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.583842Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.595839Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.609145Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.615749Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.627578Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.639556Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.648122Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.652107Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.668363Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.738797Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.769560Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.780888Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.791061Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.793956Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.801914Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.838625Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.891444Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.921294Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.933079Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.942838Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.944605Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.961538Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:52.966646Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.981791Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:52.981831Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:53.043960Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:53.074012Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.085550Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.095700Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.107100Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.227480Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.240308Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.251170Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.261545Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.536277Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.546814Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.557667Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.594761Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.691775Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.702059Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.710405Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.841964Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.853012Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.862609Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:53.874511Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.009948Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.010007Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.017094Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.150848Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.160512Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.174711Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.179134Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.306096Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.313069Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.324327Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.333937Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.490833Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.621258Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.630376Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.635251Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.650651Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.693379Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:54.762100Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:54.782375Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.787473Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.796936Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.928776Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.940839Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.947063Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:54.957410Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.080457Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.094835Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.103187Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.113347Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.234618Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.245586Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.259892Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.265368Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.389642Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.398660Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.410399Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.418649Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.573801Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.696604Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.706576Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.717171Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.726617Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.849697Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.860361Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.869008Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.878793Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:55.978752Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:55.994608Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:56.002693Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.014079Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.017550Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:56.025155Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.027866Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:56.037661Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:56.126239Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T08:48:56.159046Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.164695Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.175494Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.185450Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.308958Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.319234Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.329395Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.338449Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.461547Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.472488Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.481514Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.492433Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.644961Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.778431Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.781891Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.789537Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.799603Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.925408Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.942651Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.952504Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:56.980821Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.084554Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.096056Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.105562Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.133881Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.243127Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.248312Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.258163Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.286158Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.390584Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.401849Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.410390Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.439163Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.542973Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.556923Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.564452Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.593954Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.744453Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.851381Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.863730Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.876691Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:57.896126Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.008325Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.018011Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.027865Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.051703Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.158799Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.169838Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.180220Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.201368Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.311047Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.325088Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.332306Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.353447Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.463450Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.474798Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.485169Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.507085Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.619468Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.628645Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.638885Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.663967Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.816383Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.928331Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.939512Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.948129Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:58.969786Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.081818Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.090523Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.100933Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.124767Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.234944Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.253253Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.258862Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.281614Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.388575Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.398233Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.429074Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.440667Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.541715Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.551782Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+2026-10-12T08:48:59.581791Z  WARN evm::traces::external: could not get info err=ErrorResponse { status: "0", message: "NOTOK", result: Some("Max calls per sec rate limit reached (3/sec)") }
+Script ran successfully.
+
+== Return ==
+deployed: struct DeployPerpsArbitrumSepolia.DeployedContracts DeployedContracts({ usdc: 0xA8B43223cbF170D59fA34f2d771d94674F55aF36, clearinghouse: 0x3E4286FEb8390B538A648823E95230AAaD3a1947, engine: 0x458799BFD2a4Ce100CdBF2CbEd6aCCe44271aA6e, terminalNavBook: 0x0B0a0D29f6896FdF14057725D17e126dAF0fc361, planner: 0x53B7C2462F3402f3967F01682845bA31006Fc087, settlementSidecar: 0x9CEa3907075d278135078Da1F3a4D36e89c68DCF, engineAdmin: 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45, housePoolRedemptionMathSidecar: 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0, housePool: 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872, seniorVault: 0x1EB619CbB4F2BA9bed651b8F914837EeF29BAF6A, juniorVault: 0x7336290349Ee4F4149173DC93B89ab951321C9af, accountLens: 0xA89d01d5ba82bD9D2E5E897194E6203D15a88829, engineLens: 0xfAFDc23A0879B56F580914D594C29423501cBad0, orderPolicyEvaluator: 0x50c5CfDf82135e21095Cf7cC12eB830996683E76, closePreview: 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029, orderExecutionSidecar: 0x69c5552ed629891F00E6fE8050240C3523e8333E, router: 0x069B3c61377009C79E48D94bf947B414A7Fd3600, liquidationBatchSidecar: 0x12ca3776d001FBE12895783A9c93149eE8b5a1e5, positionProtectionBook: 0xa1Db6CbaCd533FC9f03A74772901Ed7c7b587AB0, lifecycleBook: 0x51555cf25CD487F0BE91Fe101953f011Fc686fBd, pletherOracle: 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa, routerAdmin: 0xef91017698FAde5f985b1419D2F71E5c8601D854, publicLens: 0x041b37223268f098eEbfa77A78d250Ef1F49B1a6, settlementMonitorLens: 0x0f33d9C9c4bb480cE2dD95F1dA5e544B74445A5f, settlementMonitorLensSidecar: 0x1B73BBF4b730da5664618C1186bE7917Ecf8470e, emergencyPauseCoordinator: 0xfc22E0532C52101BBFe742e7754A4578AF297F68 })
+
+== Logs ==
+  Deploying Plether perps to Arbitrum Sepolia
+  Deployer: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+  Pyth: 0x0B73614636C855Bf23F342F307FB981A3e47f42B
+
+  MockUSDC: 0xA8B43223cbF170D59fA34f2d771d94674F55aF36
+  MarginClearinghouse: 0x3E4286FEb8390B538A648823E95230AAaD3a1947
+  CfdEngine: 0x458799BFD2a4Ce100CdBF2CbEd6aCCe44271aA6e
+  TerminalNavBookV2: 0x0B0a0D29f6896FdF14057725D17e126dAF0fc361
+  PositionSizeQuantum: 100000000000000000000
+  FrozenCloseSpreadBps: 50
+  SettlementBufferBps: 25
+  FadRunwaySeconds: 3600
+  CfdEnginePlanner: 0x53B7C2462F3402f3967F01682845bA31006Fc087
+  CfdEngineSettlementSidecar: 0x9CEa3907075d278135078Da1F3a4D36e89c68DCF
+  CfdEngineAdmin: 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45
+  HousePoolRedemptionMathSidecar: 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0
+  0xe6c2cacccc84edc1a13707b40786fb89ba7d1e6aa70a2e72d3f8eea3c815b09d
+  HousePool: 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872
+  MaximumSeniorExposureUsdc: 40000000000000
+  MaximumSeniorShareBps: 8000
+  LpEpochDuration: 3600
+  MaxLpEpochsPerPhase: 16
+  CurrentLpEpoch: 497720
+  SeniorVault: 0x1EB619CbB4F2BA9bed651b8F914837EeF29BAF6A
+  JuniorVault: 0x7336290349Ee4F4149173DC93B89ab951321C9af
+  JuniorMaintenanceFeeAprBps: 100
+  JuniorMaintenanceFeeRecipient: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+  CfdEngineAccountLens: 0xA89d01d5ba82bD9D2E5E897194E6203D15a88829
+  CfdEngineLens: 0xfAFDc23A0879B56F580914D594C29423501cBad0
+  CfdOrderPolicyEvaluator: 0x50c5CfDf82135e21095Cf7cC12eB830996683E76
+  CfdClosePreview: 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029
+  OrderRouterExecutionSidecar: 0x69c5552ed629891F00E6fE8050240C3523e8333E
+  OrderRecoverySidecar: 0x66c11aB229AD212ca1d210fA4ca32812eA74A54E
+  OrderRouter: 0x069B3c61377009C79E48D94bf947B414A7Fd3600
+  MinimumOpenNotionalUsdc: 1000000000
+  AdverseConfidenceMultiplierBps: 2500
+  OrderRouterLiquidationBatchSidecar: 0x12ca3776d001FBE12895783A9c93149eE8b5a1e5
+  PositionProtectionBook: 0xa1Db6CbaCd533FC9f03A74772901Ed7c7b587AB0
+  PositionProtectionTriggerBountyUsdc: 200000
+  OrderLifecycleBook: 0x51555cf25CD487F0BE91Fe101953f011Fc686fBd
+  OrderExecutionConfigHash:
+  0xe742a5fb7354b1cac64da58093f9d0f05dd3353bdb3dc981336526bcff8f03fc
+  PletherOracle: 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa
+  BasketMaxConfidenceRatioBps: 10
+  OrderRouterAdmin: 0xef91017698FAde5f985b1419D2F71E5c8601D854
+  PerpsPublicLens: 0x041b37223268f098eEbfa77A78d250Ef1F49B1a6
+  SettlementMonitorLens: 0x0f33d9C9c4bb480cE2dD95F1dA5e544B74445A5f
+  SettlementMonitorLensSidecar: 0x1B73BBF4b730da5664618C1186bE7917Ecf8470e
+  EmergencyPauseCoordinator: 0xfc22E0532C52101BBFe742e7754A4578AF297F68
+  Emergency guardian: 0x0000000000000000000000000000000000000000
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Owner: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+  Trading remains inactive until junior and senior seed positions are initialized
+  and HousePool.activateTrading() is called.
+
+## Setting up 1 EVM.
+
+==========================
+
+Chain 421614
+
+Estimated gas price: 0.040628001 gwei
+
+Estimated total gas used for script: 133102147
+
+Estimated amount required: 0.005407674161418147 ETH
+
+==========================
+
+SIMULATION COMPLETE. To broadcast these transactions, add --broadcast and wallet configuration(s) to the previous command. See forge script --help for more.
+
+Transactions saved to: /Users/stan/.codex/worktrees/e74c/plether-core/broadcast/DeployPerpsArbitrumSepolia.s.sol/421614/dry-run/run-latest.json
+
+Sensitive values saved to: /Users/stan/.codex/worktrees/e74c/plether-core/cache/DeployPerpsArbitrumSepolia.s.sol/421614/dry-run/run-latest.json
+
+Preflight and authenticated upgraded-Pyth dry run passed. No transactions were broadcast.

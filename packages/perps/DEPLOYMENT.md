@@ -50,8 +50,12 @@ The manifest and ABI export include constructor-created contracts. Record `CfdEn
 runtime against the release build. Its immutable address is internal and has no public getter. Consumers call
 `CfdEngineLens.quoteMaxOpen(...)`, not the helper. Include the helper's embedded creation code when checking the
 lens's full creation input against EIP-3860. With these children and the separately deployed `CfdClosePreview`, the
-current full-stack manifest contains 28 deployed contracts;
+current full-stack manifest contains 29 deployed contracts;
 internal creations do not add deployer transactions or change the Router-bound three-`CREATE` sequence.
+
+`OrderRouterExecutionSidecar` also creates `OrderRecoverySidecar` internally. Discover it through
+`recoverySidecar()`, record its creation input and runtime hash, and set `PERPS_ORDER_RECOVERY_SIDECAR` for the
+standalone verifier. Set `PERPS_CLOSE_PREVIEW` to the separately deployed `CfdClosePreview` address.
 
 The bootstrap script handles operator actions after deploy:
 

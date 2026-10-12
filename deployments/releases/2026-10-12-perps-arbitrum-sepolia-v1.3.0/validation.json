@@ -1,0 +1,247 @@
+{
+  "version": "v1.3.0",
+  "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
+  "recordedAt": "2026-10-12T09:44:35.192371+00:00",
+  "preparationComplete": true,
+  "broadcastReady": false,
+  "broadcastAuthorized": true,
+  "transactionsBroadcast": 32,
+  "localChecks": {
+    "format": {
+      "passed": true,
+      "path": "format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "packageBoundaries": {
+      "passed": true,
+      "path": "boundaries.log",
+      "sha256": "7c017733d9e25d79e1cb4dcbf83fa1b42bad5141a67e787c65d16927a4c489ee"
+    },
+    "testMap": {
+      "passed": true,
+      "referenceCount": 173,
+      "path": "test-map.log",
+      "sha256": "66f066cffa378e06a5f11fda3333bb9d4e4d0fa109e59b3cdf8bc954f5ef6713"
+    },
+    "releaseTooling": {
+      "passed": true,
+      "testCount": 63,
+      "path": "release-tooling-tests.log",
+      "sha256": "ea7ea65eb7ddae4bbbb07d0cb2c14668fd20f3e0b15e42867c136dcf34dae079"
+    },
+    "bridgeTooling": {
+      "passed": true,
+      "testCount": 9,
+      "path": "bridge-tooling-tests.log",
+      "sha256": "3fa985798b4a94947bc7012c91da572399a632f0d0beed7722ec728746bc238d"
+    },
+    "integrationTests": {
+      "passed": true,
+      "testCount": 41,
+      "failed": 0,
+      "skipped": 0,
+      "path": "integration-tests.log",
+      "sha256": "9a26af74a65012c8d25e4738b685a0667e4d4affd81b71e6a258fb32330e5f62"
+    },
+    "immutableBuildAndFullDeploymentSizes": {
+      "passed": true,
+      "abiCount": 87,
+      "deploymentContractCount": 29,
+      "path": "build/build.json",
+      "sha256": "d1f417713b7c683e60e206c90eddfec41592198f9a4c7d296e75c0e9db5d138e"
+    },
+    "authenticatedDeploymentSimulation": {
+      "passed": true,
+      "broadcast": false,
+      "path": "preflight.log",
+      "sha256": "6cd75a98dd5a3102e756cf573cdd314f43e0c11c6136f2c1d9ca2175ec4a26d9"
+    },
+    "signedPythReplay": {
+      "passed": true,
+      "scenarioCount": 7,
+      "baselineAndCandidatePriceEquality": true,
+      "transactionIsolation": true,
+      "path": "oracle-fork/result.json",
+      "sha256": "ac34866e2cb997a16259840eabf554cee2fa070bcabf7d188e85427bd0bb326b",
+      "gasCap": 30000000,
+      "maxScenarioCallGas": 3689894,
+      "limitations": "Replay uses immutable signed historical fixtures. Authentic zero quotes do not establish nonzero Oracle-allocation refunds; require the MockPyth ETH-conservation invariant in production-codegen qualification. Live deployment verification needs a current signed fixture."
+    }
+  },
+  "github": {
+    "ci": {
+      "runId": 38222712233,
+      "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
+      "url": "https://github.com/Plether-Fi/plether-core/actions/runs/38222712233",
+      "status": "completed",
+      "conclusion": "success",
+      "passed": true,
+      "jobs": [
+        {
+          "name": "TypeScript (perps-aa-client)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Coverage (core protocol)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (options)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "build",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (perps)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (options)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (spot)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Coverage (perps)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Coverage (options)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps PR shard 3/4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (perps-aa)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (spot)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps PR shard 2/4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (shared)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps PR shard 4/4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Slither (perps-aa)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps PR shard 1/4",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (shared)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Package (perps)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "path": "ci.json",
+      "sha256": "b146b4c9987eb50d6069d6aa21adada646f87ebcde7645f7a5668b6bd26c99ef"
+    },
+    "deep-ci": {
+      "runId": 38222712210,
+      "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
+      "url": "https://github.com/Plether-Fi/plether-core/actions/runs/38222712210",
+      "status": "completed",
+      "conclusion": "success",
+      "passed": true,
+      "jobs": [
+        {
+          "name": "campaign",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps configured RPC integration",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Perps ci shard 2/4 (0xdeadbeef)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps ci shard 3/4 (0xdeadbeef)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps ci shard 4/4 (0xdeadbeef)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps ci shard 1/4 (0xdeadbeef)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Perps deep (all shards)",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "path": "deep-ci.json",
+      "sha256": "ec0790040634ea01d4bcf81705037c99d8f592844f79aa863dccd14a8c38bd9e"
+    }
+  },
+  "remainingBroadcastGates": [],
+  "postDeploymentGates": [],
+  "activationGates": [
+    "Matching frontend/keeper/indexer/AA consumer versions.",
+    "Reviewed old-stack obligations/cutover plan.",
+    "Explicit guardian and seed receivers, seeded-phase verification, separate trading-activation instruction.",
+    "Independent provider and bridge-route evidence before enabling funding."
+  ],
+  "broadcastAuthorizedAt": "2026-10-12T09:14:48.391217+00:00",
+  "deploymentComplete": true,
+  "deployedPhasePassed": true,
+  "oracleSynchronizationPassed": true,
+  "currentSignedUpdateEthCallPassed": true,
+  "sourcePublicationAuthorized": true,
+  "sourceVerificationStatus": "completed",
+  "broadcastReadinessNote": "The authorized deployment is complete; do not redeploy this release.",
+  "sourceVerifiedContractCount": 29,
+  "explorerCompilerInputsPassed": true,
+  "explorerCompilerInputsEvidence": "explorer-input-verification.json",
+  "savedLogFormatting": "Trailing whitespace normalized in checked-in log copies; original sanitized logs remain in the local preparation bundle. The immutable build archive is unchanged."
+}

@@ -1,0 +1,19 @@
+Start verifying contract `0x7336290349Ee4F4149173DC93B89ab951321C9af` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b0
+
+Submitting verification for [packages/perps/src/CfdEngineSettlementSidecar.sol:CfdEngineSettlementSidecar] 0x7336290349Ee4F4149173DC93B89ab951321C9af.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `dlavf1szfx4dtjdfqtrkbt67kxhpeispfjbkczufnfrz4wkfse`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

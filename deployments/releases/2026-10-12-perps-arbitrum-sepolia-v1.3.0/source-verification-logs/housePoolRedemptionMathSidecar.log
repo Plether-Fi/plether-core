@@ -1,0 +1,18 @@
+Start verifying contract `0xA89d01d5ba82bD9D2E5E897194E6203D15a88829` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+
+Submitting verification for [packages/perps/src/HousePoolRedemptionMathSidecar.sol:HousePoolRedemptionMathSidecar] 0xA89d01d5ba82bD9D2E5E897194E6203D15a88829.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `vlyaccnb2ir9zux6fv6rfhugftbepl1rwgkr5ndfsrfwzwbkdr`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
