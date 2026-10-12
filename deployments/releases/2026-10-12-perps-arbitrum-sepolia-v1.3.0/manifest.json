@@ -394,7 +394,16 @@
     "requestedSeniorSeedUsdc": "250000000000000",
     "requestedJuniorSeedUsdc": "250000000000000",
     "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
-    "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B"
+    "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "tradingActivationAuthorized": true,
+    "tradingActivationStatus": "authorized_pending_cap_timelock_and_seeds",
+    "tradingActivationPrerequisites": [
+      "Matching mature cap-only proposal finalized",
+      "Both permanent 250M seeds independently verified",
+      "Fresh signed oracle and unrestricted pool/router state verified",
+      "Owner activation call simulated successfully"
+    ],
+    "tradingActivationSimulationEvidence": "seed-250m-and-activation-preflight.log"
   },
   "governance": {
     "seniorCapProposal": {

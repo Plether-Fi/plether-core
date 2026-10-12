@@ -227,10 +227,9 @@
   "remainingBroadcastGates": [],
   "postDeploymentGates": [],
   "activationGates": [
-    "Matching frontend/keeper/indexer/AA consumer versions.",
-    "Reviewed old-stack obligations/cutover plan.",
-    "Explicit guardian and seed receivers, seeded-phase verification, separate trading-activation instruction.",
-    "Independent provider and bridge-route evidence before enabling funding."
+    "Finalize the matching mature cap-only proposal and independently verify both permanent 250M seeds.",
+    "Verify usable current signed oracle data, capacity, ownership, and unrestricted pool/router state.",
+    "Simulate and execute the explicitly authorized owner activateTrading call, then verify its receipt and live state."
   ],
   "broadcastAuthorizedAt": "2026-10-12T09:14:48.391217+00:00",
   "deploymentComplete": true,
@@ -253,8 +252,28 @@
       "requestedMockUsdcPerTranche": "250000000",
       "broadcast": false,
       "followupAutomationId": "seed-v1-3-0-after-senior-cap-timelock",
-      "tradingActivationAuthorized": false,
+      "tradingActivationAuthorized": true,
       "guardianConfigurationAuthorized": false
+    },
+    "tradingActivation": {
+      "authorized": true,
+      "broadcast": false,
+      "status": "pending_cap_timelock_and_verified_seeds",
+      "guardianConfigurationAuthorized": false,
+      "consumerCutoverAuthorized": false,
+      "bridgeEnablementAuthorized": false,
+      "followupAutomationId": "seed-v1-3-0-after-senior-cap-timelock",
+      "forkSimulationPassed": true,
+      "simulationEvidence": "seed-250m-and-activation-preflight.log",
+      "simulationEvidenceSha256": "9c7743f0601451c037dc6a06d35939e88ff3663986242cb37c38751afe671c2f",
+      "simulationScope": "Fork-only mature cap finalization, exact Junior/Senior seeds, and owner activation. No live transaction; live oracle and operational checks remain required."
     }
-  }
+  },
+  "consumerCutoverGates": [
+    "Matching frontend/keeper/indexer/AA consumer versions.",
+    "Reviewed old-stack obligations/cutover plan and separate consumer-cutover authorization."
+  ],
+  "bridgeEnablementGates": [
+    "Independent provider and bridge-route evidence and separate funding-enablement authorization."
+  ]
 }
