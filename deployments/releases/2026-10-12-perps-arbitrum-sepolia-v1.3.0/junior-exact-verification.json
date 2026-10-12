@@ -1,0 +1,15 @@
+{
+  "address": "0xfbcf57e732a6b2420e22acc0bd976648f4aaf029",
+  "verified": true,
+  "contractName": "TrancheVault",
+  "compilerVersion": "v0.8.35+commit.47b9dedd",
+  "optimizerRuns": "200",
+  "constructorArgsMatch": true,
+  "compilerVersionMatch": true,
+  "optimizerMatch": true,
+  "similarMatch": null,
+  "sourceSha256": "09841ec89ce6875b9ff9115731a99091b0b94127230e1883e57f4e521ddf2fa2",
+  "checkedAt": "2026-10-12T09:35:30.562192+00:00",
+  "explorerUrl": "https://sepolia.arbiscan.io/address/0xfbcf57e732a6b2420e22acc0bd976648f4aaf029#code",
+  "note": "Exact verification was submitted after the explorer initially reused the senior vault source match."
+}

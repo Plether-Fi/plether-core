@@ -1,0 +1,19 @@
+Start verifying contract `0x88CbA0D30fF0B1c13AB49f8e54eD22e75745e7C5` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000012ca3776d001fbe12895783a9c93149ee8b5a1e500000000000000000000000095462ce6a0088170ffabc0f93b2f93b17ba2c8b00000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc70000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad0
+
+Submitting verification for [packages/perps/src/PerpsPublicLens.sol:PerpsPublicLens] 0x88CbA0D30fF0B1c13AB49f8e54eD22e75745e7C5.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `qjjrrn9snvjyeaan7jzt1pnyixarnyrzqatifdtcwt9kcsyqc7`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

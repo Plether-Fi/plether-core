@@ -1,0 +1,19 @@
+Start verifying contract `0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x000000000000000000000000653b0cebe3cda9ec51de171cc2bb9e454a156e45
+
+Submitting verification for [packages/perps/src/MarginClearinghouse.sol:MarginClearinghouse] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `ubjhjheftapbw3na4hxthvap19aeehp2b4b6bhvkfmad3kktcm`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

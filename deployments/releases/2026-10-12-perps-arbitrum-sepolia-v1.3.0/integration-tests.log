@@ -1,0 +1,972 @@
+Compiling 64 files with Solc 0.8.35
+Solc 0.8.35 finished in 224.30s
+Compiler run successful with warnings:
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1339:9:
+     |
+1339 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1353:9:
+     |
+1353 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1361:79:
+     |
+1361 |     function assertApproxEqAbs(uint256 left, uint256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                               ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1368:77:
+     |
+1368 |     function assertApproxEqAbs(int256 left, int256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1385:9:
+     |
+1385 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1403:9:
+     |
+1403 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1413:86:
+     |
+1413 |     function assertApproxEqRel(uint256 left, uint256 right, uint256 maxPercentDelta, string calldata error)
+     |                                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1424:84:
+     |
+1424 |     function assertApproxEqRel(int256 left, int256 right, uint256 maxPercentDelta, string calldata error) external pure;
+     |                                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1431:77:
+     |
+1431 |     function assertEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1438:75:
+     |
+1438 |     function assertEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1444:46:
+     |
+1444 |     function assertEq(bool left, bool right, string calldata error) external pure;
+     |                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1450:68:
+     |
+1450 |     function assertEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1456:66:
+     |
+1456 |     function assertEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1462:68:
+     |
+1462 |     function assertEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1468:74:
+     |
+1468 |     function assertEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1474:72:
+     |
+1474 |     function assertEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1483:74:
+     |
+1483 |     function assertEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1489:74:
+     |
+1489 |     function assertEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1495:72:
+     |
+1495 |     function assertEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1501:70:
+     |
+1501 |     function assertEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1504:52:
+     |
+1504 |     function assertEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1510:50:
+     |
+1510 |     function assertEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1516:52:
+     |
+1516 |     function assertEq(address left, address right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1522:52:
+     |
+1522 |     function assertEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1528:42:
+     |
+1528 |     function assertFalse(bool condition, string calldata error) external pure;
+     |                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1536:77:
+     |
+1536 |     function assertGeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1544:75:
+     |
+1544 |     function assertGeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1551:52:
+     |
+1551 |     function assertGe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1558:50:
+     |
+1558 |     function assertGe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1566:77:
+     |
+1566 |     function assertGtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1574:75:
+     |
+1574 |     function assertGtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1581:52:
+     |
+1581 |     function assertGt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1588:50:
+     |
+1588 |     function assertGt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1596:77:
+     |
+1596 |     function assertLeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1604:75:
+     |
+1604 |     function assertLeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1611:52:
+     |
+1611 |     function assertLe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1618:50:
+     |
+1618 |     function assertLe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1626:77:
+     |
+1626 |     function assertLtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1634:75:
+     |
+1634 |     function assertLtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1641:52:
+     |
+1641 |     function assertLt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1648:50:
+     |
+1648 |     function assertLt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1655:80:
+     |
+1655 |     function assertNotEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                                ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1662:78:
+     |
+1662 |     function assertNotEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1668:49:
+     |
+1668 |     function assertNotEq(bool left, bool right, string calldata error) external pure;
+     |                                                 ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1674:71:
+     |
+1674 |     function assertNotEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1680:69:
+     |
+1680 |     function assertNotEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1686:71:
+     |
+1686 |     function assertNotEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1692:77:
+     |
+1692 |     function assertNotEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1698:75:
+     |
+1698 |     function assertNotEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1707:77:
+     |
+1707 |     function assertNotEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1713:77:
+     |
+1713 |     function assertNotEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1719:75:
+     |
+1719 |     function assertNotEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1725:73:
+     |
+1725 |     function assertNotEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1728:55:
+     |
+1728 |     function assertNotEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1734:53:
+     |
+1734 |     function assertNotEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1740:55:
+     |
+1740 |     function assertNotEq(address left, address right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1746:55:
+     |
+1746 |     function assertNotEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1752:41:
+     |
+1752 |     function assertTrue(bool condition, string calldata error) external pure;
+     |                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+   --> lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol:125:29:
+    |
+125 |         (address recovered, RecoverError error, bytes32 errorArg) = tryRecover(hash, signature);
+    |                             ^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+   --> lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol:134:29:
+    |
+134 |         (address recovered, RecoverError error, bytes32 errorArg) = tryRecoverCalldata(hash, signature);
+    |                             ^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+   --> lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol:161:29:
+    |
+161 |         (address recovered, RecoverError error, bytes32 errorArg) = tryRecover(hash, r, vs);
+    |                             ^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+   --> lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol:203:29:
+    |
+203 |         (address recovered, RecoverError error, bytes32 errorArg) = tryRecover(hash, v, r, s);
+    |                             ^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+   --> lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol:273:26:
+    |
+273 |     function _throwError(RecoverError error, bytes32 errorArg) private pure {
+    |                          ^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:201:9:
+    |
+201 |         _deposit(_msgSender(), receiver, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:203:9:
+    |
+203 |         return shares;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:214:9:
+    |
+214 |         _deposit(_msgSender(), receiver, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:216:9:
+    |
+216 |         return assets;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:227:9:
+    |
+227 |         _withdraw(_msgSender(), receiver, owner, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:229:9:
+    |
+229 |         return shares;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:240:9:
+    |
+240 |         _withdraw(_msgSender(), receiver, owner, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:242:9:
+    |
+242 |         return assets;
+    |         ^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:952:13:
+    |
+952 |             uint256 vpiFactor,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:953:13:
+    |
+953 |             uint256 maxSkewRatio,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:954:13:
+    |
+954 |             uint256 maintMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:955:13:
+    |
+955 |             uint256 initMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:956:13:
+    |
+956 |             uint256 fadMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:957:13:
+    |
+957 |             uint256 baseCarryBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:958:13:
+    |
+958 |             uint256 minBountyUsdc,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:959:13:
+    |
+959 |             uint256 bountyBps,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:960:13:
+    |
+960 |             uint256 keeperShareBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:961:13:
+    |
+961 |             uint256 protocolShareBps
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> packages/perps/src/CfdOrderPolicyEvaluatorBase.sol:144:5:
+    |
+144 |     function _assessSnapshot(
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> packages/perps/src/CfdClosePreview.sol:336:5:
+    |
+336 |     function _validatePartialClose(
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1031:5:
+     |
+1031 |     function _revertIfOpenInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1043:5:
+     |
+1043 |     function _revertIfCloseInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to view
+  --> script/VerifyPerpsArbitrumSepolia.s.sol:82:5:
+   |
+82 |     function run() external {
+   |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to view
+   --> script/VerifyPerpsArbitrumSepolia.s.sol:104:5:
+    |
+104 |     function verifyOracleSynchronization() external {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to view
+  --> test/scripts/DeploySpotArbitrumSepolia.t.sol:29:5:
+   |
+29 |     function deployOrLoadUsdc() external returns (IMintableERC20) {
+   |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to view
+   --> test/scripts/DeploySpotArbitrumSepolia.t.sol:109:5:
+    |
+109 |     function test_QuotesUseInitialPriceAndTokenDecimals() public {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to view
+   --> test/scripts/DeploySpotArbitrumSepolia.t.sol:115:5:
+    |
+115 |     function test_AddLiquidityMintsPoolAddressLpToken() public {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to view
+   --> test/scripts/DeploySpotArbitrumSepolia.t.sol:212:5:
+    |
+212 |     function test_CalcTokenAmountMatchesLpMintingValue() public {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+
+Ran 1 test for test/integration/OracleParity.t.sol:OracleParityIntegrationTest
+[PASS] test_OracleEquivalence_SamePricesSameBasket() (gas: 4065802)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 1.53ms (532.25µs CPU time)
+
+Ran 10 tests for test/scripts/DeploySpotArbitrumSepolia.t.sol:MockTwocryptoPoolTest
+[PASS] test_AddLiquidityMintsPoolAddressLpToken() (gas: 30229)
+[PASS] test_CalcTokenAmountMatchesLpMintingValue() (gas: 10752)
+[PASS] test_ExchangeReceiverOverloadMatchesSepoliaCurveAbi() (gas: 90440)
+[PASS] test_ExchangeTransfersReservesAtQuotedPrice() (gas: 90854)
+[PASS] test_InvarCoinLpDepositUsesMockPoolTwocryptoSurface() (gas: 5344065)
+[PASS] test_LiquidityReceiverOverloadsMatchSepoliaCurveAbi() (gas: 93453)
+[PASS] test_QuotesUseInitialPriceAndTokenDecimals() (gas: 10588)
+[PASS] test_RemoveLiquidityOneCoinUsesLpValue() (gas: 59579)
+[PASS] test_RemoveLiquidityReturnsProRataReserves() (gas: 93307)
+[PASS] test_SepoliaCurveReadSurfaceIsAvailable() (gas: 43361)
+Suite result: ok. 10 passed; 0 failed; 0 skipped; finished in 2.60ms (925.33µs CPU time)
+
+Ran 8 tests for test/scripts/LpEpochKeeper.t.sol:LpEpochKeeperTest
+[PASS] test_AtomicRefreshQuotesActiveOracleAndForwardsExactFee() (gas: 467188)
+[PASS] test_CachedMarkCallsOnlyHousePoolWithLensArguments() (gas: 414147)
+[PASS] test_PrepareSettlementPreservesKnownRouteDespiteOptionalDependencyFailure() (gas: 338821)
+[PASS] test_PrepareSettlementRejectsExecutionPathDependencyFailure() (gas: 316387)
+[PASS] test_PrepareSettlementRejectsNoMaturedWork() (gas: 256506)
+[PASS] test_PrepareSettlementRejectsRouterBindingMismatch() (gas: 332898)
+[PASS] test_PrepareSettlementRejectsUnknownExecutionPath() (gas: 256945)
+[PASS] test_RunRejectsHeldRoutesBeforeInputsThenDispatchesAfterRelease() (gas: 1224263)
+Logs:
+  SettlementMonitorLens: 0xc7183455a4C133Ae270771860664b6B7ec320bB1
+  OrderRouter: 0x5991A2dF15A8F6A256D3Ec51E99254Cd3fb576A9
+  Observed epoch: 42
+  Execution path: 2
+  HousePool: 0x2e234DAe75C793f67A35089C9d99245E1C58470b
+  Cached mark price: 123456789
+  Cached mark time: 1759000000
+  Cached-mark LP epoch settlement succeeded; inspect LpEpochSettled for the bounded-pass result
+  SettlementMonitorLens: 0xc7183455a4C133Ae270771860664b6B7ec320bB1
+  OrderRouter: 0x5991A2dF15A8F6A256D3Ec51E99254Cd3fb576A9
+  Observed epoch: 42
+  Execution path: 3
+  Pyth update fee: 23 wei
+  Atomic LP epoch settlement succeeded; inspect LpEpochSettled for the bounded-pass result
+
+Suite result: ok. 8 passed; 0 failed; 0 skipped; finished in 2.73ms (5.34ms CPU time)
+
+Ran 3 tests for test/scripts/DeploySpotArbitrumSepolia.t.sol:DeploySpotArbitrumSepoliaTest
+[PASS] test_DeployCurvePool_DeploysPoolAsLpToken() (gas: 33953735)
+Logs:
+  MockTwocryptoPool initial BEAR price: 1000000000000000000
+
+[PASS] test_DeployOrLoadUsdc_RevertsForWrongDecimals() (gas: 31408815)
+[PASS] test_DeployOrLoadUsdc_UsesSpotUsdcOverride() (gas: 31729314)
+Logs:
+  Using shared USDC: 0x2e234DAe75C793f67A35089C9d99245E1C58470b
+
+Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 2.68ms (3.24ms CPU time)
+
+Ran 1 test for test/scripts/VerifyPerpsArbitrumSepolia.t.sol:VerifyPerpsArbitrumSepoliaTest
+[PASS] test_VerifiesOneUsdcReleaseAcrossDeploymentSeedingAndActivation() (gas: 210121826)
+Logs:
+  Deploying Plether perps to Arbitrum Sepolia
+  Deployer: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  Pyth: 0x0B73614636C855Bf23F342F307FB981A3e47f42B
+
+  MockUSDC: 0xCF75462c9e7fFf4eEB0c50185087a0fb9A056d2b
+  MarginClearinghouse: 0xEF0f6FA72f90Bda42759fd9Bf4667345B47dE0F1
+  CfdEngine: 0xf5b8a1CcF29Cef7861A7b18c4bcD838341D10FF3
+  TerminalNavBookV2: 0x1a4f38B8A89ffbe21Ef07D0c85E71A1dA5afD2B6
+  PositionSizeQuantum: 100000000000000000000
+  FrozenCloseSpreadBps: 50
+  SettlementBufferBps: 25
+  FadRunwaySeconds: 3600
+  CfdEnginePlanner: 0xF7B7DD7cf6AB8397ae360625a56c29Ccfb76fcae
+  CfdEngineSettlementSidecar: 0x64Db3aE00Df4874ea1f72ba9Bc29B35D30D60FEA
+  CfdEngineAdmin: 0x6F22FD8df7c23fd4686bAebEF05c3d7665dA5425
+  HousePoolRedemptionMathSidecar: 0x2bf6003EFF5D0586d4E4D74cDFD392B8e3993a65
+  0xe6c2cacccc84edc1a13707b40786fb89ba7d1e6aa70a2e72d3f8eea3c815b09d
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  MaximumSeniorExposureUsdc: 40000000000000
+  MaximumSeniorShareBps: 8000
+  LpEpochDuration: 3600
+  MaxLpEpochsPerPhase: 16
+  CurrentLpEpoch: 0
+  SeniorVault: 0x717CA671AF7aB3A72ec37791Ff8414C9437199E7
+  JuniorVault: 0x30D77F81E747aC7E73dF8D6C71749F3fe0d82C81
+  JuniorMaintenanceFeeAprBps: 100
+  JuniorMaintenanceFeeRecipient: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  CfdEngineAccountLens: 0x7F0f984D29b2fC970976F63c64592D1E3351C221
+  CfdEngineLens: 0x9C5eD1ab6246054A3219Ef4FBe048397F7e22171
+  CfdOrderPolicyEvaluator: 0x16D6d7eA6e4704d2d62950627563a779CedE04b3
+  CfdClosePreview: 0xDc04f91409e86C7E3d547f204544F187b66c55B7
+  OrderRouterExecutionSidecar: 0x3431A74dCCC1716D56c47c58C6395Db634BE5f0c
+  OrderRecoverySidecar: 0x13E1AdBB22d4AFeeEf2173f84315D508f6cE59c4
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  MinimumOpenNotionalUsdc: 1000000000
+  AdverseConfidenceMultiplierBps: 2500
+  OrderRouterLiquidationBatchSidecar: 0x91814b585aa786E28cf72E00652b7d7d54f1F41D
+  PositionProtectionBook: 0xf8130be23744ECFADAA4487701A02f1952b9899c
+  PositionProtectionTriggerBountyUsdc: 200000
+  OrderLifecycleBook: 0xC87C268455605A2c859498efe81DDb7BEE7869A6
+  OrderExecutionConfigHash:
+  0xf02972004e1ac9a2dd01c6c82785926550c77cb14d9c39a0819da759b806f855
+  PletherOracle: 0x094f392df3eA564818b54B2021577cb8b2635Be5
+  BasketMaxConfidenceRatioBps: 10
+  OrderRouterAdmin: 0x04f5C06eC09811768196aEFa2AFDDb278557C436
+  PerpsPublicLens: 0x2a154E8Ec0B27b9f8249c16d98494761fBF72Fe0
+  SettlementMonitorLens: 0xa1eE97d5eC799167E552BC8693356d0d7883d03E
+  SettlementMonitorLensSidecar: 0xA50f81f0040e0fE4D2E642Ac0907A69Ce5b561f7
+  EmergencyPauseCoordinator: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Emergency guardian: 0x0000000000000000000000000000000000000000
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Owner: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  Trading remains inactive until junior and senior seed positions are initialized
+  and HousePool.activateTrading() is called.
+  Arbitrum Sepolia Perps release verification passed
+  Phase: deployed
+  Engine: 0xf5b8a1CcF29Cef7861A7b18c4bcD838341D10FF3
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  Junior effective supply: 0
+  Junior pending fee shares: 0
+  Bootstrapping Plether perps on Arbitrum Sepolia
+  Deployer: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  USDC: 0xCF75462c9e7fFf4eEB0c50185087a0fb9A056d2b
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  HousePoolRedemptionMathSidecar: 0x2bf6003EFF5D0586d4E4D74cDFD392B8e3993a65
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  OrderRouterLiquidationBatchSidecar: 0x91814b585aa786E28cf72E00652b7d7d54f1F41D
+  PositionProtectionBook: 0xf8130be23744ECFADAA4487701A02f1952b9899c
+  CfdOrderPolicyEvaluator: 0x16D6d7eA6e4704d2d62950627563a779CedE04b3
+  OrderRouterExecutionSidecar: 0x3431A74dCCC1716D56c47c58C6395Db634BE5f0c
+  OrderLifecycleBook: 0xC87C268455605A2c859498efe81DDb7BEE7869A6
+  OrderExecutionConfigHash:
+  0xf02972004e1ac9a2dd01c6c82785926550c77cb14d9c39a0819da759b806f855
+  OrderRouterAdmin: 0x04f5C06eC09811768196aEFa2AFDDb278557C436
+  EmergencyPauseCoordinator: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Requested guardian: 0x000000000000000000000000000000000000bEEF
+  Set emergency guardian: 0x000000000000000000000000000000000000bEEF
+  Minted seed USDC to broadcaster: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  Seed USDC amount: 2000000
+  Initialized junior seed: 1000000
+  Junior seed receiver: 0x0000000000000000000000000000000000007171
+  Initialized senior seed: 1000000
+  Senior seed receiver: 0x0000000000000000000000000000000000005151
+
+  HousePool trading active: false
+  Senior seed initialized: true
+  Junior seed initialized: true
+  HousePool pauser: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Router pauser: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Position protection trigger bounty USDC: 200000
+  Emergency guardian: 0x000000000000000000000000000000000000bEEF
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Maximum senior exposure (USDC units): 40000000000000
+  Maximum senior share (bps): 8000
+  Minimum opening notional (USDC units): 1000000000
+  Adverse confidence multiplier (bps): 2500
+  LP epoch duration: 3600
+  Maximum LP epochs per settlement phase: 16
+  Current LP epoch: 0
+  Note: this script funds users with mock USDC only; ETH still needs a faucet.
+  Arbitrum Sepolia Perps release verification passed
+  Phase: seeded
+  Engine: 0xf5b8a1CcF29Cef7861A7b18c4bcD838341D10FF3
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  Junior effective supply: 1000000000
+  Junior pending fee shares: 0
+  Bootstrapping Plether perps on Arbitrum Sepolia
+  Deployer: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  USDC: 0xCF75462c9e7fFf4eEB0c50185087a0fb9A056d2b
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  HousePoolRedemptionMathSidecar: 0x2bf6003EFF5D0586d4E4D74cDFD392B8e3993a65
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  OrderRouterLiquidationBatchSidecar: 0x91814b585aa786E28cf72E00652b7d7d54f1F41D
+  PositionProtectionBook: 0xf8130be23744ECFADAA4487701A02f1952b9899c
+  CfdOrderPolicyEvaluator: 0x16D6d7eA6e4704d2d62950627563a779CedE04b3
+  OrderRouterExecutionSidecar: 0x3431A74dCCC1716D56c47c58C6395Db634BE5f0c
+  OrderLifecycleBook: 0xC87C268455605A2c859498efe81DDb7BEE7869A6
+  OrderExecutionConfigHash:
+  0xf02972004e1ac9a2dd01c6c82785926550c77cb14d9c39a0819da759b806f855
+  OrderRouterAdmin: 0x04f5C06eC09811768196aEFa2AFDDb278557C436
+  EmergencyPauseCoordinator: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Requested guardian: 0x000000000000000000000000000000000000bEEF
+
+  HousePool trading active: false
+  Senior seed initialized: true
+  Junior seed initialized: true
+  HousePool pauser: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Router pauser: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Position protection trigger bounty USDC: 200000
+  Emergency guardian: 0x000000000000000000000000000000000000bEEF
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Maximum senior exposure (USDC units): 40000000000000
+  Maximum senior share (bps): 8000
+  Minimum opening notional (USDC units): 1000000000
+  Adverse confidence multiplier (bps): 2500
+  LP epoch duration: 3600
+  Maximum LP epochs per settlement phase: 16
+  Current LP epoch: 0
+  Note: this script funds users with mock USDC only; ETH still needs a faucet.
+  Bootstrapping Plether perps on Arbitrum Sepolia
+  Deployer: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  USDC: 0xCF75462c9e7fFf4eEB0c50185087a0fb9A056d2b
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  HousePoolRedemptionMathSidecar: 0x2bf6003EFF5D0586d4E4D74cDFD392B8e3993a65
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  OrderRouterLiquidationBatchSidecar: 0x91814b585aa786E28cf72E00652b7d7d54f1F41D
+  PositionProtectionBook: 0xf8130be23744ECFADAA4487701A02f1952b9899c
+  CfdOrderPolicyEvaluator: 0x16D6d7eA6e4704d2d62950627563a779CedE04b3
+  OrderRouterExecutionSidecar: 0x3431A74dCCC1716D56c47c58C6395Db634BE5f0c
+  OrderLifecycleBook: 0xC87C268455605A2c859498efe81DDb7BEE7869A6
+  OrderExecutionConfigHash:
+  0xf02972004e1ac9a2dd01c6c82785926550c77cb14d9c39a0819da759b806f855
+  OrderRouterAdmin: 0x04f5C06eC09811768196aEFa2AFDDb278557C436
+  EmergencyPauseCoordinator: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Requested guardian: 0x000000000000000000000000000000000000bEEF
+  Activated trading
+
+  HousePool trading active: true
+  Senior seed initialized: true
+  Junior seed initialized: true
+  HousePool pauser: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Router pauser: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Position protection trigger bounty USDC: 200000
+  Emergency guardian: 0x000000000000000000000000000000000000bEEF
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Maximum senior exposure (USDC units): 40000000000000
+  Maximum senior share (bps): 8000
+  Minimum opening notional (USDC units): 1000000000
+  Adverse confidence multiplier (bps): 2500
+  LP epoch duration: 3600
+  Maximum LP epochs per settlement phase: 16
+  Current LP epoch: 0
+  Note: this script funds users with mock USDC only; ETH still needs a faucet.
+  Arbitrum Sepolia Perps release verification passed
+  Phase: active
+  Engine: 0xf5b8a1CcF29Cef7861A7b18c4bcD838341D10FF3
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  Junior effective supply: 1000000000
+  Junior pending fee shares: 0
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 17.19ms (12.98ms CPU time)
+
+Ran 17 tests for test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol:ArbitrumSepoliaReleaseDefaultsTest
+[PASS] test_AsyncVaultReleaseDefaults_InitializeJuniorMaintenanceFeeAtProtocolTreasury() (gas: 228596390)
+[PASS] test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() (gas: 6721812)
+[PASS] test_BootstrapRefusesTradingActivationWithoutLiveGuardianOrWhilePaused() (gas: 7774070)
+Logs:
+  Activated trading
+
+[PASS] test_BootstrapRejectsCoordinatorBoundToAnotherPool() (gas: 7923163)
+[PASS] test_BootstrapRejectsMissingRedemptionMathSidecarOnRerun() (gas: 6792143)
+[PASS] test_BootstrapRejectsPartialCoordinatorPauserBinding() (gas: 7702245)
+[PASS] test_BootstrapRejectsStackWithoutTerminalNavBook() (gas: 122948702)
+[PASS] test_BootstrapRequiresNonzeroEmergencyGuardian() (gas: 6724920)
+[PASS] test_BootstrapVerifiesSharedCoordinatorAndRotatesGuardianIdempotently() (gas: 7735118)
+Logs:
+  Set emergency guardian: 0x000000000000000000000000000000000000bEEF
+
+[PASS] test_DeployScriptRiskDefaults_MatchArbitrumSepoliaReleaseParams() (gas: 97980271)
+[PASS] test_DeploymentAndBootstrapRejectUnexpectedMaintenanceFeeRecipient() (gas: 228578465)
+[PASS] test_DeploymentGuardsAcceptCanonicalRequestWindowAcrossCutoffs() (gas: 229263470)
+[PASS] test_DeploymentGuardsAcceptCanonicalV3OrderStackAndRejectMixedPolicyModule() (gas: 187205736)
+[PASS] test_DeploymentGuardsAcceptDistinctCanonicalPositionProtectionBookAndBoundSidecar() (gas: 170424469)
+[PASS] test_DeploymentUsesExpectedRedemptionMathSidecarAndSettlementStartsLive() (gas: 13279835)
+[PASS] test_GenericCoreDefaultsRemainUnchangedOutsideReleaseWrappers() (gas: 146932897)
+[PASS] test_ReleaseDeploymentStartsWithExactPoolAndRouterValuesWithoutProposals() (gas: 200312172)
+Logs:
+  Deploying Plether perps to Arbitrum Sepolia
+  Deployer: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  Pyth: 0x0B73614636C855Bf23F342F307FB981A3e47f42B
+
+  MockUSDC: 0xCF75462c9e7fFf4eEB0c50185087a0fb9A056d2b
+  MarginClearinghouse: 0xEF0f6FA72f90Bda42759fd9Bf4667345B47dE0F1
+  CfdEngine: 0xf5b8a1CcF29Cef7861A7b18c4bcD838341D10FF3
+  TerminalNavBookV2: 0x1a4f38B8A89ffbe21Ef07D0c85E71A1dA5afD2B6
+  PositionSizeQuantum: 100000000000000000000
+  FrozenCloseSpreadBps: 50
+  SettlementBufferBps: 25
+  FadRunwaySeconds: 3600
+  CfdEnginePlanner: 0xF7B7DD7cf6AB8397ae360625a56c29Ccfb76fcae
+  CfdEngineSettlementSidecar: 0x64Db3aE00Df4874ea1f72ba9Bc29B35D30D60FEA
+  CfdEngineAdmin: 0x6F22FD8df7c23fd4686bAebEF05c3d7665dA5425
+  HousePoolRedemptionMathSidecar: 0x2bf6003EFF5D0586d4E4D74cDFD392B8e3993a65
+  0xe6c2cacccc84edc1a13707b40786fb89ba7d1e6aa70a2e72d3f8eea3c815b09d
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  MaximumSeniorExposureUsdc: 40000000000000
+  MaximumSeniorShareBps: 8000
+  LpEpochDuration: 3600
+  MaxLpEpochsPerPhase: 16
+  CurrentLpEpoch: 0
+  SeniorVault: 0x717CA671AF7aB3A72ec37791Ff8414C9437199E7
+  JuniorVault: 0x30D77F81E747aC7E73dF8D6C71749F3fe0d82C81
+  JuniorMaintenanceFeeAprBps: 100
+  JuniorMaintenanceFeeRecipient: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  CfdEngineAccountLens: 0x7F0f984D29b2fC970976F63c64592D1E3351C221
+  CfdEngineLens: 0x9C5eD1ab6246054A3219Ef4FBe048397F7e22171
+  CfdOrderPolicyEvaluator: 0x16D6d7eA6e4704d2d62950627563a779CedE04b3
+  CfdClosePreview: 0xDc04f91409e86C7E3d547f204544F187b66c55B7
+  OrderRouterExecutionSidecar: 0x3431A74dCCC1716D56c47c58C6395Db634BE5f0c
+  OrderRecoverySidecar: 0x13E1AdBB22d4AFeeEf2173f84315D508f6cE59c4
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  MinimumOpenNotionalUsdc: 1000000000
+  AdverseConfidenceMultiplierBps: 2500
+  OrderRouterLiquidationBatchSidecar: 0x91814b585aa786E28cf72E00652b7d7d54f1F41D
+  PositionProtectionBook: 0xf8130be23744ECFADAA4487701A02f1952b9899c
+  PositionProtectionTriggerBountyUsdc: 200000
+  OrderLifecycleBook: 0xC87C268455605A2c859498efe81DDb7BEE7869A6
+  OrderExecutionConfigHash:
+  0xf02972004e1ac9a2dd01c6c82785926550c77cb14d9c39a0819da759b806f855
+  PletherOracle: 0x094f392df3eA564818b54B2021577cb8b2635Be5
+  BasketMaxConfidenceRatioBps: 10
+  OrderRouterAdmin: 0x04f5C06eC09811768196aEFa2AFDDb278557C436
+  PerpsPublicLens: 0x2a154E8Ec0B27b9f8249c16d98494761fBF72Fe0
+  SettlementMonitorLens: 0xa1eE97d5eC799167E552BC8693356d0d7883d03E
+  SettlementMonitorLensSidecar: 0xA50f81f0040e0fE4D2E642Ac0907A69Ce5b561f7
+  EmergencyPauseCoordinator: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Emergency guardian: 0x0000000000000000000000000000000000000000
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Owner: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  Trading remains inactive until junior and senior seed positions are initialized
+  and HousePool.activateTrading() is called.
+
+Suite result: ok. 17 passed; 0 failed; 0 skipped; finished in 19.43ms (65.13ms CPU time)
+
+Ran 1 test for test/scripts/PerpsReleaseDeploymentSize.t.sol:PerpsReleaseDeploymentSizeTest
+[PASS] test_AllReleaseContractsFitFullDeploymentLimits() (gas: 245906109)
+Logs:
+  Deploying Plether perps to Arbitrum Sepolia
+  Deployer: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  Pyth: 0x0B73614636C855Bf23F342F307FB981A3e47f42B
+
+  MockUSDC: 0xCF75462c9e7fFf4eEB0c50185087a0fb9A056d2b
+  MarginClearinghouse: 0xEF0f6FA72f90Bda42759fd9Bf4667345B47dE0F1
+  CfdEngine: 0xf5b8a1CcF29Cef7861A7b18c4bcD838341D10FF3
+  TerminalNavBookV2: 0x1a4f38B8A89ffbe21Ef07D0c85E71A1dA5afD2B6
+  PositionSizeQuantum: 100000000000000000000
+  FrozenCloseSpreadBps: 50
+  SettlementBufferBps: 25
+  FadRunwaySeconds: 3600
+  CfdEnginePlanner: 0xF7B7DD7cf6AB8397ae360625a56c29Ccfb76fcae
+  CfdEngineSettlementSidecar: 0x64Db3aE00Df4874ea1f72ba9Bc29B35D30D60FEA
+  CfdEngineAdmin: 0x6F22FD8df7c23fd4686bAebEF05c3d7665dA5425
+  HousePoolRedemptionMathSidecar: 0x2bf6003EFF5D0586d4E4D74cDFD392B8e3993a65
+  0xe6c2cacccc84edc1a13707b40786fb89ba7d1e6aa70a2e72d3f8eea3c815b09d
+  HousePool: 0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1
+  MaximumSeniorExposureUsdc: 40000000000000
+  MaximumSeniorShareBps: 8000
+  LpEpochDuration: 3600
+  MaxLpEpochsPerPhase: 16
+  CurrentLpEpoch: 0
+  SeniorVault: 0x717CA671AF7aB3A72ec37791Ff8414C9437199E7
+  JuniorVault: 0x30D77F81E747aC7E73dF8D6C71749F3fe0d82C81
+  JuniorMaintenanceFeeAprBps: 100
+  JuniorMaintenanceFeeRecipient: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  CfdEngineAccountLens: 0x7F0f984D29b2fC970976F63c64592D1E3351C221
+  CfdEngineLens: 0x9C5eD1ab6246054A3219Ef4FBe048397F7e22171
+  CfdOrderPolicyEvaluator: 0x16D6d7eA6e4704d2d62950627563a779CedE04b3
+  CfdClosePreview: 0xDc04f91409e86C7E3d547f204544F187b66c55B7
+  OrderRouterExecutionSidecar: 0x3431A74dCCC1716D56c47c58C6395Db634BE5f0c
+  OrderRecoverySidecar: 0x13E1AdBB22d4AFeeEf2173f84315D508f6cE59c4
+  OrderRouter: 0x56566d63971D7937D40A56E6F7Ee346179D0B37d
+  MinimumOpenNotionalUsdc: 1000000000
+  AdverseConfidenceMultiplierBps: 2500
+  OrderRouterLiquidationBatchSidecar: 0x91814b585aa786E28cf72E00652b7d7d54f1F41D
+  PositionProtectionBook: 0xf8130be23744ECFADAA4487701A02f1952b9899c
+  PositionProtectionTriggerBountyUsdc: 200000
+  OrderLifecycleBook: 0xC87C268455605A2c859498efe81DDb7BEE7869A6
+  OrderExecutionConfigHash:
+  0xf02972004e1ac9a2dd01c6c82785926550c77cb14d9c39a0819da759b806f855
+  PletherOracle: 0x094f392df3eA564818b54B2021577cb8b2635Be5
+  BasketMaxConfidenceRatioBps: 10
+  OrderRouterAdmin: 0x04f5C06eC09811768196aEFa2AFDDb278557C436
+  PerpsPublicLens: 0x2a154E8Ec0B27b9f8249c16d98494761fBF72Fe0
+  SettlementMonitorLens: 0xa1eE97d5eC799167E552BC8693356d0d7883d03E
+  SettlementMonitorLensSidecar: 0xA50f81f0040e0fE4D2E642Ac0907A69Ce5b561f7
+  EmergencyPauseCoordinator: 0x6E5eE04d79E2212A832e9F51391955B486B702ad
+  Emergency guardian: 0x0000000000000000000000000000000000000000
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Owner: 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7
+  Trading remains inactive until junior and senior seed positions are initialized
+  and HousePool.activateTrading() is called.
+  RELEASE_SIZE {"artifact":"DeployPerpsArbitrumSepolia.s.sol:MockUSDC","constructorArguments":"0x","contractKey":"mockUsdc","creationCodeBytes":2511,"creationInputBytes":2511,"creationInputSha256":"0xbe4c0269c9cd88d65e407f39616cc7f081555f199216c364749080e01031bb9a","localAddress":"0xCF75462c9e7fFf4eEB0c50185087a0fb9A056d2b","runtimeBytes":1697,"runtimeSha256":"0xfbe3bc1bda109b1392fb5bf6eef851aa58a32124d143d96d44de59d1cab2c477"}
+  RELEASE_SIZE {"artifact":"MarginClearinghouse.sol:MarginClearinghouse","constructorArguments":"0x000000000000000000000000cf75462c9e7fff4eeb0c50185087a0fb9a056d2b","contractKey":"marginClearinghouse","creationCodeBytes":22040,"creationInputBytes":22072,"creationInputSha256":"0x95b9916da15dd264297ba14a381cf1db4d6b155bcf7f9c8ad9f7dc28bb40fc08","localAddress":"0xEF0f6FA72f90Bda42759fd9Bf4667345B47dE0F1","runtimeBytes":21733,"runtimeSha256":"0x081d32b6f71be95ae9f14abda645272c51bcfa9d63673c5b4cfa623eded349b4"}
+  RELEASE_SIZE {"artifact":"CfdEngine.sol:CfdEngine","constructorArguments":"0x000000000000000000000000cf75462c9e7fff4eeb0c50185087a0fb9a056d2b000000000000000000000000ef0f6fa72f90bda42759fd9bf4667345b47de0f1000000000000000000000000000000000000000000000000000000000bebc200000000000000000000000000000000000000000000000000002386f26fc10000000000000000000000000000000000000000000000000000058d15e176280000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000012c00000000000000000000000000000000000000000000000000000000000001f400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000138800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000032","contractKey":"cfdEngine","creationCodeBytes":25396,"creationInputBytes":25844,"creationInputSha256":"0xc8b52ab0d90ffabd148f7f82cbcc48e78dba8a73a6a4eb6ae77fbafec936d48c","localAddress":"0xf5b8a1CcF29Cef7861A7b18c4bcD838341D10FF3","runtimeBytes":24423,"runtimeSha256":"0x33e533b738235c2c8b645697d92f7a801f211b1dd91d68d075cccc5dda6a61df"}
+  RELEASE_SIZE {"artifact":"TerminalNavBookV2.sol:TerminalNavBookV2","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3000000000000000000000000000000000000000000000000000000000bebc200","contractKey":"terminalNavBookV2","creationCodeBytes":9645,"creationInputBytes":9709,"creationInputSha256":"0xe849ce9beff2c03885bbd5bb1bda47021ea241c7aee5a94bc97235288964436e","localAddress":"0x1a4f38B8A89ffbe21Ef07D0c85E71A1dA5afD2B6","runtimeBytes":9356,"runtimeSha256":"0x443b7bb92d50b413a3caeeb496d1456f413655ed1e0434ee2bfc9140192774fb"}
+  RELEASE_SIZE {"artifact":"CfdEnginePlanner.sol:CfdEnginePlanner","constructorArguments":"0x","contractKey":"cfdEnginePlanner","creationCodeBytes":21817,"creationInputBytes":21817,"creationInputSha256":"0x310413d544be901c4d24856b1b26f15ca8ae53758d04bf0963486f40ee5b3aa7","localAddress":"0xF7B7DD7cf6AB8397ae360625a56c29Ccfb76fcae","runtimeBytes":21791,"runtimeSha256":"0x1381c32b9801ce00dfa0f0ebf362496623f88de12a70466929f5cf1da7c2f234"}
+  RELEASE_SIZE {"artifact":"CfdEngineSettlementSidecar.sol:CfdEngineSettlementSidecar","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3","contractKey":"cfdEngineSettlementSidecar","creationCodeBytes":23749,"creationInputBytes":23781,"creationInputSha256":"0xe1bdeeb4f45d9490544fb28c6508f8f25ab2aca8ad019bd2a38204e192c61628","localAddress":"0x64Db3aE00Df4874ea1f72ba9Bc29B35D30D60FEA","runtimeBytes":23570,"runtimeSha256":"0x21c93e550d71671a95a764ef0fd51c3919e67ccb4c2cc3abbef9e2e442c1c353"}
+  RELEASE_SIZE {"artifact":"CfdEngineAdmin.sol:CfdEngineAdmin","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3000000000000000000000000e05fcc23807536bee418f142d19fa0d21bb0cff7","contractKey":"cfdEngineAdmin","creationCodeBytes":5032,"creationInputBytes":5096,"creationInputSha256":"0xb90389247d9c09a6117f21f1c791842b27c2c0e89ac7f02d3581ea86c8275aac","localAddress":"0x6F22FD8df7c23fd4686bAebEF05c3d7665dA5425","runtimeBytes":4721,"runtimeSha256":"0x5f93eda695d33bde7f3e18484c21544e5e9639101dd8ae04b65305a1deddb29d"}
+  RELEASE_SIZE {"artifact":"HousePoolRedemptionMathSidecar.sol:HousePoolRedemptionMathSidecar","constructorArguments":"0x","contractKey":"housePoolRedemptionMathSidecar","creationCodeBytes":1068,"creationInputBytes":1068,"creationInputSha256":"0x1dbf278d1951d46e50304ec3c70a26f0ba12a94b09ed0c8b36aae7eb1364e661","localAddress":"0x2bf6003EFF5D0586d4E4D74cDFD392B8e3993a65","runtimeBytes":1042,"runtimeSha256":"0x6102f6da5f3c448aa62b23a4b46e513cb12eb0c25f8d87edb0bf17d8ad682cc3"}
+  RELEASE_SIZE {"artifact":"DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool","constructorArguments":"0x000000000000000000000000cf75462c9e7fff4eeb0c50185087a0fb9a056d2b000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff30000000000000000000000002bf6003eff5d0586d4e4d74cdfd392b8e3993a65","contractKey":"housePool","creationCodeBytes":29187,"creationInputBytes":29283,"creationInputSha256":"0x0612aa1ac8c1af120f79d0c7c7e3bb8705b98b868df3b12acb7914622a2a4ec9","localAddress":"0x07896EACEA8fc792B02C80e7578A0aC4b5F3bed1","runtimeBytes":23848,"runtimeSha256":"0x818733b1b89c37a55867a413c158e6beb4839fe3a3d4462e80d9ab0febbd6201"}
+  RELEASE_SIZE {"artifact":"CfdEngineProtocolLens.sol:CfdEngineProtocolLens","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3","contractKey":"cfdEngineProtocolLens","creationCodeBytes":4376,"creationInputBytes":4408,"creationInputSha256":"0x054e3db8937b498e839741f05d4d76ac545da7668476d05c017f195c3c8cafca","localAddress":"0x438c629a4572fECe427C3A1248a26FAbfD77f8F0","runtimeBytes":4223,"runtimeSha256":"0xa15c7eae567403f7d1d67508cf99b3b98417805edbc8e2c945abadfde53d4487"}
+  RELEASE_SIZE {"artifact":"TrancheVault.sol:TrancheVault","constructorArguments":"0x000000000000000000000000cf75462c9e7fff4eeb0c50185087a0fb9a056d2b00000000000000000000000007896eacea8fc792b02c80e7578a0ac4b5f3bed1000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011506c65746865722053656e696f72204c50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000470734c5000000000000000000000000000000000000000000000000000000000","contractKey":"seniorVault","creationCodeBytes":26098,"creationInputBytes":26450,"creationInputSha256":"0x138684d9bd455fb1f194eea3a8d57d4c8253904124eefbf4d96964d2e1ee81a2","localAddress":"0x717CA671AF7aB3A72ec37791Ff8414C9437199E7","runtimeBytes":23879,"runtimeSha256":"0x0cb488350a75f689598380d2c58c36a642df4aeaad08b2f91efcde1afe957d84"}
+  RELEASE_SIZE {"artifact":"TrancheVault.sol:TrancheVault","constructorArguments":"0x000000000000000000000000cf75462c9e7fff4eeb0c50185087a0fb9a056d2b00000000000000000000000007896eacea8fc792b02c80e7578a0ac4b5f3bed1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000064000000000000000000000000e05fcc23807536bee418f142d19fa0d21bb0cff70000000000000000000000000000000000000000000000000000000000000011506c6574686572204a756e696f72204c500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004706a4c5000000000000000000000000000000000000000000000000000000000","contractKey":"juniorVault","creationCodeBytes":26098,"creationInputBytes":26450,"creationInputSha256":"0x5128ba56fb590da9774e6689c50a0e3a0b6c12c6788469b4a1ee5cd67d2a3b27","localAddress":"0x30D77F81E747aC7E73dF8D6C71749F3fe0d82C81","runtimeBytes":23879,"runtimeSha256":"0xd7cee998dcf6c5caae458e05622b8bd4899d3cdeef611d3a6e6686d1517bd698"}
+  RELEASE_SIZE {"artifact":"CfdEngineAccountLens.sol:CfdEngineAccountLens","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3","contractKey":"cfdEngineAccountLens","creationCodeBytes":10873,"creationInputBytes":10905,"creationInputSha256":"0x6e34a34473387984b1e3a3cfe36e77676bf3f22b55c6474b23a7b5fb45a76543","localAddress":"0x7F0f984D29b2fC970976F63c64592D1E3351C221","runtimeBytes":10593,"runtimeSha256":"0x14a692148bd56806991227a6e183719a34dfed7055e764e7cbdd4e640395f2e7"}
+  RELEASE_SIZE {"artifact":"CfdEngineLens.sol:CfdEngineLens","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3","contractKey":"cfdEngineLens","creationCodeBytes":31981,"creationInputBytes":32013,"creationInputSha256":"0x1d95ef1f01aed3e426af6c017d4a59f3eef37262450df448254e5ecb2d16e281","localAddress":"0x9C5eD1ab6246054A3219Ef4FBe048397F7e22171","runtimeBytes":21234,"runtimeSha256":"0x6684b21eb78a518cd1b2f122e860eb55053933e9464949eb29d051c3cb2edb9c"}
+  RELEASE_SIZE {"artifact":"CfdEngineOpenQuoter.sol:CfdEngineOpenQuoter","constructorArguments":"0x","contractKey":"cfdEngineOpenQuoter","creationCodeBytes":10246,"creationInputBytes":10246,"creationInputSha256":"0x6682990eb3d73cf9bd1d59131c072cf588c2f653a41cd919f1a982ea46a7ab5e","localAddress":"0x537cDddc98eC173824146F58fc381616FD993696","runtimeBytes":10220,"runtimeSha256":"0xc02a30d39650fa4c848036836971a09756e46304fd71ae5e50fffbd9ef319522"}
+  RELEASE_SIZE {"artifact":"CfdOrderPolicyEvaluator.sol:CfdOrderPolicyEvaluator","constructorArguments":"0x","contractKey":"cfdOrderPolicyEvaluator","creationCodeBytes":19545,"creationInputBytes":19545,"creationInputSha256":"0x033f43f4599b306cb91771dee5059f8e6a3cd868cbe472f0fdd0557c3d927b66","localAddress":"0x16D6d7eA6e4704d2d62950627563a779CedE04b3","runtimeBytes":19519,"runtimeSha256":"0xf6403cdf55eda2678671ca68b2e9e7daa511ad7135b9fb4ed51cc78f5c158a52"}
+  RELEASE_SIZE {"artifact":"CfdClosePreview.sol:CfdClosePreview","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3","contractKey":"cfdClosePreview","creationCodeBytes":21873,"creationInputBytes":21905,"creationInputSha256":"0x597a1ccc2476a1b8686b722b30ed690df437623d218c762a407a3d1cc7bf452a","localAddress":"0xDc04f91409e86C7E3d547f204544F187b66c55B7","runtimeBytes":21732,"runtimeSha256":"0xa4251cb457b51c40be6b0d5ccbb0dd6b35b0356a8656b3213106a90fd1f0ef95"}
+  RELEASE_SIZE {"artifact":"OrderRouterExecutionSidecar.sol:OrderRouterExecutionSidecar","constructorArguments":"0x","contractKey":"orderRouterExecutionSidecar","creationCodeBytes":31888,"creationInputBytes":31888,"creationInputSha256":"0x2ca73d2f03bc8a08af0a382208a1b4ced6db975467582cd629d88a3d624bd303","localAddress":"0x3431A74dCCC1716D56c47c58C6395Db634BE5f0c","runtimeBytes":23163,"runtimeSha256":"0x7624ceb1130260e030957746580844c8e41ea443bc3287fe8e0a63fc4af060e2"}
+  RELEASE_SIZE {"artifact":"OrderRecoverySidecar.sol:OrderRecoverySidecar","constructorArguments":"0x","contractKey":"orderRecoverySidecar","creationCodeBytes":8576,"creationInputBytes":8576,"creationInputSha256":"0x7c53fe7f2a82bb7118befe4e9835349ff515d8b2cb10decde5c3ce24537eebc3","localAddress":"0x13E1AdBB22d4AFeeEf2173f84315D508f6cE59c4","runtimeBytes":8517,"runtimeSha256":"0x58e52202c6a861cbe53004158cd9fd4bb0c7a1732c82fb372646ac19bcc8453b"}
+  RELEASE_SIZE {"artifact":"DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff300000000000000000000000007896eacea8fc792b02c80e7578a0ac4b5f3bed10000000000000000000000000b73614636c855bf23f342f307fb981a3e47f42b00000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000003800000000000000000000000000000000000000000000000000000000000000006a995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30bef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd5284c2dde9633d93d1bcad84e7dc41c9d56578b7ec52fabedc1f335d673df0a7c13112b03a41c910ed446852aacf67118cb1bec67b2cd0b9a214c58cc0eaa2ecca8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc6760b1e3297e69f162877b577b0d6a47a0d63b2392bc8499e6540da4187a63e28f8000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000007fe5cf2bea0000000000000000000000000000000000000000000000000000001e32b478974000000000000000000000000000000000000000000000000000001a6c5de9845800000000000000000000000000000000000000000000000000001434c04928f8000000000000000000000000000000000000000000000000000009536c708910000000000000000000000000000000000000000000000000000007fe5cf2bea00000000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000700e860000000000000000000000000000000000000000000000000000000000009bc3000000000000000000000000000000000000000000000000000000000080400800000000000000000000000000000000000000000000000000000000004580f800000000000000000000000000000000000000000000000000000000000a5b5e000000000000000000000000000000000000000000000000000000000078422200000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001","contractKey":"pletherOracle","creationCodeBytes":15987,"creationInputBytes":17107,"creationInputSha256":"0x6cd4fe82c104e7492a700e86534710a47c3c4b7531403081341e3e977564ac3c","localAddress":"0x094f392df3eA564818b54B2021577cb8b2635Be5","runtimeBytes":14084,"runtimeSha256":"0x202e420be2706810f0b3f3d2a06c5a40887a2419a249c4ad3436ad104d63b8f8"}
+  RELEASE_SIZE {"artifact":"OrderRouterLiquidationBatchSidecar.sol:OrderRouterLiquidationBatchSidecar","constructorArguments":"0x00000000000000000000000056566d63971d7937d40a56e6f7ee346179d0b37d","contractKey":"orderRouterLiquidationBatchSidecar","creationCodeBytes":20140,"creationInputBytes":20172,"creationInputSha256":"0xd8aaf9ef20c329bf1de6e37202a554dde8ba0a14b8740540f3a3280187a922df","localAddress":"0x91814b585aa786E28cf72E00652b7d7d54f1F41D","runtimeBytes":19968,"runtimeSha256":"0xf4a26e725904d007af8827a5dd9dc7c3db4f697fa2583128e154f82e6870522e"}
+  RELEASE_SIZE {"artifact":"OrderLifecycleBook.sol:OrderLifecycleBook","constructorArguments":"0x00000000000000000000000056566d63971d7937d40a56e6f7ee346179d0b37d000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3000000000000000000000000ef0f6fa72f90bda42759fd9bf4667345b47de0f100000000000000000000000007896eacea8fc792b02c80e7578a0ac4b5f3bed1","contractKey":"orderLifecycleBook","creationCodeBytes":15634,"creationInputBytes":15762,"creationInputSha256":"0x78303224777a6e0fba6ca59a04b4de90b67922815c1514b98b54c839925f3912","localAddress":"0xC87C268455605A2c859498efe81DDb7BEE7869A6","runtimeBytes":15230,"runtimeSha256":"0x5363c045a8b50ef6d20e8ca6d5da238c3d3197ac00e1b8d6eb3c5a6ed3db4bc9"}
+  RELEASE_SIZE {"artifact":"DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter","constructorArguments":"0x000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff30000000000000000000000009c5ed1ab6246054a3219ef4fbe048397f7e2217100000000000000000000000007896eacea8fc792b02c80e7578a0ac4b5f3bed1000000000000000000000000094f392df3ea564818b54b2021577cb8b2635be500000000000000000000000091814b585aa786e28cf72e00652b7d7d54f1f41d00000000000000000000000016d6d7ea6e4704d2d62950627563a779cede04b30000000000000000000000003431a74dccc1716d56c47c58c6395db634be5f0c000000000000000000000000c87c268455605a2c859498efe81ddb7bee7869a6","contractKey":"orderRouter","creationCodeBytes":46615,"creationInputBytes":46871,"creationInputSha256":"0xc4279dbba38e470d45a3362dcf6e6dea6011122713e7641e6c77b31a9e2f5b63","localAddress":"0x56566d63971D7937D40A56E6F7Ee346179D0B37d","runtimeBytes":20928,"runtimeSha256":"0xa50dedeeafdd6b1ca2394da685aac5b3bce645e7b6b11fa1a1e4b13c53bb0c52"}
+  RELEASE_SIZE {"artifact":"OrderRouterAdmin.sol:OrderRouterAdmin","constructorArguments":"0x00000000000000000000000056566d63971d7937d40a56e6f7ee346179d0b37d000000000000000000000000e05fcc23807536bee418f142d19fa0d21bb0cff7","contractKey":"orderRouterAdmin","creationCodeBytes":5631,"creationInputBytes":5695,"creationInputSha256":"0xca1a98f34e1a7f8bc7f560fc5d5c84cb59c463dfb4a2799b7005336c74993cb6","localAddress":"0x04f5C06eC09811768196aEFa2AFDDb278557C436","runtimeBytes":5289,"runtimeSha256":"0x9d5f3d74a4139d1675985ee6c0466f4b5049f1a0b25ee428283759994a6e3a98"}
+  RELEASE_SIZE {"artifact":"PositionProtectionBook.sol:PositionProtectionBook","constructorArguments":"0x00000000000000000000000056566d63971d7937d40a56e6f7ee346179d0b37d000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff3","contractKey":"positionProtectionBook","creationCodeBytes":17509,"creationInputBytes":17573,"creationInputSha256":"0x503efa7ec5ccadabb59d71166300565ca88156ed03709ff11f1cf3b9bbe0db06","localAddress":"0xf8130be23744ECFADAA4487701A02f1952b9899c","runtimeBytes":17128,"runtimeSha256":"0xc8f4f654953c323d7131ba7d8f57567acf61e3c1ef0047a8f8aafab2d789b65e"}
+  RELEASE_SIZE {"artifact":"PerpsPublicLens.sol:PerpsPublicLens","constructorArguments":"0x0000000000000000000000007f0f984d29b2fc970976f63c64592d1e3351c221000000000000000000000000f5b8a1ccf29cef7861a7b18c4bcd838341d10ff300000000000000000000000056566d63971d7937d40a56e6f7ee346179d0b37d00000000000000000000000007896eacea8fc792b02c80e7578a0ac4b5f3bed1","contractKey":"perpsPublicLens","creationCodeBytes":14815,"creationInputBytes":14943,"creationInputSha256":"0x20ad5390d4590f3154a240c13ae9528154f444007fd7e48a330c5e4a7c95806c","localAddress":"0x2a154E8Ec0B27b9f8249c16d98494761fBF72Fe0","runtimeBytes":14461,"runtimeSha256":"0x354e8b90e6d6909c7b742c2373a89169a922b7c3a7c18894ded2afb0766c4d8d"}
+  RELEASE_SIZE {"artifact":"SettlementMonitorLens.sol:SettlementMonitorLens","constructorArguments":"0x00000000000000000000000056566d63971d7937d40a56e6f7ee346179d0b37d","contractKey":"settlementMonitorLens","creationCodeBytes":49025,"creationInputBytes":49057,"creationInputSha256":"0xd403be26b0aab6c82326db9265f18ef8d15a3e3bc4f2c11c2823c25443cade12","localAddress":"0xa1eE97d5eC799167E552BC8693356d0d7883d03E","runtimeBytes":23339,"runtimeSha256":"0x693418ff2a776431b71712b3f56ca1034a8971b6c319a0f28a58030373e434d3"}
+  RELEASE_SIZE {"artifact":"SettlementMonitorLensSidecar.sol:SettlementMonitorLensSidecar","constructorArguments":"0x00000000000000000000000056566d63971d7937d40a56e6f7ee346179d0b37d","contractKey":"settlementMonitorLensSidecar","creationCodeBytes":20719,"creationInputBytes":20751,"creationInputSha256":"0x29c207e672272bbcab185ec3fc856063e3b625ed2d00675d25d2a9679eaa7505","localAddress":"0xA50f81f0040e0fE4D2E642Ac0907A69Ce5b561f7","runtimeBytes":19345,"runtimeSha256":"0x4ac0bbc068f6670f659e7691a16399520e0323a1e6ba1cee1ec683ee861f02c4"}
+  RELEASE_SIZE {"artifact":"EmergencyPauseCoordinator.sol:EmergencyPauseCoordinator","constructorArguments":"0x00000000000000000000000004f5c06ec09811768196aefa2afddb278557c43600000000000000000000000007896eacea8fc792b02c80e7578a0ac4b5f3bed1000000000000000000000000e05fcc23807536bee418f142d19fa0d21bb0cff7","contractKey":"emergencyPauseCoordinator","creationCodeBytes":3257,"creationInputBytes":3353,"creationInputSha256":"0x6e72eb1316691679c7512357de69c9000f57c8c21ddc2cd00e3d505733d8518a","localAddress":"0x6E5eE04d79E2212A832e9F51391955B486B702ad","runtimeBytes":2788,"runtimeSha256":"0x6d644f40e4883c77961a2e1226206406a94d699afc2d3162f8e7a08cf693129d"}
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 31.24ms (27.76ms CPU time)
+
+Ran 7 test suites in 33.22ms (77.40ms CPU time): 41 tests passed, 0 failed, 0 skipped (41 total tests)

@@ -1,0 +1,18 @@
+Start verifying contract `0x1e0420b749ea85d0A1F70DB4a715458008606f44` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+
+Submitting verification for [packages/perps/src/CfdEnginePlanner.sol:CfdEnginePlanner] 0x1e0420b749ea85d0A1F70DB4a715458008606f44.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `hl8qcec2ijdub6zrybetlgk9jfby9q6nwjfee6v7heyvwrdnjq`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

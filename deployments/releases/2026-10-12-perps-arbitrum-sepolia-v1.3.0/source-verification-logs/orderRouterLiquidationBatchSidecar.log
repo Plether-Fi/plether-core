@@ -1,0 +1,19 @@
+Start verifying contract `0xb392FBFC729CeaA3ebc5208F3D69d19a78d601f8` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000005e6b97a9b8f9fd43ad098462d5cc5852a74ddc70
+
+Submitting verification for [packages/perps/src/OrderRouterLiquidationBatchSidecar.sol:OrderRouterLiquidationBatchSidecar] 0xb392FBFC729CeaA3ebc5208F3D69d19a78d601f8.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `lihbzcp54gwmts7mkhhw9dfwqmeeftcakrfmphfqapqxz9c8xa`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

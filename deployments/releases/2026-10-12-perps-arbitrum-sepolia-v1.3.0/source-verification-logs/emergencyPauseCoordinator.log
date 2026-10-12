@@ -1,0 +1,19 @@
+Start verifying contract `0xE5e2386D153c20DB34227b46c72c021bC10A667a` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x000000000000000000000000ef255d9a937b1d482970ad3f0541a61c2aaf7c6a000000000000000000000000fafdc23a0879b56f580914d594c29423501cbad00000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b
+
+Submitting verification for [packages/perps/src/EmergencyPauseCoordinator.sol:EmergencyPauseCoordinator] 0xE5e2386D153c20DB34227b46c72c021bC10A667a.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `ygpc2gv1l2ifpxgfvalr8uujaixyfcn5nenzaziier6kaxk8mr`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)

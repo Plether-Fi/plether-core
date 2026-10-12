@@ -1,0 +1,212 @@
+No files changed, compilation skipped
+2026-10-12T09:15:56.204828Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdAssertions.sol
+2026-10-12T09:15:56.205076Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdError.sol
+2026-10-12T09:15:56.205113Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdInvariant.sol
+2026-10-12T09:15:56.205158Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdToml.sol
+2026-10-12T09:15:56.205187Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/Test.sol
+2026-10-12T09:15:56.205248Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC3156FlashBorrower.sol
+2026-10-12T09:15:56.205275Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC3156FlashLender.sol
+2026-10-12T09:15:56.205320Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC5267.sol
+2026-10-12T09:15:56.205363Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20FlashMint.sol
+2026-10-12T09:15:56.205394Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Permit.sol
+2026-10-12T09:15:56.205429Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol
+2026-10-12T09:15:56.205467Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Bytes.sol
+2026-10-12T09:15:56.205543Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Nonces.sol
+2026-10-12T09:15:56.205587Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol
+2026-10-12T09:15:56.205619Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/ShortStrings.sol
+2026-10-12T09:15:56.205648Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/StorageSlot.sol
+2026-10-12T09:15:56.205680Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Strings.sol
+2026-10-12T09:15:56.205715Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol
+2026-10-12T09:15:56.205745Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol
+2026-10-12T09:15:56.205789Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/MessageHashUtils.sol
+2026-10-12T09:15:56.205825Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/math/SignedMath.sol
+2026-10-12T09:15:56.206118Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/base/FlashLoanBase.sol
+2026-10-12T09:15:56.206145Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/AggregatorV3Interface.sol
+2026-10-12T09:15:56.206174Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/ICurvePool.sol
+2026-10-12T09:15:56.206205Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/IMorpho.sol
+2026-10-12T09:15:56.206261Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/libraries/OracleLib.sol
+2026-10-12T09:15:56.206295Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/test-support/MockOracle.sol
+2026-10-12T09:15:56.206332Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/test-support/MockPyth.sol
+2026-10-12T09:15:56.206362Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/base/LeverageRouterBase.sol
+2026-10-12T09:15:56.206404Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/InvarCoin.sol
+2026-10-12T09:15:56.206443Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/SyntheticSplitter.sol
+2026-10-12T09:15:56.206469Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/SyntheticToken.sol
+2026-10-12T09:15:56.206495Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveGauge.sol
+2026-10-12T09:15:56.206530Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveMinter.sol
+2026-10-12T09:15:56.206558Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveTwocrypto.sol
+2026-10-12T09:15:56.206585Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IInvarCoin.sol
+2026-10-12T09:15:56.206617Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IRewardDistributor.sol
+2026-10-12T09:15:56.206645Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ISyntheticSplitter.sol
+2026-10-12T09:15:56.206675Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IYieldAdapter.sol
+2026-10-12T09:15:56.206709Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/BasketOracle.sol
+2026-10-12T09:15:56.206737Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/MorphoOracle.sol
+2026-10-12T09:15:56.206793Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/PythAdapter.sol
+2026-10-12T09:15:56.206830Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/StakedOracle.sol
+2026-10-12T09:15:56.206871Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/BullLeverageRouter.sol
+2026-10-12T09:15:56.206906Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/LeverageRouter.sol
+2026-10-12T09:15:56.206946Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/ZapRouter.sol
+2026-10-12T09:15:56.206977Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/staking/RewardDistributor.sol
+2026-10-12T09:15:56.207006Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/staking/StakedToken.sol
+2026-10-12T09:15:56.207042Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/BootstrapPerpsArbitrumSepolia.s.sol
+2026-10-12T09:15:56.207070Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeploySpotArbitrumSepolia.s.sol
+2026-10-12T09:15:56.207095Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployToSepolia.s.sol
+2026-10-12T09:15:56.207132Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployToTest.s.sol
+2026-10-12T09:15:56.207159Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/LpEpochKeeper.s.sol
+2026-10-12T09:15:56.207190Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/VerifyPerpsArbitrumSepolia.s.sol
+2026-10-12T09:15:56.207218Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/mocks/MockTwocryptoPool.s.sol
+2026-10-12T09:15:56.207251Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/integration/OracleParity.t.sol
+2026-10-12T09:15:56.207279Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/mocks/MockPyth.sol
+2026-10-12T09:15:56.207305Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/mocks/MockToken.sol
+2026-10-12T09:15:56.207345Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol
+2026-10-12T09:15:56.207373Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/DeploySpotArbitrumSepolia.t.sol
+2026-10-12T09:15:56.207400Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/LpEpochKeeper.t.sol
+2026-10-12T09:15:56.207426Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/PerpsReleaseDeploymentSize.t.sol
+2026-10-12T09:15:56.207457Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/VerifyPerpsArbitrumSepolia.t.sol
+2026-10-12T09:15:56.207486Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/utils/MockYieldAdapter.sol
+2026-10-12T09:15:56.906833Z  WARN foundry_fork_db::cache: Failed to read cache file err=Os { code: 2, kind: NotFound, message: "No such file or directory" } path="/Users/stan/.foundry/cache/rpc/arbitrum-sepolia/318367868"
+2026-10-12T09:15:59.178625Z  WARN evm::traces::external: etherscan config not found
+2026-10-12T09:15:59.535653Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.537025Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.547038Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.615693Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.684492Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.735313Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.762212Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.767939Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.812357Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.840505Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.895014Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.920338Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.965720Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:15:59.974219Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.202039Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.260748Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.261177Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.261200Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.318340Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.351763Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.418280Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.470310Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.480494Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.540258Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.603424Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.603526Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.617590Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.638272Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.691615Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.757152Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.802259Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.835798Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.835850Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.910535Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.988777Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:00.994382Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.052324Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.056288Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.145563Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.145738Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.193648Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.201598Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.201750Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.302481Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.340428Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.346208Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.411485Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.457378Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.485825Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.486050Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.493733Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.578324Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:01.604941Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:03.562225Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:03.578170Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:05.403521Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:05.409884Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:05.456565Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:05.487240Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:05.502241Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T09:16:05.560956Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+Script ran successfully.
+
+== Return ==
+deployed: struct DeployPerpsArbitrumSepolia.DeployedContracts DeployedContracts({ usdc: 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45, clearinghouse: 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0, engine: 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0, terminalNavBook: 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872, planner: 0x1e0420b749ea85d0A1F70DB4a715458008606f44, settlementSidecar: 0x7336290349Ee4F4149173DC93B89ab951321C9af, engineAdmin: 0xeB5CCf3d63ff78541d33F56A3772d3E78341954a, housePoolRedemptionMathSidecar: 0xA89d01d5ba82bD9D2E5E897194E6203D15a88829, housePool: 0xfAFDc23A0879B56F580914D594C29423501cBad0, seniorVault: 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa, juniorVault: 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029, accountLens: 0x12ca3776d001FBE12895783A9c93149eE8b5a1e5, engineLens: 0x069B3c61377009C79E48D94bf947B414A7Fd3600, orderPolicyEvaluator: 0xEC050dDe46F13848B4018B304e8609FfCC1997ad, closePreview: 0x041b37223268f098eEbfa77A78d250Ef1F49B1a6, orderExecutionSidecar: 0x0f33d9C9c4bb480cE2dD95F1dA5e544B74445A5f, router: 0x5e6b97a9b8f9fd43aD098462d5cc5852A74ddC70, liquidationBatchSidecar: 0xb392FBFC729CeaA3ebc5208F3D69d19a78d601f8, positionProtectionBook: 0xFf43e35AD574Fe30E69769741ABb0FFF3273a812, lifecycleBook: 0xfc22E0532C52101BBFe742e7754A4578AF297F68, pletherOracle: 0x76B6461880Be19ABa592C16975611Be8B6eAF6e5, routerAdmin: 0xEf255D9A937B1d482970ad3F0541A61c2AAF7C6A, publicLens: 0x88CbA0D30fF0B1c13AB49f8e54eD22e75745e7C5, settlementMonitorLens: 0xA2cAd103857aeD976a063219ee6b8366A758D9EA, settlementMonitorLensSidecar: 0xCA44e01506f4463e22a7CA02dbfb0DBbFB77DE9B, emergencyPauseCoordinator: 0xE5e2386D153c20DB34227b46c72c021bC10A667a })
+
+== Logs ==
+  Deploying Plether perps to Arbitrum Sepolia
+  Deployer: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+  Pyth: 0x0B73614636C855Bf23F342F307FB981A3e47f42B
+
+  MockUSDC: 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45
+  MarginClearinghouse: 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0
+  CfdEngine: 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0
+  TerminalNavBookV2: 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872
+  PositionSizeQuantum: 100000000000000000000
+  FrozenCloseSpreadBps: 50
+  SettlementBufferBps: 25
+  FadRunwaySeconds: 3600
+  CfdEnginePlanner: 0x1e0420b749ea85d0A1F70DB4a715458008606f44
+  CfdEngineSettlementSidecar: 0x7336290349Ee4F4149173DC93B89ab951321C9af
+  CfdEngineAdmin: 0xeB5CCf3d63ff78541d33F56A3772d3E78341954a
+  HousePoolRedemptionMathSidecar: 0xA89d01d5ba82bD9D2E5E897194E6203D15a88829
+  0xe6c2cacccc84edc1a13707b40786fb89ba7d1e6aa70a2e72d3f8eea3c815b09d
+  HousePool: 0xfAFDc23A0879B56F580914D594C29423501cBad0
+  MaximumSeniorExposureUsdc: 40000000000000
+  MaximumSeniorShareBps: 8000
+  LpEpochDuration: 3600
+  MaxLpEpochsPerPhase: 16
+  CurrentLpEpoch: 497721
+  SeniorVault: 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa
+  JuniorVault: 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029
+  JuniorMaintenanceFeeAprBps: 100
+  JuniorMaintenanceFeeRecipient: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+  CfdEngineAccountLens: 0x12ca3776d001FBE12895783A9c93149eE8b5a1e5
+  CfdEngineLens: 0x069B3c61377009C79E48D94bf947B414A7Fd3600
+  CfdOrderPolicyEvaluator: 0xEC050dDe46F13848B4018B304e8609FfCC1997ad
+  CfdClosePreview: 0x041b37223268f098eEbfa77A78d250Ef1F49B1a6
+  OrderRouterExecutionSidecar: 0x0f33d9C9c4bb480cE2dD95F1dA5e544B74445A5f
+  OrderRecoverySidecar: 0x1B73BBF4b730da5664618C1186bE7917Ecf8470e
+  OrderRouter: 0x5e6b97a9b8f9fd43aD098462d5cc5852A74ddC70
+  MinimumOpenNotionalUsdc: 1000000000
+  AdverseConfidenceMultiplierBps: 2500
+  OrderRouterLiquidationBatchSidecar: 0xb392FBFC729CeaA3ebc5208F3D69d19a78d601f8
+  PositionProtectionBook: 0xFf43e35AD574Fe30E69769741ABb0FFF3273a812
+  PositionProtectionTriggerBountyUsdc: 200000
+  OrderLifecycleBook: 0xfc22E0532C52101BBFe742e7754A4578AF297F68
+  OrderExecutionConfigHash:
+  0x7ddc0c26d15e87ee30d46e566877ee0caa03e46f3ecad77fb76f97a6ef4f0a3f
+  PletherOracle: 0x76B6461880Be19ABa592C16975611Be8B6eAF6e5
+  BasketMaxConfidenceRatioBps: 10
+  OrderRouterAdmin: 0xEf255D9A937B1d482970ad3F0541A61c2AAF7C6A
+  PerpsPublicLens: 0x88CbA0D30fF0B1c13AB49f8e54eD22e75745e7C5
+  SettlementMonitorLens: 0xA2cAd103857aeD976a063219ee6b8366A758D9EA
+  SettlementMonitorLensSidecar: 0xCA44e01506f4463e22a7CA02dbfb0DBbFB77DE9B
+  EmergencyPauseCoordinator: 0xE5e2386D153c20DB34227b46c72c021bC10A667a
+  Emergency guardian: 0x0000000000000000000000000000000000000000
+  Risk-off order cutoff: 0
+  LP epoch settlement paused: false
+  Owner: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+  Trading remains inactive until junior and senior seed positions are initialized
+  and HousePool.activateTrading() is called.
+
+## Setting up 1 EVM.
+
+==========================
+
+Chain 421614
+
+Estimated gas price: 0.040308001 gwei
+
+Estimated total gas used for script: 133102240
+
+Estimated amount required: 0.00536508522302224 ETH
+
+==========================
+
+
+==========================
+
+ONCHAIN EXECUTION COMPLETE & SUCCESSFUL.
+
+Transactions saved to: /Users/stan/.codex/worktrees/e74c/plether-core/broadcast/DeployPerpsArbitrumSepolia.s.sol/421614/run-latest.json
+
+Sensitive values saved to: /Users/stan/.codex/worktrees/e74c/plether-core/cache/DeployPerpsArbitrumSepolia.s.sol/421614/run-latest.json
