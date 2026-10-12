@@ -1,0 +1,42 @@
+{
+  "release": "v1.3.0",
+  "chainId": 421614,
+  "checkedAt": "2026-10-12T10:10:37.752023+00:00",
+  "housePool": "0xfafdc23a0879b56f580914d594c29423501cbad0",
+  "requestedRawUsdcPerTranche": "250000000000000",
+  "seedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+  "currentConfig": {
+    "seniorRateBps": 800,
+    "markStalenessLimit": 60,
+    "seniorFrozenLpFeeBps": 25,
+    "juniorFrozenLpFeeBps": 75,
+    "maxSeniorExposureUsdc": 40000000000000,
+    "maxSeniorShareBps": 8000
+  },
+  "proposedConfig": {
+    "seniorRateBps": 800,
+    "markStalenessLimit": 60,
+    "seniorFrozenLpFeeBps": 25,
+    "juniorFrozenLpFeeBps": 75,
+    "maxSeniorExposureUsdc": 250000000000000,
+    "maxSeniorShareBps": 8000
+  },
+  "proposalCalldata": "0x31c6b19f0000000000000000000000000000000000000000000000000000000000000320000000000000000000000000000000000000000000000000000000000000003c0000000000000000000000000000000000000000000000000000000000000019000000000000000000000000000000000000000000000000000000000000004b0000000000000000000000000000000000000000000000000000e35fa931a0000000000000000000000000000000000000000000000000000000000000001f40",
+  "timelockSeconds": 172800,
+  "simulationPassed": true,
+  "simulationLogSha256": "f0ba97bba77bdc6d7e3bcdfe1dc255ebf33ab826afb46f1fa5905fad6f5ec800",
+  "broadcast": true,
+  "approvalStatus": "User approved cap increase and seeding after the 48-hour timelock",
+  "simulationLog": "seed-250m-preflight.log",
+  "operationStage": "proposal confirmed; waiting for timelock",
+  "proposalNonce": 136609,
+  "authorized": true,
+  "proposalTransactionHash": "0x172b895257a5d0fc11687f93a59f9a3572d78e473494028d6d1db070d5a89973",
+  "activationTime": 1791972752,
+  "activationTimeUtc": "2026-10-14T10:12:32+00:00",
+  "activationTimeWarsaw": "2026-10-14T12:12:32+02:00",
+  "confirmedAt": "2026-10-12T10:12:33.980650+00:00",
+  "followupAutomationId": "seed-v1-3-0-after-senior-cap-timelock",
+  "followupLocalTime": "12:15 Europe/Warsaw; chain timestamp and proposal maturation govern",
+  "correctedPreflightNote": "An initial no-broadcast draft used an effective fee view. The corrected preflight and live proposal use configured frozen fees 25/75 bps and change only the absolute senior cap."
+}

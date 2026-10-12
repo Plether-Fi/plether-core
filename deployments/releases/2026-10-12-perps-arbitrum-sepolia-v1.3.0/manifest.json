@@ -283,10 +283,10 @@
     "positionProtectionTriggerBountyUsdc": "200000",
     "maxSeniorExposureUsdc": "40000000000000",
     "maxSeniorShareBps": 8000,
-    "seniorSeedUsdc": "1000000",
-    "juniorSeedUsdc": "1000000",
-    "seniorSeedReceiver": null,
-    "juniorSeedReceiver": null,
+    "seniorSeedUsdc": "250000000000000",
+    "juniorSeedUsdc": "250000000000000",
+    "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
     "juniorMaintenanceFeeAprBps": 100,
     "juniorMaintenanceFeeRecipient": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
     "juniorFeeRecipientIsDeploymentTreasurySnapshot": true
@@ -385,11 +385,27 @@
     "deploymentComplete": true
   },
   "bootstrap": {
-    "status": "not_run",
+    "status": "authorized_pending_cap_timelock",
     "seniorSeedInitialized": false,
     "juniorSeedInitialized": false,
     "isTradingActive": false,
     "guardianConfigured": false,
-    "seedAmountsInEconomicsArePlannedDefaults": true
+    "seedAmountsInEconomicsArePlannedDefaults": false,
+    "requestedSeniorSeedUsdc": "250000000000000",
+    "requestedJuniorSeedUsdc": "250000000000000",
+    "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B"
+  },
+  "governance": {
+    "seniorCapProposal": {
+      "transactionHash": "0x172b895257a5d0fc11687f93a59f9a3572d78e473494028d6d1db070d5a89973",
+      "activeMaxSeniorExposureUsdc": "40000000000000",
+      "pendingMaxSeniorExposureUsdc": "250000000000000",
+      "activationTime": 1791972752,
+      "activationTimeWarsaw": "2026-10-14T12:12:32+02:00",
+      "status": "pending_timelock",
+      "otherPoolConfigFieldsUnchanged": true,
+      "evidence": "senior-cap-proposal.json"
+    }
   }
 }

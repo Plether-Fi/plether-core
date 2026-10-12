@@ -243,5 +243,18 @@
   "sourceVerifiedContractCount": 29,
   "explorerCompilerInputsPassed": true,
   "explorerCompilerInputsEvidence": "explorer-input-verification.json",
-  "savedLogFormatting": "Trailing whitespace normalized in checked-in log copies; original sanitized logs remain in the local preparation bundle. The immutable build archive is unchanged."
+  "savedLogFormatting": "Trailing whitespace normalized in checked-in log copies; original sanitized logs remain in the local preparation bundle. The immutable build archive is unchanged.",
+  "pendingOperations": {
+    "seniorCapFinalization": {
+      "earliestActivation": "2026-10-14T12:12:32+02:00",
+      "pendingCapOnlyProposalVerified": true
+    },
+    "seedJuniorAndSenior": {
+      "requestedMockUsdcPerTranche": "250000000",
+      "broadcast": false,
+      "followupAutomationId": "seed-v1-3-0-after-senior-cap-timelock",
+      "tradingActivationAuthorized": false,
+      "guardianConfigurationAuthorized": false
+    }
+  }
 }

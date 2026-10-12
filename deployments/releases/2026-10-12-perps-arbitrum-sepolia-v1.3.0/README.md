@@ -70,8 +70,16 @@ Execution-config hash: `0x7ddc0c26d15e87ee30d46e566877ee0caa03e46f3ecad77fb76f97
 
 Deployed-phase and synchronization logs, the current signed fixture, and the baseline/candidate plus scenario fork evidence are included. No private key, API key, credential-bearing RPC URL, or ignored environment file belongs in this release record.
 
+## Authorized cap increase and seeding
+
+The user requested **250M mock USDC per tranche** and approved raising the senior absolute cap from **40M to 250M**. The cap-only [proposal transaction](https://sepolia.arbiscan.io/tx/0x172b895257a5d0fc11687f93a59f9a3572d78e473494028d6d1db070d5a89973) succeeded. The pending config is `(800,60,25,75,250000000000000,8000)`: the senior rate, mark freshness, frozen fees, and 80% share limit are unchanged. The active absolute cap remains 40M until finalization.
+
+Earliest finalization: **14 October 2026 at 12:12:32 Europe/Warsaw**. A follow-up in this chat is scheduled at 12:15 local time; the actual chain timestamp and matching proposal govern execution. After maturation it will finalize this cap change, then seed Junior and Senior with `250000000000000` raw mock USDC each to owner `0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B`, checking receipts and state before every retry. The corrected fork simulation passed for both exact seeds after the 48-hour timelock. See [proposal evidence](senior-cap-proposal.json), [receipt](senior-cap-proposal-receipt.json), and [simulation](seed-250m-preflight.log).
+
+Neither seed has been broadcast yet. The guardian remains unset and trading remains inactive. The fixed-$1 bootstrap script and fixed-$40M/nonzero-guardian verifier do not apply unchanged to this user-authorized operation; use the actual approved amounts/configuration and independent state checks.
+
 ## Next gate
 
-Stop at deployed/inactive. Before seeding or activating trading, select and configure the guardian and explicit seed receivers, confirm intended seed amounts, require matching frontend/keeper/indexer/AA versions, and review obligations on the previous stack. Standard bootstrap defaults require $1 per tranche. Then run seeded-phase verification before a separately authorized activation and active-phase verification. Keep bridge funding disabled until its own live provider and compatible deployment evidence pass.
+Complete only the authorized cap finalization and 250M/250M seeds after the timelock, with the owner as both receivers and without guardian configuration or trading activation. For any later trading activation, first select and configure the guardian, require matching frontend/keeper/indexer/AA versions, and review obligations on the previous stack. The standard bootstrap script still hard-codes $1 seeds and the standard verifier hard-codes the original 40M cap and a nonzero guardian; verify this explicitly authorized seeded state independently. Activation remains a separate instruction. Keep bridge funding disabled until its own live provider and compatible deployment evidence pass.
 
 [Deployment guide](../../../packages/perps/DEPLOYMENT.md) · [Oracle synchronization](../../../packages/perps/ORACLE_SYNCHRONIZATION.md) · [V3 timing](../../../packages/perps/ORDER_V3_TIMING.md) · [Deposit-free close](../../../packages/perps/DEPOSIT_FREE_CLOSE.md) · [Bridge funding](../../../packages/perps/BRIDGE_FUNDING.md)
