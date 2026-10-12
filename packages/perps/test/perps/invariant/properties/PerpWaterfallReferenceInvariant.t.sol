@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
+import {WaterfallReferenceMath} from "../ghost/WaterfallReferenceMath.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
@@ -196,34 +197,29 @@ contract PerpWaterfallReferenceHandler is Test {
     }
 
     function _reconcileReference() private {
-        uint256 coupon = expectedSenior * 800 * (block.timestamp - expectedCheckpoint) / (10_000 * 365 days);
-        uint256 paid = coupon < expectedJunior ? coupon : expectedJunior;
-        expectedSenior += paid;
-        expectedJunior -= paid;
-        if (expectedSenior > expectedHwm) {
-            expectedHwm = expectedSenior;
-            couponRatchets++;
-        }
-        expectedCheckpoint = block.timestamp;
-
-        // Allocate the independently known cash by priority. Loss preserves Senior's last recognized principal;
-        // revenue instead restores the unimpaired entitlement before any residual reaches Junior.
         if (expectedUnassigned > expectedCash) {
             expectedUnassigned = expectedCash;
         }
-        uint256 distributable = expectedCash - expectedUnassigned;
-        uint256 priorSenior = expectedSenior;
-        uint256 priorJunior = expectedJunior;
-        uint256 seniorTarget = distributable >= expectedSenior + expectedJunior ? expectedHwm : expectedSenior;
-        expectedSenior = distributable < seniorTarget ? distributable : seniorTarget;
-        expectedJunior = distributable - expectedSenior;
-        if (expectedSenior < priorSenior) {
+        WaterfallReferenceMath.Result memory result = WaterfallReferenceMath.reconcile(
+            WaterfallReferenceMath.State(expectedSenior, expectedJunior, expectedHwm, expectedCheckpoint),
+            expectedCash - expectedUnassigned,
+            800,
+            block.timestamp
+        );
+        expectedSenior = result.state.senior;
+        expectedJunior = result.state.junior;
+        expectedHwm = result.state.highWaterMark;
+        expectedCheckpoint = result.state.checkpoint;
+        if (result.couponRatchet) {
+            couponRatchets++;
+        }
+        if (result.seniorLoss) {
             seniorLosses++;
         }
-        if (expectedSenior > priorSenior) {
+        if (result.seniorRestoration) {
             seniorRestorations++;
         }
-        if (expectedJunior < priorJunior) {
+        if (result.juniorLoss) {
             juniorLosses++;
         }
     }

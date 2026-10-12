@@ -608,6 +608,9 @@ Rules:
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
 - carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
+- a flat-to-open transition advances both side indexes to execution wall-clock time using the old borrowing bases
+  and pool depth before inserting new exposure. This also applies to historical-price fills that retain a newer
+  cached accounting mark: the new position must not accrue carry for time before it opened,
 - on deposit, realized carry may be collected from post-deposit settlement in the same transaction,
 - on withdraw, carry is realized before settlement balance is reduced,
 - close and liquidation planners project this same allocation before calculating price-loss caps, residual margin,
@@ -638,10 +641,12 @@ context without changing that accrual basis. Snapshot loading and live collectio
 
 For every checkpoint sequence, `starting arrears + newly accrued carry = margin collected + free settlement collected
 + ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.
-A close commitment still prepays its bounty exclusively from free settlement after carry collection. Insufficient free
-cash reports required bounty, available free settlement, and unpaid carry; unrelated validation errors propagate unchanged.
-A zero-free-cash account may therefore still need bounty funding. These are the current source semantics; editing or
-redeploying source does not change previously deployed immutable engine stacks.
+A close commitment prepays its bounty from free settlement first, then eligible position PnL pledge after carry
+collection. Insufficient backing reports the required bounty, available post-carry free settlement plus pledge, and
+unpaid carry; unrelated validation errors propagate unchanged. Zero free settlement alone does not prevent a close
+commitment when eligible pledge covers the bounty. Partial commitments also require no unpaid carry and strict
+post-reservation maintenance/FAD health. A zero bounty still checkpoints carry and validates admission. These are the
+current source semantics; editing or redeploying source does not change previously deployed immutable engine stacks.
 
 ## Trader Claim Liabilities
 
@@ -714,14 +719,33 @@ Rules:
 
 ### Close-order bounty policy
 
-- close intents source their flat bounty from free settlement and lock it as action reserve; the bounty never consumes
-  or reclassifies PnL pledge,
-- this is an explicit bounded liveness tradeoff,
+- close intents source their snapshotted flat bounty from post-carry free settlement first, then eligible position
+  PnL pledge, and lock the full amount as action reserve. This reclassifies custody without transferring tokens;
+  pledge-funded value immediately reduces position and side margin, updates borrow bases, and resynchronizes the
+  terminal curve,
+- claims, unrealized gains, liquidation reserve, VPI backing, and other orders' reservations cannot fund the bounty,
+- partial commitments require fully collected carry and exact price-risk equity strictly above the active
+  maintenance/FAD requirement for the entire exposed position after reservation. Full commitments do not apply this
+  partial-position health gate; ordinary close admission and bounty-backing checks still apply,
 - partial close intents below the engine's minimum meaningful notional are rejected at commit time unless they fully close the queued residual position,
 - `closeOrderExecutionBountyUsdc` is governance-configured but hard-capped at `1 USDC`,
+- a configured zero bounty still creates an explicit active reservation and runs carry and admission checks,
 - the amount parked in reservation is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
 - collateral reachability should treat that reservation as temporarily unavailable until the order resolves,
-- terminal-invalid close execution pays the keeper from the clearinghouse-reserved bounty; liquidatable full closes may reserve that bounty only from free settlement, not active position margin.
+- ordinary terminal-invalid close execution pays the keeper from the clearinghouse-reserved bounty under the existing
+  terminal-order policy; a liquidatable full close may source that reservation from free settlement and eligible pledge.
+
+The clearinghouse records each bounty's free-funded and pledge-funded amounts and its source position epoch; the
+lifecycle book retains the snapshotted order entitlement. `positionEpoch` advances only when an account goes from
+flat to open. Execution authenticates the reservation and its complete funding before paying it; a mismatch is
+retryable without consuming or reallocating the item.
+
+On mismatch-expiry recovery, an authenticated, fully backed record refunds free-funded value to free settlement.
+Pledge-funded value returns to pledge only while the original position epoch remains live; otherwise it becomes free
+settlement and cannot alter a reopened position's pledge. Refunds checkpoint carry without collecting it, update the
+affected margin and borrowing state, and create no new custody. Missing, foreign, settled, or internally inconsistent
+records do not authorize a fabricated refund; inconsistent backing is quarantined. Ordinary consistent expiry and
+position-protection retry retain their existing bounty dispositions.
 
 ### Position-protection bounty policy
 
@@ -735,8 +759,8 @@ Component authority is deliberately split:
   namespace. The Book holds no tokens, and it cannot mutate the Router queue directly.
 
 - one protection snapshots a fixed trigger bounty and the current fixed close-order bounty at creation,
-- both protection bounties are reserved from free settlement only, as are ordinary close-order bounties; neither path
-  reclassifies active-position margin to fund a bounty,
+- both protection bounties are reserved from free settlement only; protection creation does not reclassify active
+  position pledge. A generated close attempt receives that existing reservation without funding a second bounty,
 - the protection reserve is locked before post-reservation safety is evaluated. Existing-position creation uses the
   Engine-configured canonical planner's V2 exact-price predicate rather than a local copy of risk math. Inputs are exact
   entry cost and price-risk equity composed only of PnL pledge (`position.margin`) plus the same-account trader claim
