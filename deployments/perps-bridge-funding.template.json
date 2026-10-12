@@ -1,0 +1,84 @@
+{
+  "version": "perps-funding-v1",
+  "provider": "across",
+  "destinationChainId": null,
+  "releaseId": null,
+  "clearinghouse": null,
+  "clearinghouseCodeHash": null,
+  "token": null,
+  "destinationSpokePool": null,
+  "destinationSpokePoolCodeHash": null,
+  "destinationSpokePoolImplementation": null,
+  "destinationSpokePoolImplementationCodeHash": null,
+  "multicallHandler": null,
+  "multicallHandlerCodeHash": null,
+  "confirmations": null,
+  "startBlock": null,
+  "sources": [
+    {
+      "chainId": null,
+      "name": null,
+      "token": null,
+      "symbol": null,
+      "decimals": null,
+      "transactionTargets": [],
+      "approvalSpenders": [],
+      "swapExchanges": [],
+      "spokePools": []
+    }
+  ],
+  "evidence": {
+    "schema": "plether-perps-bridge-funding",
+    "schemaVersion": 1,
+    "sourceCommit": null,
+    "contracts": {
+      "settlementToken": {
+        "address": null,
+        "runtimeCodeHash": null,
+        "decimals": 6
+      },
+      "marginClearinghouse": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "cfdEngine": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "housePool": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "orderRouter": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "pletherOracle": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "orderLifecycleBook": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "destinationSpokePool": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "destinationSpokePoolImplementation": {
+        "address": null,
+        "runtimeCodeHash": null
+      },
+      "multicallHandler": {
+        "address": null,
+        "runtimeCodeHash": null
+      }
+    },
+    "depositFor": {
+      "transactionHash": null,
+      "payer": null,
+      "beneficiary": null,
+      "amountUsdc": null
+    }
+  }
+}

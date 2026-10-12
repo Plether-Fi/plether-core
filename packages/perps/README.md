@@ -128,6 +128,7 @@ In practice, the compact public API is:
 
 - Traders:
   - `MarginClearinghouse.depositMargin(uint256)`
+  - `MarginClearinghouse.depositFor(address,uint256)` for credit-only funding by a payer
   - `MarginClearinghouse.withdrawMargin(uint256)`
 - Ordinary trade actions:
   - `OrderRouter.commitOrder(OrderV3Types.OrderRequest)`
@@ -347,6 +348,31 @@ The main runtime and read surfaces are:
   advisory: off-chain monitoring archives its evidence and the configured guardian independently decides whether to
   call the coordinator with reason/evidence hashes.
 - The account and protocol lenses are for deeper diagnostics, tests, audits, and operator tooling.
+
+## Trader Account Funding
+
+`depositMargin(amount)` funds the caller's own account and retains its normal carry-checkpoint behavior.
+`depositFor(account, amount)` pulls the caller's USDC and credits the named account's free settlement without calling
+Engine hooks, collecting carry, or allocating position margin. It requires a nonzero account, positive amount,
+allowance from the payer, and an exact increase in clearinghouse token custody. The payer gains no trading or
+withdrawal authority. An account may fund itself through this path, and the beneficiary may be an undeployed smart
+account address whose eventual control the application must verify.
+
+Credit-only funding leaves accrued carry due. Later account actions and health projections apply the existing carry
+rules; an account owner must use the ordinary margin-allocation flow to increase a live position's PnL pledge.
+A successful call emits `Deposit` for the settlement credit and `DepositFor` for payer attribution. Count the two
+logs as one deposit.
+
+The Across funding integration uses its existing destination handler to approve the clearinghouse and call
+`depositFor` with the actual canonical-USDC balance and the user's verified trading-account beneficiary. The same
+call sequence clears the allowance and emits the quote's unique marker. The beneficiary is also the explicit
+fallback recipient if the destination calls fail. Tokens returned to that account remain
+wallet USDC in a `needs-deposit` state; they are not clearinghouse margin. See
+[`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for route validation and confirmed fill/credit evidence requirements.
+The integration deploys no per-intent receiver or factory and requires no bridge-specific signing/flush worker.
+No compatible live clearinghouse is currently asserted. A new funding route does not upgrade an immutable
+clearinghouse or establish active V3 trading/AA compatibility; deployment and application release checks remain
+required before enabling it.
 
 ## Trader Lifecycle
 
@@ -921,7 +947,8 @@ Carry behavior:
   at the same timestamp. Claim payouts still require pool cash to cover all outstanding claims after collection; a
   failure rolls back the whole transaction.
 - Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
-- On deposit, realized carry may be collected from post-deposit settlement in the same transaction.
+- On an owner `deposit` / `depositMargin`, realized carry may be collected from post-deposit settlement in the same
+  transaction. Credit-only `depositFor` does not checkpoint or collect carry; that liability remains due.
 - On withdraw, carry is realized before settlement balance is reduced.
 - Flows to LP trading revenue once realized.
 - Guard and risk checks project carry against active position margin first, then free settlement. The reduced pledge
@@ -1118,12 +1145,13 @@ Pre-oracle expiry and config-mismatch receipts use `PriceSource.None`, zero exec
 Risk-off receipts likewise use `RiskOff`, execution mode and price source `None`, and the permissionless cleaner as
 executor. A nonzero reserved bounty is returned to the account with `RefundedToAccount`; the cleaner receives
 nothing. Liquidation cleanup records `AccountLiquidated`, retains the original keeper as executor, and marks a
-nonzero remaining queued-order bounty `Forfeited` to the Engine's protocol-treasury account. On every terminal path,
-a zero bounty requires `BountyDisposition.None` and the zero recipient rather than a paid/refunded/forfeited label.
-A failed registered protection attempt records its nonzero bounty as
+nonzero remaining queued-order bounty `Forfeited` to the Engine's protocol-treasury account. A zero bounty ordinarily
+uses `BountyDisposition.None` and the zero recipient; an authenticated protection attempt may instead retain an
+explicitly active zero reservation for retry.
+A failed registered protection attempt records its retained bounty, including an active zero reservation, as
 `BountyDisposition.RetainedForProtectionRetry` with a zero recipient only while the exact protected position still
 matches, because custody remains reserved for the next attempt. A missing or mismatched position instead records
-ordinary `Paid` cleanup and terminally resolves the protection as `Failed`.
+ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally resolves the protection as `Failed`.
 
 ### Basket oracle and publish-time checks
 

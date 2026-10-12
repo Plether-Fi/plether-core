@@ -35,7 +35,7 @@ not perps directions. Bind the intended market through the Router's verified Ora
 | Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV3Types.ExecutionBounds`, `IPositionProtectionActions` |
 | Financial policy | The evaluator reconstructs authoritative Engine state and checks the registered intent's limits before the Engine applies the transition | `CfdOrderPolicyEvaluator`, configured Engine planner |
 | Composable execution | Bounded-order submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
-| Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.outcome`, `IPositionProtectionViews` |
+| Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.terminalOutcome`, `IPositionProtectionViews` |
 
 The practical result is that an agent can separate three questions that are often conflated:
 
@@ -80,6 +80,23 @@ Bounded-order limits are per-order execution authority. They are not wallet-wide
 limit, a withdrawal policy, or a revocation mechanism; those controls belong in the account layer.
 
 ## Core integration tools
+
+### Margin funding
+
+An owner funds its own account with `MarginClearinghouse.depositMargin(amount)`, which retains ordinary carry
+checkpointing. A payer can instead approve the clearinghouse and call `depositFor(account, amount)` to credit exact
+USDC to that account's free settlement. This credit-only path requires no beneficiary signature or deployed code and
+grants the payer no trading or withdrawal authority. It does not collect carry or add to a position's PnL pledge;
+normal account actions still project and collect outstanding carry.
+
+Treat the emitted `Deposit` and `DepositFor` as one credit plus payer metadata. For bridge-assisted funding, verify
+the Across handler, destination token/clearinghouse, actual-balance deposit call, and trading-account beneficiary;
+the explicit fallback recipient must be that same beneficiary. Attribute credit only from the intent's canonical
+destination fill, exact quote marker, and matching confirmed clearinghouse events. Source submission, provider status,
+or wallet USDC alone does not prove margin funding. A fallback remains `needs-deposit` until a separate deposit succeeds.
+The integration has no per-intent receiver or bridge-specific signing/flush worker. Provider, deployment, and V3
+application compatibility requirements are documented in [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md); the core funding
+API does not imply a live compatible release.
 
 ### Trader actions
 
@@ -178,11 +195,14 @@ The submitting agent does not have to be the executor. Any keeper may execute an
 bounded-order request, including an attached protection parent, execution remains inside the limits pinned by the
 account. Only triggered and retried protection close orders use the documented protocol-synthesized envelope; they
 remain subject to ordinary Router, evaluator, Engine, and protection-state checks. Self-execution releases the stored
-order bounty to the account's free settlement; an external keeper receives a clearinghouse credit instead. Receipts
-encode self-execution as `Paid` to `executor == account`; `RefundedToAccount` is reserved for risk-off cleanup. A failed registered protection attempt records
+order bounty to the account's free settlement; an external keeper receives a clearinghouse credit instead. For a
+nonzero bounty, receipts encode self-execution as `Paid` to `executor == account`; ordinary zero-bounty execution uses
+`None`. `RefundedToAccount` applies to risk-off cleanup and recoverable backing returned by
+`ExpiredReservationMismatch`. A failed registered protection attempt records
 `RetainedForProtectionRetry`, pays no cleaner, and rolls the same reserved amount back to the latched protection only
-while the exact protected position still matches. A missing or mismatched position instead uses `Paid` cleanup and
-terminally resolves the protection as `Failed`.
+while the exact protected position still matches, including an explicitly active zero reservation. A missing or
+mismatched position instead uses ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally
+resolves the protection as `Failed`.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
@@ -328,10 +348,9 @@ HousePool redemption-math sidecar because that module affects LP redemption budg
 domains contribute their finalized active configuration versions; pending timelock proposals are not active execution
 policy and therefore are not committed.
 
-The bounded request ABI and intent-hash domain remain V2. The latched-retry release uses the V3 execution-config and
-receipt domains because a Router-authenticated protection-attempt marker and the retained-for-retry bounty disposition
-change authenticated terminal semantics. Never compare a V2 deployment's digest or receipt hash with V3 as if the
-domain were unchanged.
+The bounded request ABI and intent-hash domain are V3, including `submitBy` and `executionWindowSeconds`.
+Execution-config and receipt domains are V4. Use the matching request, receipt, and lifecycle interfaces for this
+release; historical V2 request or V3 receipt/config encodings are not interchangeable with the current domains.
 
 For a nonzero externally pinned expectation, a later mismatch terminalizes as `ConfigMismatch` unless risk-off,
 expiry, account liquidation, or another terminal cleanup path finalizes the order first. Authenticated protection
@@ -417,7 +436,9 @@ original protection action.
 - lifecycle status, terminal reason, execution regime, executor, and price source;
 - adverse execution price, neutral mark, pool depth, and oracle publish time;
 - whether the price reached the Engine;
-- that queued order's exact stored execution bounty, recipient, and disposition;
+- the queued order's bounty entitlement, actual paid/refunded/retained/forfeited amounts, recipient, disposition, and
+  any reservation discrepancy; `ExpiredReservationMismatch` reports the actual recoverable refund, which can differ
+  from the stored entitlement;
 - typed failure evidence and revert-data hash;
 - normalized execution economics and post-state summaries.
 
@@ -435,7 +456,7 @@ For TP/SL, also reconcile the retained protection record and `PositionProtection
 thresholds, protection status, triggered leg, trigger mark and publish time, and
 `parentOrderId`/latest-`linkedOrderId` association that an order receipt does not contain. Retry events and lifecycle
 receipts form the complete one-to-many attempt history; never treat the mutable latest id as the whole history. The
-receipt bounty covers only that attempt's stored execution bounty. Protection trigger bounties and protection reserves
+receipt bounty fields cover only that attempt's entitlement and actual settlement. Protection trigger bounties and protection reserves
 that are separately retained, refunded, or forfeited require the protection and Clearinghouse/Engine evidence. A
 failed attempt with `RetainedForProtectionRetry` has a zero recipient because the value moves from Router attribution
 back to Book attribution rather than being paid.

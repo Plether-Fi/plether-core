@@ -91,9 +91,37 @@ clearinghouse.depositMargin(amount)
 
 The smart account is both the EIP-3009 recipient and the caller of `depositMargin`, preserving the contracts' `msg.sender` ownership invariant. Enable this route only after verifying that the configured USDC implements `receiveWithAuthorization` with the expected EIP-712 domain.
 
+## Bridge funding
+
+The source package exports funding primitives for a separately verified release with
+`MarginClearinghouse.depositFor(address,uint256)`. Existing immutable clearinghouses without that method require a
+new compatible core deployment. Existing published package versions may not contain these exports.
+
+`buildDepositForCalls` builds an exact payer approval plus free-settlement credit for a fixed beneficiary. Both calls
+must execute from the same payer; use an atomic batch when the account supports it, or confirm approval before the
+deposit. The beneficiary receives no authority over the payer, and the payer receives no authority over the beneficiary.
+
+`verifyBridgeFundingDeployment` checks the destination chain, pinned USDC/clearinghouse/SpokePool/implementation/handler
+code, the SpokePool's EIP-1967 implementation slot, and the clearinghouse settlement token at one block. Supply
+`chainId`, `usdc`, `clearinghouse`, `destinationSpokePool`, `destinationSpokePoolImplementation`, `multicallHandler`, and
+each contract's corresponding `RuntimeCodeHash` from a trusted release. The full core graph and actual `depositFor` behavior must
+already have passed release verification. The shared Across handler is permissionless; it has no immutable binding
+to a SpokePool or beneficiary, and these identity checks do not authorize arbitrary handler calldata.
+
+The builder returns raw zero-native-value destination calls, not sponsored `PerpsActionPlan` objects. Across
+quotes, destination message construction, source allowlists, and durable source/fill correlation remain application
+responsibilities. A handler address, provider status, or token balance alone does not prove margin credit. Match the
+specific source deposit and destination fill/message to the beneficiary's confirmed clearinghouse credit, and count
+the `Deposit`/`DepositFor` pair once. If Across returns USDC to the intended fallback beneficiary after a destination
+call fails, that wallet balance still needs a separate authorized deposit. This SDK does not create receivers or
+provide receiver flush/recovery operations. See the repository's
+[bridge-funding guide](../perps/BRIDGE_FUNDING.md) for release and fallback requirements.
+
 ## Trader actions and cancellation
 
 Builders are provided for deposit, commit order, add margin, withdraw, and settle claim. `addMargin(account, amount)` and `settleTraderClaim(account)` always encode the smart-account address as the account argument.
+
+`buildPlaceOrderAction` retains the historical scalar-router ABI. Use `buildPlaceOrderV3Action` for V3 deployments.
 
 `buildWithdrawAction` calls `withdrawMargin`, so the clearinghouse sends USDC to
 the smart account (`msg.sender`). It does not silently append a transfer to the
@@ -109,21 +137,22 @@ Committed delayed orders are binding in the current perps protocol; there is no 
 
 ## Position protection
 
-`buildProtectedOpenAction` builds an atomic bounded V2 opening order with TP/SL.
+`buildProtectedOpenAction` builds an atomic bounded V3 opening order with TP/SL.
 `buildCreateProtectionAction`, `buildReplaceProtectionAction`, and
 `buildCancelProtectionAction` manage account-owned protection records. Every
 builder targets the configured PositionProtectionBook with zero native value;
-the exported `positionProtectionBookAbi` is the complete reviewed v1.2.1 ABI.
+the exported `positionProtectionBookAbi` is generated for the current source and must match the target deployment.
 Reject empty triggers, invalid uint64 protection IDs, and unbounded/closing
 requests before asking for sponsorship. Pass these plans through the same
 manifest validation and durable journaling flow as other native AA actions.
 
-The package combines the self-hosted-AA source patch (SHA-256
+The package originated from the self-hosted-AA source patch (SHA-256
 `d1c6941c03f37cc9a93b35b95dc73a876ee87dab624524ed9c4d6336022f2955`,
 base `bc8f6290c540665e4ff61328ea83a4c3d421a8d4`) with protection source
-`3472427ed15b0a478248af7d025535da349a8592`. Core source and immutable package
-releases are authoritative for future changes. Tests freeze the app's previous
-encodings and hashes; `RELEASING.md` describes the artifact compatibility gate.
+`3472427ed15b0a478248af7d025535da349a8592`. Those references record its historical
+origins; current source and release evidence define the updated order and protection ABIs.
+Compatibility tests preserve the retained action encodings and hashes while explicitly recording
+the new order ABI. `RELEASING.md` describes the artifact compatibility gate.
 
 ## UI errors and fallback
 
@@ -188,6 +217,7 @@ RPC log queries over the known L2 deployment-to-head range. Keep transport
 `blockNumber`/`blockHash` separately for indexing and reorg handling; hash the
 event's authenticated `terminalBlock` as emitted. See [Arbitrum block-number
 documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time).
+
 ## V3 order timing (0.2.0 source release)
 
 `buildPlaceOrderV3Action` and `buildProtectedOpenAction` encode `submitBy` and
