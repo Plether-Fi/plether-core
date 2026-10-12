@@ -52,17 +52,28 @@
     "evidence": "active-verification.json"
   },
   "sourceVerification": {
-    "status": "partial_exact_public_readback_pending_publication_approval",
-    "verifiedContracts": 7,
+    "status": "all_sources_match_qualified_build_27_exact_2_similar",
+    "publicSourceContracts": 29,
+    "verifiedContracts": 27,
     "totalContracts": 29,
-    "sourcePublicationAuthorizedForThisDeployment": false,
-    "remainingContracts": 22,
+    "sourcePublicationAuthorizedForThisDeployment": true,
+    "sourcePublicationAttempted": true,
+    "remainingContracts": 2,
+    "remainingExactMatchContracts": [
+      "housePool",
+      "settlementMonitorLensSidecar"
+    ],
+    "compilerInputsAndSourceGraphsMatchQualifiedBuild": true,
     "evidence": "source-verification.json",
-    "blockingReason": "Automatic approval review rejected new v1.3.1 public-source publication because explicit earlier publication approval was scoped to v1.3.0."
+    "independentInputEvidence": "explorer-input-verification.json",
+    "publicationLogEvidence": "source-publication.log",
+    "exactReverificationPayloads": "exact-reverification-payloads.tar.gz",
+    "blockingReason": "Arbiscan returns Already Verified for both exact resubmissions and retains older SimilarMatch constructor records.",
+    "restrictionDocumentation": "https://info.etherscan.com/update-on-similar-match-contract-verification/"
   },
   "consumerCutoverPerformed": false,
   "bridgeEnablementPerformed": false,
   "oldV130StackModified": false,
   "remainingDeploymentOrTradingGates": [],
-  "remainingPublicationGate": "Explicit approval to publicly verify remaining22 v1.3.1 addresses on Arbiscan; automatic approval review blocked publication."
+  "remainingPublicationGate": "Arbiscan exact-match upgrade for HousePool and SettlementMonitorLensSidecar; owner-account reverification access may be required. All29 sources are public and match the qualified build."
 }

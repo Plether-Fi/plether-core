@@ -1,0 +1,639 @@
+mockUsdc existing exact public verification
+marginClearinghouse verified
+cfdEngine verified
+terminalNavBookV2 verified
+cfdEnginePlanner existing exact public verification
+cfdEngineSettlementSidecar verified
+cfdEngineAdmin verified
+housePoolRedemptionMathSidecar existing exact public verification
+housePool needs review
+cfdEngineProtocolLens verified
+seniorVault verified
+juniorVault verified
+cfdEngineAccountLens verified
+cfdEngineLens verified
+cfdEngineOpenQuoter existing exact public verification
+cfdOrderPolicyEvaluator existing exact public verification
+cfdClosePreview verified
+orderRouterExecutionSidecar existing exact public verification
+orderRecoverySidecar existing exact public verification
+pletherOracle verified
+orderRouterLiquidationBatchSidecar verified
+orderLifecycleBook verified
+orderRouter verified
+orderRouterAdmin verified
+positionProtectionBook verified
+perpsPublicLens verified
+settlementMonitorLens verified
+settlementMonitorLensSidecar needs review
+emergencyPauseCoordinator verified
+Verified 27 / 29
+Source verification needs follow-up: housePool, settlementMonitorLensSidecar
+
+mockUsdc existing exact public verification
+marginClearinghouse existing exact public verification
+cfdEngine existing exact public verification
+terminalNavBookV2 existing exact public verification
+cfdEnginePlanner existing exact public verification
+cfdEngineSettlementSidecar existing exact public verification
+cfdEngineAdmin existing exact public verification
+housePoolRedemptionMathSidecar existing exact public verification
+housePool needs review
+cfdEngineProtocolLens existing exact public verification
+seniorVault existing exact public verification
+juniorVault existing exact public verification
+cfdEngineAccountLens existing exact public verification
+cfdEngineLens existing exact public verification
+cfdEngineOpenQuoter existing exact public verification
+cfdOrderPolicyEvaluator existing exact public verification
+cfdClosePreview existing exact public verification
+orderRouterExecutionSidecar existing exact public verification
+orderRecoverySidecar existing exact public verification
+pletherOracle existing exact public verification
+orderRouterLiquidationBatchSidecar existing exact public verification
+orderLifecycleBook existing exact public verification
+orderRouter existing exact public verification
+orderRouterAdmin existing exact public verification
+positionProtectionBook existing exact public verification
+perpsPublicLens existing exact public verification
+settlementMonitorLens existing exact public verification
+settlementMonitorLensSidecar needs review
+emergencyPauseCoordinator existing exact public verification
+Verified 27 / 29
+Source verification needs follow-up: housePool, settlementMonitorLensSidecar
+
+
+Contract cfdClosePreview
+Start verifying contract `0x4A1D87466d272BE9ebB643cD386883D94F0eb59B` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb
+
+Submitting verification for [packages/perps/src/CfdClosePreview.sol:CfdClosePreview] 0x4A1D87466d272BE9ebB643cD386883D94F0eb59B.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `m4bh4mewk5d2dx3rm2hjsnzptawfabnjxwgwqkvf9t4fgi3zpe`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract cfdEngine
+Start verifying contract `0x55e5d20eBc41234584Fe0bA3c6dDcF71B3CBB2cB` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000004b44312d1f94d3d79a36a875691d768dd6c0575f000000000000000000000000e91f82bd0e1a3ebc78ee0d7c9c745029c2d324c7000000000000000000000000000000000000000000000000000000000bebc200000000000000000000000000000000000000000000000000002386f26fc10000000000000000000000000000000000000000000000000000058d15e176280000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000012c00000000000000000000000000000000000000000000000000000000000001f400000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000138800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000032
+
+Submitting verification for [packages/perps/src/CfdEngine.sol:CfdEngine] 0x55e5d20eBc41234584Fe0bA3c6dDcF71B3CBB2cB.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `umha22nf3ucdxzfdrrvpg4qypttdbbrd8phsnkizf5pfgk2nqm`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract cfdEngineAccountLens
+Start verifying contract `0xf520133a4F757A68A523c704512aF24b1f5b7762` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb
+
+Submitting verification for [packages/perps/src/CfdEngineAccountLens.sol:CfdEngineAccountLens] 0xf520133a4F757A68A523c704512aF24b1f5b7762.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `6hijpkwsg4gmjqyuppjs83qianu6sxxacaxc5eswqpe1xynu4t`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract cfdEngineAdmin
+Start verifying contract `0x27479e3FFFF4606faff7a3745426BFC48A5B6685` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb0000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b
+
+Submitting verification for [packages/perps/src/CfdEngineAdmin.sol:CfdEngineAdmin] 0x27479e3FFFF4606faff7a3745426BFC48A5B6685.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `jbdasivq1b4jm1j2cutk3qy4iceiygakfyiavy763avglz2twf`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract cfdEngineLens
+Start verifying contract `0xfFfD7Ef10A3cdd70A9f4d21A8349F70Ce059dD7E` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb
+
+Submitting verification for [packages/perps/src/CfdEngineLens.sol:CfdEngineLens] 0xfFfD7Ef10A3cdd70A9f4d21A8349F70Ce059dD7E.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `wakmp3sq92rp1i7hbksmqavp3kpqldzs3y2nppkwjg6respvtq`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract cfdEngineProtocolLens
+Start verifying contract `0x127E0778fA95ACB2f267cDa035c071Fc786aaF96` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb
+
+Submitting verification for [packages/perps/src/CfdEngineProtocolLens.sol:CfdEngineProtocolLens] 0x127E0778fA95ACB2f267cDa035c071Fc786aaF96.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `vlbnjjkufubjhyeif8syfd442bxvmsaidgnpazzzhacideeidi`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract cfdEngineSettlementSidecar
+Start verifying contract `0x174B1231EdBd6379877706C06898A20a5475ae73` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb
+
+Submitting verification for [packages/perps/src/CfdEngineSettlementSidecar.sol:CfdEngineSettlementSidecar] 0x174B1231EdBd6379877706C06898A20a5475ae73.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `gu6tx9hj4ualtgh3lqt3syygsl5yw3k9zynxzwrqjptghbcjiq`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract emergencyPauseCoordinator
+Start verifying contract `0xDad70EEB98681C7Df8125A199F3E88eC8b6C00F5` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000000188dc48a24e3e5bccd73275867b5fb5a0e57e6e000000000000000000000000587c9863bb46fd5282a4ca2ea99589e3e85439620000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b
+
+Submitting verification for [packages/perps/src/EmergencyPauseCoordinator.sol:EmergencyPauseCoordinator] 0xDad70EEB98681C7Df8125A199F3E88eC8b6C00F5.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `juqqqsbrdbcaftwa897wkvquwbckfpcdebumavkuue4zwaipvx`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract housePool-initial
+Start verifying contract `0x587C9863bB46fD5282A4CA2eA99589e3e8543962` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000004b44312d1f94d3d79a36a875691d768dd6c0575f00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb000000000000000000000000020300c4b5b85148d407e6b0fab1b9974c385101
+
+Submitting verification for [script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool] 0x587C9863bB46fD5282A4CA2eA99589e3e8543962.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `y8gymwcahf5crk1jwfhzxennituiiiblmji34hbdyvhs2ribg2`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Already Verified`
+Contract source code already verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract housePool
+Start verifying contract `0x587C9863bB46fD5282A4CA2eA99589e3e8543962` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000004b44312d1f94d3d79a36a875691d768dd6c0575f00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb000000000000000000000000020300c4b5b85148d407e6b0fab1b9974c385101
+
+Submitting verification for [script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseHousePool] 0x587C9863bB46fD5282A4CA2eA99589e3e8543962.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `an6z7n5munfrbnyym5qizdqda7sqzmhpqiff8eufie3we43f2x`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Already Verified`
+Contract source code already verified
+
+
+Contract juniorVault
+Start verifying contract `0x1D4bEed4D594cadfe4C3c5Bdc8174B0FbFc4aAf0` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000004b44312d1f94d3d79a36a875691d768dd6c0575f000000000000000000000000587c9863bb46fd5282a4ca2ea99589e3e8543962000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000640000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b0000000000000000000000000000000000000000000000000000000000000011506c6574686572204a756e696f72204c500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004706a4c5000000000000000000000000000000000000000000000000000000000
+
+Submitting verification for [packages/perps/src/TrancheVault.sol:TrancheVault] 0x1D4bEed4D594cadfe4C3c5Bdc8174B0FbFc4aAf0.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `ydypau4r3shm6zcpxu6vum8givdgxdtmyhfjgu4nk7s2nky4fx`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract marginClearinghouse
+Start verifying contract `0xe91F82bd0e1A3EbC78eE0d7c9C745029c2d324c7` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000004b44312d1f94d3d79a36a875691d768dd6c0575f
+
+Submitting verification for [packages/perps/src/MarginClearinghouse.sol:MarginClearinghouse] 0xe91F82bd0e1A3EbC78eE0d7c9C745029c2d324c7.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `iggs9gkhbuivbv1bvyscrhi2pgfikcf5vkadjs9tnyn6rdf2av`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract orderLifecycleBook
+Start verifying contract `0x519f57a34FB440c42bFd2D8328D2F80349af3872` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e800000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb000000000000000000000000e91f82bd0e1a3ebc78ee0d7c9c745029c2d324c7000000000000000000000000587c9863bb46fd5282a4ca2ea99589e3e8543962
+
+Submitting verification for [packages/perps/src/OrderLifecycleBook.sol:OrderLifecycleBook] 0x519f57a34FB440c42bFd2D8328D2F80349af3872.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `mivda1mvghnrutpsicnc5eskqzpxapw9v7f3uel1khrzcjqabg`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract orderRouter
+Start verifying contract `0x9B9dDc783780A14e4930dbBCd94D6356a82725E8` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb000000000000000000000000fffd7ef10a3cdd70a9f4d21a8349f70ce059dd7e000000000000000000000000587c9863bb46fd5282a4ca2ea99589e3e854396200000000000000000000000004a1455d19960a624bbe41511fc8018a0ffdd494000000000000000000000000f970aa9b0c315801f5ec6f948c14020c7f70339c000000000000000000000000f550cada6b7d477b23069c8b4f254d19088f28c8000000000000000000000000176f7ff42e5398e3b96e0bf2ade46d35639d6365000000000000000000000000519f57a34fb440c42bfd2d8328d2f80349af3872
+
+Submitting verification for [script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseRouter] 0x9B9dDc783780A14e4930dbBCd94D6356a82725E8.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `gzdeezrapbcpvtmevmcmyfrnrpptjxaemu8wwhthbjgbqwlylx`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (6 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (5 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (4 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (3 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (2 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (1 tries remaining)
+
+
+Contract orderRouterAdmin
+Start verifying contract `0x0188dc48a24e3e5bcCD73275867b5FB5A0E57E6E` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e80000000000000000000000005a71a4094ec81165ada48aa4c27da48ec27e0d6b
+
+Submitting verification for [packages/perps/src/OrderRouterAdmin.sol:OrderRouterAdmin] 0x0188dc48a24e3e5bcCD73275867b5FB5A0E57E6E.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `ukdueaisfjcirtejqfi365gencurxxv16x2scfyyfqisjcesnn`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract orderRouterLiquidationBatchSidecar
+Start verifying contract `0xf970aA9b0C315801f5ec6f948C14020c7F70339C` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e8
+
+Submitting verification for [packages/perps/src/OrderRouterLiquidationBatchSidecar.sol:OrderRouterLiquidationBatchSidecar] 0xf970aA9b0C315801f5ec6f948C14020c7F70339C.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `1jdfxxcjvjrayp9hnhk1i1xhygjkr3kqrm1yc8qqaicz8abaqi`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract perpsPublicLens
+Start verifying contract `0x5502E241DdDE4fd00313947e1d2F941764C92959` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x000000000000000000000000f520133a4f757a68a523c704512af24b1f5b776200000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e8000000000000000000000000587c9863bb46fd5282a4ca2ea99589e3e8543962
+
+Submitting verification for [packages/perps/src/PerpsPublicLens.sol:PerpsPublicLens] 0x5502E241DdDE4fd00313947e1d2F941764C92959.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `pjssgcxwjg3e5mfdnk8xtfteyjdd1rucdlm3acsnknek9k8cfv`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract pletherOracle
+Start verifying contract `0x04a1455D19960a624BBE41511fC8018a0ffDd494` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb000000000000000000000000587c9863bb46fd5282a4ca2ea99589e3e85439620000000000000000000000000b73614636c855bf23f342f307fb981a3e47f42b00000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000003800000000000000000000000000000000000000000000000000000000000000006a995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30bef2c98c804ba503c6a707e38be4dfbb16683775f195b091252bf24693042fd5284c2dde9633d93d1bcad84e7dc41c9d56578b7ec52fabedc1f335d673df0a7c13112b03a41c910ed446852aacf67118cb1bec67b2cd0b9a214c58cc0eaa2ecca8ccb376aa871517e807358d4e3cf0bc7fe4950474dbe6c9ffc21ef64e43fc6760b1e3297e69f162877b577b0d6a47a0d63b2392bc8499e6540da4187a63e28f8000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000007fe5cf2bea0000000000000000000000000000000000000000000000000000001e32b478974000000000000000000000000000000000000000000000000000001a6c5de9845800000000000000000000000000000000000000000000000000001434c04928f8000000000000000000000000000000000000000000000000000009536c708910000000000000000000000000000000000000000000000000000007fe5cf2bea00000000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000700e860000000000000000000000000000000000000000000000000000000000009bc3000000000000000000000000000000000000000000000000000000000080400800000000000000000000000000000000000000000000000000000000004580f800000000000000000000000000000000000000000000000000000000000a5b5e000000000000000000000000000000000000000000000000000000000078422200000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001
+
+Submitting verification for [script/DeployPerpsArbitrumSepolia.s.sol:ArbitrumSepoliaReleaseOracle] 0x04a1455D19960a624BBE41511fC8018a0ffDd494.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `6mnayz4cqurzlaiu5hg6ab73ayij897wrww1vnygtev1n98txm`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (6 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (5 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (4 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (3 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (2 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (1 tries remaining)
+
+
+Contract positionProtectionBook
+Start verifying contract `0xa7e2132ff262ac97Cdeaeeb158F0EE5C8C30e312` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e800000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb
+
+Submitting verification for [packages/perps/src/PositionProtectionBook.sol:PositionProtectionBook] 0xa7e2132ff262ac97Cdeaeeb158F0EE5C8C30e312.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `neg7wpuz6dfrwipcdurnxb8knfmqukn249asjy1cpdzujpmac8`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract seniorVault
+Start verifying contract `0xEe755754319Be980dD0f7Df77107720485fe9D20` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000004b44312d1f94d3d79a36a875691d768dd6c0575f000000000000000000000000587c9863bb46fd5282a4ca2ea99589e3e8543962000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011506c65746865722053656e696f72204c50000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000470734c5000000000000000000000000000000000000000000000000000000000
+
+Submitting verification for [packages/perps/src/TrancheVault.sol:TrancheVault] 0xEe755754319Be980dD0f7Df77107720485fe9D20.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `abjiniixm9cfynuth2bp9g8tgvbmsmwnhehpyutv7ddrm3cnpj`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract settlementMonitorLens
+Start verifying contract `0xB80B72b6517D53ed6387C9873eA4B61D0c97aDE8` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e8
+
+Submitting verification for [packages/perps/src/SettlementMonitorLens.sol:SettlementMonitorLens] 0xB80B72b6517D53ed6387C9873eA4B61D0c97aDE8.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `g3iecq3qsbm1juhhqkirwelay2r17q17qii17nbxjne47kk16y`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (6 tries remaining)
+Warning: Verification is still pending...; waiting 15 seconds before trying again (5 tries remaining)
+
+
+Contract settlementMonitorLensSidecar-initial
+Start verifying contract `0x022aF8E4461C313E194B020b2Af5a8CC583421eE` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e8
+
+Submitting verification for [packages/perps/src/SettlementMonitorLensSidecar.sol:SettlementMonitorLensSidecar] 0x022aF8E4461C313E194B020b2Af5a8CC583421eE.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `uvdiich96bz3h2aecragaukm68rhudgru9v6wgbhjygqxhvcus`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `NOTOK`
+Details: `Already Verified`
+Contract source code already verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
+
+
+Contract settlementMonitorLensSidecar
+Start verifying contract `0x022aF8E4461C313E194B020b2Af5a8CC583421eE` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x0000000000000000000000009b9ddc783780a14e4930dbbcd94d6356a82725e8
+
+Submitting verification for [packages/perps/src/SettlementMonitorLensSidecar.sol:SettlementMonitorLensSidecar] 0x022aF8E4461C313E194B020b2Af5a8CC583421eE.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `peydxyxtr1wengvssh9jq7bj1lbtqv4cptx4qbm8ignujusmsm`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Already Verified`
+Contract source code already verified
+
+
+Contract terminalNavBookV2
+Start verifying contract `0xe214Ad3702825a1Ac1B0a6FCe3Aa2D540302Bee1` deployed on arbitrum-sepolia
+EVM version: prague
+Compiler version: v0.8.35+commit.47b9dedd
+Optimizations:    200
+Constructor args: 0x00000000000000000000000055e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb000000000000000000000000000000000000000000000000000000000bebc200
+
+Submitting verification for [packages/perps/src/TerminalNavBookV2.sol:TerminalNavBookV2] 0xe214Ad3702825a1Ac1B0a6FCe3Aa2D540302Bee1.
+Submitted contract for verification:
+	Response: `OK`
+	GUID: `dq6bfqwjk98aes3yw8ipq58n8bfbg5r6pny1yw9sw41as6sxci`
+	URL: [REDACTED_URL]
+Contract verification status:
+Response: `NOTOK`
+Details: `Pending in queue`
+Contract verification status:
+Response: `OK`
+Details: `Pass - Verified`
+Contract successfully verified
+Warning: Verification is still pending...; waiting 15 seconds before trying again (7 tries remaining)
