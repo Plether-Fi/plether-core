@@ -1,0 +1,596 @@
+Compiling 1 files with Solc 0.8.35
+Solc 0.8.35 finished in 892.25ms
+Compiler run successful with warnings:
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1339:9:
+     |
+1339 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1353:9:
+     |
+1353 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1361:79:
+     |
+1361 |     function assertApproxEqAbs(uint256 left, uint256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                               ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1368:77:
+     |
+1368 |     function assertApproxEqAbs(int256 left, int256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1385:9:
+     |
+1385 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1403:9:
+     |
+1403 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1413:86:
+     |
+1413 |     function assertApproxEqRel(uint256 left, uint256 right, uint256 maxPercentDelta, string calldata error)
+     |                                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1424:84:
+     |
+1424 |     function assertApproxEqRel(int256 left, int256 right, uint256 maxPercentDelta, string calldata error) external pure;
+     |                                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1431:77:
+     |
+1431 |     function assertEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1438:75:
+     |
+1438 |     function assertEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1444:46:
+     |
+1444 |     function assertEq(bool left, bool right, string calldata error) external pure;
+     |                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1450:68:
+     |
+1450 |     function assertEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1456:66:
+     |
+1456 |     function assertEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1462:68:
+     |
+1462 |     function assertEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1468:74:
+     |
+1468 |     function assertEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1474:72:
+     |
+1474 |     function assertEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1483:74:
+     |
+1483 |     function assertEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1489:74:
+     |
+1489 |     function assertEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1495:72:
+     |
+1495 |     function assertEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1501:70:
+     |
+1501 |     function assertEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1504:52:
+     |
+1504 |     function assertEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1510:50:
+     |
+1510 |     function assertEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1516:52:
+     |
+1516 |     function assertEq(address left, address right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1522:52:
+     |
+1522 |     function assertEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1528:42:
+     |
+1528 |     function assertFalse(bool condition, string calldata error) external pure;
+     |                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1536:77:
+     |
+1536 |     function assertGeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1544:75:
+     |
+1544 |     function assertGeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1551:52:
+     |
+1551 |     function assertGe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1558:50:
+     |
+1558 |     function assertGe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1566:77:
+     |
+1566 |     function assertGtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1574:75:
+     |
+1574 |     function assertGtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1581:52:
+     |
+1581 |     function assertGt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1588:50:
+     |
+1588 |     function assertGt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1596:77:
+     |
+1596 |     function assertLeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1604:75:
+     |
+1604 |     function assertLeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1611:52:
+     |
+1611 |     function assertLe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1618:50:
+     |
+1618 |     function assertLe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1626:77:
+     |
+1626 |     function assertLtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1634:75:
+     |
+1634 |     function assertLtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1641:52:
+     |
+1641 |     function assertLt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1648:50:
+     |
+1648 |     function assertLt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1655:80:
+     |
+1655 |     function assertNotEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                                ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1662:78:
+     |
+1662 |     function assertNotEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1668:49:
+     |
+1668 |     function assertNotEq(bool left, bool right, string calldata error) external pure;
+     |                                                 ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1674:71:
+     |
+1674 |     function assertNotEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1680:69:
+     |
+1680 |     function assertNotEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1686:71:
+     |
+1686 |     function assertNotEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1692:77:
+     |
+1692 |     function assertNotEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1698:75:
+     |
+1698 |     function assertNotEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1707:77:
+     |
+1707 |     function assertNotEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1713:77:
+     |
+1713 |     function assertNotEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1719:75:
+     |
+1719 |     function assertNotEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1725:73:
+     |
+1725 |     function assertNotEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1728:55:
+     |
+1728 |     function assertNotEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1734:53:
+     |
+1734 |     function assertNotEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1740:55:
+     |
+1740 |     function assertNotEq(address left, address right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1746:55:
+     |
+1746 |     function assertNotEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1752:41:
+     |
+1752 |     function assertTrue(bool condition, string calldata error) external pure;
+     |                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:952:13:
+    |
+952 |             uint256 vpiFactor,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:953:13:
+    |
+953 |             uint256 maxSkewRatio,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:954:13:
+    |
+954 |             uint256 maintMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:955:13:
+    |
+955 |             uint256 initMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:956:13:
+    |
+956 |             uint256 fadMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:957:13:
+    |
+957 |             uint256 baseCarryBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:958:13:
+    |
+958 |             uint256 minBountyUsdc,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:959:13:
+    |
+959 |             uint256 bountyBps,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:960:13:
+    |
+960 |             uint256 keeperShareBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:961:13:
+    |
+961 |             uint256 protocolShareBps
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1031:5:
+     |
+1031 |     function _revertIfOpenInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1043:5:
+     |
+1043 |     function _revertIfCloseInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+2026-10-12T10:43:11.049398Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for artifacts/releases/v1.3.0/Seed40M440MPreflight.s.sol
+2026-10-12T10:43:11.051313Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC4626.sol
+2026-10-12T10:43:11.051398Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol
+2026-10-12T10:43:11.051476Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol
+2026-10-12T10:43:11.051609Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol
+2026-10-12T10:43:11.051670Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol
+2026-10-12T10:43:11.051864Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/LowLevelCall.sol
+2026-10-12T10:43:11.051930Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Memory.sol
+2026-10-12T10:43:11.052600Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/TrancheVault.sol
+2026-10-12T10:43:11.052730Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IAsyncTrancheVault.sol
+2026-10-12T10:43:11.052765Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IAsyncTrancheVaultClaimableRedeem.sol
+2026-10-12T10:43:11.052993Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IERC7540.sol
+2026-10-12T10:43:11.053029Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IERC7575.sol
+2026-10-12T10:43:11.053736Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/JuniorMaintenanceFeeMathLib.sol
+2026-10-12T10:43:11.054053Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdClosePreview.sol
+2026-10-12T10:43:11.054093Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineAccountLens.sol
+2026-10-12T10:43:11.054136Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineAdmin.sol
+2026-10-12T10:43:11.054184Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineLens.sol
+2026-10-12T10:43:11.054244Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineOpenQuoter.sol
+2026-10-12T10:43:11.054292Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEnginePlanner.sol
+2026-10-12T10:43:11.054350Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineSettlementSidecar.sol
+2026-10-12T10:43:11.054385Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdOrderPolicyEvaluator.sol
+2026-10-12T10:43:11.054422Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdOrderPolicyEvaluatorBase.sol
+2026-10-12T10:43:11.054459Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/EmergencyPauseCoordinator.sol
+2026-10-12T10:43:11.054494Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/HousePoolRedemptionMathSidecar.sol
+2026-10-12T10:43:11.054548Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/MarginClearinghouse.sol
+2026-10-12T10:43:11.054589Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderLifecycleBook.sol
+2026-10-12T10:43:11.054624Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRecoverySidecar.sol
+2026-10-12T10:43:11.054664Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouter.sol
+2026-10-12T10:43:11.054700Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouterAdmin.sol
+2026-10-12T10:43:11.054771Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouterExecutionSidecar.sol
+2026-10-12T10:43:11.054812Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouterLiquidationBatchSidecar.sol
+2026-10-12T10:43:11.054859Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderV3Types.sol
+2026-10-12T10:43:11.054906Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/PerpsPublicLens.sol
+2026-10-12T10:43:11.054962Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/PletherOracle.sol
+2026-10-12T10:43:11.055014Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/PositionProtectionBook.sol
+2026-10-12T10:43:11.055074Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/SettlementMonitorLens.sol
+2026-10-12T10:43:11.055131Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/SettlementMonitorLensSidecar.sol
+2026-10-12T10:43:11.055183Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/TerminalNavBookV2.sol
+2026-10-12T10:43:11.055228Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/AccountLensViewTypes.sol
+2026-10-12T10:43:11.055287Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngine.sol
+2026-10-12T10:43:11.055329Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineAccountLens.sol
+2026-10-12T10:43:11.055381Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineLens.sol
+2026-10-12T10:43:11.055420Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineRiskParamsView.sol
+2026-10-12T10:43:11.055457Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineSettlementHost.sol
+2026-10-12T10:43:11.055506Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdOrderPolicyEvaluator.sol
+2026-10-12T10:43:11.055556Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IHousePoolEmergencyAdmin.sol
+2026-10-12T10:43:11.055592Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IMarginAccount.sol
+2026-10-12T10:43:11.055631Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderLifecycleBook.sol
+2026-10-12T10:43:11.055676Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouter.sol
+2026-10-12T10:43:11.055731Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterAccounting.sol
+2026-10-12T10:43:11.055775Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterAdminHost.sol
+2026-10-12T10:43:11.055815Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterEmergencyAdmin.sol
+2026-10-12T10:43:11.055851Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterErrors.sol
+2026-10-12T10:43:11.055896Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterExecutionHost.sol
+2026-10-12T10:43:11.055946Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsAdmin.sol
+2026-10-12T10:43:11.055979Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsKeeper.sol
+2026-10-12T10:43:11.056014Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsLPViews.sol
+2026-10-12T10:43:11.056048Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsTraderActions.sol
+2026-10-12T10:43:11.056091Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsTraderViews.sol
+2026-10-12T10:43:11.056141Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPletherOracle.sol
+2026-10-12T10:43:11.056200Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPositionProtectionActions.sol
+2026-10-12T10:43:11.056234Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPositionProtectionBook.sol
+2026-10-12T10:43:11.056266Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPositionProtectionViews.sol
+2026-10-12T10:43:11.056296Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IProtocolViews.sol
+2026-10-12T10:43:11.056328Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ISettlementMonitorLens.sol
+2026-10-12T10:43:11.056386Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/PerpsViewTypes.sol
+2026-10-12T10:43:11.056427Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/PositionProtectionTypes.sol
+2026-10-12T10:43:11.056463Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/SettlementMonitorViewTypes.sol
+2026-10-12T10:43:11.056497Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/CfdEngineCollateralSnapshotLib.sol
+2026-10-12T10:43:11.056540Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/CloseCommitmentLib.sol
+2026-10-12T10:43:11.056583Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/HousePoolRedemptionMathLib.sol
+2026-10-12T10:43:11.056638Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/MarketCalendarLib.sol
+2026-10-12T10:43:11.056677Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/OrderFailurePolicyLib.sol
+2026-10-12T10:43:11.056721Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/OrderValidationLib.sol
+2026-10-12T10:43:11.056771Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderBountyAccounting.sol
+2026-10-12T10:43:11.056807Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderCommitHandler.sol
+2026-10-12T10:43:11.056838Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderExecutionHandler.sol
+2026-10-12T10:43:11.056869Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderExecutionOrchestrator.sol
+2026-10-12T10:43:11.056900Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderExecutionSettlement.sol
+2026-10-12T10:43:11.056939Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderHandler.sol
+2026-10-12T10:43:11.056991Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderLiquidationBatchLogic.sol
+2026-10-12T10:43:11.057033Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderLiquidationHandler.sol
+2026-10-12T10:43:11.057062Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderOracleExecution.sol
+2026-10-12T10:43:11.057096Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderQueueBook.sol
+2026-10-12T10:43:11.057128Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderReservationAccounting.sol
+2026-10-12T10:43:11.057161Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderRouterBase.sol
+2026-10-12T10:43:11.057191Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderValidation.sol
+2026-10-12T10:43:11.057221Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/PositionProtectionHandler.sol
+2026-10-12T10:43:11.057253Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/IPyth.sol
+2026-10-12T10:43:11.057283Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/libraries/DecimalConstants.sol
+2026-10-12T10:43:11.057327Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployPerpsArbitrumSepolia.s.sol
+2026-10-12T10:43:11.057380Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdAssertions.sol
+2026-10-12T10:43:11.057431Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdError.sol
+2026-10-12T10:43:11.057461Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdInvariant.sol
+2026-10-12T10:43:11.057505Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdToml.sol
+2026-10-12T10:43:11.057549Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/Test.sol
+2026-10-12T10:43:11.057619Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC3156FlashBorrower.sol
+2026-10-12T10:43:11.057652Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC3156FlashLender.sol
+2026-10-12T10:43:11.057716Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC5267.sol
+2026-10-12T10:43:11.057771Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20FlashMint.sol
+2026-10-12T10:43:11.057839Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Permit.sol
+2026-10-12T10:43:11.057881Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol
+2026-10-12T10:43:11.057921Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Bytes.sol
+2026-10-12T10:43:11.057963Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Nonces.sol
+2026-10-12T10:43:11.058011Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol
+2026-10-12T10:43:11.058051Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/ShortStrings.sol
+2026-10-12T10:43:11.058084Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/StorageSlot.sol
+2026-10-12T10:43:11.058123Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Strings.sol
+2026-10-12T10:43:11.058162Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol
+2026-10-12T10:43:11.058215Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol
+2026-10-12T10:43:11.058258Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/MessageHashUtils.sol
+2026-10-12T10:43:11.058300Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/math/SignedMath.sol
+2026-10-12T10:43:11.058611Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/base/FlashLoanBase.sol
+2026-10-12T10:43:11.058650Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/AggregatorV3Interface.sol
+2026-10-12T10:43:11.058677Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/ICurvePool.sol
+2026-10-12T10:43:11.058707Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/IMorpho.sol
+2026-10-12T10:43:11.058750Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/libraries/OracleLib.sol
+2026-10-12T10:43:11.058779Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/test-support/MockOracle.sol
+2026-10-12T10:43:11.058808Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/test-support/MockPyth.sol
+2026-10-12T10:43:11.058839Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/base/LeverageRouterBase.sol
+2026-10-12T10:43:11.058888Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/InvarCoin.sol
+2026-10-12T10:43:11.058921Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/SyntheticSplitter.sol
+2026-10-12T10:43:11.058946Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/SyntheticToken.sol
+2026-10-12T10:43:11.058971Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveGauge.sol
+2026-10-12T10:43:11.058995Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveMinter.sol
+2026-10-12T10:43:11.059019Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveTwocrypto.sol
+2026-10-12T10:43:11.059042Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IInvarCoin.sol
+2026-10-12T10:43:11.059091Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IRewardDistributor.sol
+2026-10-12T10:43:11.059117Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ISyntheticSplitter.sol
+2026-10-12T10:43:11.059148Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IYieldAdapter.sol
+2026-10-12T10:43:11.059175Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/BasketOracle.sol
+2026-10-12T10:43:11.059202Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/MorphoOracle.sol
+2026-10-12T10:43:11.059227Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/PythAdapter.sol
+2026-10-12T10:43:11.059250Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/StakedOracle.sol
+2026-10-12T10:43:11.059289Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/BullLeverageRouter.sol
+2026-10-12T10:43:11.059323Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/LeverageRouter.sol
+2026-10-12T10:43:11.059367Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/ZapRouter.sol
+2026-10-12T10:43:11.059403Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/staking/RewardDistributor.sol
+2026-10-12T10:43:11.059428Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/staking/StakedToken.sol
+2026-10-12T10:43:11.059458Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/BootstrapPerpsArbitrumSepolia.s.sol
+2026-10-12T10:43:11.059484Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeploySpotArbitrumSepolia.s.sol
+2026-10-12T10:43:11.059508Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployToSepolia.s.sol
+2026-10-12T10:43:11.059537Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployToTest.s.sol
+2026-10-12T10:43:11.059561Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/LpEpochKeeper.s.sol
+2026-10-12T10:43:11.059597Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/VerifyPerpsArbitrumSepolia.s.sol
+2026-10-12T10:43:11.059626Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/mocks/MockTwocryptoPool.s.sol
+2026-10-12T10:43:11.059652Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/integration/OracleParity.t.sol
+2026-10-12T10:43:11.059675Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/mocks/MockPyth.sol
+2026-10-12T10:43:11.059700Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/mocks/MockToken.sol
+2026-10-12T10:43:11.059734Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol
+2026-10-12T10:43:11.059761Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/DeploySpotArbitrumSepolia.t.sol
+2026-10-12T10:43:11.059825Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/LpEpochKeeper.t.sol
+2026-10-12T10:43:11.059860Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/PerpsReleaseDeploymentSize.t.sol
+2026-10-12T10:43:11.059884Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/VerifyPerpsArbitrumSepolia.t.sol
+2026-10-12T10:43:11.059914Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/utils/MockYieldAdapter.sol
+2026-10-12T10:43:11.059940Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for artifacts/releases/v1.3.0/Seed250MPreflight.s.sol
+2026-10-12T10:43:11.060318Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for artifacts/releases/v1.3.0/Seed40M440MDelayedActivationPreflight.s.sol
+2026-10-12T10:43:11.060500Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for artifacts/releases/v1.3.0/Seed250MAndActivationPreflight.s.sol
+2026-10-12T10:43:11.715120Z  WARN foundry_fork_db::cache: Failed to read cache file err=Os { code: 2, kind: NotFound, message: "No such file or directory" } path="/Users/stan/.foundry/cache/rpc/arbitrum-sepolia/318388370"
+2026-10-12T10:43:15.073869Z  WARN evm::traces::external: etherscan config not found
+2026-10-12T10:43:15.511500Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T10:43:15.581039Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T10:43:15.586937Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T10:43:15.664637Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:43:15.926568Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:43:15.956352Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T10:43:15.965207Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+Script ran successfully.
+
+== Logs ==
+  Current exact 40M Senior / 440M Junior seeds permit activation after the approved cap matures.
+  Simulation only; live signed oracle refresh remains a required activation check.

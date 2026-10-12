@@ -1,0 +1,1051 @@
+Compiling 1 files with Solc 0.8.35
+Solc 0.8.35 finished in 1.16s
+Compiler run successful with warnings:
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1339:9:
+     |
+1339 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1353:9:
+     |
+1353 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1361:79:
+     |
+1361 |     function assertApproxEqAbs(uint256 left, uint256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                               ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1368:77:
+     |
+1368 |     function assertApproxEqAbs(int256 left, int256 right, uint256 maxDelta, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1385:9:
+     |
+1385 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1403:9:
+     |
+1403 |         string calldata error
+     |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1413:86:
+     |
+1413 |     function assertApproxEqRel(uint256 left, uint256 right, uint256 maxPercentDelta, string calldata error)
+     |                                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1424:84:
+     |
+1424 |     function assertApproxEqRel(int256 left, int256 right, uint256 maxPercentDelta, string calldata error) external pure;
+     |                                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1431:77:
+     |
+1431 |     function assertEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1438:75:
+     |
+1438 |     function assertEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1444:46:
+     |
+1444 |     function assertEq(bool left, bool right, string calldata error) external pure;
+     |                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1450:68:
+     |
+1450 |     function assertEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1456:66:
+     |
+1456 |     function assertEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1462:68:
+     |
+1462 |     function assertEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1468:74:
+     |
+1468 |     function assertEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1474:72:
+     |
+1474 |     function assertEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1483:74:
+     |
+1483 |     function assertEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1489:74:
+     |
+1489 |     function assertEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1495:72:
+     |
+1495 |     function assertEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                        ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1501:70:
+     |
+1501 |     function assertEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                      ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1504:52:
+     |
+1504 |     function assertEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1510:50:
+     |
+1510 |     function assertEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1516:52:
+     |
+1516 |     function assertEq(address left, address right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1522:52:
+     |
+1522 |     function assertEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1528:42:
+     |
+1528 |     function assertFalse(bool condition, string calldata error) external pure;
+     |                                          ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1536:77:
+     |
+1536 |     function assertGeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1544:75:
+     |
+1544 |     function assertGeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1551:52:
+     |
+1551 |     function assertGe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1558:50:
+     |
+1558 |     function assertGe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1566:77:
+     |
+1566 |     function assertGtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1574:75:
+     |
+1574 |     function assertGtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1581:52:
+     |
+1581 |     function assertGt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1588:50:
+     |
+1588 |     function assertGt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1596:77:
+     |
+1596 |     function assertLeDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1604:75:
+     |
+1604 |     function assertLeDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1611:52:
+     |
+1611 |     function assertLe(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1618:50:
+     |
+1618 |     function assertLe(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1626:77:
+     |
+1626 |     function assertLtDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1634:75:
+     |
+1634 |     function assertLtDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1641:52:
+     |
+1641 |     function assertLt(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1648:50:
+     |
+1648 |     function assertLt(int256 left, int256 right, string calldata error) external pure;
+     |                                                  ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1655:80:
+     |
+1655 |     function assertNotEqDecimal(uint256 left, uint256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                                ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1662:78:
+     |
+1662 |     function assertNotEqDecimal(int256 left, int256 right, uint256 decimals, string calldata error) external pure;
+     |                                                                              ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1668:49:
+     |
+1668 |     function assertNotEq(bool left, bool right, string calldata error) external pure;
+     |                                                 ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1674:71:
+     |
+1674 |     function assertNotEq(string calldata left, string calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1680:69:
+     |
+1680 |     function assertNotEq(bytes calldata left, bytes calldata right, string calldata error) external pure;
+     |                                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1686:71:
+     |
+1686 |     function assertNotEq(bool[] calldata left, bool[] calldata right, string calldata error) external pure;
+     |                                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1692:77:
+     |
+1692 |     function assertNotEq(uint256[] calldata left, uint256[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1698:75:
+     |
+1698 |     function assertNotEq(int256[] calldata left, int256[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1707:77:
+     |
+1707 |     function assertNotEq(address[] calldata left, address[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1713:77:
+     |
+1713 |     function assertNotEq(bytes32[] calldata left, bytes32[] calldata right, string calldata error) external pure;
+     |                                                                             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1719:75:
+     |
+1719 |     function assertNotEq(string[] calldata left, string[] calldata right, string calldata error) external pure;
+     |                                                                           ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1725:73:
+     |
+1725 |     function assertNotEq(bytes[] calldata left, bytes[] calldata right, string calldata error) external pure;
+     |                                                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1728:55:
+     |
+1728 |     function assertNotEq(uint256 left, uint256 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1734:53:
+     |
+1734 |     function assertNotEq(int256 left, int256 right, string calldata error) external pure;
+     |                                                     ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1740:55:
+     |
+1740 |     function assertNotEq(address left, address right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1746:55:
+     |
+1746 |     function assertNotEq(bytes32 left, bytes32 right, string calldata error) external pure;
+     |                                                       ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (6335): "error" will be promoted to keyword in the future and will not be allowed as an identifier anymore.
+    --> lib/forge-std/src/Vm.sol:1752:41:
+     |
+1752 |     function assertTrue(bool condition, string calldata error) external pure;
+     |                                         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:201:9:
+    |
+201 |         _deposit(_msgSender(), receiver, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:203:9:
+    |
+203 |         return shares;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:214:9:
+    |
+214 |         _deposit(_msgSender(), receiver, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:216:9:
+    |
+216 |         return assets;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:227:9:
+    |
+227 |         _withdraw(_msgSender(), receiver, owner, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:229:9:
+    |
+229 |         return shares;
+    |         ^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:240:9:
+    |
+240 |         _withdraw(_msgSender(), receiver, owner, assets, shares);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5740): Unreachable code.
+   --> lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC4626.sol:242:9:
+    |
+242 |         return assets;
+    |         ^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:952:13:
+    |
+952 |             uint256 vpiFactor,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:953:13:
+    |
+953 |             uint256 maxSkewRatio,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:954:13:
+    |
+954 |             uint256 maintMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:955:13:
+    |
+955 |             uint256 initMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:956:13:
+    |
+956 |             uint256 fadMarginBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:957:13:
+    |
+957 |             uint256 baseCarryBps,
+    |             ^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:958:13:
+    |
+958 |             uint256 minBountyUsdc,
+    |             ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:959:13:
+    |
+959 |             uint256 bountyBps,
+    |             ^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:960:13:
+    |
+960 |             uint256 keeperShareBps,
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> packages/perps/src/CfdEngine.sol:961:13:
+    |
+961 |             uint256 protocolShareBps
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1031:5:
+     |
+1031 |     function _revertIfOpenInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+    --> packages/perps/src/CfdEngine.sol:1043:5:
+     |
+1043 |     function _revertIfCloseInvalidTyped(
+     |     ^ (Relevant source part starts here and spans across multiple lines).
+
+2026-10-12T10:35:08.698398Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for artifacts/releases/v1.3.0/Seed40M440MPreflight.s.sol
+2026-10-12T10:35:08.701947Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdClosePreview.sol
+2026-10-12T10:35:08.701993Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineAccountLens.sol
+2026-10-12T10:35:08.702022Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineAdmin.sol
+2026-10-12T10:35:08.702077Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineLens.sol
+2026-10-12T10:35:08.702142Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineOpenQuoter.sol
+2026-10-12T10:35:08.702183Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEnginePlanner.sol
+2026-10-12T10:35:08.702247Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdEngineSettlementSidecar.sol
+2026-10-12T10:35:08.702280Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdOrderPolicyEvaluator.sol
+2026-10-12T10:35:08.702311Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/CfdOrderPolicyEvaluatorBase.sol
+2026-10-12T10:35:08.702347Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/EmergencyPauseCoordinator.sol
+2026-10-12T10:35:08.702401Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/HousePoolRedemptionMathSidecar.sol
+2026-10-12T10:35:08.702457Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/MarginClearinghouse.sol
+2026-10-12T10:35:08.702499Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderLifecycleBook.sol
+2026-10-12T10:35:08.702556Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRecoverySidecar.sol
+2026-10-12T10:35:08.702594Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouter.sol
+2026-10-12T10:35:08.702650Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouterAdmin.sol
+2026-10-12T10:35:08.702691Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouterExecutionSidecar.sol
+2026-10-12T10:35:08.702714Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderRouterLiquidationBatchSidecar.sol
+2026-10-12T10:35:08.702763Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/OrderV3Types.sol
+2026-10-12T10:35:08.702813Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/PerpsPublicLens.sol
+2026-10-12T10:35:08.702862Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/PletherOracle.sol
+2026-10-12T10:35:08.702903Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/PositionProtectionBook.sol
+2026-10-12T10:35:08.702954Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/SettlementMonitorLens.sol
+2026-10-12T10:35:08.702991Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/SettlementMonitorLensSidecar.sol
+2026-10-12T10:35:08.703020Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/TerminalNavBookV2.sol
+2026-10-12T10:35:08.703051Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/AccountLensViewTypes.sol
+2026-10-12T10:35:08.703091Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngine.sol
+2026-10-12T10:35:08.703121Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineAccountLens.sol
+2026-10-12T10:35:08.703177Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineLens.sol
+2026-10-12T10:35:08.703214Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineRiskParamsView.sol
+2026-10-12T10:35:08.703242Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdEngineSettlementHost.sol
+2026-10-12T10:35:08.703282Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ICfdOrderPolicyEvaluator.sol
+2026-10-12T10:35:08.703319Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IHousePoolEmergencyAdmin.sol
+2026-10-12T10:35:08.703347Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IMarginAccount.sol
+2026-10-12T10:35:08.703388Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderLifecycleBook.sol
+2026-10-12T10:35:08.703435Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouter.sol
+2026-10-12T10:35:08.703469Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterAccounting.sol
+2026-10-12T10:35:08.703494Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterAdminHost.sol
+2026-10-12T10:35:08.703528Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterEmergencyAdmin.sol
+2026-10-12T10:35:08.703568Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterErrors.sol
+2026-10-12T10:35:08.703601Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IOrderRouterExecutionHost.sol
+2026-10-12T10:35:08.703634Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsAdmin.sol
+2026-10-12T10:35:08.703665Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsKeeper.sol
+2026-10-12T10:35:08.703715Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsLPViews.sol
+2026-10-12T10:35:08.703754Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsTraderActions.sol
+2026-10-12T10:35:08.703777Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPerpsTraderViews.sol
+2026-10-12T10:35:08.703807Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPletherOracle.sol
+2026-10-12T10:35:08.703834Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPositionProtectionActions.sol
+2026-10-12T10:35:08.703863Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPositionProtectionBook.sol
+2026-10-12T10:35:08.703887Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IPositionProtectionViews.sol
+2026-10-12T10:35:08.703910Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/IProtocolViews.sol
+2026-10-12T10:35:08.703937Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/ISettlementMonitorLens.sol
+2026-10-12T10:35:08.703975Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/PerpsViewTypes.sol
+2026-10-12T10:35:08.704001Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/PositionProtectionTypes.sol
+2026-10-12T10:35:08.704032Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/interfaces/SettlementMonitorViewTypes.sol
+2026-10-12T10:35:08.704062Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/CfdEngineCollateralSnapshotLib.sol
+2026-10-12T10:35:08.704094Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/CloseCommitmentLib.sol
+2026-10-12T10:35:08.704134Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/HousePoolRedemptionMathLib.sol
+2026-10-12T10:35:08.704179Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/MarketCalendarLib.sol
+2026-10-12T10:35:08.704208Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/OrderFailurePolicyLib.sol
+2026-10-12T10:35:08.704235Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/libraries/OrderValidationLib.sol
+2026-10-12T10:35:08.704300Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderBountyAccounting.sol
+2026-10-12T10:35:08.704337Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderCommitHandler.sol
+2026-10-12T10:35:08.704370Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderExecutionHandler.sol
+2026-10-12T10:35:08.704400Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderExecutionOrchestrator.sol
+2026-10-12T10:35:08.704430Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderExecutionSettlement.sol
+2026-10-12T10:35:08.704459Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderHandler.sol
+2026-10-12T10:35:08.704498Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderLiquidationBatchLogic.sol
+2026-10-12T10:35:08.704563Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderLiquidationHandler.sol
+2026-10-12T10:35:08.704605Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderOracleExecution.sol
+2026-10-12T10:35:08.704637Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderQueueBook.sol
+2026-10-12T10:35:08.704664Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderReservationAccounting.sol
+2026-10-12T10:35:08.704691Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderRouterBase.sol
+2026-10-12T10:35:08.704728Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/OrderValidation.sol
+2026-10-12T10:35:08.704760Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/perps/src/router/PositionProtectionHandler.sol
+2026-10-12T10:35:08.704787Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/IPyth.sol
+2026-10-12T10:35:08.704828Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/libraries/DecimalConstants.sol
+2026-10-12T10:35:08.704868Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployPerpsArbitrumSepolia.s.sol
+2026-10-12T10:35:08.704903Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdAssertions.sol
+2026-10-12T10:35:08.704932Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdError.sol
+2026-10-12T10:35:08.704966Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdInvariant.sol
+2026-10-12T10:35:08.705027Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/StdToml.sol
+2026-10-12T10:35:08.705078Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/forge-std/src/Test.sol
+2026-10-12T10:35:08.705143Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC3156FlashBorrower.sol
+2026-10-12T10:35:08.705176Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC3156FlashLender.sol
+2026-10-12T10:35:08.705211Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/interfaces/IERC5267.sol
+2026-10-12T10:35:08.705264Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20FlashMint.sol
+2026-10-12T10:35:08.705307Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Permit.sol
+2026-10-12T10:35:08.705352Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Permit.sol
+2026-10-12T10:35:08.705390Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Bytes.sol
+2026-10-12T10:35:08.705464Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Nonces.sol
+2026-10-12T10:35:08.705507Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol
+2026-10-12T10:35:08.705544Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/ShortStrings.sol
+2026-10-12T10:35:08.705590Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/StorageSlot.sol
+2026-10-12T10:35:08.705646Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/Strings.sol
+2026-10-12T10:35:08.705692Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol
+2026-10-12T10:35:08.705735Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol
+2026-10-12T10:35:08.705769Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/cryptography/MessageHashUtils.sol
+2026-10-12T10:35:08.705818Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for lib/openzeppelin-contracts/contracts/utils/math/SignedMath.sol
+2026-10-12T10:35:08.706156Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/base/FlashLoanBase.sol
+2026-10-12T10:35:08.706229Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/AggregatorV3Interface.sol
+2026-10-12T10:35:08.706268Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/ICurvePool.sol
+2026-10-12T10:35:08.706297Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/interfaces/IMorpho.sol
+2026-10-12T10:35:08.706329Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/src/libraries/OracleLib.sol
+2026-10-12T10:35:08.706360Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/test-support/MockOracle.sol
+2026-10-12T10:35:08.706395Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/shared/test-support/MockPyth.sol
+2026-10-12T10:35:08.706439Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/base/LeverageRouterBase.sol
+2026-10-12T10:35:08.706480Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/InvarCoin.sol
+2026-10-12T10:35:08.706517Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/SyntheticSplitter.sol
+2026-10-12T10:35:08.706564Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/core/SyntheticToken.sol
+2026-10-12T10:35:08.706610Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveGauge.sol
+2026-10-12T10:35:08.706644Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveMinter.sol
+2026-10-12T10:35:08.706680Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ICurveTwocrypto.sol
+2026-10-12T10:35:08.706703Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IInvarCoin.sol
+2026-10-12T10:35:08.706731Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IRewardDistributor.sol
+2026-10-12T10:35:08.706760Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/ISyntheticSplitter.sol
+2026-10-12T10:35:08.706819Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/interfaces/IYieldAdapter.sol
+2026-10-12T10:35:08.706860Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/BasketOracle.sol
+2026-10-12T10:35:08.706900Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/MorphoOracle.sol
+2026-10-12T10:35:08.706942Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/PythAdapter.sol
+2026-10-12T10:35:08.706975Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/oracles/StakedOracle.sol
+2026-10-12T10:35:08.707036Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/BullLeverageRouter.sol
+2026-10-12T10:35:08.707083Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/LeverageRouter.sol
+2026-10-12T10:35:08.707125Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/routers/ZapRouter.sol
+2026-10-12T10:35:08.707168Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/staking/RewardDistributor.sol
+2026-10-12T10:35:08.707223Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for packages/spot/src/staking/StakedToken.sol
+2026-10-12T10:35:08.707261Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/BootstrapPerpsArbitrumSepolia.s.sol
+2026-10-12T10:35:08.707291Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeploySpotArbitrumSepolia.s.sol
+2026-10-12T10:35:08.707327Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployToSepolia.s.sol
+2026-10-12T10:35:08.707382Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/DeployToTest.s.sol
+2026-10-12T10:35:08.707416Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/LpEpochKeeper.s.sol
+2026-10-12T10:35:08.707453Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/VerifyPerpsArbitrumSepolia.s.sol
+2026-10-12T10:35:08.707495Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for script/mocks/MockTwocryptoPool.s.sol
+2026-10-12T10:35:08.707540Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/integration/OracleParity.t.sol
+2026-10-12T10:35:08.707574Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/mocks/MockPyth.sol
+2026-10-12T10:35:08.707596Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/mocks/MockToken.sol
+2026-10-12T10:35:08.707636Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/ArbitrumSepoliaReleaseDefaults.t.sol
+2026-10-12T10:35:08.707674Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/DeploySpotArbitrumSepolia.t.sol
+2026-10-12T10:35:08.707713Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/LpEpochKeeper.t.sol
+2026-10-12T10:35:08.707747Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/PerpsReleaseDeploymentSize.t.sol
+2026-10-12T10:35:08.707778Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/scripts/VerifyPerpsArbitrumSepolia.t.sol
+2026-10-12T10:35:08.707812Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for test/utils/MockYieldAdapter.sol
+2026-10-12T10:35:08.707844Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for artifacts/releases/v1.3.0/Seed250MPreflight.s.sol
+2026-10-12T10:35:08.708331Z  WARN foundry_evm_traces::debug::sources: failed to parse contract definitions for artifacts/releases/v1.3.0/Seed250MAndActivationPreflight.s.sol
+2026-10-12T10:35:09.290460Z  WARN foundry_fork_db::cache: Failed to read cache file err=Os { code: 2, kind: NotFound, message: "No such file or directory" } path="/Users/stan/.foundry/cache/rpc/arbitrum-sepolia/318386476"
+2026-10-12T10:35:13.494821Z  WARN evm::traces::external: etherscan config not found
+2026-10-12T10:35:13.942813Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:14.275252Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T10:35:14.285017Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:14.285180Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:14.296386Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:14.384408Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:14.539125Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:14.886129Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:15.108132Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:15.121679Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:15.321105Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:15.623517Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:15.623688Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:15.750249Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("expected value", line: 1, column: 1) })
+2026-10-12T10:35:15.774308Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:16.095500Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+2026-10-12T10:35:16.393820Z  WARN evm::traces::external: could not get info err=Reqwest(reqwest::Error { kind: Decode, source: Error("data did not match any variant of untagged enum SourcifyResponse", line: 0, column: 0) })
+Traces:
+  [1194144] → new Seed40M440MDelayedActivationPreflight@0x9f7cF1d1F558E57ef88a59ac3D47214eF25B6A06
+    └─ ← [Return] 5854 bytes of code
+
+  [956906] Seed40M440MDelayedActivationPreflight::run()
+    ├─ [3506] 0xfAFDc23A0879B56F580914D594C29423501cBad0::owner() [staticcall]
+    │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    ├─ [1359] 0xfAFDc23A0879B56F580914D594C29423501cBad0::USDC() [staticcall]
+    │   └─ ← [Return] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45
+    ├─ [3969] 0xfAFDc23A0879B56F580914D594C29423501cBad0::maxSeniorExposureUsdc() [staticcall]
+    │   └─ ← [Return] 40000000000000 [4e13]
+    ├─ [2294] 0xfAFDc23A0879B56F580914D594C29423501cBad0::maxSeniorShareBps() [staticcall]
+    │   └─ ← [Return] 8000
+    ├─ [2840] 0xfAFDc23A0879B56F580914D594C29423501cBad0::seniorSeedInitialized() [staticcall]
+    │   └─ ← [Return] false
+    ├─ [576] 0xfAFDc23A0879B56F580914D594C29423501cBad0::juniorSeedInitialized() [staticcall]
+    │   └─ ← [Return] false
+    ├─ [1761] 0xfAFDc23A0879B56F580914D594C29423501cBad0::isTradingActive() [staticcall]
+    │   └─ ← [Return] false
+    ├─ [2360] 0xfAFDc23A0879B56F580914D594C29423501cBad0::poolConfigActivationTime() [staticcall]
+    │   └─ ← [Return] 1791972752 [1.791e9]
+    ├─ [2537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   └─ ← [Return] 0
+    ├─ [3729] 0xfAFDc23A0879B56F580914D594C29423501cBad0::juniorVault() [staticcall]
+    │   └─ ← [Return] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029
+    ├─ [3289] 0xfAFDc23A0879B56F580914D594C29423501cBad0::seniorVault() [staticcall]
+    │   └─ ← [Return] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa
+    ├─ [137214] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::quoteBootstrapDeposit(440000000000000 [4.4e14]) [staticcall]
+    │   ├─ [134798] 0xfAFDc23A0879B56F580914D594C29423501cBad0::getPendingDepositTrancheState() [staticcall]
+    │   │   ├─ [73895] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolInputSnapshot(60) [staticcall]
+    │   │   │   ├─ [46330] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::terminalNavSnapshot() [staticcall]
+    │   │   │   │   ├─ [38736] 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872::terminalNavSnapshot() [staticcall]
+    │   │   │   │   │   ├─ [9805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(0) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   ├─ [9805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(1) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   ├─ [2473] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkPrice() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   ├─ [2579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   ├─ [2847] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::totalTraderClaimBalanceUsdc() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   ├─ [2771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   ├─ [2428] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::pool() [staticcall]
+    │   │   │   │   └─ ← [Return] 0xfAFDc23A0879B56F580914D594C29423501cBad0
+    │   │   │   ├─ [5251] 0xfAFDc23A0879B56F580914D594C29423501cBad0::totalAssets() [staticcall]
+    │   │   │   │   ├─ [2537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [699] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::clearinghouse() [staticcall]
+    │   │   │   │   └─ ← [Return] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0
+    │   │   │   ├─ [3069] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::protocolTreasury() [staticcall]
+    │   │   │   │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    │   │   │   ├─ [2984] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0::balanceUsdc(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [3529] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::settlementBufferBps() [staticcall]
+    │   │   │   │   └─ ← [Return] 25
+    │   │   │   └─ ← [Return] HousePoolInputSnapshot({ physicalAssetsUsdc: 0, netPhysicalAssetsUsdc: 0, maxLiabilityUsdc: 0, supplementalReservedUsdc: 0, terminalLpPriceDeltaUsdc: 0, terminalNavBookVersion: 0, traderClaimBalanceUsdc: 0, hasOpenPositions: false, markFreshnessRequired: false, maxMarkStaleness: 0 })
+    │   │   ├─ [16488] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [13314] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801308 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   │   └─ ← [Return] false, false
+    │   │   │   │   └─ ← [Return] false
+    │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   └─ ← [Return] false
+    │   │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   │   ├─ [3732] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::accruedTotalSupply() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [6134] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::accruedTotalSupply() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   └─ ← [Return] 0, 0
+    │   └─ ← [Return] 440000000000000000 [4.4e17]
+    ├─ [47808] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::quoteBootstrapDeposit(40000000000000 [4e13]) [staticcall]
+    │   ├─ [45798] 0xfAFDc23A0879B56F580914D594C29423501cBad0::getPendingDepositTrancheState() [staticcall]
+    │   │   ├─ [24395] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolInputSnapshot(60) [staticcall]
+    │   │   │   ├─ [13830] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::terminalNavSnapshot() [staticcall]
+    │   │   │   │   ├─ [10736] 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872::terminalNavSnapshot() [staticcall]
+    │   │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(0) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(1) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   ├─ [473] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkPrice() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   ├─ [847] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::totalTraderClaimBalanceUsdc() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   ├─ [428] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::pool() [staticcall]
+    │   │   │   │   └─ ← [Return] 0xfAFDc23A0879B56F580914D594C29423501cBad0
+    │   │   │   ├─ [1251] 0xfAFDc23A0879B56F580914D594C29423501cBad0::totalAssets() [staticcall]
+    │   │   │   │   ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [699] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::clearinghouse() [staticcall]
+    │   │   │   │   └─ ← [Return] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0
+    │   │   │   ├─ [1069] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::protocolTreasury() [staticcall]
+    │   │   │   │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    │   │   │   ├─ [984] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0::balanceUsdc(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [1529] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::settlementBufferBps() [staticcall]
+    │   │   │   │   └─ ← [Return] 25
+    │   │   │   └─ ← [Return] HousePoolInputSnapshot({ physicalAssetsUsdc: 0, netPhysicalAssetsUsdc: 0, maxLiabilityUsdc: 0, supplementalReservedUsdc: 0, terminalLpPriceDeltaUsdc: 0, terminalNavBookVersion: 0, traderClaimBalanceUsdc: 0, hasOpenPositions: false, markFreshnessRequired: false, maxMarkStaleness: 0 })
+    │   │   ├─ [5988] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [2814] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801308 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   │   └─ ← [Return] false, false
+    │   │   │   │   └─ ← [Return] false
+    │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   └─ ← [Return] false
+    │   │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   │   ├─ [1732] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::accruedTotalSupply() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [2134] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::accruedTotalSupply() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   └─ ← [Return] 0, 0
+    │   └─ ← [Return] 40000000000000000 [4e16]
+    ├─ [0] VM::startPrank(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B)
+    │   └─ ← [Return]
+    ├─ [44465] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::mint(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, 480000000000000 [4.8e14])
+    │   ├─ emit Transfer(from: 0x0000000000000000000000000000000000000000, to: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, value: 480000000000000 [4.8e14])
+    │   └─ ← [Stop]
+    ├─ [24325] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::approve(0xfAFDc23A0879B56F580914D594C29423501cBad0, 480000000000000 [4.8e14])
+    │   ├─ emit Approval(owner: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, spender: 0xfAFDc23A0879B56F580914D594C29423501cBad0, value: 480000000000000 [4.8e14])
+    │   └─ ← [Return] true
+    ├─ [310560] 0xfAFDc23A0879B56F580914D594C29423501cBad0::initializeSeedPosition(false, 440000000000000 [4.4e14], 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B)
+    │   ├─ [5988] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [2814] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801308 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   └─ ← [Return] false, false
+    │   │   │   └─ ← [Return] false
+    │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   └─ ← [Return] false
+    │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   ├─ [48214] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::quoteBootstrapDeposit(440000000000000 [4.4e14]) [staticcall]
+    │   │   ├─ [45798] 0xfAFDc23A0879B56F580914D594C29423501cBad0::getPendingDepositTrancheState() [staticcall]
+    │   │   │   ├─ [24395] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolInputSnapshot(60) [staticcall]
+    │   │   │   │   ├─ [13830] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::terminalNavSnapshot() [staticcall]
+    │   │   │   │   │   ├─ [10736] 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872::terminalNavSnapshot() [staticcall]
+    │   │   │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(0) [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(1) [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   │   ├─ [473] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkPrice() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   │   ├─ [847] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::totalTraderClaimBalanceUsdc() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   │   ├─ [428] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::pool() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0xfAFDc23A0879B56F580914D594C29423501cBad0
+    │   │   │   │   ├─ [1251] 0xfAFDc23A0879B56F580914D594C29423501cBad0::totalAssets() [staticcall]
+    │   │   │   │   │   ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [699] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::clearinghouse() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0
+    │   │   │   │   ├─ [1069] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::protocolTreasury() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    │   │   │   │   ├─ [984] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0::balanceUsdc(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [1529] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::settlementBufferBps() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 25
+    │   │   │   │   └─ ← [Return] HousePoolInputSnapshot({ physicalAssetsUsdc: 0, netPhysicalAssetsUsdc: 0, maxLiabilityUsdc: 0, supplementalReservedUsdc: 0, terminalLpPriceDeltaUsdc: 0, terminalNavBookVersion: 0, traderClaimBalanceUsdc: 0, hasOpenPositions: false, markFreshnessRequired: false, maxMarkStaleness: 0 })
+    │   │   │   ├─ [5988] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [2814] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801308 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] false, false
+    │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   │   │   ├─ [1732] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::accruedTotalSupply() [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [2134] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::accruedTotalSupply() [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   └─ ← [Return] 0, 0
+    │   │   └─ ← [Return] 440000000000000000 [4.4e17]
+    │   ├─ [38366] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::checkpointCarryIndexes()
+    │   │   ├─ [1251] 0xfAFDc23A0879B56F580914D594C29423501cBad0::totalAssets() [staticcall]
+    │   │   │   ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   └─ ← [Return] 0
+    │   │   └─ ← [Return]
+    │   ├─ [23423] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::transferFrom(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, 0xfAFDc23A0879B56F580914D594C29423501cBad0, 440000000000000 [4.4e14])
+    │   │   ├─ emit Transfer(from: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, to: 0xfAFDc23A0879B56F580914D594C29423501cBad0, value: 440000000000000 [4.4e14])
+    │   │   └─ ← [Return] true
+    │   ├─ [80017] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::bootstrapMint(440000000000000000 [4.4e17], 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B)
+    │   │   ├─ emit MaintenanceFeeCheckpointed(previousBoundary: 1791799200 [1.791e9], newBoundary: 1791802800 [1.791e9], recipient: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, aprBps: 100, mintedShares: 0, chargedHours: 0, forgivenHours: 0)
+    │   │   ├─ emit Transfer(from: 0x0000000000000000000000000000000000000000, to: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, value: 440000000000000000 [4.4e17])
+    │   │   └─ ← [Stop]
+    │   ├─ [43211] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::configureSeedPosition(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, 440000000000000000 [4.4e17])
+    │   │   └─ ← [Stop]
+    │   ├─ emit SeedPositionInitialized(toSenior: false, receiver: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, amountUsdc: 440000000000000 [4.4e14], sharesMinted: 440000000000000000 [4.4e17])
+    │   └─ ← [Return]
+    ├─ [275324] 0xfAFDc23A0879B56F580914D594C29423501cBad0::initializeSeedPosition(true, 40000000000000 [4e13], 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B)
+    │   ├─ [5988] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [2814] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801308 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   └─ ← [Return] false, false
+    │   │   │   └─ ← [Return] false
+    │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   └─ ← [Return] false
+    │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   ├─ [24438] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolInputSnapshot(60) [staticcall]
+    │   │   ├─ [13830] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::terminalNavSnapshot() [staticcall]
+    │   │   │   ├─ [10736] 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872::terminalNavSnapshot() [staticcall]
+    │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(0) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(1) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   ├─ [473] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkPrice() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [847] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::totalTraderClaimBalanceUsdc() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   ├─ [428] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::pool() [staticcall]
+    │   │   │   └─ ← [Return] 0xfAFDc23A0879B56F580914D594C29423501cBad0
+    │   │   ├─ [1251] 0xfAFDc23A0879B56F580914D594C29423501cBad0::totalAssets() [staticcall]
+    │   │   │   ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   │   │   └─ ← [Return] 440000000000000 [4.4e14]
+    │   │   │   └─ ← [Return] 440000000000000 [4.4e14]
+    │   │   ├─ [699] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::clearinghouse() [staticcall]
+    │   │   │   └─ ← [Return] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0
+    │   │   ├─ [1069] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::protocolTreasury() [staticcall]
+    │   │   │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    │   │   ├─ [984] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0::balanceUsdc(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [1529] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::settlementBufferBps() [staticcall]
+    │   │   │   └─ ← [Return] 25
+    │   │   └─ ← [Return] HousePoolInputSnapshot({ physicalAssetsUsdc: 440000000000000 [4.4e14], netPhysicalAssetsUsdc: 440000000000000 [4.4e14], maxLiabilityUsdc: 0, supplementalReservedUsdc: 0, terminalLpPriceDeltaUsdc: 0, terminalNavBookVersion: 0, traderClaimBalanceUsdc: 0, hasOpenPositions: false, markFreshnessRequired: false, maxMarkStaleness: 0 })
+    │   ├─ [5988] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [2814] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801308 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   └─ ← [Return] false, false
+    │   │   │   └─ ← [Return] false
+    │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   └─ ← [Return] false
+    │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   ├─ [1732] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::accruedTotalSupply() [staticcall]
+    │   │   └─ ← [Return] 0
+    │   ├─ [2397] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::accruedTotalSupply() [staticcall]
+    │   │   └─ ← [Return] 440000000000000000 [4.4e17]
+    │   ├─ [48239] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::quoteBootstrapDeposit(40000000000000 [4e13]) [staticcall]
+    │   │   ├─ [46229] 0xfAFDc23A0879B56F580914D594C29423501cBad0::getPendingDepositTrancheState() [staticcall]
+    │   │   │   ├─ [24438] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolInputSnapshot(60) [staticcall]
+    │   │   │   │   ├─ [13830] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::terminalNavSnapshot() [staticcall]
+    │   │   │   │   │   ├─ [10736] 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872::terminalNavSnapshot() [staticcall]
+    │   │   │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(0) [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(1) [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   │   │   ├─ [473] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkPrice() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   │   ├─ [847] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::totalTraderClaimBalanceUsdc() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   │   ├─ [428] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::pool() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0xfAFDc23A0879B56F580914D594C29423501cBad0
+    │   │   │   │   ├─ [1251] 0xfAFDc23A0879B56F580914D594C29423501cBad0::totalAssets() [staticcall]
+    │   │   │   │   │   ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] 440000000000000 [4.4e14]
+    │   │   │   │   │   └─ ← [Return] 440000000000000 [4.4e14]
+    │   │   │   │   ├─ [699] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::clearinghouse() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0
+    │   │   │   │   ├─ [1069] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::protocolTreasury() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    │   │   │   │   ├─ [984] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0::balanceUsdc(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [1529] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::settlementBufferBps() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 25
+    │   │   │   │   └─ ← [Return] HousePoolInputSnapshot({ physicalAssetsUsdc: 440000000000000 [4.4e14], netPhysicalAssetsUsdc: 440000000000000 [4.4e14], maxLiabilityUsdc: 0, supplementalReservedUsdc: 0, terminalLpPriceDeltaUsdc: 0, terminalNavBookVersion: 0, traderClaimBalanceUsdc: 0, hasOpenPositions: false, markFreshnessRequired: false, maxMarkStaleness: 0 })
+    │   │   │   ├─ [5988] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [2814] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801308 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   │   │   └─ ← [Return] false, false
+    │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   │   │   ├─ [1732] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::accruedTotalSupply() [staticcall]
+    │   │   │   │   └─ ← [Return] 0
+    │   │   │   ├─ [2397] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::accruedTotalSupply() [staticcall]
+    │   │   │   │   └─ ← [Return] 440000000000000000 [4.4e17]
+    │   │   │   └─ ← [Return] 0, 440000000000000 [4.4e14]
+    │   │   └─ ← [Return] 40000000000000000 [4e16]
+    │   ├─ [1502] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::checkpointCarryIndexes()
+    │   │   └─ ← [Return]
+    │   ├─ [3523] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::transferFrom(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, 0xfAFDc23A0879B56F580914D594C29423501cBad0, 40000000000000 [4e13])
+    │   │   ├─ emit Transfer(from: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, to: 0xfAFDc23A0879B56F580914D594C29423501cBad0, value: 40000000000000 [4e13])
+    │   │   └─ ← [Return] true
+    │   ├─ [69317] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::bootstrapMint(40000000000000000 [4e16], 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B)
+    │   │   ├─ emit Transfer(from: 0x0000000000000000000000000000000000000000, to: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, value: 40000000000000000 [4e16])
+    │   │   └─ ← [Stop]
+    │   ├─ [43211] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::configureSeedPosition(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, 40000000000000000 [4e16])
+    │   │   └─ ← [Stop]
+    │   ├─ emit SeedPositionInitialized(toSenior: true, receiver: 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, amountUsdc: 40000000000000 [4e13], sharesMinted: 40000000000000000 [4e16])
+    │   └─ ← [Return]
+    ├─ [2013] 0xfAFDc23A0879B56F580914D594C29423501cBad0::juniorPrincipal() [staticcall]
+    │   └─ ← [Return] 440000000000000 [4.4e14]
+    ├─ [536] 0xfAFDc23A0879B56F580914D594C29423501cBad0::seniorPrincipal() [staticcall]
+    │   └─ ← [Return] 40000000000000 [4e13]
+    ├─ [1837] 0xfAFDc23A0879B56F580914D594C29423501cBad0::accountedAssets() [staticcall]
+    │   └─ ← [Return] 480000000000000 [4.8e14]
+    ├─ [1607] 0xfAFDc23A0879B56F580914D594C29423501cBad0::rawAssets() [staticcall]
+    │   ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   └─ ← [Return] 480000000000000 [4.8e14]
+    │   └─ ← [Return] 480000000000000 [4.8e14]
+    ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   └─ ← [Return] 0
+    ├─ [768] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::allowance(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B, 0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   └─ ← [Return] 0
+    ├─ [266] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::seedReceiver() [staticcall]
+    │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    ├─ [1246] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::seedShareFloor() [staticcall]
+    │   └─ ← [Return] 440000000000000000 [4.4e17]
+    ├─ [520] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::totalSupply() [staticcall]
+    │   └─ ← [Return] 440000000000000000 [4.4e17]
+    ├─ [1549] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::balanceOf(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   └─ ← [Return] 440000000000000000 [4.4e17]
+    ├─ [266] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::seedReceiver() [staticcall]
+    │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    ├─ [1246] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::seedShareFloor() [staticcall]
+    │   └─ ← [Return] 40000000000000000 [4e16]
+    ├─ [520] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::totalSupply() [staticcall]
+    │   └─ ← [Return] 40000000000000000 [4e16]
+    ├─ [1549] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::balanceOf(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   └─ ← [Return] 40000000000000000 [4e16]
+    ├─ [0] VM::warp(1791801309 [1.791e9])
+    │   └─ ← [Return]
+    ├─ [49227] 0xfAFDc23A0879B56F580914D594C29423501cBad0::activateTrading()
+    │   ├─ [24438] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolInputSnapshot(60) [staticcall]
+    │   │   ├─ [13830] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::terminalNavSnapshot() [staticcall]
+    │   │   │   ├─ [10736] 0xd6E94DB3BB26E89183563719B8F4A66c1E0A1872::terminalNavSnapshot() [staticcall]
+    │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(0) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   ├─ [1805] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::sides(1) [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0, 0, 0, 0
+    │   │   │   │   ├─ [473] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkPrice() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [847] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::totalTraderClaimBalanceUsdc() [staticcall]
+    │   │   │   │   │   └─ ← [Return] 0
+    │   │   │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   │   │   └─ ← [Return] false
+    │   │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   │   └─ ← [Return] TerminalNavSnapshot({ markPrice: 0, markTime: 0, terminalLpPriceDeltaUsdc: 0, totalTraderClaimsUsdc: 0, maxDirectionalLiabilityUsdc: 0, bookVersion: 0, hasOpenPositions: false, degradedMode: false })
+    │   │   ├─ [428] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::pool() [staticcall]
+    │   │   │   └─ ← [Return] 0xfAFDc23A0879B56F580914D594C29423501cBad0
+    │   │   ├─ [1251] 0xfAFDc23A0879B56F580914D594C29423501cBad0::totalAssets() [staticcall]
+    │   │   │   ├─ [537] 0x653B0CebE3cda9Ec51De171cC2bB9E454A156e45::balanceOf(0xfAFDc23A0879B56F580914D594C29423501cBad0) [staticcall]
+    │   │   │   │   └─ ← [Return] 480000000000000 [4.8e14]
+    │   │   │   └─ ← [Return] 480000000000000 [4.8e14]
+    │   │   ├─ [699] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::clearinghouse() [staticcall]
+    │   │   │   └─ ← [Return] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0
+    │   │   ├─ [1069] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::protocolTreasury() [staticcall]
+    │   │   │   └─ ← [Return] 0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B
+    │   │   ├─ [984] 0x3C1f9FDD4882fEF4650EE03dCc4703860dd8d1c0::balanceUsdc(0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B) [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [1529] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::settlementBufferBps() [staticcall]
+    │   │   │   └─ ← [Return] 25
+    │   │   └─ ← [Return] HousePoolInputSnapshot({ physicalAssetsUsdc: 480000000000000 [4.8e14], netPhysicalAssetsUsdc: 480000000000000 [4.8e14], maxLiabilityUsdc: 0, supplementalReservedUsdc: 0, terminalLpPriceDeltaUsdc: 0, terminalNavBookVersion: 0, traderClaimBalanceUsdc: 0, hasOpenPositions: false, markFreshnessRequired: false, maxMarkStaleness: 0 })
+    │   ├─ [5988] 0xCB3141511d7c8FC58ec45815cE35A5bc7a2E9F57::getHousePoolStatusSnapshot() [staticcall]
+    │   │   ├─ [579] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::lastMarkTime() [staticcall]
+    │   │   │   └─ ← [Return] 0
+    │   │   ├─ [2814] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::isOracleFrozen() [staticcall]
+    │   │   │   ├─ [722] 0x1e0420b749ea85d0A1F70DB4a715458008606f44::marketCalendarStatus(1791801309 [1.791e9], false, false, 3600) [staticcall]
+    │   │   │   │   └─ ← [Return] false, false
+    │   │   │   └─ ← [Return] false
+    │   │   ├─ [771] 0x95462Ce6a0088170FfABc0F93B2F93B17Ba2c8b0::degradedMode() [staticcall]
+    │   │   │   └─ ← [Return] false
+    │   │   └─ ← [Return] HousePoolStatusSnapshot({ lastMarkTime: 0, oracleFrozen: false, degradedMode: false })
+    │   ├─ [1732] 0xd1893D4C3A3E1Dc3b3634C59310C8212409C1Aaa::accruedTotalSupply() [staticcall]
+    │   │   └─ ← [Return] 40000000000000000 [4e16]
+    │   ├─ [2397] 0xfBCf57e732a6B2420E22aCC0bd976648f4aaF029::accruedTotalSupply() [staticcall]
+    │   │   └─ ← [Return] 440000000000000000 [4.4e17]
+    │   └─ ← [Revert] HousePool__ExceedsSeniorDepositCapacity()
+    └─ ← [Revert] HousePool__ExceedsSeniorDepositCapacity()
+
+
+Error: script failed: HousePool__ExceedsSeniorDepositCapacity()

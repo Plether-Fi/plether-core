@@ -9,7 +9,7 @@
     "date": "2026-10-12",
     "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
     "forgeVersion": "1.5.1-stable",
-    "phase": "deployed",
+    "phase": "seeded",
     "deploymentBlock": 318367917,
     "deployer": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
     "owner": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
@@ -19,7 +19,7 @@
     "version": "v1.3.0",
     "previousFullStackVersion": "v1.2.3",
     "previousFullStackSourceCommit": "ffe45937b7f38133133ad292c5435828bf99357d",
-    "deploymentScope": "fresh complete perps stack; deployed/inactive is the next phase",
+    "deploymentScope": "fresh complete perps stack; seeded/inactive pending approved cap finalization and trading activation",
     "deploymentEndBlock": 318367988,
     "deploymentGasUsed": 102131829,
     "deploymentGasCostWei": "2080175269437829",
@@ -283,8 +283,8 @@
     "positionProtectionTriggerBountyUsdc": "200000",
     "maxSeniorExposureUsdc": "40000000000000",
     "maxSeniorShareBps": 8000,
-    "seniorSeedUsdc": "250000000000000",
-    "juniorSeedUsdc": "250000000000000",
+    "seniorSeedUsdc": "40000000000000",
+    "juniorSeedUsdc": "440000000000000",
     "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
     "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
     "juniorMaintenanceFeeAprBps": 100,
@@ -332,7 +332,12 @@
       "0xa5df7bd16e81df8b1d61b63722dd6f347586e2b38affb6d9eb3787b3f57c2b3a",
       "0xf2be47deba3b26de0908e41c3cc9872aea1ce5e402adae51bf42c77f0111f652"
     ],
-    "bootstrapSeeding": [],
+    "bootstrapSeeding": [
+      "0x12b728f86b56410b99e446319e4394c42c22450d919858ac001fa3a30f4c843a",
+      "0x174d0a4c010da379db45836e4242de6de0f8241bb462b6d3aa87537bca705a6c",
+      "0xbd898873a54cec18e39823645da3c0105f996fe23b2b6c0c8aeb74282b7bf6be",
+      "0xafde1b2eb91191f6adb88198e756b472c006b7d369a1f87fb067d1c8bd9be371"
+    ],
     "activation": []
   },
   "verification": {
@@ -342,8 +347,10 @@
       "log": "deployed-verifier.log"
     },
     "seededPhase": {
-      "txOrRunId": null,
-      "passed": false
+      "txOrRunId": "independent RPC/event checkpoint at L2 block 318388159",
+      "passed": true,
+      "evidence": "seed-40m-440m-verification.json",
+      "scope": "Exact revised amounts, active 40M cap, owner receivers and zero guardian; standard fixed-amount/nonzero-guardian verifier not run."
     },
     "activePhase": {
       "txOrRunId": null,
@@ -379,31 +386,35 @@
     "networkPreflight": "network-preflight.json",
     "simulationEvidence": "simulation.json",
     "deploymentEnvironment": ".env.arbitrum-sepolia-perps (ignored; secrets excluded from this bundle)",
-    "scope": "Fresh complete stack deployed and verified; no bootstrap, seeds, trading activation, migration, or consumer cutover.",
+    "scope": "Fresh complete stack deployed and verified; permanent 40M Senior / 440M Junior seeds confirmed; trading activation pending approved cap finalization. No migration or consumer cutover.",
     "preparationComplete": true,
     "broadcastComplete": true,
     "deploymentComplete": true
   },
   "bootstrap": {
-    "status": "authorized_pending_cap_timelock",
-    "seniorSeedInitialized": false,
-    "juniorSeedInitialized": false,
+    "status": "seeded_activation_pending_cap_timelock",
+    "seniorSeedInitialized": true,
+    "juniorSeedInitialized": true,
     "isTradingActive": false,
     "guardianConfigured": false,
     "seedAmountsInEconomicsArePlannedDefaults": false,
-    "requestedSeniorSeedUsdc": "250000000000000",
-    "requestedJuniorSeedUsdc": "250000000000000",
+    "requestedSeniorSeedUsdc": "40000000000000",
+    "requestedJuniorSeedUsdc": "440000000000000",
     "seniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
     "juniorSeedReceiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
     "tradingActivationAuthorized": true,
-    "tradingActivationStatus": "authorized_pending_cap_timelock_and_seeds",
+    "tradingActivationStatus": "authorized_pending_cap_timelock",
     "tradingActivationPrerequisites": [
-      "Matching mature cap-only proposal finalized",
-      "Both permanent 250M seeds independently verified",
-      "Fresh signed oracle and unrestricted pool/router state verified",
-      "Owner activation call simulated successfully"
+      "Verify confirmed 40M Senior / 440M Junior seed checkpoint and current permanent seed floors",
+      "Finalize the matching mature approved 250M cap-only proposal",
+      "Verify fresh signed oracle and unrestricted pool/router state",
+      "Simulate and execute the authorized owner activation call"
     ],
-    "tradingActivationSimulationEvidence": "seed-250m-and-activation-preflight.log"
+    "tradingActivationSimulationEvidence": "seeded-40m-440m-cap-activation-preflight.log",
+    "seededCheckpointEvidence": "seed-40m-440m-verification.json",
+    "seededCheckpointBlock": 318388159,
+    "totalSeedUsdc": "480000000000000",
+    "tradingActivationBlockingReason": "Senior coupon accrual increases protected exposure above the full 40M cap. Activation requires the existing approved cap-only increase to mature."
   },
   "governance": {
     "seniorCapProposal": {
@@ -414,7 +425,8 @@
       "activationTimeWarsaw": "2026-10-14T12:12:32+02:00",
       "status": "pending_timelock",
       "otherPoolConfigFieldsUnchanged": true,
-      "evidence": "senior-cap-proposal.json"
+      "evidence": "senior-cap-proposal.json",
+      "retainedPurpose": "Approved cap increase remains pending and is required for activation after senior coupon accrual; permanent seeds changed to 40M/440M."
     }
   }
 }
