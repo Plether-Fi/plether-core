@@ -1,0 +1,14 @@
+mint510M broadcast 0x5490411f484543aece8b25f59ada09d89770b9f6cf85e3b2489d64c5c92601bd
+mint510M confirmed in block 318399082
+approve510M broadcast 0xc99702437cbd861f07470ab93a1df1018b0994b058738186cc88e83f9d145350
+approve510M confirmed in block 318399100
+seedJunior500M broadcast 0xcd1349546611d13a3e37204f14cb14049994f9b67863a7b4e685eff36bcc0340
+seedJunior500M confirmed in block 318399119
+seedSenior10M broadcast 0x5348d1522931127a9154e07daab62ee8519962442c4699535949bc3e82949de5
+seedSenior10M confirmed in block 318399138
+Exact510M seeded checkpoint verified;10M Senior /500M Junior permanent floors, receiver and custody match.
+activationOracleRefresh broadcast 0xc74825a5d24345d44d1343b5824d3dd89d1e9bbde721df93dba4a7d6ff6d46bb
+activationOracleRefresh confirmed in block 318399182
+activateTrading broadcast 0xdb6dc7805f0e60a5fd6f2b124cce385cdba79ea94e2cc8f9c1e24d10bc6e7adc
+activateTrading confirmed in block 318399233
+ACTIVE VERIFIED:10M Senior /500M Junior,510M custody, zero residual approval, fresh signed mark, trading and new-risk gates enabled. Guardian zero; no pending config.

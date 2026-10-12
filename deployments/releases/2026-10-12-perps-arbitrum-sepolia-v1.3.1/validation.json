@@ -1,0 +1,68 @@
+{
+  "version": "v1.3.1",
+  "chainId": 421614,
+  "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
+  "deploymentComplete": true,
+  "deployedPhasePassed": true,
+  "seededPhasePassed": true,
+  "activePhasePassed": true,
+  "deployedContractCount": 29,
+  "deploymentReceiptCount": 32,
+  "bootstrapOracleActivationReceiptCount": 6,
+  "runtimeAndCreationInputsMatchQualifiedBuild": true,
+  "consumerAbiCount": 87,
+  "productionCodeUnchangedFromQualifiedV130": true,
+  "qualificationReuse": {
+    "release": "v1.3.0",
+    "record": "../2026-10-12-perps-arbitrum-sepolia-v1.3.0/validation.json",
+    "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
+    "ciUrl": "https://github.com/Plether-Fi/plether-core/actions/runs/38222712233",
+    "deepCiUrl": "https://github.com/Plether-Fi/plether-core/actions/runs/38222712210",
+    "integrationScriptTestsPassed": 41,
+    "releaseToolingTestsPassed": 63,
+    "bridgeToolingTestsPassed": 9,
+    "realSignedPythForkScenariosPassed": 7,
+    "note": "Same exact production code and compiler settings. Historical qualification is preserved; this operation adds an exact fresh10M/500M deployment/mark/activation fork and independent live checks."
+  },
+  "operationFork": {
+    "passed": true,
+    "activationBeforeSeedsRejected": true,
+    "activationAfterBothSeedsAndTenSecondsCouponAccrualPassed": true,
+    "freshAuthenticatedSixFeedOraclePassed": true,
+    "broadcast": false,
+    "evidence": "activation-preflight.log"
+  },
+  "bootstrap": {
+    "permanentSeniorMockUsdc": "10000000",
+    "permanentJuniorMockUsdc": "500000000",
+    "totalMockUsdc": "510000000",
+    "receiver": "0x5a71a4094Ec81165Ada48AA4c27dA48ec27E0d6B",
+    "zeroResidualAllowance": true,
+    "preExistingOwnerTokenFundsPreserved": true,
+    "evidence": "bootstrap-evidence.json"
+  },
+  "activeState": {
+    "isTradingActive": true,
+    "canIncreaseRisk": true,
+    "activeSeniorCapMockUsdc": "40000000",
+    "pendingPoolConfig": null,
+    "guardian": "0x0000000000000000000000000000000000000000",
+    "unrestrictedPoolRouterState": true,
+    "freshValidatedMarkAtActivation": true,
+    "evidence": "active-verification.json"
+  },
+  "sourceVerification": {
+    "status": "partial_exact_public_readback_pending_publication_approval",
+    "verifiedContracts": 7,
+    "totalContracts": 29,
+    "sourcePublicationAuthorizedForThisDeployment": false,
+    "remainingContracts": 22,
+    "evidence": "source-verification.json",
+    "blockingReason": "Automatic approval review rejected new v1.3.1 public-source publication because explicit earlier publication approval was scoped to v1.3.0."
+  },
+  "consumerCutoverPerformed": false,
+  "bridgeEnablementPerformed": false,
+  "oldV130StackModified": false,
+  "remainingDeploymentOrTradingGates": [],
+  "remainingPublicationGate": "Explicit approval to publicly verify remaining22 v1.3.1 addresses on Arbiscan; automatic approval review blocked publication."
+}

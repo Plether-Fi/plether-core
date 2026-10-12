@@ -1,0 +1,238 @@
+{
+  "chainId": 421614,
+  "sourceCommit": "cf86189bcca4813f39d6405a338b77176783eb42",
+  "contracts": {
+    "mockUsdc": {
+      "address": "0x4b44312d1f94d3d79a36a875691d768dd6c0575f",
+      "runtimeBytes": 1697,
+      "runtimeCodeHash": "0x43dda72bae63d140bf5d2edd5529f458a028579f5a339485bc93a0f1a9b64951",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 2511
+    },
+    "marginClearinghouse": {
+      "address": "0xe91f82bd0e1a3ebc78ee0d7c9c745029c2d324c7",
+      "runtimeBytes": 21733,
+      "runtimeCodeHash": "0xce892ca008b33bc74b6dc431008a3e1ebd56f605e7a06bec03ff39e6eee48734",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 22072
+    },
+    "cfdEngine": {
+      "address": "0x55e5d20ebc41234584fe0ba3c6ddcf71b3cbb2cb",
+      "runtimeBytes": 24423,
+      "runtimeCodeHash": "0x2bcab643ea9c4d9f3159f8b79eb754ff8978438462f4a29ab472b8bea098daf7",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 25844
+    },
+    "terminalNavBookV2": {
+      "address": "0xe214ad3702825a1ac1b0a6fce3aa2d540302bee1",
+      "runtimeBytes": 9356,
+      "runtimeCodeHash": "0x6c09724f3effd364df1e734dc4fc01f72ad8c852cb3f0925aef8a6eef79605c3",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 9709
+    },
+    "cfdEnginePlanner": {
+      "address": "0x85fed624c49137ce036ddc7654876616783428f8",
+      "runtimeBytes": 21791,
+      "runtimeCodeHash": "0x44cf90b08e0704ac1d3130f25448bf04b46222e391bac2770269362b48ac5ff9",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 21817
+    },
+    "cfdEngineSettlementSidecar": {
+      "address": "0x174b1231edbd6379877706c06898a20a5475ae73",
+      "runtimeBytes": 23570,
+      "runtimeCodeHash": "0x770498da8b945382fbc0b2ee651392b01ed5fb0bbf95c42309f9643c1f3a2040",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 23781
+    },
+    "cfdEngineAdmin": {
+      "address": "0x27479e3ffff4606faff7a3745426bfc48a5b6685",
+      "runtimeBytes": 4721,
+      "runtimeCodeHash": "0xc65c6ebaf171801a110be5cd8e684b461559ef2c8e178f1d826b3a16e8a69f6e",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 5096
+    },
+    "housePoolRedemptionMathSidecar": {
+      "address": "0x020300c4b5b85148d407e6b0fab1b9974c385101",
+      "runtimeBytes": 1042,
+      "runtimeCodeHash": "0x6bd056f471727898e21e8cb0d2a77efcb5a0f87e1d853a17a3a12b316812c65a",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 1068
+    },
+    "housePool": {
+      "address": "0x587c9863bb46fd5282a4ca2ea99589e3e8543962",
+      "runtimeBytes": 23848,
+      "runtimeCodeHash": "0xa4e0344628f6eab96920c72cbbff530eb4bab9a845a2d7d52e298d5ce0c89a43",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 29283
+    },
+    "cfdEngineProtocolLens": {
+      "address": "0x127e0778fa95acb2f267cda035c071fc786aaf96",
+      "runtimeBytes": 4223,
+      "runtimeCodeHash": "0xfca830b803fd4e6ce0ad841d0de7b822f0ed8ea5370a7067b057560b15ae6e71",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 4408
+    },
+    "seniorVault": {
+      "address": "0xee755754319be980dd0f7df77107720485fe9d20",
+      "runtimeBytes": 23879,
+      "runtimeCodeHash": "0xc9bed8b28351f3af94394ea4e8f68377da3c52a5e264dc99f1ea255511449aba",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 26450
+    },
+    "juniorVault": {
+      "address": "0x1d4beed4d594cadfe4c3c5bdc8174b0fbfc4aaf0",
+      "runtimeBytes": 23879,
+      "runtimeCodeHash": "0x75360eb4a57e62b44a3d73df33e586a2d94fa8634f61a089681de3927df7b48a",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 26450
+    },
+    "cfdEngineAccountLens": {
+      "address": "0xf520133a4f757a68a523c704512af24b1f5b7762",
+      "runtimeBytes": 10593,
+      "runtimeCodeHash": "0x98903118982ff06397e9c1c1504d8187b6f35b6a7c2c4e139faef4f46dca8727",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 10905
+    },
+    "cfdEngineLens": {
+      "address": "0xfffd7ef10a3cdd70a9f4d21a8349f70ce059dd7e",
+      "runtimeBytes": 21234,
+      "runtimeCodeHash": "0x844590ff77858729af341d9c6229751e9828676f22d48065f9fe5a016e7ffb58",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 32013
+    },
+    "cfdEngineOpenQuoter": {
+      "address": "0xe290e4df3af54e53ee98d100f430f603fd51e26a",
+      "runtimeBytes": 10220,
+      "runtimeCodeHash": "0x2ee58cdaed192427e6aeb08808cab207cd0829ba8409c2b8dde4ad27290d82ec",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 10246
+    },
+    "pletherOracle": {
+      "address": "0x04a1455d19960a624bbe41511fc8018a0ffdd494",
+      "runtimeBytes": 14084,
+      "runtimeCodeHash": "0xfb6bc7451cf49ef800c0631dffc59e8a6309b1855ca4011b7656ebe96f2b6d5f",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 17107
+    },
+    "cfdOrderPolicyEvaluator": {
+      "address": "0xf550cada6b7d477b23069c8b4f254d19088f28c8",
+      "runtimeBytes": 19519,
+      "runtimeCodeHash": "0x5343c6e581202dcfcb6ad16f8630f42ce5082c930e52db90173b0d2573d31fc8",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 19545
+    },
+    "cfdClosePreview": {
+      "address": "0x4a1d87466d272be9ebb643cd386883d94f0eb59b",
+      "runtimeBytes": 21732,
+      "runtimeCodeHash": "0x0c76040939a8dc6670fb38e7d812fb66f5b0bede6eb519148bc49fcdbc696369",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 21905
+    },
+    "orderRouterExecutionSidecar": {
+      "address": "0x176f7ff42e5398e3b96e0bf2ade46d35639d6365",
+      "runtimeBytes": 23163,
+      "runtimeCodeHash": "0x86fd621c7e34fe876a9ead02384ee61bee21bf79a50738d488b703eecc363041",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 31888
+    },
+    "orderRecoverySidecar": {
+      "address": "0x663f5cefe9727375deba798fed75304f1184957c",
+      "runtimeBytes": 8517,
+      "runtimeCodeHash": "0x9b3844a3cea4a72d409b3aa0214110ba430bd98713a6d64e8090ad3a88e4ac95",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 8576
+    },
+    "orderLifecycleBook": {
+      "address": "0x519f57a34fb440c42bfd2d8328d2f80349af3872",
+      "runtimeBytes": 15230,
+      "runtimeCodeHash": "0x2772eecb9580b8ba132c184c47e42125f2db4df220e6582b9e45ee72337cf8f7",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 15762
+    },
+    "orderRouterLiquidationBatchSidecar": {
+      "address": "0xf970aa9b0c315801f5ec6f948c14020c7f70339c",
+      "runtimeBytes": 19968,
+      "runtimeCodeHash": "0x0cd9ca7637fadbebd5c8aca9c3dac54a8669c14a70108b9f36898389a0900004",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 20172
+    },
+    "orderRouter": {
+      "address": "0x9b9ddc783780a14e4930dbbcd94d6356a82725e8",
+      "runtimeBytes": 20928,
+      "runtimeCodeHash": "0xbba0bdc0ad492502a91184d69da069d75fd8037636632738be5ccb2a6879172d",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 46871
+    },
+    "orderRouterAdmin": {
+      "address": "0x0188dc48a24e3e5bccd73275867b5fb5a0e57e6e",
+      "runtimeBytes": 5289,
+      "runtimeCodeHash": "0x110a2c57271f8128aa565c02ef2c8a43bd047f04b3c28608ecc6d4cba36545ab",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 5695
+    },
+    "positionProtectionBook": {
+      "address": "0xa7e2132ff262ac97cdeaeeb158f0ee5c8c30e312",
+      "runtimeBytes": 17128,
+      "runtimeCodeHash": "0x0374bf3a77ea8bb4e09ec0e306dbcb5725bbc0c7326f423fa53ec98fb68be47b",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 17573
+    },
+    "perpsPublicLens": {
+      "address": "0x5502e241ddde4fd00313947e1d2f941764c92959",
+      "runtimeBytes": 14461,
+      "runtimeCodeHash": "0x19e168d19a63f331ea048757ca80642006c872f2279c5977cf31b526f3a3a0c0",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 14943
+    },
+    "settlementMonitorLens": {
+      "address": "0xb80b72b6517d53ed6387c9873ea4b61d0c97ade8",
+      "runtimeBytes": 23339,
+      "runtimeCodeHash": "0x68294d908bf9c72d656c54ad44fc089c77e2a8c448485016f3e05155c173d450",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 49057
+    },
+    "settlementMonitorLensSidecar": {
+      "address": "0x022af8e4461c313e194b020b2af5a8cc583421ee",
+      "runtimeBytes": 19345,
+      "runtimeCodeHash": "0x426ad380d748a340099eb4b6e4a61ec81f0939b814223d4d3230667f5d11e9f3",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 20751
+    },
+    "emergencyPauseCoordinator": {
+      "address": "0xdad70eeb98681c7df8125a199f3e88ec8b6c00f5",
+      "runtimeBytes": 2788,
+      "runtimeCodeHash": "0x14308b536f4156bb43f42576c93a45ba41d845b0709b86a9642f938c265296e9",
+      "matchesBuildOutsideImmutables": true,
+      "creationInputMatchesBuild": true,
+      "fullCreationInputBytes": 3353
+    }
+  }
+}
