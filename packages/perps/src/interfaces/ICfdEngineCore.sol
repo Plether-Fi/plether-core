@@ -12,14 +12,6 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 ///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngineCore is ICfdEngineTypes {
 
-    function resolveCloseBounty(
-        address account,
-        uint64 orderId,
-        uint256 freeUsdc,
-        uint256 pledgeUsdc,
-        uint64 sourcePositionEpoch,
-        bool quarantine
-    ) external;
     function positionEpoch(
         address account
     ) external view returns (uint64);

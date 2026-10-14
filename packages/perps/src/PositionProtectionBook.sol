@@ -101,7 +101,7 @@ interface IPositionProtectionOrderCommitHost {
 
 }
 
-/// @notice Book-only host surface for transferring one retained protection bounty into a fresh close attempt.
+/// @notice Book-only host surface for appending a fresh unpaid protection close attempt.
 /// @dev The Router authenticates this explicit-account call by requiring its immutable Book as caller.
 interface IPositionProtectionCloseAttemptHost {
 
@@ -158,15 +158,13 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     uint64 public nextPositionProtectionId = 1;
 
     mapping(uint64 protectionId => StoredProtection protection) private _protections;
-    /// @dev Immutable per-record execution-bounty amount used to authenticate every retained retry transfer.
-    mapping(uint64 protectionId => uint256 executionBountyUsdc) private _executionBountySnapshots;
     mapping(address account => uint64 protectionId) private _activeProtectionIds;
     mapping(uint64 parentOrderId => uint64 protectionId) private _parentProtectionIds;
     mapping(uint64 linkedOrderId => uint64 protectionId) private _attemptProtectionIds;
 
     /// @notice Deployment requires a nonzero router and engine.
     error PositionProtectionBook__ZeroAddress();
-    /// @notice Bounties disagree with current creation settings or the stored execution-bounty reserve snapshot.
+    /// @notice Trigger bounty disagrees with current settings, or the close execution bounty is nonzero.
     error PositionProtectionBook__BountyMismatch();
     /// @notice An activation supplied a zero or already-bound linked close id.
     error PositionProtectionBook__InvalidLinkedOrder();
@@ -240,11 +238,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             .recordBountyReservation(
                 account, IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId, triggerBountyUsdc
             );
-        _clearinghouse()
-            .recordBountyReservation(
-                account, IMarginClearinghouse.BountyKind.ProtectionExecution, protectionId, executionBountyUsdc
-            );
-        _executionBountySnapshots[protectionId] = executionBountyUsdc;
         _arm(protection);
         _activeProtectionIds[account] = protectionId;
 
@@ -352,10 +345,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert OrderRouter__PendingOrdersExist();
         }
 
-        uint256 executionBountyUsdc = _executionBountySnapshots[protectionId];
-        if (_executionBounty(protection) != executionBountyUsdc) {
-            revert PositionProtectionBook__BountyMismatch();
-        }
+        uint256 executionBountyUsdc = 0;
         if (protection.linkedOrderId == 0 || _attemptProtectionIds[protection.linkedOrderId] != 0) {
             revert PositionProtectionBook__InvalidLinkedOrder();
         }
@@ -443,11 +433,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             .recordBountyReservation(
                 account, IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId, triggerBountyUsdc
             );
-        _clearinghouse()
-            .recordBountyReservation(
-                account, IMarginClearinghouse.BountyKind.ProtectionExecution, protectionId, executionBountyUsdc
-            );
-        _executionBountySnapshots[protectionId] = executionBountyUsdc;
         protection.status = PositionProtectionTypes.PositionProtectionStatus.PendingOpen;
         _activeProtectionIds[account] = protectionId;
         _parentProtectionIds[parentOrderId] = protectionId;
@@ -510,10 +495,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         plan.side = protection.side;
         plan.size = protection.size;
         plan.triggerBountyUsdc = _triggerBounty(protection);
-        plan.executionBountyUsdc = _executionBounty(protection);
-        if (plan.executionBountyUsdc != _executionBountySnapshots[protectionId]) {
-            revert PositionProtectionBook__BountyMismatch();
-        }
+        plan.executionBountyUsdc = 0;
     }
 
     function _recordActivation(
@@ -541,14 +523,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert PositionProtectionBook__InvalidLinkedOrder();
         }
         uint64 previousLinkedOrderId = protection.linkedOrderId;
-        _clearinghouse()
-            .moveBountyReservation(
-                protection.account,
-                IMarginClearinghouse.BountyKind.ProtectionExecution,
-                protection.protectionId,
-                IMarginClearinghouse.BountyKind.Order,
-                linkedOrderId
-            );
         protection.linkedOrderId = linkedOrderId;
         protection.status = PositionProtectionTypes.PositionProtectionStatus.Triggered;
         _attemptProtectionIds[linkedOrderId] = protection.protectionId;
@@ -645,8 +619,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert PositionProtectionBook__InvalidTerminalReason();
         }
 
-        uint256 bountySnapshotUsdc = _executionBountySnapshots[protectionId];
-        if (executionBountyUsdc != bountySnapshotUsdc || _executionBounty(protection) != 0) {
+        if (executionBountyUsdc != 0) {
             revert PositionProtectionBook__BountyMismatch();
         }
 
@@ -654,14 +627,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         retained = _positionMatches(protection);
         emit PositionProtectionCloseAttemptFailed(protectionId, account, orderId, reason, retained);
         if (retained) {
-            _clearinghouse()
-                .moveBountyReservation(
-                    account,
-                    IMarginClearinghouse.BountyKind.Order,
-                    orderId,
-                    IMarginClearinghouse.BountyKind.ProtectionExecution,
-                    protectionId
-                );
             protection.status = PositionProtectionTypes.PositionProtectionStatus.Latched;
             return true;
         }
@@ -751,7 +716,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.triggeredLeg = stored.triggeredLeg;
         protection.status = stored.status;
         protection.triggerBountyUsdc = _triggerBounty(stored);
-        protection.executionBountyUsdc = _executionBounty(stored);
+        protection.executionBountyUsdc = 0;
     }
 
     /// @inheritdoc IPositionProtectionBook
@@ -759,7 +724,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         address account
     ) external view returns (uint256 unpaidBountyUsdc) {
         StoredProtection storage protection = _protections[_activeProtectionIds[account]];
-        return _triggerBounty(protection) + _executionBounty(protection);
+        return _triggerBounty(protection);
     }
 
     function _triggerBounty(
@@ -770,17 +735,9 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         .amountUsdc;
     }
 
-    function _executionBounty(
-        StoredProtection storage protection
-    ) private view returns (uint256) {
-        return _clearinghouse()
-        .getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionExecution, protection.protectionId)
-        .amountUsdc;
-    }
-
     function _configuredBounties() private view returns (uint256 triggerBountyUsdc, uint256 executionBountyUsdc) {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
-        return (router.positionProtectionTriggerBountyUsdc(), router.closeOrderExecutionBountyUsdc());
+        return (router.positionProtectionTriggerBountyUsdc(), 0);
     }
 
     function _clearinghouse() private view returns (IMarginClearinghouse) {
@@ -857,8 +814,8 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     ) private view {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
         if (
-            triggerBountyUsdc != router.positionProtectionTriggerBountyUsdc()
-                || executionBountyUsdc != router.closeOrderExecutionBountyUsdc()
+            triggerBountyUsdc != router.positionProtectionTriggerBountyUsdc() || executionBountyUsdc != 0
+                || router.closeOrderExecutionBountyUsdc() != 0
         ) {
             revert PositionProtectionBook__BountyMismatch();
         }
@@ -1054,9 +1011,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         IMarginClearinghouse clearinghouse = _clearinghouse();
         amountUsdc = clearinghouse.takeBountyReservation(
             protection.account, IMarginClearinghouse.BountyKind.ProtectionTrigger, protection.protectionId
-        );
-        amountUsdc += clearinghouse.takeBountyReservation(
-            protection.account, IMarginClearinghouse.BountyKind.ProtectionExecution, protection.protectionId
         );
     }
 

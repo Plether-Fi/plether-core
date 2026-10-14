@@ -138,8 +138,8 @@ contract MarginFirstCarryTest is BasePerpTest {
         vm.prank(TRADER);
         router.commitOrder(CfdTypes.Side.LONG, size, 0, 0, true);
         assertEq(_margin(TRADER), beforeMargin - carry);
-        assertEq(_freeSettlementUsdc(TRADER), 200_000);
-        assertEq(clearinghouse.actionReserveUsdc(TRADER), 200_000);
+        assertEq(_freeSettlementUsdc(TRADER), 400_000);
+        assertEq(clearinghouse.actionReserveUsdc(TRADER), 0);
         assertEq(pool.totalAssets(), beforePool + carry);
         assertEq(engine.unsettledCarryUsdc(TRADER), 0);
         assertEq(router.pendingOrderCounts(TRADER), 1);
@@ -147,7 +147,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         _authenticate(TRADER);
     }
 
-    function test_BountyShortfallReportsPostCarryAndRollsBackNestedMutation() public {
+    function test_UnpaidFullCloseCollectsAvailableCarryAndRetainsArrears() public {
         _fundTrader(TRADER, 10_000e6 + 100_000);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         vm.warp(block.timestamp + 200_000 days);
@@ -158,66 +158,54 @@ contract MarginFirstCarryTest is BasePerpTest {
         bytes32 beforeBook = keccak256(abi.encode(terminalNavBook.bookState()));
         uint256 accrued = _expectedIndexedCarryUsdc(TRADER);
         assertGt(accrued, beforeMargin + 100_000);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector,
-                200_000,
-                0,
-                accrued - beforeMargin - 100_000
-            )
-        );
         vm.prank(TRADER);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
-        assertEq(_margin(TRADER), beforeMargin);
-        assertEq(clearinghouse.balanceUsdc(TRADER), beforeBalance);
-        assertEq(pool.totalAssets(), beforePool);
-        assertEq(terminalNavBook.curveHashOf(TRADER), beforeHash);
-        assertEq(keccak256(abi.encode(terminalNavBook.bookState())), beforeBook);
-        _checkpoint(TRADER); // a failed bracket must not suppress authentication/synchronization on retry
+        assertEq(_margin(TRADER), 0);
+        assertEq(clearinghouse.balanceUsdc(TRADER), beforeBalance - beforeMargin - 100_000);
+        assertEq(pool.totalAssets(), beforePool + beforeMargin + 100_000);
+        assertEq(engine.unsettledCarryUsdc(TRADER), accrued - beforeMargin - 100_000);
+        assertNotEq(terminalNavBook.curveHashOf(TRADER), beforeHash);
+        assertNotEq(keccak256(abi.encode(terminalNavBook.bookState())), beforeBook);
         _authenticate(TRADER);
     }
 
-    function test_BountyShortfallReportsCarryUnpaidAfterBothSourcesExhausted() public {
+    function test_UnpaidFullCloseRemainsAdmissibleAfterBothCarrySourcesExhausted() public {
         _fundTrader(TRADER, 3000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 3000e6, 1e8);
         vm.warp(block.timestamp + 500 * 365 days);
         uint256 unpaid = _expectedIndexedCarryUsdc(TRADER) - _margin(TRADER);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector, 200_000, 0, unpaid
-            )
-        );
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 200_000);
-        assertEq(engine.unsettledCarryUsdc(TRADER), 0, "failed funding rolls back collection and arrears");
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 0);
+        assertEq(engine.unsettledCarryUsdc(TRADER), unpaid, "full-close commitment retains unpaid carry");
+        assertEq(_margin(TRADER), 0);
         _authenticate(TRADER);
     }
 
     function test_CloseCommitValidationRetainsSpecificFailures() public {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NoOpenPosition.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100e18, 200_000);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100e18, 0);
         _fundTrader(TRADER, 20_000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 3000e6, 1e8);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAmount.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 0, 200_000);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 0, 0);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_100e18, 200_000);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_100e18, 0);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 1e18, 200_000);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 1e18, 0);
         vm.mockCall(address(engine), abi.encodeWithSelector(engine.lastMarkPrice.selector), abi.encode(uint256(0)));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 200_000);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 0);
         vm.clearMockedCalls();
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 50_000e18, 200_000);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 50_000e18, 0);
         _authenticate(TRADER);
     }
 
@@ -299,14 +287,14 @@ contract MarginFirstCarryTest is BasePerpTest {
         );
         assertEq(
             receipt.economics.grossAccountDebitUsdc,
-            receipt.commitment.carryCollectedUsdc + carry + (isPartial ? 20e6 : 40e6) + 200_000
+            receipt.commitment.carryCollectedUsdc + carry + (isPartial ? 20e6 : 40e6)
         );
         assertEq(receipt.economics.preSettlementBalanceUsdc, balanceAfterCommit);
         assertEq(receipt.economics.postSettlementBalanceUsdc, clearinghouse.balanceUsdc(TRADER));
         assertEq(realized, carry);
         assertEq(free, 0);
         assertEq(margin, carry);
-        assertEq(clearinghouse.balanceUsdc(TRADER), balanceAfterCommit - carry - (isPartial ? 20e6 : 40e6) - 200_000);
+        assertEq(clearinghouse.balanceUsdc(TRADER), balanceAfterCommit - carry - (isPartial ? 20e6 : 40e6));
         assertEq(_margin(TRADER), preview.remainingMargin);
         assertEq(_margin(TRADER), isPartial ? (marginAfterCommit - carry) - (marginAfterCommit - carry) / 2 : 0);
         assertEq(engine.unsettledCarryUsdc(TRADER), 0);

@@ -437,8 +437,7 @@ contract PerpExplicitAccountingHandler is Test {
         uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
         uint256 maximumCollectibleUsdc =
             side == CfdTypes.Side.LONG ? lots * engine.CAP_PRICE() - entryCostUsdcAtoms : entryCostUsdcAtoms;
-        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account)
-            + clearinghouse.collectibleCloseEscrowUsdc(account);
+        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
         uint256 expectedCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
 
         return uint256(curve.lots) == lots && uint256(curve.entryCostUsdcAtoms) == entryCostUsdcAtoms

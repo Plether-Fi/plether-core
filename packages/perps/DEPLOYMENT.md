@@ -899,3 +899,9 @@ commit and inspect its protection support and configuration instead of assuming 
 State clearly that a trigger queues a close; it does not guarantee execution time, execution price, or execution before
 liquidation. Keep prepared candidate manifests separate from the active deployment record until deployment and all
 phase verifiers have succeeded.
+
+## Zero-close stack rollout
+
+The zero-close implementation requires a coherent fresh deployment. Configure ordinary close execution bounty and protection execution reward to zero; nonzero values are rejected. Opening/increase and protection trigger rewards remain positive. Removed pledge-escrow storage and internal interfaces are not an in-place upgrade path. Do not rotate a subset of old components into this accounting model.
+
+Before publishing a fresh manifest, verify current runtime hashes and component bindings, deploy the coordinated keeper/frontend/indexer revisions, configure positive native transaction spending caps, fund independent primary/standby operators, and rehearse same-account fallback with keeper, sponsor and protocol API unavailable. Existing release manifests and old-stack servicing stay unchanged. Local tests do not replace this activation drill or a measured operating budget. See [ZERO_CLOSE_OPERATIONS.md](ZERO_CLOSE_OPERATIONS.md).

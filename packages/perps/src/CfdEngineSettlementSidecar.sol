@@ -330,11 +330,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         effects = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta, amountUsdc);
         host.settlementRealizeCarry(account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(account);
-        clearinghouse.reserveCloseBounty(account, effects.bountyFromFreeUsdc, effects.bountyFromPledgeUsdc);
-        host.settlementSyncTotalSideMargin(
-            snap.position.side, marginBefore, marginBefore - effects.bountyFromPledgeUsdc
-        );
         IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets = clearinghouse.getAccountUsdcBuckets(account);
         if (
             afterBuckets.settlementBalanceUsdc != effects.settlementAfterUsdc
@@ -538,7 +533,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
         // A successful close earns its bounty now. Until this point refundable pledged funding stays collectible.
-        clearinghouse.consumeCollectibleCloseEscrow(delta.account, orderId);
         _executeClose(delta, currentPosition, clearinghouse);
     }
 

@@ -46,25 +46,24 @@ contract PendingOrderReferenceLedgerTest is Test {
         assertEq(ledger.order(3).originalMargin, 200e6, "History preserves original, not refunded principal");
     }
 
-    function test_TerminalReplayRetainsRequestAndPledgeGenerationWithoutNewReservation() public {
+    function test_TerminalReplayRetainsRequestAndGenerationWithoutNewReservation() public {
         OrderV3Types.OrderRequest memory request = _request(1, CfdTypes.Side.LONG, 20, 0, true);
-        uint64 id = ledger.commit(0, 2, request, 50_000, 150_000, 100, 10);
-        assertEq(ledger.order(id).sourceGeneration, 2);
-        assertEq(ledger.takeBounty(id), 200_000);
-        assertEq(ledger.resolveCollectiblePledge(id, 2), 150_000);
+        uint64 id = ledger.commit(0, 2, request, 0, 0, 100, 10);
+        assertEq(ledger.order(id).sourceGeneration, 0);
+        assertEq(ledger.takeBounty(id), 0);
         ledger.finalize(id, OrderV3Types.LifecycleStatus.Failed, OrderV3Types.TerminalReason.Expired);
         assertEq(ledger.head(), 0);
         // Later account generations and changed market bounty inputs cannot create a second reservation.
         assertEq(ledger.commit(0, 9, request, 200_000, 0, 900, 90), id);
         PendingOrderReferenceLedger.Order memory historical = ledger.order(id);
         assertEq(historical.generation, 2);
-        assertEq(historical.sourceGeneration, 2);
+        assertEq(historical.sourceGeneration, 0);
         assertEq(historical.commitTime, 100);
         assertEq(historical.commitBlock, 10);
         assertEq(historical.deadline, 400);
-        assertEq(historical.bountyFree, 50_000);
-        assertEq(historical.bountyPledge, 150_000);
-        assertEq(historical.bountyUsdc, 200_000);
+        assertEq(historical.bountyFree, 0);
+        assertEq(historical.bountyPledge, 0);
+        assertEq(historical.bountyUsdc, 0);
         assertEq(historical.remainingBounty, 0);
         assertEq(abi.encode(historical.request), abi.encode(request));
         assertEq(uint8(historical.status), uint8(OrderV3Types.LifecycleStatus.Failed));
@@ -80,9 +79,9 @@ contract PendingOrderReferenceLedgerTest is Test {
 
     function test_QueuedExposureExcludesRiskOffOpensButPreservesCloses() public {
         ledger.commit(0, 2, _request(1, CfdTypes.Side.LONG, 20, 100e6, false), 100_000, 0, 100, 10);
-        ledger.commit(0, 2, _request(2, CfdTypes.Side.LONG, 20, 0, true), 200_000, 0, 100, 10);
+        ledger.commit(0, 2, _request(2, CfdTypes.Side.LONG, 20, 0, true), 0, 0, 100, 10);
         ledger.commit(0, 2, _request(3, CfdTypes.Side.LONG, 30, 100e6, false), 100_000, 0, 100, 10);
-        ledger.commit(0, 2, _request(4, CfdTypes.Side.LONG, 40, 0, true), 200_000, 0, 100, 10);
+        ledger.commit(0, 2, _request(4, CfdTypes.Side.LONG, 40, 0, true), 0, 0, 100, 10);
         ledger.commit(0, 2, _request(5, CfdTypes.Side.LONG, 50, 100e6, false), 100_000, 0, 100, 10);
         assertEq(ledger.queuedLots(0, 100, 0), 140, "Open increases and close reductions combine in queue order");
         assertEq(ledger.queuedLots(0, 100, 1), 120, "Cutoff removes the first twenty-lot increase");
@@ -90,30 +89,19 @@ contract PendingOrderReferenceLedgerTest is Test {
         assertEq(ledger.pendingCloseLots(0), 60, "Stored close count includes every still-pending close intent");
     }
 
-    function test_PledgedHeadOwnsOneGenerationAndLaterFreeOrdersRemainLegal() public {
-        uint64 head = ledger.commit(0, 2, _request(1, CfdTypes.Side.LONG, 20, 0, true), 50_000, 150_000, 100, 10);
-        uint64 later = ledger.commit(0, 2, _request(2, CfdTypes.Side.LONG, 20, 100e6, false), 200_000, 0, 100, 10);
-        OrderV3Types.OrderRequest memory trailing = _request(3, CfdTypes.Side.LONG, 20, 0, true);
-        vm.expectRevert(PendingOrderReferenceLedger.PledgeRequiresEmptyQueue.selector);
-        ledger.commit(0, 2, trailing, 199_999, 1, 100, 10);
-        (uint256 amount, uint64 owner, uint256 epoch) = ledger.collectibleEscrow(0);
-        assertEq(amount, 150_000);
-        assertEq(owner, head);
-        assertEq(epoch, 2);
-        assertEq(ledger.takeBounty(head), 200_000);
-        (amount,,) = ledger.collectibleEscrow(0);
-        assertEq(amount, 150_000, "taking bounty classification cannot silently drop LP backing");
-        vm.expectRevert(PendingOrderReferenceLedger.CollectiblePledgeStillReserved.selector);
-        ledger.finalize(head, OrderV3Types.LifecycleStatus.Failed, OrderV3Types.TerminalReason.Expired);
-        vm.expectRevert(PendingOrderReferenceLedger.SourceGenerationMismatch.selector);
-        ledger.resolveCollectiblePledge(head, 3);
-        assertEq(ledger.resolveCollectiblePledge(head, 2), 150_000);
-        assertEq(ledger.resolveCollectiblePledge(head, 2), 0, "resolution cannot duplicate pledge");
-        ledger.finalize(head, OrderV3Types.LifecycleStatus.Failed, OrderV3Types.TerminalReason.Expired);
-        assertEq(ledger.head(), later);
-        assertEq(ledger.count(0), 1);
-        (amount, owner, epoch) = ledger.collectibleEscrow(0);
-        assertEq(amount + owner + epoch, 0);
+    function test_CloseRejectsAnyFundedBountyButAllowsCloseOpenCloseHistory() public {
+        OrderV3Types.OrderRequest memory request = _request(1, CfdTypes.Side.LONG, 20, 0, true);
+        vm.expectRevert(PendingOrderReferenceLedger.InvalidRequest.selector);
+        ledger.commit(0, 2, request, 1, 0, 100, 10);
+        vm.expectRevert(PendingOrderReferenceLedger.InvalidRequest.selector);
+        ledger.commit(0, 2, request, 0, 1, 100, 10);
+        assertEq(ledger.commit(0, 2, request, 0, 0, 100, 10), 1);
+        _open(0, 2, 100e6);
+        assertEq(ledger.commit(0, 2, _request(3, CfdTypes.Side.LONG, 20, 0, true), 0, 0, 100, 10), 3);
+        assertEq(ledger.takeBounty(1), 0);
+        ledger.finalize(1, OrderV3Types.LifecycleStatus.Failed, OrderV3Types.TerminalReason.Expired);
+        assertEq(ledger.head(), 2);
+        assertEq(ledger.count(0), 2);
     }
 
     function test_CapacityIsFivePerActorAndExactReplayStillWorksAtCapacity() public {

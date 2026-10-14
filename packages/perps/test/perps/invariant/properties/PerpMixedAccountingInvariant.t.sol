@@ -41,7 +41,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
             address(this)
         );
         handler.assertModel();
-        handler.exerciseRestoredSolventEscrowHistory();
+        handler.exercisePendingCloseSolvencyHistory();
         _seedInterimLpClaims();
         handler.openOrIncrease(0, 300, 120_000_003);
         handler.requestJuniorDeposit(0, 1500e6);
@@ -49,7 +49,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         handler.openOrIncrease(2, 150, 80_000_001);
         handler.openOrIncrease(0, 25, 110_000_003);
         handler.close(2, 50, false);
-        handler.commitPledgeFundedClose(0, true);
+        handler.commitZeroFreeClose(0, true);
         handler.settleJuniorEpoch(true);
         handler.expirePending(0);
         handler.claimJuniorDeposit(0);
@@ -82,7 +82,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         handler.openOrIncrease(0, 251, 120_000_003);
         handler.openOrIncrease(1, 117, 80_000_001);
         handler.exercisePendingHistories();
-        handler.exercisePledgeEscrowFailureHistory();
+        handler.exerciseUnpaidCloseOverlapHistory();
 
         // Commitments persist across independently generated economic actions. The synchronous helpers above
         // remain deterministic setup conveniences; generated trading uses the public queue lifecycle below.
@@ -115,7 +115,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         selectors[25] = handler.pendingMevBoundary.selector;
         selectors[26] = handler.executeSlippageFailure.selector;
         selectors[27] = handler.riskOffPending.selector;
-        selectors[28] = handler.commitPledgeFundedClose.selector;
+        selectors[28] = handler.commitZeroFreeClose.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }
@@ -191,12 +191,12 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         assertGt(handler.riskOffOrders(), 0);
         assertGt(handler.completedBatches(), 0);
         assertGt(handler.pendingMarginConsumed(), 0);
-        assertGt(handler.mixedFailureRefunds(), 0);
-        assertGt(handler.rejectedPledgeOverlap(), 0);
-        assertGt(handler.freeOrdersBehindPledgedHead(), 0);
-        assertGt(handler.restoredSolventLiquidations(), 0);
-        assertGt(handler.pledgeLiquidationRefunds(), 0);
-        assertGt(handler.lpEpochsWithCollectibleEscrow(), 0);
+        assertGt(handler.unpaidFailureTransitions(), 0);
+        assertGt(handler.closesBehindPendingOrders(), 0);
+        assertGt(handler.closeOpenCloseHistories(), 0);
+        assertGt(handler.pendingCloseHealthyRejections(), 0);
+        assertGt(handler.unpaidCloseLiquidations(), 0);
+        assertGt(handler.lpEpochsWithPendingCloses(), 0);
     }
 
     function test_MandatoryPreludeExercisesMixedHistories() public view {
@@ -219,7 +219,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         uint64 cursorBefore = handler.orders().nextId();
         bytes32 economicsBefore = handler.economicFingerprint(2);
         bytes32 modelBefore = keccak256(abi.encode(handler.traderState(2)));
-        handler.commitPledgeFundedClose(378_607_894_605_621_696_302_822_193_767_330, false);
+        handler.commitZeroFreeClose(378_607_894_605_621_696_302_822_193_767_330, false);
         assertEq(handler.rejectedSmallOrders(), rejectionsBefore, "generator excludes zero-size requests");
         assertEq(handler.economicFingerprint(2), economicsBefore, "guard preserves production economics");
         assertEq(keccak256(abi.encode(handler.traderState(2))), modelBefore, "guard preserves the ghost ledger");
@@ -232,7 +232,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         assertEq(handler.traderState(2).lots, 1, "the rejected close preserves the live position");
         handler.assertModel();
 
-        handler.commitPledgeFundedClose(378_607_894_605_621_696_302_822_193_767_330, true);
+        handler.commitZeroFreeClose(378_607_894_605_621_696_302_822_193_767_330, true);
         assertEq(handler.orders().count(2), 1, "a full close of the same one-lot position remains valid");
         handler.executeHead(false);
         assertEq(handler.traderState(2).lots, 0, "the valid full close completes");
@@ -262,7 +262,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
     function test_RegressionOneLotPledgeCloseDoesNotSubmitZeroSize() public {
         // Audit seed 0x2 shrank to these four public handler actions. Earlier partial closes leave
         // actor 2 with one lot, for which another half-close has no positive size.
-        handler.commitPledgeFundedClose(10_786, false);
+        handler.commitZeroFreeClose(10_786, false);
         handler.commitClose(
             235_399_669_922,
             2_742_752_018_512_376_947_672_463_408_101_996_658_382_367_066_140_257_046_549_603_650_091_881,
@@ -275,7 +275,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         bytes32 economicsBefore = handler.economicFingerprint(2);
         bytes32 modelBefore = keccak256(abi.encode(handler.traderState(2)));
         uint256 markTimeBefore = handler.currentMarkTime();
-        handler.commitPledgeFundedClose(341_821_013_369_658_799_147_725_076_362_896_016_228_270_630_917_724_810, false);
+        handler.commitZeroFreeClose(341_821_013_369_658_799_147_725_076_362_896_016_228_270_630_917_724_810, false);
         assertEq(handler.orders().nextId(), nextId, "zero-size partial close is outside generated domain");
         assertEq(handler.rejectedSmallOrders(), smallRejections, "no zero-size request reaches Router validation");
         assertEq(handler.economicFingerprint(2), economicsBefore, "guard runs before any carry or withdrawal");

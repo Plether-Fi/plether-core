@@ -5,7 +5,6 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
-import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @notice Canonical close admission economics, shared by commitment and prospective assessment.
@@ -16,6 +15,9 @@ library CloseCommitmentLib {
         uint256 size,
         uint256 bounty
     ) internal pure returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
+        if (bounty != 0) {
+            revert ICfdEngineTypes.CfdEngine__InvalidRiskParams();
+        }
         if (snap.position.size == 0) {
             revert ICfdEngineTypes.CfdEngine__NoOpenPosition();
         }
@@ -35,22 +37,6 @@ library CloseCommitmentLib {
         effects.settlementBeforeUsdc = snap.accountBuckets.settlementBalanceUsdc;
         effects.carryCollectedUsdc = CfdEnginePlanLib.projectCloseCommitCarry(snap);
         effects.carryOutstandingUsdc = snap.unsettledCarryUsdc;
-        uint256 free = snap.accountBuckets.freeSettlementUsdc;
-        effects.bountyFromFreeUsdc = bounty < free ? bounty : free;
-        effects.bountyFromPledgeUsdc = bounty - effects.bountyFromFreeUsdc;
-        if (effects.bountyFromPledgeUsdc > snap.position.margin) {
-            revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking(
-                bounty, free + snap.position.margin, snap.unsettledCarryUsdc
-            );
-        }
-        uint256 oldBorrow = snap.positionBorrowBaseUsdc;
-        snap.position.margin -= effects.bountyFromPledgeUsdc;
-        snap.positionBorrowBaseUsdc =
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin);
-        CfdEnginePlanTypes.SideSnapshot memory side =
-            snap.position.side == CfdTypes.Side.LONG ? snap.longSide : snap.shortSide;
-        side.totalMargin -= effects.bountyFromPledgeUsdc;
-        side.borrowBaseUsdc = side.borrowBaseUsdc - oldBorrow + snap.positionBorrowBaseUsdc;
         if (size != snap.position.size) {
             if (snap.unsettledCarryUsdc != 0) {
                 revert ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded(snap.unsettledCarryUsdc);
@@ -68,18 +54,6 @@ library CloseCommitmentLib {
                 revert ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy();
             }
         }
-        snap.lockedBuckets.positionMarginUsdc = snap.position.margin;
-        snap.actionReserveUsdc += bounty;
-        snap.protectedExecutionBountyUsdc += bounty;
-        snap.lockedBuckets.reservedSettlementUsdc += bounty;
-        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
-            snap.accountBuckets.settlementBalanceUsdc,
-            snap.position.margin,
-            snap.liquidationReserveUsdc,
-            snap.lockedBuckets.committedOrderMarginUsdc,
-            snap.actionReserveUsdc
-        );
-        snap.lockedBuckets.totalLockedMarginUsdc = snap.accountBuckets.totalLockedMarginUsdc;
         effects.settlementAfterUsdc = snap.accountBuckets.settlementBalanceUsdc;
         effects.freeSettlementAfterUsdc = snap.accountBuckets.freeSettlementUsdc;
     }

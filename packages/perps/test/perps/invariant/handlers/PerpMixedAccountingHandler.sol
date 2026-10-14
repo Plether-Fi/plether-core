@@ -137,14 +137,14 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     uint256 public pendingSameBlockResults;
     uint256 public completedBatches;
     uint256 public stoppedBatches;
-    uint256 public pledgeFundedOrders;
-    uint256 public rejectedPledgeOverlap;
-    uint256 public pledgeFailureRefunds;
-    uint256 public mixedFailureRefunds;
-    uint256 public pledgeLiquidationRefunds;
-    uint256 public restoredSolventLiquidations;
-    uint256 public freeOrdersBehindPledgedHead;
-    uint256 public lpEpochsWithCollectibleEscrow;
+    uint256 public zeroFreeCloseOrders;
+    uint256 public closesBehindPendingOrders;
+    uint256 public unpaidFailedCloses;
+    uint256 public unpaidFailureTransitions;
+    uint256 public unpaidCloseLiquidations;
+    uint256 public pendingCloseHealthyRejections;
+    uint256 public closeOpenCloseHistories;
+    uint256 public lpEpochsWithPendingCloses;
     uint256 public pendingMarginConsumed;
     mapping(uint64 => uint256) public committedCarry;
     mapping(uint64 => uint256) public expectedExecutionPrices;
@@ -1483,28 +1483,6 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         x.maintenanceBps = _maintenanceBps();
     }
 
-    /// @dev Refund assesses the old carry basis, then restores pledge before liquidation collection.
-    /// This projection uses only the submitted-action ledger and never changes the model for a rolled-back attempt.
-    function _liquidationInputAfterEscrowRefund(
-        uint256 i,
-        CarryReferenceLedger.Collection memory assessed
-    ) internal view returns (LiquidationReferenceMath.Input memory x) {
-        x = _liquidationInput(i, assessed);
-        (uint256 escrow,,) = orders.collectibleEscrow(i);
-        if (escrow == 0) {
-            return x;
-        }
-        uint256 restoredPledge = traders[i].margin + escrow;
-        uint256 fromMargin = assessed.assessed < restoredPledge ? assessed.assessed : restoredPledge;
-        uint256 unpaid = assessed.assessed - fromMargin;
-        uint256 fromFree = unpaid < _free(i) ? unpaid : _free(i);
-        x.pledge = restoredPledge - fromMargin;
-        x.free = _free(i) - fromFree;
-        x.cash = traders[i].cash - fromMargin - fromFree;
-        x.poolCash = expectedPoolCash + fromMargin + fromFree;
-        x.unpaidCarry = unpaid - fromFree;
-    }
-
     function _liquidateAt(
         uint256 i,
         uint256 price
@@ -1515,10 +1493,10 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64[] memory refundedOrders = _refundRiskOffPendingBeforeLiquidation(i);
         CarryReferenceLedger.Collection memory projected = carry.previewCheckpoint(actorAt(i), vm.getBlockTimestamp());
         LiquidationReferenceMath.Values memory values =
-            LiquidationReferenceMath.calculate(_liquidationInputAfterEscrowRefund(i, projected));
+            LiquidationReferenceMath.calculate(_liquidationInput(i, projected));
         if (!values.eligible) {
-            if (LiquidationReferenceMath.calculate(_liquidationInput(i, projected)).eligible) {
-                ++restoredSolventLiquidations;
+            if (orders.pendingCloseLots(i) != 0) {
+                ++pendingCloseHealthyRejections;
             }
             if (refundedOrders.length == 0) {
                 vm.prank(KEEPER);
@@ -1942,7 +1920,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertModel();
     }
 
-    function commitPledgeFundedClose(
+    function commitZeroFreeClose(
         uint256 actorSeed,
         bool full
     ) public {
@@ -2082,11 +2060,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             ++rejectedSmallOrders;
             return 0;
         }
-        uint256 bounty = isClose ? 200_000 : lots * currentPrice / 10_000;
+        uint256 bounty = isClose ? 0 : lots * currentPrice / 10_000;
         if (bounty > 200_000) {
             bounty = 200_000;
         }
-        if (bounty < 10_000) {
+        if (!isClose && bounty < 10_000) {
             bounty = 10_000;
         }
         if (isClose) {
@@ -2103,24 +2081,18 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (!isClose && _rejectOpenCommitIfInvalid(i, request)) {
             return 0;
         }
-        if (_rejectPledgeOverlap(i, request, bounty)) {
-            return 0;
-        }
         uint256 beforeCash = traders[i].cash;
         _collect(i);
-        uint256 freePart = bounty < _free(i) ? bounty : _free(i);
-        uint256 pledgePart = bounty - freePart;
-        assertTrue(isClose || pledgePart == 0, "funded open commitment domain");
-        assertLe(pledgePart, traders[i].margin, "independent bounty backing");
-        {
-            (uint256 precedingEscrow,,) = orders.collectibleEscrow(i);
-            if (precedingEscrow != 0) {
-                assertEq(pledgePart, 0, "later order is wholly free funded");
-                ++freeOrdersBehindPledgedHead;
-            }
+        if (isClose && _free(i) == 0) {
+            ++zeroFreeCloseOrders;
         }
-        carry.reserveBountyWithoutCheckpoint(actorAt(i), freePart, pledgePart);
-        traders[i].margin -= pledgePart;
+        if (isClose && orders.count(i) != 0) {
+            ++closesBehindPendingOrders;
+        }
+        assertLe(bounty, _free(i), "opening bounty is entirely free funded");
+        uint256 freePart = bounty;
+        uint256 pledgePart = 0;
+        carry.reserveWithoutCheckpoint(actorAt(i), bounty);
         carry.reserveWithoutCheckpoint(actorAt(i), contribution);
         id = orders.commit(
             i, positionEpochs[i], request, freePart, pledgePart, vm.getBlockTimestamp(), vm.getBlockNumber()
@@ -2135,29 +2107,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         if (orders.liveCount() > maximumLiveOrders) {
             maximumLiveOrders = orders.liveCount();
         }
-        if (pledgePart != 0) {
-            ++pledgeFundedOrders;
-        }
         _assertLiveOrder(id);
-    }
-
-    function _rejectPledgeOverlap(
-        uint256 i,
-        OrderV3Types.OrderRequest memory request,
-        uint256 bounty
-    ) internal returns (bool) {
-        if (!request.isClose || orders.count(i) == 0) {
-            return false;
-        }
-        CarryReferenceLedger.Collection memory projected = carry.previewCheckpoint(actorAt(i), vm.getBlockTimestamp());
-        if (bounty <= _free(i) - projected.fromFree) {
-            return false;
-        }
-        _rejectCommit(
-            i, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue.selector)
-        );
-        ++rejectedPledgeOverlap;
-        return true;
     }
 
     function _rejectOpenCommitIfInvalid(
@@ -2393,13 +2343,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         } else {
             PendingOrderReferenceLedger.Order memory o = orders.order(id);
             if (o.request.isClose && reason != OrderV3Types.TerminalReason.Executed) {
-                _restorePendingPledge(id);
-                if (o.bountyPledge != 0) {
-                    ++pledgeFailureRefunds;
-                    if (o.bountyFree != 0) {
-                        ++mixedFailureRefunds;
-                    }
-                }
+                assertEq(o.bountyUsdc, 0);
+                ++unpaidFailedCloses;
+                ++unpaidFailureTransitions;
                 _modelBountyPayment(id, executor, o.bountyFree);
             } else {
                 _modelBountyPayment(id, executor, o.bountyUsdc);
@@ -2434,9 +2380,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         PendingOrderReferenceLedger.Order memory o
     ) internal {
         uint256 i = o.actorIndex;
-        if (o.request.isClose) {
-            assertEq(orders.resolveCollectiblePledge(o.id, positionEpochs[i]), o.bountyPledge);
-        }
+        if (o.request.isClose) {}
         _collect(i);
         uint256 lots = o.request.sizeDelta / 1e20;
         int256 vpi = _vpi(i, lots, o.request.isClose);
@@ -2477,21 +2421,6 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertEq(executor, KEEPER, "bounded external executor");
             expectedKeeper += amount;
         }
-    }
-
-    function _restorePendingPledge(
-        uint64 id
-    ) internal {
-        PendingOrderReferenceLedger.Order memory o = orders.order(id);
-        if (o.bountyPledge == 0) {
-            return;
-        }
-        uint256 i = o.actorIndex;
-        assertGt(traders[i].lots, 0, "pledge source position remains live");
-        assertEq(orders.resolveCollectiblePledge(id, positionEpochs[i]), o.bountyPledge);
-        carry.assessWithoutCollection(actorAt(i), vm.getBlockTimestamp());
-        carry.releaseToPledgeWithoutCheckpoint(actorAt(i), o.bountyPledge);
-        traders[i].margin += o.bountyPledge;
     }
 
     function _finishPendingOrder(
@@ -2551,25 +2480,20 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 forfeited;
         if (reason == OrderV3Types.TerminalReason.AccountLiquidated) {
             forfeited = o.bountyFree;
-            refunded = o.bountyPledge;
         } else if (reason == OrderV3Types.TerminalReason.RiskOff) {
             refunded = o.bountyUsdc;
         } else if (o.request.isClose && reason != OrderV3Types.TerminalReason.Executed) {
             paid = o.bountyFree;
-            refunded = o.bountyPledge;
         } else {
             paid = o.bountyUsdc;
         }
         OrderV3Types.BountyDisposition disposition;
         address recipient;
         if (paid != 0) {
-            disposition =
-                refunded == 0 ? OrderV3Types.BountyDisposition.Paid : OrderV3Types.BountyDisposition.PaidAndRefunded;
+            disposition = OrderV3Types.BountyDisposition.Paid;
             recipient = executor;
         } else if (forfeited != 0) {
-            disposition = refunded == 0
-                ? OrderV3Types.BountyDisposition.Forfeited
-                : OrderV3Types.BountyDisposition.ForfeitedAndRefunded;
+            disposition = OrderV3Types.BountyDisposition.Forfeited;
             recipient = engine.protocolTreasury();
         } else if (refunded != 0) {
             disposition = OrderV3Types.BountyDisposition.RefundedToAccount;
@@ -2863,9 +2787,8 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64[] memory ids = orders.accountIds(i);
         for (uint256 j; j < ids.length; ++j) {
             PendingOrderReferenceLedger.Order memory o = orders.order(ids[j]);
-            _restorePendingPledge(o.id);
-            if (o.bountyPledge != 0) {
-                ++pledgeLiquidationRefunds;
+            if (o.request.isClose) {
+                ++unpaidCloseLiquidations;
             }
             assertEq(orders.takeBounty(o.id), o.bountyUsdc);
             uint256 amount = o.bountyFree;
@@ -3166,8 +3089,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 nav -= pnl;
             } else {
                 uint256 loss = uint256(-pnl);
-                (uint256 escrow,,) = orders.collectibleEscrow(i);
-                uint256 backing = t.margin + t.claim + escrow;
+                uint256 backing = t.margin + t.claim;
                 nav += int256(loss < backing ? loss : backing);
             }
         }
@@ -3181,10 +3103,10 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     }
 
     function _reconcile() internal {
-        for (uint256 i; i < 4; ++i) {
-            (uint256 escrow,,) = orders.collectibleEscrow(i);
-            if (escrow != 0) {
-                ++lpEpochsWithCollectibleEscrow;
+        uint64[] memory live = orders.liveIds();
+        for (uint256 i; i < live.length; ++i) {
+            if (orders.order(live[i]).request.isClose) {
+                ++lpEpochsWithPendingCloses;
                 break;
             }
         }
@@ -3229,25 +3151,6 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 orders.bounty(i) + (traders[i].vpi < 0 ? uint256(-traders[i].vpi) : 0)
             );
             assertEq(engine.positionEpoch(account), positionEpochs[i], "independent position incarnation");
-            _assertCollectibleEscrow(i, account, accountIds);
-        }
-    }
-
-    function _assertCollectibleEscrow(
-        uint256 i,
-        address account,
-        uint64[] memory accountIds
-    ) internal view {
-        (uint256 escrow, uint64 escrowOrder, uint256 sourceGeneration) = orders.collectibleEscrow(i);
-        (uint96 actualEscrow, uint64 actualOwner, uint64 actualEpoch) = clearinghouse.collectibleCloseEscrow(account);
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(account), escrow, "input-derived collectible escrow");
-        assertEq(actualEscrow, escrow);
-        assertEq(actualOwner, escrowOrder);
-        assertEq(actualEpoch, sourceGeneration);
-        if (escrow != 0) {
-            assertEq(escrowOrder, accountIds[0], "pledged order owns account head");
-            assertEq(sourceGeneration, positionEpochs[i], "pledged order owns live generation");
-            assertGt(traders[i].lots, 0, "pending pledged source cannot be flat");
         }
     }
 
@@ -3333,8 +3236,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
                 engine.unsettledCarryUsdc(actorAt(i)),
                 clearinghouse.balanceUsdc(actorAt(i)),
                 clearinghouse.getAccountUsdcBuckets(actorAt(i)),
-                engine.traderClaimBalanceUsdc(actorAt(i)),
-                clearinghouse.collectibleCloseEscrowUsdc(actorAt(i))
+                engine.traderClaimBalanceUsdc(actorAt(i))
             )
         );
         bytes32 indexes = keccak256(
@@ -3413,10 +3315,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertGt(traders[0].claim, 0);
         assertGt(traders[0].vpi, 0);
         _withdraw(0, _free(0));
-        _deposit(0, 200_000);
         uint64 id = _commitTrade(0, 50, 0, true);
         _commitTrade(1, 17, 1020e6, false);
-        assertEq(_free(0), 0, "current close bounty protects all remaining free settlement");
+        assertEq(_free(0), 0, "close commits with no free settlement");
         vm.warp(vm.getBlockTimestamp() + 1);
         _refresh(currentPrice);
         uint256 beforeOffset = carry.totalVpiOffset();
@@ -3456,7 +3357,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(uint8(orders.order(first).marginStatus), uint8(PendingOrderReferenceLedger.MarginStatus.Consumed));
         assertEq(orders.order(first).remainingBounty, 136_000);
         assertEq(orders.order(second).remainingBounty, 136_000);
-        assertEq(expectedKeeper - keeperBefore, 200_000, "only executing close bounty paid");
+        assertEq(expectedKeeper - keeperBefore, 0, "close leaves queued open bounties protected");
         assertModel();
         executeHead(false);
         assertEq(uint8(orders.order(first).reason), uint8(OrderV3Types.TerminalReason.PlannerRejected));
@@ -3467,48 +3368,31 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     }
 
     /// @notice Real source escrow straddles maintenance, blocks liquidation, then is recovered at a losing mark.
-    function exerciseRestoredSolventEscrowHistory() external {
+    function exercisePendingCloseSolvencyHistory() external {
         uint256 i = 2;
         assertEq(orders.liveCount(), 0);
         assertEq(traders[i].lots, 0);
-        assertEq(traders[i].claim, 0);
         _refresh(100_000_002);
         _trade(i, 100, 300e6, false);
-        _deposit(i, 1);
         _withdraw(i, _free(i));
         uint64 id = _commitTrade(i, 100, 0, true);
-        assertEq(orders.order(id).bountyPledge, 200_000);
-        vm.warp(vm.getBlockTimestamp() + 1);
-        CarryReferenceLedger.Collection memory assessment = carry.previewCheckpoint(actorAt(i), vm.getBlockTimestamp());
-        uint256 midpoint = traders[i].basis + traders[i].margin - assessment.assessed + 100_000;
-        uint256 price = midpoint * 10_000 / (traders[i].lots * (10_000 + _maintenanceBps()));
-        price = 2 * (price / 2);
-        assertGe(price, 60_000_000);
-        assertLe(price, 140_000_002);
-        _refresh(price);
-        assessment = carry.previewCheckpoint(actorAt(i), vm.getBlockTimestamp());
-        assertTrue(LiquidationReferenceMath.calculate(_liquidationInput(i, assessment)).eligible);
-        assertFalse(LiquidationReferenceMath.calculate(_liquidationInputAfterEscrowRefund(i, assessment)).eligible);
-        assertFalse(_liquidateAt(i, price), "restoration rolls liquidation back before spending escrow");
+        assertEq(orders.order(id).bountyUsdc, 0);
+        assertFalse(_liquidateAt(i, 100_000_002), "unpaid pending close preserves solvent position");
         assertEq(orders.head(), id);
-        assertEq(orders.order(id).remainingBounty, 200_000);
-        assertTrue(_liquidateAt(i, 140_000_002), "restored pledge is recoverable at genuinely insolvent mark");
+        assertTrue(_liquidateAt(i, 140_000_002), "unpaid pending close cannot shield losses");
         assertEq(orders.count(i), 0);
         assertModel();
     }
 
-    /// @notice A mixed bounty fails while a later fully free-funded request remains independently queued.
-    function exercisePledgeEscrowFailureHistory() public {
+    function exerciseUnpaidCloseOverlapHistory() public {
         assertEq(orders.liveCount(), 0);
         uint256 i;
         assertGt(traders[i].lots, 0);
-        _deposit(i, 1); // Collect accrued carry before choosing the exact split from submitted free cash.
+        _deposit(i, 1);
         _withdraw(i, _free(i));
-        _deposit(i, 100_000);
-        uint64 pledged = _commitTrade(i, traders[i].lots, 0, true);
-        assertGt(pledged, 0);
-        assertEq(orders.order(pledged).bountyFree, 100_000);
-        assertEq(orders.order(pledged).bountyPledge, 100_000);
+        uint64 first = _commitTrade(i, traders[i].lots, 0, true);
+        assertGt(first, 0);
+        assertEq(orders.order(first).bountyUsdc, 0);
         uint256 nextBounty = 17 * currentPrice / 10_000;
         if (nextBounty > 200_000) {
             nextBounty = 200_000;
@@ -3518,17 +3402,20 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         _deposit(i, 1020e6 + nextBounty);
         uint64 later = _commitTrade(i, 17, 1020e6, false);
-        assertGt(later, pledged, "later free-funded reopen remains permitted");
-        assertEq(orders.order(later).bountyPledge, 0);
-        assertEq(_free(i), 0, "the trailing close would need pledge from the original position");
-        assertEq(_commitTrade(i, 17, 0, true), 0, "later pledge funding is rejected");
+        assertGt(later, first);
+        assertEq(_free(i), 0);
+        uint64 last = _commitTrade(i, 17, 0, true);
+        assertGt(last, later, "unpaid later close requires no pledge reservation restriction");
+        ++closeOpenCloseHistories;
         vm.warp(vm.getBlockTimestamp() + 61);
         uint256 keeperBefore = expectedKeeper;
         uint256 marginBefore = traders[i].margin;
         expirePending(0);
-        assertEq(expectedKeeper - keeperBefore, 100_000);
-        assertEq(traders[i].margin - marginBefore, 100_000);
-        assertEq(orders.head(), later, "terminal failure removes only its own account/global links");
+        assertEq(expectedKeeper, keeperBefore);
+        assertEq(traders[i].margin, marginBefore);
+        assertEq(orders.head(), later);
+        expirePending(0);
+        assertEq(expectedKeeper - keeperBefore, nextBounty);
         expirePending(0);
         assertEq(orders.liveCount(), 0);
         _refresh(currentPrice);

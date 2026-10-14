@@ -74,7 +74,7 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         openOrderExecutionBountyBps = 1;
         minOpenOrderExecutionBountyUsdc = 10_000;
         maxOpenOrderExecutionBountyUsdc = 200_000;
-        closeOrderExecutionBountyUsdc = 200_000;
+        closeOrderExecutionBountyUsdc = 0;
         positionProtectionTriggerBountyUsdc = 200_000;
         minEngineGas = 600_000;
         maxPruneOrdersPerCall = 64;

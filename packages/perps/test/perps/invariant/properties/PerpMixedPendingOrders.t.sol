@@ -60,45 +60,31 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
 
     function test_IndependentMixedRefundPreservesLaterFreeFundedOrder() public {
         handler.openOrIncrease(0, 100, 80_000_002);
-        handler.exercisePledgeEscrowFailureHistory();
-        assertEq(handler.mixedFailureRefunds(), 1);
-        assertEq(handler.rejectedPledgeOverlap(), 1);
-        assertEq(handler.freeOrdersBehindPledgedHead(), 1);
+        handler.exerciseUnpaidCloseOverlapHistory();
+        assertEq(handler.unpaidFailureTransitions(), 2);
+        assertEq(handler.closesBehindPendingOrders(), 1);
+        assertEq(handler.closeOpenCloseHistories(), 1);
         handler.assertModel();
     }
 
     function test_IndependentRestoredSolvencyPreservesPledgedOrder() public {
-        handler.exerciseRestoredSolventEscrowHistory();
-        assertEq(handler.restoredSolventLiquidations(), 1);
-        assertEq(handler.pledgeLiquidationRefunds(), 1);
-        handler.assertModel();
-    }
-
-    function test_FaultControlNormalCheckerRejectsLostCollectiblePledge() public {
-        handler.openOrIncrease(0, 100, 80_000_002);
-        handler.commitPledgeFundedClose(0, true);
-        vm.mockCall(
-            address(clearinghouse),
-            abi.encodeCall(clearinghouse.collectibleCloseEscrowUsdc, (handler.actorAt(0))),
-            abi.encode(uint256(0))
-        );
-        vm.expectRevert();
-        handler.assertModel();
-        vm.clearMockedCalls();
+        handler.exercisePendingCloseSolvencyHistory();
+        assertEq(handler.pendingCloseHealthyRejections(), 1);
+        assertEq(handler.unpaidCloseLiquidations(), 1);
         handler.assertModel();
     }
 
     function test_IndependentLpEpochSpansPledgeReservationAndRefund() public {
         handler.openOrIncrease(0, 100, 80_000_002);
         handler.requestJuniorDeposit(0, 1000e6);
-        handler.commitPledgeFundedClose(0, true);
-        assertGt(handler.pledgeFundedOrders(), 0);
+        handler.commitZeroFreeClose(0, true);
+        assertGt(handler.zeroFreeCloseOrders(), 0);
         handler.refreshMark(140_000_002);
         handler.settleJuniorEpoch(false);
-        assertEq(handler.lpEpochsWithCollectibleEscrow(), 1);
+        assertEq(handler.lpEpochsWithPendingCloses(), 1);
         handler.expirePending(0);
         handler.claimJuniorDeposit(0);
-        assertEq(handler.pledgeFailureRefunds(), 1);
+        assertEq(handler.unpaidFailedCloses(), 1);
         handler.assertModel();
     }
 
@@ -130,17 +116,17 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
 
     function test_PledgeBountyProvenancePersistsThroughExpiryAndSelfExecution() public {
         handler.openOrIncrease(0, 100, 80_000_002);
-        handler.commitPledgeFundedClose(0, false);
+        handler.commitZeroFreeClose(0, false);
         uint64 id = handler.orders().head();
         PendingOrderReferenceLedger.Order memory expected = handler.orders().order(id);
-        assertEq(expected.bountyPledge, 200_000);
-        assertEq(expected.sourceGeneration, 1);
+        assertEq(expected.bountyPledge, 0);
+        assertEq(expected.sourceGeneration, 0);
         vm.warp(vm.getBlockTimestamp() + 61);
         handler.expirePending(0);
-        handler.commitPledgeFundedClose(0, true);
+        handler.commitZeroFreeClose(0, true);
         handler.executeHead(true);
         assertEq(handler.traderState(0).lots, 0);
-        assertGe(handler.pledgeFundedOrders(), 2);
+        assertGe(handler.zeroFreeCloseOrders(), 2);
         handler.assertModel();
     }
 

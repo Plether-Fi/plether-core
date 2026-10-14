@@ -268,7 +268,7 @@ contract AdminConfigVersionTest is Test {
         config.openOrderExecutionBountyBps = 1;
         config.minOpenOrderExecutionBountyUsdc = 1;
         config.maxOpenOrderExecutionBountyUsdc = 1;
-        config.closeOrderExecutionBountyUsdc = 1;
+        config.closeOrderExecutionBountyUsdc = 0;
         config.positionProtectionTriggerBountyUsdc = 1;
         config.maxPendingOrders = 1;
         config.minEngineGas = 100_000;

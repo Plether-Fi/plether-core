@@ -210,7 +210,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
             pledge: clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER),
             bounty: _bountyReservation(chain.wrongCloseId).amountUsdc
         });
-        assertGt(beforeState.bounty, 0);
+        assertEq(beforeState.bounty, 0);
         bytes[] memory update = _mockPythUpdateData(BOUNTY_PRICE);
         if (confidence) {
             uint256 published = _mockHistoricalPublishTime();
@@ -236,7 +236,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         assertEq(receipt.executor, executor);
         assertEq(receipt.bounty.bountyPaidUsdc, beforeState.bounty);
         assertEq(receipt.bounty.bountyRefundedUsdc, 0);
-        assertEq(receipt.bountyRecipient, executor);
+        assertEq(receipt.bountyRecipient, address(0));
         assertEq(_positionDigest(), beforeState.position);
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), beforeState.pledge);
         assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), beforeState.settlement - (self ? 0 : beforeState.bounty));

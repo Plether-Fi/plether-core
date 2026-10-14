@@ -16,12 +16,6 @@ interface IMarginClearinghouse {
         uint256 cashChargeAfterVpi,
         uint256 vpiRelease
     ) external;
-    function reserveCloseBounty(
-        address account,
-        uint256 fromFreeUsdc,
-        uint256 fromPledgeUsdc
-    ) external;
-
     /// @notice The caller is not the engine or the engine-derived router or settlement sidecar required by the call.
     error MarginClearinghouse__NotOperator();
     /// @notice A legacy owner-authenticated deposit or withdrawal named an account other than the caller.
@@ -93,29 +87,6 @@ interface IMarginClearinghouse {
         uint256 expectedPledgeUsdc,
         uint64 expectedSourcePositionEpoch
     ) external returns (BountyRecovery memory);
-    /// @notice Resolves one Book-authenticated bounty inside the Engine's terminal-curve mutation frame.
-    /// @dev Quarantine removes only the matching collectible eligibility and never unlocks custody.
-    function resolveCloseBounty(
-        address account,
-        uint64 orderId,
-        uint256 freeUsdc,
-        uint256 pledgeUsdc,
-        uint64 sourcePositionEpoch,
-        bool quarantine
-    ) external returns (uint256 restoredPledgeUsdc);
-
-    /// @notice Refundable pledged-close backing already contained in the account action reserve.
-    function collectibleCloseEscrow(
-        address account
-    ) external view returns (uint96 amountUsdc, uint64 orderId, uint64 sourcePositionEpoch);
-    function collectibleCloseEscrowUsdc(
-        address account
-    ) external view returns (uint256);
-    /// @notice Removes successful close escrow eligibility without moving its reserved bounty custody.
-    function consumeCollectibleCloseEscrow(
-        address account,
-        uint64 orderId
-    ) external;
     enum BountyReservationState {
         None,
         Active,
@@ -132,14 +103,6 @@ interface IMarginClearinghouse {
         uint96 pledgeFundedUsdc;
         uint64 sourcePositionEpoch;
     }
-    function recordFundedBountyReservation(
-        address account,
-        BountyKind kind,
-        uint64 id,
-        uint256 amountUsdc,
-        uint256 pledgeFundedUsdc,
-        uint64 sourcePositionEpoch
-    ) external;
     function validateBountyReservation(
         address account,
         BountyKind kind,
@@ -161,15 +124,6 @@ interface IMarginClearinghouse {
         BountyKind kind,
         uint64 id
     ) external returns (uint256 amountUsdc);
-
-    /// @notice Book-only transfer between a protection's execution bounty and its authenticated close attempt.
-    function moveBountyReservation(
-        address account,
-        BountyKind fromKind,
-        uint64 fromId,
-        BountyKind toKind,
-        uint64 toId
-    ) external;
 
     function getBountyReservation(
         BountyKind kind,

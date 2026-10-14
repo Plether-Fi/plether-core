@@ -67,7 +67,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         CfdClosePreview.ClosePreview memory p = _preview(o, adversePrice, KEEPER);
         assertEq(p.assessment.preSettlementBalanceUsdc, 10_000_200_000);
         assertEq(p.assessment.postSettlementBalanceUsdc, 0);
-        assertEq(p.assessment.actionChargeCollectedUsdc, 0);
+        assertEq(p.assessment.actionChargeCollectedUsdc, 200_000);
         assertEq(p.commitmentCarryUsdc, 0);
     }
 
@@ -99,7 +99,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         _openNormally(CfdTypes.Side.SHORT, 200_000);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
         OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
-            address(engine), o, KEEPER, 95_000_000, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
+            address(engine), o, KEEPER, 95_000_000, pool.totalAssets(), uint64(block.timestamp), _bounds(), 0
         );
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(o, 95_000_000, KEEPER);
         assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, 95_000_000));
@@ -110,8 +110,8 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
     function test_OneAtomicUnitShortUsesPledgeAndMatchesCommit() public {
         _openNormally(CfdTypes.Side.LONG, 199_999);
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(_order(CfdTypes.Side.LONG, SIZE), PRICE, KEEPER);
-        assertEq(p.commitment.bountyFromFreeUsdc, 199_999);
-        assertEq(p.commitment.bountyFromPledgeUsdc, 1);
+        assertEq(p.commitment.bountyFromFreeUsdc, 0);
+        assertEq(p.commitment.bountyFromPledgeUsdc, 0);
     }
 
     function test_OtherOrderBountyIsNotTheProspectiveBounty() public {
@@ -119,10 +119,10 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE / 2);
         vm.prank(ACCOUNT);
         router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 200_000);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
         _commitParity(o, PRICE, KEEPER);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 400_000);
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 2e6);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 2_400_000);
     }
 
     function test_StaleStoredMarkStillAllowsCommit() public {
@@ -173,7 +173,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionTrigger, 99, 3e6);
         uint256 reserveBefore = clearinghouse.actionReserveUsdc(ACCOUNT);
         _commitParity(_order(CfdTypes.Side.LONG, SIZE / 2), PRICE, KEEPER);
-        assertEq(clearinghouse.actionReserveUsdc(ACCOUNT), reserveBefore + 200_000);
+        assertEq(clearinghouse.actionReserveUsdc(ACCOUNT), reserveBefore);
         assertEq(clearinghouse.vpiRebateReserveUsdc(ACCOUNT), 5e6);
         assertEq(
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, 99).amountUsdc, 3e6
@@ -320,7 +320,7 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         uint256 adversePrice = 1025e5;
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE);
         OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
-            address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
+            address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 0
         );
         assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, adversePrice));
         (uint64 closeId, CfdClosePreview.ClosePreview memory p) = _commitParity(o, adversePrice, KEEPER);
@@ -348,23 +348,15 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         assertEq(p.assessment.carryUsdc, p.commitmentCarryUsdc);
     }
 
-    function test_CarryExhaustingFreeSettlementMatchesFundingFailure() public {
+    function test_CarryExhaustingFreeSettlementStillAllowsFullClose() public {
         _openNormally(CfdTypes.Side.SHORT, 200_000);
         vm.warp(block.timestamp + 200 * 365 days);
         assertGt(_expectedIndexedCarryUsdc(ACCOUNT), clearinghouse.pnlPledgeUsdc(ACCOUNT) + 200_000);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
-        (bool previewOk, bytes memory previewError) = address(previewer)
-            .staticcall(
-                abi.encodeCall(
-                    ILegacyClosePreview(address(previewer)).previewClose,
-                    (address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds())
-                )
-            );
-        assertFalse(previewOk);
-        assertEq(bytes4(previewError), ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        vm.expectRevert(previewError);
-        vm.prank(ACCOUNT);
-        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+        (, CfdClosePreview.ClosePreview memory p) = _commitParity(o, PRICE, KEEPER);
+        assertGt(p.commitment.carryOutstandingUsdc, 0);
+        assertEq(p.executionBountyUsdc, 0);
+        assertEq(clearinghouse.getFreeBuyingPowerUsdc(ACCOUNT), 0);
     }
 
 }

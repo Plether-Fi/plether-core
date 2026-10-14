@@ -18,8 +18,6 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     uint256 public constant TIMELOCK_DELAY = 48 hours;
     /// @notice Upper bound for live pending orders per account.
     uint256 internal constant MAX_PENDING_ORDERS_LIMIT = 32;
-    /// @notice Upper bound for the fixed close-order bounty (6-decimal USDC; $1).
-    uint256 internal constant MAX_CLOSE_ORDER_EXECUTION_BOUNTY_USDC = 1_000_000;
     /// @notice Upper bound for the fixed protection-trigger bounty (6-decimal USDC; $1).
     uint256 internal constant MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_USDC = 1_000_000;
     /// @notice Lower bound for minimum engine-call gas.
@@ -363,8 +361,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         if (
             config.openOrderExecutionBountyBps == 0 || config.openOrderExecutionBountyBps > 10_000
                 || config.minOpenOrderExecutionBountyUsdc == 0 || config.maxOpenOrderExecutionBountyUsdc == 0
-                || config.closeOrderExecutionBountyUsdc > MAX_CLOSE_ORDER_EXECUTION_BOUNTY_USDC
-                || config.positionProtectionTriggerBountyUsdc == 0
+                || config.closeOrderExecutionBountyUsdc != 0 || config.positionProtectionTriggerBountyUsdc == 0
                 || config.positionProtectionTriggerBountyUsdc > MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_USDC
                 || config.minOpenOrderExecutionBountyUsdc > config.maxOpenOrderExecutionBountyUsdc
         ) {

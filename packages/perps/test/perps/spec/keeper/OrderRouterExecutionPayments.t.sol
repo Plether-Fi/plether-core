@@ -338,7 +338,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
 
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            200_000,
+            0,
             "Keeper should recover the full expired close-order bounty"
         );
         assertEq(
@@ -371,7 +371,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
 
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            200_000,
+            0,
             "Invalid close-order failure should pay the reserved clearer bounty"
         );
         assertEq(
@@ -406,7 +406,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
 
         assertEq(
             _freeSettlementUsdc(account),
-            freeSettlementBeforeCommit - 200_000,
+            freeSettlementBeforeCommit - 0,
             "commit should temporarily seize the close bounty from free settlement"
         );
 
@@ -419,13 +419,13 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
 
         assertGt(
             _freeSettlementUsdc(account),
-            freeSettlementBeforeCommit - 200_000,
+            freeSettlementBeforeCommit - 0,
             "successful partial close should release proportional PnL pledge into free settlement"
         );
         assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            200_000,
+            0,
             "keeper should receive the free-backed bounty as clearinghouse credit"
         );
         (uint256 remainingSize,,,,,,) = engine.positions(account);
@@ -453,7 +453,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
 
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            200_000,
+            0,
             "Terminal close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertEq(

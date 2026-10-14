@@ -161,7 +161,7 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
         );
         assertEq(
             _orderRecord(headOrderId).executionBountyUsdc,
-            200_000,
+            0,
             "Close orders should reserve the full bounty in clearinghouse custody"
         );
     }
@@ -184,7 +184,7 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
         assertEq(keeperBounty, 0, "Terminal slippage miss should not pay the keeper wallet");
         assertEq(
             clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
-            200_000,
+            0,
             "Terminal slippage miss should credit the clearer in clearinghouse custody"
         );
         assertEq(router.nextExecuteId(), 0, "Single queued slippage miss should clear the current head");
@@ -235,15 +235,11 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
         );
         assertEq(
             clearinghouse.balanceUsdc(KEEPER) - keeperSettlementBefore,
-            200_000,
+            0,
             "Expired head close should still pay the configured bounty to the clearer"
         );
 
-        assertEq(
-            _freeSettlementUsdc(account),
-            800_000,
-            "Only the committed close bounty slice should leave prefunded free settlement"
-        );
+        assertEq(_freeSettlementUsdc(account), 1_000_000, "Unpaid close leaves prefunded free settlement intact");
     }
 
     /// @dev spec; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
@@ -258,7 +254,7 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
         uint256 reservedSettlementBefore = clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc;
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 routerBalanceBefore = usdc.balanceOf(address(router));
-        assertEq(reservedSettlementBefore, 200_000, "Queued close bounty should be reserved in clearinghouse custody");
+        assertEq(reservedSettlementBefore, 0, "Queued close bounty should be reserved in clearinghouse custody");
         assertEq(routerBalanceBefore, 0, "Router should not custody queued close bounties");
 
         bytes[] memory priceData = new bytes[](1);
@@ -624,7 +620,6 @@ contract PendingDepositLifecycleBountyTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
 
-        _fundTrader(account, router.closeOrderExecutionBountyUsdc());
         uint256 accountBalanceBeforeCommit = clearinghouse.balanceUsdc(account);
         uint256 bountyUsdc = router.closeOrderExecutionBountyUsdc();
 
@@ -754,7 +749,7 @@ contract IlliquidPoolCloseBountyTest is BasePerpTest {
         assertEq(
             router.nextCommitId(), 2, "Close commits should still succeed when the trader prefunds the keeper bounty"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "Close commits should reserve the configured flat clearer bounty");
+        assertEq(_executionBountyReserve(1), 0, "Close commits should reserve the configured flat clearer bounty");
     }
 
     /// @dev spec; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
@@ -785,7 +780,7 @@ contract IlliquidPoolCloseBountyTest is BasePerpTest {
         assertEq(size, 0, "Close should still succeed even when execution bounty cash is unavailable");
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
-            200_000,
+            0,
             "Illiquid close execution should still pay the keeper from clearinghouse-reserved bounty value"
         );
     }
@@ -1156,13 +1151,13 @@ contract PledgedBountyClaimVpiLiquidationTest is BasePerpTest {
         vm.prank(TRADER);
         uint64 id = router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 0, 0, true);
         uint256 pledgeBounty = router.closeOrderExecutionBountyUsdc();
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(TRADER), pledgeBounty);
+
         assertEq(clearinghouse.pnlPledgeUsdc(TRADER), pledgeBefore - pledgeBounty);
         update = _mockPythUpdateData(0.2e8);
         vm.prank(KEEPER);
         router.executeLiquidation(TRADER, update);
         assertEq(_liquidationBalances(), withoutReservation, "pending pledge cannot reduce claim/VPI/LP loss recovery");
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(TRADER), 0);
+
         assertEq(clearinghouse.totalBountyReservationsUsdc(TRADER), 0);
         assertEq(router.pendingOrderCounts(TRADER), 0);
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(id)), uint8(OrderV3Types.LifecycleStatus.Failed));

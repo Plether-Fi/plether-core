@@ -184,7 +184,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
-        assertEq(_executionBountyReserve(1), 200_000, "Close orders should pre-seize the flat router bounty");
+        assertEq(_executionBountyReserve(1), 0, "Close orders should pre-seize the flat router bounty");
     }
 
     function test_ReserveCloseOrderExecutionBounty_RejectsUnhealthyExposedPosition() public {
@@ -206,7 +206,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
 
         vm.prank(address(router));
         vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 1e6);
+        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 0);
     }
 
     function test_EligibleSmallRemainderCanReserveBountyFromPledge() public {

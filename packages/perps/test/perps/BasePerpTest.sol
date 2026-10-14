@@ -1184,8 +1184,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
         uint256 maximumCollectibleUsdc =
             side == CfdTypes.Side.LONG ? lots * CAP_PRICE - entryCostUsdcAtoms : entryCostUsdcAtoms;
-        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account)
-            + clearinghouse.collectibleCloseEscrowUsdc(account);
+        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
         uint256 expectedCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
 
         assertEq(uint256(curve.lots), lots, "Terminal curve lots must match Engine position");

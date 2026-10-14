@@ -103,6 +103,16 @@ abstract contract CfdSponsoredClosePreviewTestFixture is CfdClosePreviewTestBase
         SponsoredBatchAccount(ACCOUNT).executeBatch(targets, calls);
     }
 
+    function _ordinaryClose(
+        OrderV3Types.OrderRequest memory r
+    ) internal {
+        address[] memory targets = new address[](1);
+        bytes[] memory calls = new bytes[](1);
+        targets[0] = address(router);
+        calls[0] = abi.encodeCall(OrderRouter.commitOrder, (r));
+        SponsoredBatchAccount(ACCOUNT).executeBatch(targets, calls);
+    }
+
     function _parity(
         uint256 size,
         uint256 free
@@ -110,8 +120,8 @@ abstract contract CfdSponsoredClosePreviewTestFixture is CfdClosePreviewTestBase
         _openNormally(CfdTypes.Side.LONG, free);
         OrderV3Types.OrderRequest memory r = _request(size);
         CfdClosePreview.SponsoredClosePreview memory p = _fundedPreview(r);
-        assertEq(p.subsidyUsdc, 200_000 - free);
-        _batch(r, p.subsidyUsdc);
+        assertEq(p.subsidyUsdc, 0);
+        _ordinaryClose(r);
         OrderV3Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
             address(engine),
             _order(r.side, size),
@@ -155,7 +165,8 @@ abstract contract CfdSponsoredClosePreviewTestFixture is CfdClosePreviewTestBase
         CfdClosePreview.SponsoredClosePreview memory p = sponsored.previewSponsoredClose(
             address(engine), ACCOUNT, r, KEEPER, closePrice, uint64(vm.getBlockTimestamp())
         );
-        _batch(r, p.subsidyUsdc);
+        assertEq(p.subsidyUsdc, 0);
+        _ordinaryClose(r);
         uint64 closeId = router.lifecycleBook().clientIntent(ACCOUNT, r.clientOrderId).orderId;
         update = _mockPythUpdateData(closePrice);
         vm.prank(KEEPER);

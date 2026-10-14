@@ -174,7 +174,10 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0) {
+        if (
+            msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0
+                || executionBountyUsdc != 0
+        ) {
             revert OrderRouter__Unauthorized();
         }
 

@@ -339,8 +339,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             ? lots * engineContract.CAP_PRICE() - entryCostUsdcAtoms
             : entryCostUsdcAtoms;
         IMarginClearinghouse clearinghouse = engineContract.clearinghouse();
-        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engineContract.traderClaimBalanceUsdc(account)
-            + clearinghouse.collectibleCloseEscrowUsdc(account);
+        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engineContract.traderClaimBalanceUsdc(account);
         effectiveCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
     }
 

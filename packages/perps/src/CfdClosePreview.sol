@@ -107,9 +107,6 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
             ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
             snapshot = _buildRawSnapshot(engine, planner, account, IHousePool(engine.pool()).totalAssets());
             preview.commitment = CloseCommitmentLib.project(snapshot, request.sizeDelta, bounty);
-            if (preview.commitment.bountyFromPledgeUsdc != 0 && router.pendingOrderCounts(account) != 0) {
-                revert IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue();
-            }
             preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
             preview.executionBountyUsdc = bounty;
             delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice, publishTime);
@@ -324,8 +321,11 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         preview.executionBountyUsdc = ICfdClosePreviewRouter(engine.orderRouter()).closeOrderExecutionBountyUsdc();
         _validateRouterCommit(snapshot, order);
 
-        // Match the engine's commitment path, whose zero-bounty branch skips carry and funding validation.
-        if (preview.executionBountyUsdc != 0) {
+        // Preserve the legacy paid testnet projection; unpaid closes use canonical carry and admission.
+        if (preview.executionBountyUsdc == 0) {
+            preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta, 0);
+            preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
+        } else {
             _validateCommit(snapshot, order.sizeDelta);
             preview.commitmentCarryUsdc = CfdEnginePlanLib.projectCloseCommitCarry(snapshot);
             uint256 freeUsdc = snapshot.accountBuckets.freeSettlementUsdc;

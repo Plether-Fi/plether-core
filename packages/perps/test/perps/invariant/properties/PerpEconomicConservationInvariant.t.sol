@@ -171,7 +171,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         uint256 executedBefore = handler.ghostExecutedOrderCount();
         uint256 liveClaimBefore = engine.traderClaimBalanceUsdc(account);
         uint256 observedClaimBefore = handler.traderClaimSnapshot(account);
-        assertGt(handler.accountExecutionBountyReserve(account), 0, "Close bounty must be reserved");
+        assertEq(handler.accountExecutionBountyReserve(account), 0, "Close does not reserve bounty cash");
 
         handler.warpForward(router.maxExecutionWindowSeconds() + 1);
         handler.executeNextOrderModelled();

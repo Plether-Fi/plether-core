@@ -311,8 +311,11 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         assertEq(result.receiptHash, router.lifecycleBook().terminalOutcome(id).receiptHash);
         assertEq(uint8(receipt.executionMode), row.regime + 1);
         assertEq(receipt.executor, row.self ? ACCOUNT : KEEPER);
-        assertEq(receipt.bountyRecipient, row.self ? ACCOUNT : KEEPER);
-        assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
+        assertEq(receipt.bountyRecipient, receipt.bountyUsdc == 0 ? address(0) : row.self ? ACCOUNT : KEEPER);
+        assertEq(
+            uint8(receipt.bountyDisposition),
+            uint8(receipt.bountyUsdc == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
+        );
         assertEq(receipt.bountyUsdc, bounty);
         assertEq(clearinghouse.balanceUsdc(KEEPER), before_.keeper + (row.self ? 0 : bounty));
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
@@ -386,7 +389,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         uint256 spread = row.regime == 2 ? 40e6 * multiplicity : 0;
         uint256 seedFees = row.action == 0 ? 0 : row.action == 1 ? FEE : 2 * FEE;
         uint256 seedBounty = row.action == 0 ? 0 : 200_000;
-        uint256 bounty = 200_000;
+        uint256 bounty = row.action < 2 ? 200_000 : 0;
         uint256 remaining = row.action == 3 ? 0 : row.action == 1 ? 2 * SIZE : SIZE;
         uint256 pledge = row.action == 3 ? 0 : row.action == 1 ? 3_977_600_000 : 1_988_800_000;
         assertEq(receipt.executionPrice, MARK);
@@ -536,11 +539,11 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(90_000_000, uint64(vm.getBlockTimestamp()));
         // The remaining 100 lots lose $1,000 at $0.90: $997.20 claims and $2.80 pledge fund that loss.
-        // Gross authority includes both sources, plus the $3.60 fee and $0.20 external bounty.
+        // Gross authority includes both sources, plus the $3.60 fee.
         uint256 startingState = vm.snapshotState();
         row.action = 3;
         for (uint8 adjacent; adjacent < 3; adjacent++) {
-            uint256 actual = 1_003_800_000;
+            uint256 actual = 1_003_600_000;
             OrderV3Types.OrderRequest memory request = _request(row);
             request.sizeDelta = SIZE;
             request.targetPrice = 90_000_000;
@@ -554,7 +557,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 assertEq(receipt.economics.close.pricePnlPledgeConsumedUsdc, 2_800_000);
                 assertEq(receipt.economics.grossAccountDebitUsdc, actual);
                 assertEq(receipt.economics.actionChargeAssessedUsdc, 3_600_000);
-                assertEq(receipt.economics.postSettlementBalanceUsdc, settlement - 6_600_000);
+                assertEq(receipt.economics.postSettlementBalanceUsdc, settlement - 6_400_000);
                 assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 0);
                 assertEq(receipt.economics.postPositionSize, 0);
             }
@@ -594,7 +597,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
             if (kind <= 4) {
                 // Rejection at commitment must roll back its carry collection as well as reservation allocation.
                 OrderV3Types.OrderRequest memory tooSmall = _request(row);
-                uint256 commitActual = commitmentCarry + (kind == 3 ? 200_000 : 0);
+                uint256 commitActual = commitmentCarry;
                 _setLimit(tooSmall, kind, commitActual - 1);
                 State memory beforeCommit = _state();
                 vm.expectRevert(
@@ -609,7 +612,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 router.commitOrder(tooSmall);
                 _assertCommitRollback(beforeCommit);
             }
-            uint256 actual = kind == 5 ? FEE : commitmentCarry + delayedCarry + FEE + (kind == 3 ? 200_000 : 0);
+            uint256 actual = kind == 5 ? FEE : commitmentCarry + delayedCarry + FEE;
             for (uint8 adjacent; adjacent < 3; adjacent++) {
                 OrderV3Types.OrderRequest memory request = _request(row);
                 _setLimit(request, kind, adjacent == 0 ? actual : adjacent == 1 ? actual - 1 : actual + 1);
@@ -622,10 +625,10 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 if (adjacent != 1) {
                     assertEq(receipt.economics.carryUsdc, int256(commitmentCarry + delayedCarry));
                     assertEq(receipt.economics.actionChargeAssessedUsdc, FEE + commitmentCarry + delayedCarry);
-                    assertEq(receipt.economics.grossAccountDebitUsdc, FEE + 200_000 + commitmentCarry + delayedCarry);
+                    assertEq(receipt.economics.grossAccountDebitUsdc, FEE + commitmentCarry + delayedCarry);
                     assertEq(
                         receipt.economics.postSettlementBalanceUsdc,
-                        before_.settlement - FEE - 200_000 - commitmentCarry - delayedCarry
+                        before_.settlement - FEE - commitmentCarry - delayedCarry
                     );
                     assertEq(usdc.balanceOf(address(pool)), before_.poolCash + commitmentCarry + delayedCarry);
                     assertEq(receipt.economics.postPositionSize, SIZE);

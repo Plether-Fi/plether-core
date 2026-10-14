@@ -632,9 +632,13 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
 
+        uint256 expectedCarry = _expectedIndexedCarry(account);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
+        assertGt(expectedCarry, 0);
         vm.prank(address(router));
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 1400e6);
+        engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 0);
+        assertEq(clearinghouse.pnlPledgeUsdc(account), pledgeBefore - expectedCarry);
+        assertEq(clearinghouse.actionReserveUsdc(account), 0);
     }
 
     function test_ReserveCloseOrderExecutionBounty_DoesNotRecomputeHistoricalCarryAfterReservationReachabilityDrop()
@@ -648,7 +652,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 price = 1e8;
         uint256 size = 100_000e18;
         uint256 marginUsdc = 2000e6;
-        uint256 bountyUsdc = 1e6;
+        uint256 bountyUsdc = 0;
         uint256 carryTimeDelta = 3_839_405;
 
         // Leave a distinct free-settlement slice so the historical carry and close bounty are actually collectible;
@@ -668,7 +672,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
 
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, size / 2, bountyUsdc);
+        engine.reserveCloseOrderExecutionBounty(account, size / 2, 0);
 
         assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
         assertEq(

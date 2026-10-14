@@ -99,7 +99,7 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
 
         assertEq(
             _freeSettlementUsdc(account),
-            freeSettlementBeforeCommit - 200_000,
+            freeSettlementBeforeCommit - 0,
             "commit should temporarily seize the close bounty from free settlement"
         );
 
@@ -110,13 +110,13 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
 
         assertGt(
             _freeSettlementUsdc(account),
-            freeSettlementBeforeCommit - 200_000,
+            freeSettlementBeforeCommit - 0,
             "successful partial close should release proportional PnL pledge into free settlement"
         );
         assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
-            200_000,
+            0,
             "keeper should receive the free-backed bounty as clearinghouse credit"
         );
         (uint256 remainingSize,,,,,,) = engine.positions(account);
@@ -162,7 +162,7 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         uint256 executorReward = _settlementBalance(address(this)) - executorBefore;
         assertEq(
             executorReward,
-            600_000,
+            400_000,
             "Current queue economics pay the executor for all three terminal head outcomes in this mixed sequence"
         );
         assertEq(

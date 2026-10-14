@@ -624,43 +624,6 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _endTerminalCurveMutation(account, expectedOldHash);
     }
 
-    /// @notice Resolves authenticated bounty funding without collecting carry or requiring an oracle update.
-    function resolveCloseBounty(
-        address account,
-        uint64 orderId,
-        uint256 freeUsdc,
-        uint256 pledgeUsdc,
-        uint64 sourcePositionEpoch,
-        bool quarantine
-    ) external onlyRouter nonReentrant {
-        StoredPosition storage pos = _positions[account];
-        bytes32 oldHash = _beginTerminalCurveMutation(account);
-        unsettledCarryUsdc[account] = _checkpointPositionCarry(account, pos);
-        address target = address(clearinghouse);
-        bytes4 invalidResult = ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector;
-        uint256 restoredPledgeUsdc;
-        assert(this.resolveCloseBounty.selector == IMarginClearinghouse.resolveCloseBounty.selector);
-        // Engine and clearinghouse resolvers share the selector and six-argument input layout. Forward the
-        // fixed-width call, ignoring any trailing calldata, and reuse temporary memory for the one-word
-        // result. Normal borrow/terminal synchronization and the nonReentrant epilogue still run below.
-        assembly ("memory-safe") {
-            let ptr := mload(0x40)
-            calldatacopy(ptr, 0, 196)
-            if iszero(call(gas(), target, 0, ptr, 196, ptr, 32)) {
-                returndatacopy(ptr, 0, returndatasize())
-                revert(ptr, returndatasize())
-            }
-            if iszero(eq(returndatasize(), 32)) {
-                mstore(ptr, invalidResult)
-                revert(ptr, 4)
-            }
-            restoredPledgeUsdc := mload(ptr)
-        }
-        _sideState(pos.side).totalMargin += restoredPledgeUsdc;
-        _syncPositionBorrowBase(account, pos);
-        _endTerminalCurveMutation(account, oldHash);
-    }
-
     /// @notice Clears degraded mode once adjusted solvency has recovered.
     /// @dev Callable only by the owner. Recovery requires HousePool physical assets net of senior trader claims to
     ///      cover the larger side's aggregate maximum-profit liability.

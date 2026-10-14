@@ -14,10 +14,7 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
     /// @param account Liquidated account whose bounties are forfeited.
     function _forfeitReservedOrderBountiesOnLiquidation(
         address account
-    )
-        internal
-        returns (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc, uint256[] memory pledgeRefundsUsdc)
-    {
+    ) internal returns (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc) {
         uint256 orderCount = 0;
         for (
             uint64 cursor = accountHeadOrderId[account]; cursor != 0; cursor = orderRecords[cursor].nextAccountOrderId) {
@@ -26,7 +23,6 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
         }
         orderIds = new uint64[](orderCount);
         orderBountiesUsdc = new uint256[](orderCount);
-        pledgeRefundsUsdc = new uint256[](orderCount);
 
         uint256 forfeitedUsdc = _protectionBountiesToForfeitOnLiquidation(account);
         uint256 index = 0;
@@ -35,24 +31,16 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {
-            IMarginClearinghouse.BountyReservation memory reservation =
-                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
             uint256 executionBountyUsdc =
                 clearinghouse.takeBountyReservation(account, IMarginClearinghouse.BountyKind.Order, orderId);
             orderIds[index] = orderId;
             orderBountiesUsdc[index] = executionBountyUsdc;
-            pledgeRefundsUsdc[index] = reservation.pledgeFundedUsdc;
-            if (reservation.pledgeFundedUsdc != 0) {
-                engine.resolveCloseBounty(
-                    account, orderId, 0, reservation.pledgeFundedUsdc, reservation.sourcePositionEpoch, false
-                );
-            }
             ++index;
-            forfeitedUsdc += reservation.freeFundedUsdc;
+            forfeitedUsdc += executionBountyUsdc;
         }
 
         if (forfeitedUsdc == 0) {
-            return (orderIds, orderBountiesUsdc, pledgeRefundsUsdc);
+            return (orderIds, orderBountiesUsdc);
         }
 
         engine.absorbReservedExecutionBounty(account, forfeitedUsdc);

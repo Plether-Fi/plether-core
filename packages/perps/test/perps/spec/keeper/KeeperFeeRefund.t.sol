@@ -281,7 +281,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         assertEq(usdc.balanceOf(address(pool)), poolBefore, "rejected open cannot move pool cash");
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "rejected open cannot create a position");
-        _assertTerminalCleanup(1, OrderV3Types.TerminalReason.Slippage);
+        _assertTerminalCleanup(1, OrderV3Types.TerminalReason.Slippage, 200_000);
         _assertCleanupReplayRejected(1, false);
     }
 
@@ -317,7 +317,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         assertEq(sizeAfter, 10_000e18, "Terminal slippage failure should leave the position open");
         assertEq(
             _settlementBalance(keeper) - keeperUsdcBefore,
-            200_000,
+            0,
             "Terminal close slippage should still pay the clearer through the carry-aware settlement path"
         );
         assertEq(
@@ -326,7 +326,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
             "Terminal close slippage should not additionally route bounty value to protocol fees in this path"
         );
         assertEq(usdc.balanceOf(alice), 0, "Trader wallet should not receive free-backed close bounty refunds");
-        _assertTerminalCleanup(2, OrderV3Types.TerminalReason.Slippage);
+        _assertTerminalCleanup(2, OrderV3Types.TerminalReason.Slippage, 0);
         _assertCleanupReplayRejected(2, false);
     }
 
@@ -386,24 +386,28 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "expired opens cannot create a position");
         for (uint64 id = 1; id <= count; ++id) {
-            _assertTerminalCleanup(id, OrderV3Types.TerminalReason.Expired);
+            _assertTerminalCleanup(id, OrderV3Types.TerminalReason.Expired, 200_000);
         }
         _assertCleanupReplayRejected(count, batch);
     }
 
     function _assertTerminalCleanup(
         uint64 id,
-        OrderV3Types.TerminalReason reason
+        OrderV3Types.TerminalReason reason,
+        uint256 expectedBounty
     ) internal {
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), id);
         assertEq(outcome.account, alice);
         assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint8(outcome.reason), uint8(reason));
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
+        assertEq(
+            uint8(outcome.bountyDisposition),
+            uint8(outcome.bountyUsdc == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
+        );
         assertEq(outcome.executor, keeper);
-        assertEq(outcome.bountyRecipient, keeper);
-        assertEq(outcome.bountyUsdc, 200_000, "configured stored execution bounty");
+        assertEq(outcome.bountyRecipient, outcome.bountyUsdc == 0 ? address(0) : keeper);
+        assertEq(outcome.bountyUsdc, expectedBounty, "stored bounty for the submitted action");
         assertEq(router.lifecycleBook().pendingIntent(id).account, address(0));
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(id);
         assertEq(pending.committedMarginUsdc, 0);

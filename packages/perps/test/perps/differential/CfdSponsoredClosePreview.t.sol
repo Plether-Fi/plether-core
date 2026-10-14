@@ -45,7 +45,7 @@ contract CfdSponsoredClosePreviewTest is CfdSponsoredClosePreviewTestFixture {
     function test_ReplayDoesNotMintTwice() public {
         _openNormally(CfdTypes.Side.LONG, 0);
         OrderV3Types.OrderRequest memory r = _request(SIZE);
-        _batch(r, 200_000);
+        _ordinaryClose(r);
         uint256 supply = usdc.totalSupply();
         vm.expectRevert(CfdClosePreview.CfdClosePreview__SponsoredIntentInvalid.selector);
         _batch(r, 200_000);
@@ -55,9 +55,7 @@ contract CfdSponsoredClosePreviewTest is CfdSponsoredClosePreviewTestFixture {
     function test_MismatchedSubsidyDoesNotMint() public {
         _openNormally(CfdTypes.Side.LONG, 2000);
         OrderV3Types.OrderRequest memory r = _request(SIZE);
-        vm.expectRevert(
-            abi.encodeWithSelector(CfdClosePreview.CfdClosePreview__SubsidyMismatch.selector, 200_000, 198_000)
-        );
+        vm.expectRevert(abi.encodeWithSelector(CfdClosePreview.CfdClosePreview__SubsidyMismatch.selector, 200_000, 0));
         _batch(r, 200_000);
     }
 
@@ -160,11 +158,11 @@ contract CfdSponsoredCloseCarryTest is CfdSponsoredClosePreviewTest {
         vm.warp(vm.getBlockTimestamp() + 1 days);
         OrderV3Types.OrderRequest memory r = _request(SIZE);
         CfdClosePreview.SponsoredClosePreview memory p = _fundedPreview(r);
-        assertGt(p.depositCarryUsdc, 0);
-        assertEq(p.commitmentCarryUsdc, 0);
+        assertEq(p.depositCarryUsdc, 0);
+        assertGt(p.commitmentCarryUsdc, 0);
         uint256 beforeBalance = clearinghouse.balanceUsdc(ACCOUNT);
-        _batch(r, p.subsidyUsdc);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), beforeBalance + p.subsidyUsdc - p.depositCarryUsdc);
+        _ordinaryClose(r);
+        assertEq(clearinghouse.balanceUsdc(ACCOUNT), beforeBalance - p.commitmentCarryUsdc);
         OrderV3Types.ExecutionAssessment memory actual = policyEvaluator.assessOrder(
             address(engine),
             _order(r.side, SIZE),

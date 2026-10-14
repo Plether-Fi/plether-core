@@ -68,7 +68,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
-            200_000,
+            0,
             "Expired close should still credit the clearer even after carry-aware settlement crediting"
         );
         assertEq(usdc.balanceOf(ALICE) - traderWalletBefore, 0, "Expired close should not refund the trader wallet");
@@ -212,7 +212,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
-            200_000,
+            0,
             "Close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertEq(
@@ -321,17 +321,16 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
         vm.prank(KEEPER);
         router.executeOrder(1, priceData);
 
-        assertGt(
+        assertEq(
             clearinghouse.balanceUsdc(keeperAccount),
             keeperSettlementBefore,
             "Failed-order clearer payout should still credit settlement when the cached mark is stale"
         );
-        assertGe(
+        assertEq(
             _lastCarryTimestamp(keeperAccount),
-            uint64(block.timestamp),
-            "Stale-mark clearer payout should checkpoint carry before mutating the basis"
+            carryTimestampBefore,
+            "Unpaid cleanup does not credit or checkpoint the executor"
         );
-        assertLt(carryTimestampBefore, _lastCarryTimestamp(keeperAccount), "Carry clock should advance");
     }
 
     function test_ProtocolInvalidationPaysClearerAndDoesNotRefundTrader() public {
@@ -418,7 +417,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
-            200_000,
+            0,
             "Untyped close revert should keep the clearer-paid fallback"
         );
         assertEq(
@@ -447,7 +446,7 @@ contract OrderRouterPolicyMatrixTest is BasePerpTest {
 
         assertEq(
             clearinghouse.balanceUsdc(keeperAccount) - keeperSettlementBefore,
-            200_000,
+            0,
             "Non-slippage close terminal failures should stay on the clearer-paid path"
         );
     }

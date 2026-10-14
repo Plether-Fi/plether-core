@@ -78,71 +78,28 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc, 0);
     }
 
-    function test_ProtectionRetryReattributesOneReserveWithoutUnlockingOrRelocking() public {
-        _lockActionReserve(6e6);
-        _record(IMarginClearinghouse.BountyKind.Order, 1, 1e6);
-        _record(IMarginClearinghouse.BountyKind.ProtectionTrigger, 1, 2e6);
-        _record(IMarginClearinghouse.BountyKind.ProtectionExecution, 1, 3e6);
-        uint256 balance = clearinghouse.balanceUsdc(ACCOUNT);
-        vm.startPrank(address(router.positionProtectionBook()));
-        clearinghouse.moveBountyReservation(
-            ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, IMarginClearinghouse.BountyKind.Order, 2
-        );
-        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, 2).amountUsdc, 3e6);
-        assertEq(
-            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionExecution, 1).amountUsdc, 0
-        );
-        clearinghouse.moveBountyReservation(
-            ACCOUNT, IMarginClearinghouse.BountyKind.Order, 2, IMarginClearinghouse.BountyKind.ProtectionExecution, 1
-        );
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidBountyReservation.selector);
-        clearinghouse.moveBountyReservation(
-            ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, IMarginClearinghouse.BountyKind.Order, 2
-        );
-        clearinghouse.moveBountyReservation(
-            ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, IMarginClearinghouse.BountyKind.Order, 3
-        );
-        vm.stopPrank();
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 6e6);
-        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc, 6e6);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), balance);
-        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, 1).amountUsdc, 1e6);
-        assertEq(
-            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, 1).amountUsdc, 2e6
-        );
-    }
-
-    function test_BountyTransferRejectsWrongOwnerNamespaceAccountAndLiveDestination() public {
-        _lockActionReserve(6e6);
-        _record(IMarginClearinghouse.BountyKind.Order, 1, 1e6);
-        _record(IMarginClearinghouse.BountyKind.ProtectionTrigger, 1, 2e6);
-        _record(IMarginClearinghouse.BountyKind.ProtectionExecution, 1, 3e6);
+    function test_RetiredProtectionExecutionNamespaceCannotReserveEvenZero() public {
         address book = address(router.positionProtectionBook());
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
+        vm.prank(book);
+        clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, 0);
+    }
+
+    function test_ZeroOrderReservationStillAuthenticatesIdentityAndCannotBeReused() public {
         vm.prank(address(router));
-        clearinghouse.moveBountyReservation(
-            ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, IMarginClearinghouse.BountyKind.Order, 2
-        );
-        vm.startPrank(book);
+        clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1, 0);
+        clearinghouse.validateBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1, 0);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidBountyReservation.selector);
-        clearinghouse.moveBountyReservation(
-            ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionTrigger, 1, IMarginClearinghouse.BountyKind.Order, 2
-        );
+        clearinghouse.validateBountyReservation(OTHER, IMarginClearinghouse.BountyKind.Order, 1, 0);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidBountyReservation.selector);
-        clearinghouse.moveBountyReservation(
-            OTHER, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, IMarginClearinghouse.BountyKind.Order, 2
-        );
+        clearinghouse.validateBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 2, 0);
+        vm.prank(address(router));
+        clearinghouse.takeBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidBountyReservation.selector);
-        clearinghouse.moveBountyReservation(
-            ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, IMarginClearinghouse.BountyKind.Order, 1
-        );
-        vm.stopPrank();
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 6e6);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(OTHER), 0);
-        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, 1).amountUsdc, 1e6);
-        assertEq(
-            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionExecution, 1).amountUsdc, 3e6
-        );
+        clearinghouse.validateBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1, 0);
+        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InvalidBountyReservation.selector);
+        vm.prank(address(router));
+        clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1, 0);
     }
 
     function test_ReservationFloorsAndFifoConsumptionDoNotReadRouterAccounting() public {
