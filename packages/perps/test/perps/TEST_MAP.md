@@ -301,23 +301,27 @@ temporary test tree. Successful execution traces are compacted; failure traces, 
 per-test status remain in the recorded results. Interrupted, skipped, failed, and unselected coverage are distinct
 from a passing run.
 
-The source-bound close-bounty acceptance on the pre-integration source is recorded in
-[VALIDATION.json](VALIDATION.json) for execution-source hash
-`c06b4dd29d6f3031c4be3ff2f974d5793a1b661114240c70a310def24add3a87`.
-This record is historical for the master-based PR branch; its passing status does not attest the combined source.
-Quick and CI each partitioned
-2,207 discovered nonfork tests into 2,122 correctness tests and 85 production-codegen gates; all four full nonfork
-production-codegen shards passed 2,207 tests. The changed-invariant audit passed 51 lanes across seeds `0xdeadbeef`,
-`0x1`, and `0x2`, totaling 60 property executions and 15,360,000 calls. The report records exact selections, budgets,
-source guards, fault controls, SDK and repository checks. Its prior tracked validation remains historical at commit
-`550d0a642e3fe854a5542edcdc18cbeafc0744b6`, Git blob
-`3fd0355568bb09458da1d34b6a7bca7a63531398`; earlier bounty-fix runs on source `332e604e...` are historical too.
-The durable local evidence bundle is in the Codex Security standalone collection for
-`targetPath=/Users/stan/.codex/worktrees/6ac7/plether-core` at
-`artifacts/bounty-fix/validation/evidence-bundle-r2/`. Its `VALIDATION.portable.json` has SHA-256
-`bcd9a69507f8b7e7698db0fe555e6c8aa288b894df86f5b5cbd0ca20cfdd63b9`; the record's
-`evidence_transport` identifies the content-addressed archive, index, and extraction scheme. These local artifacts
-and their hashes do not imply remote availability.
+The historical source-bound close-bounty r2 evidence is preserved in the
+[validation report at commit 33ceb7ab](https://github.com/Plether-Fi/plether-core/blob/33ceb7abd7486cca940c5739489ec67ad827accd/packages/perps/test/perps/VALIDATION.json).
+The in-tree `VALIDATION.json` retains the earlier baseline record; use the linked report for the bounty-fix campaign.
+The linked report covers execution-source SHA-256
+`c06b4dd29d6f3031c4be3ff2f974d5793a1b661114240c70a310def24add3a87`, before integration with master.
+Its passing status does not attest the combined PR source. Quick and CI each passed 2,122 correctness tests and
+85 production-codegen gates; full nonfork production-codegen passed 2,207 tests. The changed-invariant audit passed
+51 lanes, totaling 60 property executions and 15,360,000 calls across seeds `0xdeadbeef`, `0x1`, and `0x2`.
+
+The full portable bundle remains local in the Codex Security standalone collection for
+`targetPath=/Users/stan/.codex/worktrees/6ac7/plether-core`, under
+`artifacts/bounty-fix/validation/evidence-bundle-r2/`. It contains `VALIDATION.portable.json`, `index.json`,
+`objects.tar.zst`, and `verify-portable-r2.py`. Run `python3 verify-portable-r2.py --directory <bundle-directory>`
+(with Python 3 and zstd) to verify all 226 evidence references and 166 content-addressed objects without extracting
+archive paths. The report SHA-256 is `bcd9a69507f8b7e7698db0fe555e6c8aa288b894df86f5b5cbd0ca20cfdd63b9`;
+the archive SHA-256 is `6243852cf6a821332e1449c2e639c036effdc4a798be072b89bd1a729087c5bb`.
+The raw bundle has not been uploaded; the linked JSON report alone does not include its referenced objects.
+
+[Refreshed timing measurements](https://github.com/Plether-Fi/plether-core/blob/33ceb7abd7486cca940c5739489ec67ad827accd/scripts/perps-shard-weights.json)
+are preserved at the same commit and inside the bundle. This PR retains the base shard weights; new files use the
+runner's fallback estimate. Weights affect shard allocation, not test inclusion or configured campaign budgets.
 Internal ABI and storage changed, requiring a fresh connected deployment even though public order/receipt tuples and
 their hash domains remain unchanged. No fork, live-network or populated-state migration validation is claimed.
 
