@@ -359,26 +359,61 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
 
         usdc.mint(address(pool), 1_000_000e6);
         pool.accountExcess();
-        (uint256 pendingSeniorBefore, uint256 pendingJuniorBefore,,) = pool.getPendingTrancheState();
+        {
+            (uint256 pendingSeniorBefore, uint256 pendingJuniorBefore,,) = pool.getPendingTrancheState();
+            assertEq(pendingSeniorBefore, seniorSeedAssets, "Admitted cash restores the seeded Senior claim");
+            assertEq(pendingJuniorBefore, 1_000_000e6 - seniorSeedAssets, "Junior owns the remaining admitted cash");
+        }
+
+        // Independent fixture ledger: $10,000 entry notional, 4-bps open fee, 10-bps reserved charge,
+        // and a 50% keeper share. The $5,000 raw price loss exceeds the remaining $236 pledge.
+        uint256 expectedOpenFee = (10_000e6 * 4) / 10_000;
+        uint256 expectedCharge = (10_000e6 * 10) / 10_000;
+        uint256 expectedPriceRecovery = 250e6 - expectedOpenFee - expectedCharge;
+        uint256 expectedKeeperCredit = expectedCharge / 2;
+        uint256 expectedPoolRevenue = expectedPriceRecovery + expectedCharge - expectedKeeperCredit;
 
         address trader = address(0xAB1719);
-        address account = trader;
         _fundTrader(trader, 900e6);
-        _open(account, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
+        _open(trader, CfdTypes.Side.LONG, 10_000e18, 250e6, 1e8);
+        assertEq(clearinghouse.pnlPledgeUsdc(trader), expectedPriceRecovery, "Open isolates the $236 price pledge");
+        assertEq(clearinghouse.liquidationReserveUsdc(trader), expectedCharge, "Charge is capped by the $10 reserve");
+        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), expectedOpenFee, "Open credits the $4 fee once");
+        assertEq(clearinghouse.balanceUsdc(address(this)), 0, "Keeper starts without a clearinghouse entitlement");
+        assertEq(pool.totalAssets(), 1_000_000e6, "The clearinghouse execution fee is not pool cash");
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
-        router.executeLiquidation(account, priceData);
+        router.executeLiquidation(trader, priceData);
 
-        (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
-        uint256 pendingDelta = (pendingSenior + pendingJunior) - (pendingSeniorBefore + pendingJuniorBefore);
-
+        assertEq(clearinghouse.balanceUsdc(address(this)), expectedKeeperCredit, "Only $5 belongs to the keeper");
         assertEq(
-            pendingDelta,
-            0,
-            "Seeded pending LP revenue should exclude the keeper bounty portion paid out after liquidation"
+            clearinghouse.balanceUsdc(engine.protocolTreasury()), expectedOpenFee, "Liquidation adds no protocol fee"
         );
-        assertEq(pool.excessAssets(), 0, "Keeper bounty inflow should be canonically accounted, not stranded as excess");
+        assertEq(clearinghouse.balanceUsdc(trader), 900e6 - 250e6, "Liquidation preserves the $650 free settlement");
+        assertEq(clearinghouse.pnlPledgeUsdc(trader), 0, "The bounded price pledge was fully recovered");
+        assertEq(clearinghouse.liquidationReserveUsdc(trader), 0, "The liquidation charge was fully allocated");
+        assertEq(pool.totalAssets(), 1_000_000e6 + expectedPoolRevenue, "Pool owns $236 recovery plus its $5 charge");
+        assertEq(usdc.balanceOf(address(pool)), 1_000_000e6 + expectedPoolRevenue, "Accounted LP revenue is real cash");
+        assertEq(usdc.balanceOf(address(clearinghouse)), 900e6 - expectedPoolRevenue, "Custody conserves the deposit");
+        {
+            (uint256 pendingSenior, uint256 pendingJunior,,) = pool.getPendingTrancheState();
+            assertEq(pendingSenior, seniorSeedAssets, "Senior restoration is not counted twice");
+            assertEq(
+                pendingJunior,
+                1_000_000e6 - seniorSeedAssets + expectedPoolRevenue,
+                "Junior receives valid recovery and its charge share, excluding the keeper portion"
+            );
+        }
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal(), seniorSeedAssets, "Live Senior agrees with the pending allocation");
+        assertEq(
+            pool.juniorPrincipal(), 1_000_000e6 - seniorSeedAssets + expectedPoolRevenue, "Live Junior retains $241"
+        );
+        assertEq(pool.pendingTradingRevenueUsdc(), 0, "Revenue routing consumes the pending bucket exactly once");
+        assertEq(pool.unassignedAssets(), 0, "Seeded claimant revenue must not be stranded as unassigned cash");
+        assertEq(pool.excessAssets(), 0, "LP inflow is canonically accounted, not stranded as excess");
     }
 
     function test_RecordTradingRevenueInflow_NoClaimantPathFallsBackToUnassignedAssets() public {

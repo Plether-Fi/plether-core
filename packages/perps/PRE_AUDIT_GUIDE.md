@@ -18,7 +18,7 @@ If reviewing quickly, focus on these questions in order:
 2. Does the path move value only across the intended custody domains?
 3. Does the path use the correct oracle regime and failure policy for the current market state?
 4. Does the path preserve bounded queue behavior and trader-claim seniority?
-5. Does every position/pledge/claim mutation atomically synchronize the matching `TerminalNavBookV2` curve from canonical Engine and clearinghouse state?
+5. Does every position/pledge/claim/collectible-escrow mutation atomically synchronize the matching `TerminalNavBookV2` curve from canonical Engine and clearinghouse state?
 
 ## Test Taxonomy
 
@@ -128,27 +128,30 @@ the old child remains terminal in the lifecycle Book.
 | Open/close executes successfully | `Executed` | keeper paid from reservation | dequeue |
 | Typed `UserInvalid` open | `Failed` | keeper paid | dequeue |
 | Typed `ProtocolStateInvalidated` open | `Failed` | keeper paid from reserved bounty | dequeue |
-| Terminal invalid close | `Failed` | keeper paid | dequeue |
+| Terminal invalid ordinary close | `Failed` | original free funding paid; pledged funding restored to source position | dequeue only this order |
 | Slippage failure on open | `Failed` | keeper paid under the current terminal-failure policy | dequeue |
-| Slippage failure on close | `Failed` | keeper paid | dequeue |
+| Slippage failure on ordinary close | `Failed` | original free funding paid; pledged funding restored | dequeue only this order |
 | Expired open order | `Failed` | keeper paid from reserved bounty | dequeue |
-| Expired close order | `Failed` | keeper paid from reservation under the current terminal-close policy | dequeue |
+| Expired ordinary close order | `Failed` | original free funding paid; pledged funding restored | dequeue only this order |
 | Risk-off open at or below persistent cutoff | `Failed` | full order and attached `PendingOpen` protection bounties returned to trader's internal settlement; clearer unpaid | dequeue |
-| Pinned configuration mismatch, disallowed execution mode, or financial-bound violation | `Failed` | ordinary order pays keeper; matching registered protection attempt retains bounty for retry | dequeue |
+| Pinned configuration mismatch, disallowed execution mode, or financial-bound violation | `Failed` | open pays full bounty; ordinary close pays original free funding and restores pledge; matching protection attempt retains bounty | dequeue |
 | Failed registered protection attempt with its exact protected position still live | `Failed` child; `Latched` protection | original execution bounty retained; cleaner unpaid | dequeue child; retry appends a new child |
-| Liquidation cleanup of an order not covered by risk-off | `Failed` with `AccountLiquidated` | nonzero bounty forfeited to protocol treasury | unlink from account and global queues |
+| Liquidation cleanup of an order not covered by risk-off | `Failed` with `AccountLiquidated` | pledged funding restored before health/loss assessment; only free funding forfeited to treasury | clear liquidated account, preserve other accounts' FIFO |
 | Stale oracle | blocked, not terminal | no distribution | keep pending |
 | Live-market publish-time ordering failure | blocked, not terminal | no distribution | keep pending |
 | Close-only ineligibility for queued open | blocked, not terminal | no distribution | keep pending |
 | Unknown, panic, empty, malformed, or insufficient-gas item/receipt failure | pending or reverted call | no distribution in failed item | keep pending; completed prepared-item prefix survives unless outer oracle preparation reverts |
 
 The ordinary failure rows above assume no retained protection attempt; its specific retention rule takes precedence.
+Pledge funding requires an empty account queue; later wholly free-funded orders are allowed. A failed close with zero
+original free funding pays no cleaner. If restoring pledge makes liquidation healthy, its inner frame rolls back and
+the pledged order stays pending; preceding valid risk-off refunds remain effective.
 
 ### Bounty-flow table
 
 | Bounty type | Source of funds | Custody while pending | Success path | Illiquid path | Terminal failure path |
 |-------------|-----------------|-----------------------|--------------|---------------|-----------------------|
-| Order execution bounty | Eligible trader free settlement; never active PnL pledge | `MarginClearinghouse` action reserve and canonical `BountyKind.Order` reservation | clearinghouse credit for the keeper | n/a | risk-off refunds the trader; matching protection-attempt failure retains the bounty; liquidation cleanup forfeits it to treasury; other ordinary failures pay the keeper |
+| Order execution bounty | Opens/protection: free settlement. Ordinary close: post-carry free settlement, then eligible pledge with an empty account queue | `MarginClearinghouse` action reserve and canonical `BountyKind.Order` reservation; pledged close part has an order/epoch-bound collectible mirror | full bounty credited/released, including self-execution | n/a | ordinary close restores pledge and pays free funding; liquidation restores pledge and forfeits free funding; risk-off/protection retain their separate policies |
 | Liquidation charge | Dedicated liquidation-charge reserve, capped by the canonical planned charge | clearinghouse liquidation reserve | Default: 50% keeper clearinghouse credit; 0% protocol-treasury clearinghouse credit; exact 50% remainder to HousePool claimant revenue | n/a | n/a |
 
 ### Oracle regime table
@@ -172,7 +175,7 @@ Custody held by the clearinghouse becomes pool backing only when collected into 
 | PnL pledge / active position margin | Trader until exact price settlement | clearinghouse `pnlPledgeUsdc`; the Engine position getter reads this canonical bucket | engine/settlement-sidecar open, close, liquidation, claim service | yes only for the account's price-loss cap and health | no physical pool asset before collection | no | yes, only through the capped terminal curve |
 | Other locked margin | Trader, reserved to typed non-price obligations | clearinghouse typed reserves | router and engine/sidecar typed reservation paths | only for its matching action; never generic price-loss reachability | no direct pool asset | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail and typed action-charge settlement | separate close/liquidation action charges only, after spendable action reserve and free settlement; never price loss | no | no | no |
-| Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` action reserve and canonical bounty-reservation ledger | router commit/distribute/forfeit through engine/clearinghouse | no | no | no | no |
+| Execution bounty reserve | Trader-funded keeper reserve | `MarginClearinghouse` action reserve and canonical bounty-reservation ledger | router commit/distribute/forfeit through engine/clearinghouse | only after eligible pledge is restored | no | no | only source-bound refundable pledged-close part via the collectible cap |
 | Liquidation-charge reserve | Trader, dedicated to the active position charge | `MarginClearinghouse.liquidationReserveUsdc` | engine/settlement sidecar | liquidation charge only | no separate pool asset | no | no |
 | VPI rebate reserve | Trader, dedicated to `max(-vpiAccrued, 0)` | protected sub-balance of clearinghouse action reserve | engine/settlement sidecar | matching VPI clawback only; excluded from price-risk collateral, with underfunding treated as independent delinquency | no separate pool asset | no | no |
 | Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | same-account price-risk health and one-time price-loss netting only; never cash/action collateral | yes, as senior liability | yes | yes |
@@ -191,7 +194,9 @@ Custody held by the clearinghouse becomes pool backing only when collected into 
 
 Reachability note:
 - Price-loss reachability is exactly same-account nettable claim plus PnL pledge, capped by the terminal curve.
-- `CommittedOrder`, execution-bounty, liquidation-charge, VPI, and generic action reserves cannot enlarge that price cap.
+- `CommittedOrder`, liquidation-charge, VPI and generic action reserves cannot enlarge that price cap. The sole
+  execution-bounty exception is authenticated, order/epoch-bound refundable pledged-close escrow. It remains marked
+  backing until success earns the full bounty or failure/liquidation restores it; it is never additional cash.
 - Each typed reserve may be consumed only for its matching obligation; bounded liquidation cleanup may separately forfeit abandoned order bounties.
 - Negative lifetime VPI must be fully covered by its dedicated reserve. Underfunding independently blocks withdrawal
   and makes the account liquidatable; overfunding never increases price collateral.
@@ -281,7 +286,7 @@ Reachability note:
 - Ownership problem: entry and exit share pricing must not apply different marked-liability assumptions.
 - Chosen rule: both use `physicalAssets - totalTraderClaims + terminalLpPriceDelta`, with the signed delta computed from whole lots, exact entry cost, and account-capped collectible loss.
 - Liquidity separation: a positive marked receivable affects share ownership but cannot fund redemption cash before collection; endpoint max liability remains the withdrawal/admission reserve.
-- Protecting invariant: a current terminal deficit blocks deposit activation, and every position/pledge/claim transition synchronizes the account curve atomically.
+- Protecting invariant: a current terminal deficit blocks deposit activation, and every position/pledge/claim/collectible-escrow transition synchronizes the account curve atomically.
 
 ### Junior maintenance-fee dilution
 
@@ -379,7 +384,9 @@ Reachability note:
 ### Losing partial close
 
 1. Trader commits a reduce-only close.
-2. Router reserves the execution bounty and preserves the residual position path.
+2. Router reserves the execution bounty and preserves the residual position path. Pledge funding requires an empty
+   account queue and a source-bound collectible escrow; successful execution removes that eligibility before close
+   settlement, recognizing the authorized bounty cost once.
 3. Keeper executes.
 4. Planner allocates exact entry cost to the closed lots, nets same-account claim, consumes PnL pledge up to the pre-close cap, and reports any excess price loss as a diagnostic write-off.
 5. Margin-first carry is collected before price settlement; only unpaid carry, VPI, execution fee, and any frozen spread use the separate action path; an uncollectible action remainder rejects the partial close, but uncollateralized price loss does not.
@@ -398,7 +405,9 @@ Reachability note:
 ### Liquidation with positive residual
 
 1. Keeper calls liquidation on an under-maintenance account.
-2. Planner computes exact price PnL, carry/action obligations, and health from typed account buckets.
+2. Router restores source-bound pledged bounty inside the isolated liquidation frame, then the Planner computes exact
+   price PnL, carry/action obligations and health from typed account buckets. If now healthy, that frame rolls back
+   while preceding valid risk-off refunds persist.
 3. Total liquidation charge is capped by the dedicated liquidation reserve.
 4. Settlement credits the configured reserve shares to the keeper and protocol treasury, routes the exact rounding
    remainder to LPs, and computes any fresh trader payout. The charge cannot exceed its dedicated reserve; there is no
@@ -410,7 +419,8 @@ Reachability note:
 ### Liquidation with price-loss write-off and trader-claim netting
 
 1. Keeper calls liquidation on an account whose claim plus PnL pledge cannot cover exact marked price loss.
-2. Planner computes the collectible price amount and the diagnostic excess separately from carry/action charges.
+2. Router restores source-bound pledged bounty before the Planner checks health and computes collectible price loss
+   and diagnostic excess separately from carry/action charges; only original free-funded bounty is forfeited.
 3. Total liquidation charge is capped by its dedicated reserve and allocated using the configured keeper and protocol
    shares, with LPs receiving the exact remainder.
 4. Existing same-account trader claim is netted exactly once, then PnL pledge is transferred to HousePool.
@@ -478,7 +488,7 @@ Reachability note:
 7. Reservation conservation: clearinghouse-reserved execution bounty value and admin-held ETH refund claims are each distributed, refunded, forfeited, or left claimable exactly once.
 8. Exact symmetric NAV: deposits and redemptions use the same signed terminal delta; marked trader losses count only to the account cap and never as spendable withdrawal cash.
 9. Frozen-spread conservation: assessed spread equals LP-paid spread plus terminally waived spread; live/FAD-only closes and all liquidations assess zero.
-10. Terminal-curve parity: after every successful transition, the bound Engine has atomically called the book's sole mutation endpoint and every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim` cap.
+10. Terminal-curve parity: after every successful transition, the bound Engine has atomically called the book's sole mutation endpoint and every account curve matches live lots, exact entry cost, side, and `pnlPledge + nettable claim + eligible source-bound close-bounty escrow` cap.
 11. Monitor epistemics: a failed dependency read must remain distinguishable from healthy zero state, every Oracle
     dependency is required for a complete composite even if its feed policy is not required by the selected route,
     cutoff totals are maximum membership because cancellations may shrink them, and bounded aggregate checks do not

@@ -88,12 +88,33 @@ interface IMarginClearinghouse {
     }
     function recoverExpiredBounty(
         address account,
-        uint64 orderId
+        uint64 orderId,
+        uint256 expectedFreeUsdc,
+        uint256 expectedPledgeUsdc,
+        uint64 expectedSourcePositionEpoch
     ) external returns (BountyRecovery memory);
-    function refundReservedBounty(
+    /// @notice Resolves one Book-authenticated bounty inside the Engine's terminal-curve mutation frame.
+    /// @dev Quarantine removes only the matching collectible eligibility and never unlocks custody.
+    function resolveCloseBounty(
         address account,
+        uint64 orderId,
         uint256 freeUsdc,
-        uint256 pledgeUsdc
+        uint256 pledgeUsdc,
+        uint64 sourcePositionEpoch,
+        bool quarantine
+    ) external returns (uint256 restoredPledgeUsdc);
+
+    /// @notice Refundable pledged-close backing already contained in the account action reserve.
+    function collectibleCloseEscrow(
+        address account
+    ) external view returns (uint96 amountUsdc, uint64 orderId, uint64 sourcePositionEpoch);
+    function collectibleCloseEscrowUsdc(
+        address account
+    ) external view returns (uint256);
+    /// @notice Removes successful close escrow eligibility without moving its reserved bounty custody.
+    function consumeCollectibleCloseEscrow(
+        address account,
+        uint64 orderId
     ) external;
     enum BountyReservationState {
         None,

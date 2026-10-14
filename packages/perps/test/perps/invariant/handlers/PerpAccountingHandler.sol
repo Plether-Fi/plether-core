@@ -873,6 +873,7 @@ contract PerpAccountingHandler is Test {
                     || selector == IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector
                     || selector == IOrderRouterErrors.OrderRouter__SideMismatch.selector
                     || selector == IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector
+                    || selector == IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue.selector
                     || selector == IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector
                     || selector == IMarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector
                     || selector == ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector

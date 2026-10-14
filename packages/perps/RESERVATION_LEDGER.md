@@ -19,7 +19,8 @@ They exclude exhausted records immediately. There is no `syncMarginQueue` operat
 
 ## Bounty records
 
-A record is keyed by `(BountyKind, id)` and contains its account and unpaid amount. Numeric ids may overlap across
+A record is keyed by `(BountyKind, id)` and contains its account, unpaid amount, lifecycle state, original free/pledge
+funding and source position epoch. Numeric ids may overlap across
 namespaces. `totalBountyReservationsUsdc(account)` sums all three namespaces and is updated with each creation or
 take. A transfer changes attribution without changing this total.
 
@@ -30,7 +31,10 @@ take. A transfer changes attribution without changing this total.
 | Protection trigger | Protection book | Take trigger record; move execution record to `Order(attemptId)` | Existing trigger credit; execution reserve stays locked |
 | Retained failed attempt | Protection book | Move `Order(attemptId)` back to `ProtectionExecution(id)` | No unlock, relock, or custody change |
 | Retry | Protection book | Move execution record to the fresh `Order(attemptId)` | No additional funding |
-| Order payout, refund, risk-off release, or forfeiture | Router | Take exact order record | Existing settlement path completes atomically |
+| Successful order payout | Router | Take authenticated order record | Pay/release full bounty; successful ordinary close consumes only its own collectible eligibility |
+| Ordinary close failure or expiry | Router through Engine | Take authenticated original split | Restore pledged part to source position, then pay/release free-funded part |
+| Liquidation order cleanup | Router through Engine | Take authenticated original split inside isolated liquidation frame | Restore pledged part before health/loss assessment; forfeit only free-funded part |
+| Risk-off open cleanup | Router | Take exact free-funded order record | Refund internally, no cleaner payment or carry checkpoint |
 | Protection refund or forfeiture | Protection book | Take remaining protection records | Existing settlement path completes atomically |
 
 Only the Router may create/take ordinary order records; only its immutable protection book may create/take
@@ -39,9 +43,15 @@ attempt relationship. Transfers reject cross-account attribution, live destinati
 reuse of any previous order record. A consumed protection-execution record may receive its own retry reserve again.
 
 Creation of a nonzero bounty requires existing reserved-settlement backing for the new amount plus all existing
-bounties and the VPI floor. An authorized zero-amount creation is a no-op: it creates no receipt or event and does not
-claim the id. A take returns the full classified amount and zeroes it; taking the same record again returns zero. The
-retained account prevents re-creation under an already used id. A known record cannot be taken for another account.
+bounties and the VPI floor. A configured zero-bounty ordinary close still creates an explicit active record so its
+funding identity can be authenticated. A take returns the full classified amount and zeroes it; exact lifecycle and
+owner checks prevent another payment or re-creation under a used id. A known record cannot be taken for another account.
+
+The lifecycle Book independently records the original funding split and source epoch. An ordinary close may use
+pledge only when its account queue is empty; later fully free-funded peers remain legal. One Clearinghouse collectible
+escrow mirror binds the pledge amount to that pending head and its live source epoch. Reservation decreases physical
+pledge and increases this mirror within the Engine's authenticated curve frame, preserving the marked cap while
+keeping the bounty locked. The mirror is not extra custody, borrow collateral or an additional protected-reserve floor.
 
 ## Atomicity and accounting
 
@@ -49,7 +59,15 @@ Classification is distinct from custody. `recordBountyReservation` classifies fu
 funding path. `takeBountyReservation` removes that classification before the existing payout, refund, or forfeiture.
 These trusted callers must complete both operations in one transaction. Neither record operation nor transfer
 checkpoints carry; the existing funding and settlement paths retain their carry timing. Any later failure rolls back
-records, lifecycle, and funds together.
+records, lifecycle, and funds together. Removing bounty classification alone does not remove collectible escrow.
+Pledged refund checkpoints old-basis carry without collecting it before restoring margin; success consumes eligibility
+inside the close mutation. Liquidation restores pledge before authoritative health/loss assessment. Restored solvency
+rolls back its inner frame, retaining the pledged order while preserving valid preceding outer risk-off refunds.
+
+Expired discrepancies must reconcile exact Book-backed funding and live source ownership before any refund. Stale
+pledge never becomes free settlement or a later generation's collateral. Otherwise identifiable backing remains
+locked in quarantine and only matching collectible eligibility is removed inside an Engine curve frame. Failure to
+authenticate that boundary fails closed; no administrator can guess or rewrite a disputed owner.
 
 Generic action-reserve consumption protects `VPI reserve + totalBountyReservationsUsdc(account)` using only local
 clearinghouse accounting. No Router queue scan or accounting callback supplies that floor. Engine and lens snapshots
@@ -68,12 +86,16 @@ New clearinghouse bounty entrypoints, getters, and `BountyReservationUpdated` ev
 Existing trader order/protection input and view shapes remain unchanged; margin queue views now contain only active
 records. Rebuild clients that consume the internal accounting interface and do not reuse old raw-storage decoders.
 
-Deploy a matching stack together. No live-state migration, deployment-boundary consolidation, pricing change,
-waterfall change, or new payout policy is included. See [Deployment](DEPLOYMENT.md) for cutover constraints.
+The source-bound close extension also changes internal Engine/Book interfaces and Clearinghouse/Book storage. Public
+request/receipt field layouts and their existing hash domains stay stable; `PaidAndRefunded=5` and
+`ForfeitedAndRefunded=6` append mixed dispositions. Its new failed-close payout policy and refundable-escrow marked cap
+are specified in [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy). Deploy a matching fresh
+stack together; there is no Router-only hot swap or live-state migration. See [Deployment](DEPLOYMENT.md) for cutover
+constraints.
 
 ## Stateful conservation test
 
-`test/perps/invariant/ProtectionBountyStateMachine.t.sol` maintains a separate ledger of funded, unpaid, paid,
+`test/perps/invariant/properties/ProtectionBountyStateMachine.t.sol` maintains a separate ledger of funded, unpaid, paid,
 refunded, and forfeited bounty value. Expected amounts come from fixed configured bounties and successful actions;
 protocol return values supply record identities. Every step compares all current and historical records, account
 totals, reserve backing, keeper credits, and protection/order/position lifecycle against that model.

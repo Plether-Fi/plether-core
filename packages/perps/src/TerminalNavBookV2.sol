@@ -429,8 +429,9 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
 
         uint256 lots = size / SIZE_QUANTUM;
         uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-        uint256 candidateCapUsdcAtoms = IMarginClearinghouse(engine.clearinghouse()).pnlPledgeUsdc(account)
-            + engine.traderClaimBalanceUsdc(account);
+        IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
+        uint256 candidateCapUsdcAtoms = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account)
+            + clearinghouse.collectibleCloseEscrowUsdc(account);
         if (
             lots > type(uint112).max || entryCostUsdcAtoms > type(uint144).max
                 || candidateCapUsdcAtoms > type(uint144).max

@@ -100,7 +100,8 @@ abstract contract PerpActionHandler is Test {
         if (isClose) {
             return selector == IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector
                 || selector == IOrderRouterErrors.OrderRouter__SideMismatch.selector
-                || selector == IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector;
+                || selector == IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector
+                || selector == IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue.selector;
         }
         return selector == IOrderRouterErrors.OrderRouter__DegradedMode.selector
             || selector == IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector
@@ -979,6 +980,8 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         uint64 orderId;
         address account;
         uint256 bountyUsdc;
+        uint256 freeFundedUsdc;
+        uint256 pledgeFundedUsdc;
         uint256 committedMarginUsdc;
     }
 
@@ -1319,11 +1322,15 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         uint256 count;
         while (cursor != 0 && cursor <= maxOrderId) {
             OrderRouterDebugLens.OrderRecord memory record = _orderRecord(cursor);
+            IMarginClearinghouse.BountyReservation memory funding =
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, cursor);
             assertEq(uint8(record.status), uint8(IOrderRouterAccounting.OrderStatus.Pending));
             observed.orders[count++] = PendingBatchOrder({
                 orderId: cursor,
                 account: record.core.account,
                 bountyUsdc: record.executionBountyUsdc,
+                freeFundedUsdc: funding.freeFundedUsdc,
+                pledgeFundedUsdc: funding.pledgeFundedUsdc,
                 committedMarginUsdc: clearinghouse.getOrderReservation(cursor).remainingAmountUsdc
             });
             cursor = record.nextGlobalOrderId;
@@ -1402,12 +1409,24 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         } else if (receipt.reason == OrderV3Types.TerminalReason.RiskOff) {
             assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RefundedToAccount));
             assertEq(receipt.bountyRecipient, pending.account);
+        } else if (receipt.status == OrderV3Types.LifecycleStatus.Failed && pending.pledgeFundedUsdc != 0) {
+            OrderV3Types.BountyDisposition disposition = pending.freeFundedUsdc == 0
+                ? OrderV3Types.BountyDisposition.RefundedToAccount
+                : OrderV3Types.BountyDisposition.PaidAndRefunded;
+            assertEq(uint8(receipt.bountyDisposition), uint8(disposition));
+            assertEq(receipt.bountyRecipient, pending.freeFundedUsdc == 0 ? pending.account : address(this));
+            keeperCreditUsdc = pending.freeFundedUsdc;
         } else {
             // This handler creates ordinary orders. It never creates protection attempts or liquidates within a batch.
             assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
             assertEq(receipt.bountyRecipient, address(this));
             keeperCreditUsdc = pending.bountyUsdc;
         }
+        OrderV3Types.OrderReceipt memory fullReceipt = _verifiedReceipt(router.lifecycleBook(), pending.orderId);
+        assertEq(fullReceipt.bounty.bountyPaidUsdc, keeperCreditUsdc);
+        assertEq(fullReceipt.bounty.bountyRefundedUsdc, pending.bountyUsdc - keeperCreditUsdc);
+        assertEq(fullReceipt.bounty.bountyRetainedUsdc, 0);
+        assertEq(fullReceipt.bounty.bountyForfeitedUsdc, 0);
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, pending.orderId);
         assertEq(bounty.amountUsdc, 0, "Terminal order cannot retain a bounty reservation");
@@ -1547,6 +1566,36 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         assertEq(handler.ghost_successfulExecutions(), 1);
         handler.processBatch(1, 1e8);
         assertGt(handler.ghost_batchExecutedOrders(), 0);
+        _assertAllInvariants();
+    }
+
+    function test_AdversarialHandlerClassifiesPledgeCloseBehindPendingOrder() public {
+        handler.openPosition(0, 0, 250, 5000e6);
+        handler.openPosition(1, 0, 250, 5000e6);
+        handler.queueBadClose(1);
+        handler.openPosition(0, 0, 250, 4950e6);
+
+        address actor = handler.actors(0);
+        uint256 free = clearinghouse.getFreeBuyingPowerUsdc(actor);
+        assertGt(free, 0);
+        vm.prank(actor);
+        clearinghouse.withdraw(actor, free);
+        assertEq(clearinghouse.getFreeBuyingPowerUsdc(actor), 0);
+
+        uint64 nextCommitIdBefore = router.nextCommitId();
+        uint256 accountPendingBefore = router.pendingOrderCounts(actor);
+        uint256 bountyBefore = clearinghouse.totalBountyReservationsUsdc(actor);
+        uint256 expectedRejectionsBefore = handler.ghost_expectedCommitRejections();
+        handler.queueBadClose(0);
+
+        assertEq(handler.ghost_expectedCommitRejections(), expectedRejectionsBefore + 1);
+        assertEq(
+            handler.ghost_rejectionsBySelector(IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue.selector),
+            1
+        );
+        assertEq(router.nextCommitId(), nextCommitIdBefore);
+        assertEq(router.pendingOrderCounts(actor), accountPendingBefore);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(actor), bountyBefore);
         _assertAllInvariants();
     }
 

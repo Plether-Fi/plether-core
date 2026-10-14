@@ -51,6 +51,7 @@ contract PendingOrderReferenceLedgerTest is Test {
         uint64 id = ledger.commit(0, 2, request, 50_000, 150_000, 100, 10);
         assertEq(ledger.order(id).sourceGeneration, 2);
         assertEq(ledger.takeBounty(id), 200_000);
+        assertEq(ledger.resolveCollectiblePledge(id, 2), 150_000);
         ledger.finalize(id, OrderV3Types.LifecycleStatus.Failed, OrderV3Types.TerminalReason.Expired);
         assertEq(ledger.head(), 0);
         // Later account generations and changed market bounty inputs cannot create a second reservation.
@@ -87,6 +88,32 @@ contract PendingOrderReferenceLedgerTest is Test {
         assertEq(ledger.queuedLots(0, 100, 1), 120, "Cutoff removes the first twenty-lot increase");
         assertEq(ledger.queuedLots(0, 100, 2), 120, "A close below the cutoff remains valid queued exposure");
         assertEq(ledger.pendingCloseLots(0), 60, "Stored close count includes every still-pending close intent");
+    }
+
+    function test_PledgedHeadOwnsOneGenerationAndLaterFreeOrdersRemainLegal() public {
+        uint64 head = ledger.commit(0, 2, _request(1, CfdTypes.Side.LONG, 20, 0, true), 50_000, 150_000, 100, 10);
+        uint64 later = ledger.commit(0, 2, _request(2, CfdTypes.Side.LONG, 20, 100e6, false), 200_000, 0, 100, 10);
+        OrderV3Types.OrderRequest memory trailing = _request(3, CfdTypes.Side.LONG, 20, 0, true);
+        vm.expectRevert(PendingOrderReferenceLedger.PledgeRequiresEmptyQueue.selector);
+        ledger.commit(0, 2, trailing, 199_999, 1, 100, 10);
+        (uint256 amount, uint64 owner, uint256 epoch) = ledger.collectibleEscrow(0);
+        assertEq(amount, 150_000);
+        assertEq(owner, head);
+        assertEq(epoch, 2);
+        assertEq(ledger.takeBounty(head), 200_000);
+        (amount,,) = ledger.collectibleEscrow(0);
+        assertEq(amount, 150_000, "taking bounty classification cannot silently drop LP backing");
+        vm.expectRevert(PendingOrderReferenceLedger.CollectiblePledgeStillReserved.selector);
+        ledger.finalize(head, OrderV3Types.LifecycleStatus.Failed, OrderV3Types.TerminalReason.Expired);
+        vm.expectRevert(PendingOrderReferenceLedger.SourceGenerationMismatch.selector);
+        ledger.resolveCollectiblePledge(head, 3);
+        assertEq(ledger.resolveCollectiblePledge(head, 2), 150_000);
+        assertEq(ledger.resolveCollectiblePledge(head, 2), 0, "resolution cannot duplicate pledge");
+        ledger.finalize(head, OrderV3Types.LifecycleStatus.Failed, OrderV3Types.TerminalReason.Expired);
+        assertEq(ledger.head(), later);
+        assertEq(ledger.count(0), 1);
+        (amount, owner, epoch) = ledger.collectibleEscrow(0);
+        assertEq(amount + owner + epoch, 0);
     }
 
     function test_CapacityIsFivePerActorAndExactReplayStillWorksAtCapacity() public {

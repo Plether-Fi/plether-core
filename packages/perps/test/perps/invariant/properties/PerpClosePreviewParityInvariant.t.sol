@@ -211,26 +211,33 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
                 if (fractions[f] == 0 || fractions[f] >= size) {
                     continue;
                 }
-                ICfdEngineTypes.ClosePreview memory preview =
-                    engineLens.previewClose(account, fractions[f], oraclePrice);
-                assertTrue(
-                    preview.invalidReason != CfdTypes.CloseInvalidReason.DustPosition,
-                    "Legacy DustPosition is retained in the ABI but is not a current close policy"
-                );
-                if (!preview.valid) {
-                    continue;
-                }
-                ResidualPriceRisk memory risk = _independentResidualPriceRisk(
-                    account, fractions[f], preview.remainingMargin, preview.traderClaimBalanceUsdc, oraclePrice
-                );
-                assertEq(preview.remainingSize, risk.size, "Partial preview must retain the unclosed whole lots");
-                assertGt(
-                    risk.equityUsdc,
-                    int256(risk.requiredUsdc),
-                    "Residual pledge plus same-account claims and exact price PnL must exceed required margin"
-                );
+                _assertValidPartialCloseResidualHealth(account, fractions[f], oraclePrice);
             }
         }
+    }
+
+    function _assertValidPartialCloseResidualHealth(
+        address account,
+        uint256 closeSize,
+        uint256 oraclePrice
+    ) internal view {
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, closeSize, oraclePrice);
+        assertTrue(
+            preview.invalidReason != CfdTypes.CloseInvalidReason.DustPosition,
+            "Legacy DustPosition is retained in the ABI but is not a current close policy"
+        );
+        if (!preview.valid) {
+            return;
+        }
+        ResidualPriceRisk memory risk = _independentResidualPriceRisk(
+            account, closeSize, preview.remainingMargin, preview.traderClaimBalanceUsdc, oraclePrice
+        );
+        assertEq(preview.remainingSize, risk.size, "Partial preview must retain the unclosed whole lots");
+        assertGt(
+            risk.equityUsdc,
+            int256(risk.requiredUsdc),
+            "Residual pledge plus same-account claims and exact price PnL must exceed required margin"
+        );
     }
 
     /// @dev Independent integer specification: preserve basis dust, cap the mark, and floor the active requirement.

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {RecordedOrderReceipts} from "../../../utils/RecordedOrderReceipts.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -15,9 +16,8 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
-import {Test} from "forge-std/Test.sol";
 
-contract PerpValueConservationHandler is Test {
+contract PerpValueConservationHandler is RecordedOrderReceipts {
 
     error UnexpectedCloseResult(OrderV3Types.ExecutionResult result);
 
@@ -94,6 +94,7 @@ contract PerpValueConservationHandler is Test {
         // The two equal basket weights independently floor each half of an odd mock price.
         uint256 targetPrice = (executionPrice / 2) * 2 - (expectSlippage ? 1 : 0);
 
+        assertEq(clearinghouse.getFreeBuyingPowerUsdc(FULL_CLOSE_TRADER), 0, "fixture bounty is entirely pledge funded");
         vm.prank(FULL_CLOSE_TRADER);
         uint64 orderId = LegacyOrderRouterHarness(payable(address(router)))
             .commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, targetPrice, true);
@@ -101,6 +102,7 @@ contract PerpValueConservationHandler is Test {
         IMarginClearinghouse.BountyReservation memory reservation =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
         bytes[] memory priceData = _mockPythUpdateData(executionPrice);
+        _startRecordingLogs();
         vm.prank(FAILED_CLOSE_KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, priceData);
         if (
@@ -113,13 +115,8 @@ contract PerpValueConservationHandler is Test {
         ) {
             revert UnexpectedCloseResult(result);
         }
-        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(FULL_CLOSE_TRADER);
         keeperGain = clearinghouse.balanceUsdc(FAILED_CLOSE_KEEPER) - keeperSettlementBefore;
-        // Commitment may reclassify pledge into the authenticated bounty. The deliberate slippage rejection may
-        // pay that bounty, but cannot consume any additional pledge. All other fixture calls must succeed.
-        violation = keeperGain > reservation.amountUsdc || reservation.account != FULL_CLOSE_TRADER
-            || reservation.state != IMarginClearinghouse.BountyReservationState.Active
-            || (expectSlippage ? sizeAfter != 100_000e18 || marginAfter != marginAfterCommit : sizeAfter != 0);
+        violation = _closeBountyViolation(orderId, reservation, marginAfterCommit, expectSlippage, keeperGain);
 
         vm.revertToState(snapshot);
         if (expectSlippage) {
@@ -131,6 +128,34 @@ contract PerpValueConservationHandler is Test {
             failedCloseExtractedMargin = true;
             failedCloseKeeperGainUsdc = keeperGain;
         }
+    }
+
+    function _closeBountyViolation(
+        uint64 orderId,
+        IMarginClearinghouse.BountyReservation memory reservation,
+        uint256 marginAfterCommit,
+        bool failed,
+        uint256 keeperGain
+    ) internal returns (bool) {
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(FULL_CLOSE_TRADER);
+        OrderV3Types.OrderReceipt memory receipt = _verifiedReceipt(router.lifecycleBook(), orderId);
+        uint256 expectedPaid = failed ? 0 : reservation.amountUsdc;
+        uint256 expectedRefunded = failed ? reservation.amountUsdc : 0;
+        OrderV3Types.BountyDisposition expectedDisposition =
+            failed ? OrderV3Types.BountyDisposition.RefundedToAccount : OrderV3Types.BountyDisposition.Paid;
+        // This fixture submits no free collateral beyond the original open's margin. A failed close must return
+        // its entire pledge-funded bounty to the same position; a successful close still pays the full bounty.
+        return reservation.account != FULL_CLOSE_TRADER
+            || reservation.state != IMarginClearinghouse.BountyReservationState.Active
+            || reservation.freeFundedUsdc != 0 || reservation.pledgeFundedUsdc != reservation.amountUsdc
+            || keeperGain != expectedPaid || receipt.bountyDisposition != expectedDisposition
+            || receipt.bounty.bountyPaidUsdc != expectedPaid || receipt.bounty.bountyRefundedUsdc != expectedRefunded
+            || receipt.bounty.bountyForfeitedUsdc != 0 || receipt.bounty.bountyRetainedUsdc != 0
+            || receipt.bountyRecipient != (failed ? FULL_CLOSE_TRADER : FAILED_CLOSE_KEEPER)
+            || clearinghouse.collectibleCloseEscrowUsdc(FULL_CLOSE_TRADER) != 0
+            || (failed
+                    ? sizeAfter != 100_000e18 || marginAfter != marginAfterCommit + reservation.amountUsdc
+                    : sizeAfter != 0);
     }
 
     function neutralMtmCannotCreateLpDepositWithdrawProfit(

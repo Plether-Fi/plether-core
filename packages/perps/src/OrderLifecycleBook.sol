@@ -4,8 +4,10 @@ pragma solidity 0.8.35;
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
+import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 
 /// @dev Minimal Router surface used to keep execution-config hashing outside size-constrained Router bytecode.
@@ -98,6 +100,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         uint256 carryOutstandingUsdc;
         uint96 bountyFromFreeUsdc;
         uint96 bountyFromPledgeUsdc;
+        uint64 sourcePositionEpoch;
         uint256 settlementAfterUsdc;
         uint256 freeSettlementAfterUsdc;
     }
@@ -320,7 +323,8 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
 
     function recordCommitment(
         uint64 orderId,
-        CfdEnginePlanTypes.CloseCommitment calldata effects
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        uint64 sourceEpoch
     ) external onlyRouter {
         StoredPendingIntent storage pending = _pendingIntents[orderId];
         if (pending.account == address(0)) {
@@ -340,6 +344,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         if (
             effects.settlementBeforeUsdc != effects.settlementAfterUsdc + effects.carryCollectedUsdc
                 || effects.bountyFromFreeUsdc + effects.bountyFromPledgeUsdc != pending.executionBountyUsdc
+                || (effects.bountyFromPledgeUsdc == 0 ? sourceEpoch != 0 : sourceEpoch == 0)
         ) {
             revert OrderLifecycleBook__InvalidCommitmentEffects();
         }
@@ -348,9 +353,56 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
             carryOutstandingUsdc: effects.carryOutstandingUsdc,
             bountyFromFreeUsdc: SafeCast.toUint96(effects.bountyFromFreeUsdc),
             bountyFromPledgeUsdc: SafeCast.toUint96(effects.bountyFromPledgeUsdc),
+            sourcePositionEpoch: sourceEpoch,
             settlementAfterUsdc: effects.settlementAfterUsdc,
             freeSettlementAfterUsdc: effects.freeSettlementAfterUsdc
         });
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function sourcePositionEpoch(
+        uint64 orderId
+    ) external view override returns (uint64) {
+        return _pendingIntents[orderId].commitment.sourcePositionEpoch;
+    }
+
+    /// @inheritdoc IOrderLifecycleBook
+    function validateBountyFunding(
+        uint64 orderId
+    ) external view override {
+        StoredPendingIntent storage pending = _pendingIntents[orderId];
+        if (pending.account == address(0)) {
+            revert OrderLifecycleBook__OrderNotPending(orderId);
+        }
+        IMarginClearinghouse clearinghouse = IMarginClearinghouse(CLEARINGHOUSE);
+        clearinghouse.validateBountyReservation(
+            pending.account, IMarginClearinghouse.BountyKind.Order, orderId, pending.executionBountyUsdc
+        );
+        IMarginClearinghouse.BountyReservation memory reservation =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
+        uint256 freeFunded =
+            _protectionAttempts[orderId] ? pending.executionBountyUsdc : pending.commitment.bountyFromFreeUsdc;
+        uint256 pledgeFunded = pending.commitment.bountyFromPledgeUsdc;
+        uint64 sourceEpoch = pending.commitment.sourcePositionEpoch;
+        if (
+            reservation.freeFundedUsdc != freeFunded || reservation.pledgeFundedUsdc != pledgeFunded
+                || reservation.sourcePositionEpoch != sourceEpoch
+        ) {
+            revert OrderLifecycleBook__BountyFundingMismatch(orderId);
+        }
+        (uint96 escrowAmount, uint64 escrowOrderId, uint64 escrowEpoch) =
+            clearinghouse.collectibleCloseEscrow(pending.account);
+        if (pledgeFunded != 0) {
+            (uint256 size,,,,,,) = ICfdEngineCore(ENGINE).positions(pending.account);
+            if (
+                size == 0 || ICfdEngineCore(ENGINE).positionEpoch(pending.account) != sourceEpoch
+                    || escrowAmount != pledgeFunded || escrowOrderId != orderId || escrowEpoch != sourceEpoch
+            ) {
+                revert OrderLifecycleBook__BountyFundingMismatch(orderId);
+            }
+        } else if (escrowOrderId == orderId && escrowAmount != 0) {
+            revert OrderLifecycleBook__BountyFundingMismatch(orderId);
+        }
     }
 
     /// @inheritdoc IOrderLifecycleBook
@@ -383,6 +435,12 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
         if (pending.account == address(0)) {
             revert OrderLifecycleBook__OrderNotPending(receipt.orderId);
         }
+        bool reservationMismatch = receipt.reason == OrderV3Types.TerminalReason.ExpiredReservationMismatch;
+        // Discrepancy recovery authenticates the independent committed funding, even if the entitlement word is
+        // corrupt. The receipt retains that reported entitlement as evidence; arbitrary partial refunds stay invalid.
+        uint256 expectedResolvedBounty = reservationMismatch && !_protectionAttempts[receipt.orderId]
+            ? uint256(pending.commitment.bountyFromFreeUsdc) + pending.commitment.bountyFromPledgeUsdc
+            : pending.executionBountyUsdc;
         if (
             receipt.account != pending.account || receipt.clientOrderId != pending.clientOrderId
                 || receipt.intentHash != pending.intentHash
@@ -390,8 +448,7 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
                 || keccak256(abi.encode(receipt.commitment))
                     != keccak256(abi.encode(_expandCommitment(pending.commitment)))
                 || receipt.bounty.bountyEntitlementUsdc != pending.executionBountyUsdc
-                || (receipt.reason != OrderV3Types.TerminalReason.ExpiredReservationMismatch
-                    && receipt.bountyUsdc != pending.executionBountyUsdc)
+                || (receipt.bountyUsdc != expectedResolvedBounty && !(reservationMismatch && receipt.bountyUsdc == 0))
                 || keccak256(abi.encode(receipt.timing)) != keccak256(abi.encode(pending.timing))
         ) {
             revert OrderLifecycleBook__ReceiptIdentityMismatch(receipt.orderId);
@@ -667,60 +724,53 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
     function _validateBountyDisposition(
         OrderV3Types.OrderReceipt calldata receipt
     ) private view {
-        OrderV3Types.BountyDisposition disposition = receipt.bountyDisposition;
-        if (
-            (disposition == OrderV3Types.BountyDisposition.Paid && receipt.bounty.bountyPaidUsdc != receipt.bountyUsdc)
-                || (disposition == OrderV3Types.BountyDisposition.RefundedToAccount
-                    && receipt.bounty.bountyRefundedUsdc != receipt.bountyUsdc)
-                || (disposition == OrderV3Types.BountyDisposition.Forfeited
-                    && receipt.bounty.bountyForfeitedUsdc != receipt.bountyUsdc)
-                || (disposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry
-                    && receipt.bounty.bountyRetainedUsdc != receipt.bountyUsdc)
-        ) {
-            revert OrderLifecycleBook__InvalidTerminalOutcome();
-        }
-        if (receipt.bountyUsdc == 0) {
-            if (
-                (receipt.bountyDisposition != OrderV3Types.BountyDisposition.None
-                        && !(receipt.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry
-                            && _protectionAttempts[receipt.orderId])) || receipt.bountyRecipient != address(0)
-            ) {
-                revert OrderLifecycleBook__InvalidTerminalOutcome();
-            }
-            return;
-        }
+        uint256 paid;
+        uint256 refunded;
+        uint256 retained;
+        uint256 forfeited;
+        address recipient;
+        OrderV3Types.BountyDisposition disposition;
+        uint256 bounty = receipt.bountyUsdc;
+        uint256 pledge = _pendingIntents[receipt.orderId].commitment.bountyFromPledgeUsdc;
         if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
             if (
                 !_protectionAttempts[receipt.orderId] || receipt.status != OrderV3Types.LifecycleStatus.Failed
                     || receipt.reason == OrderV3Types.TerminalReason.RiskOff
                     || receipt.reason == OrderV3Types.TerminalReason.AccountLiquidated
-                    || receipt.bountyRecipient != address(0)
             ) {
                 revert OrderLifecycleBook__InvalidTerminalOutcome();
             }
-            return;
-        }
-        if (receipt.reason == OrderV3Types.TerminalReason.RiskOff) {
-            if (
-                receipt.bountyDisposition != OrderV3Types.BountyDisposition.RefundedToAccount
-                    || receipt.bountyRecipient != receipt.account
-            ) {
-                revert OrderLifecycleBook__InvalidTerminalOutcome();
+            retained = bounty;
+            disposition = OrderV3Types.BountyDisposition.RetainedForProtectionRetry;
+        } else if (bounty != 0) {
+            if (receipt.reason == OrderV3Types.TerminalReason.RiskOff) {
+                refunded = bounty;
+                recipient = receipt.account;
+                disposition = OrderV3Types.BountyDisposition.RefundedToAccount;
+            } else if (receipt.reason == OrderV3Types.TerminalReason.AccountLiquidated) {
+                refunded = pledge;
+                forfeited = bounty - pledge;
+                recipient = forfeited == 0 ? receipt.account : ICfdEngineCore(ENGINE).protocolTreasury();
+                disposition = pledge == 0
+                    ? OrderV3Types.BountyDisposition.Forfeited
+                    : forfeited == 0
+                        ? OrderV3Types.BountyDisposition.RefundedToAccount
+                        : OrderV3Types.BountyDisposition.ForfeitedAndRefunded;
+            } else {
+                refunded = receipt.status == OrderV3Types.LifecycleStatus.Failed ? pledge : 0;
+                paid = bounty - refunded;
+                recipient = paid == 0 ? receipt.account : receipt.executor;
+                disposition = refunded == 0
+                    ? OrderV3Types.BountyDisposition.Paid
+                    : paid == 0
+                        ? OrderV3Types.BountyDisposition.RefundedToAccount
+                        : OrderV3Types.BountyDisposition.PaidAndRefunded;
             }
-            return;
-        }
-        if (receipt.reason == OrderV3Types.TerminalReason.AccountLiquidated) {
-            if (
-                receipt.bountyDisposition != OrderV3Types.BountyDisposition.Forfeited
-                    || receipt.bountyRecipient != IOrderLifecycleEngineConfigView(ENGINE).protocolTreasury()
-            ) {
-                revert OrderLifecycleBook__InvalidTerminalOutcome();
-            }
-            return;
         }
         if (
-            receipt.bountyDisposition != OrderV3Types.BountyDisposition.Paid
-                || receipt.bountyRecipient != receipt.executor
+            receipt.bountyDisposition != disposition || receipt.bountyRecipient != recipient
+                || receipt.bounty.bountyPaidUsdc != paid || receipt.bounty.bountyRefundedUsdc != refunded
+                || receipt.bounty.bountyRetainedUsdc != retained || receipt.bounty.bountyForfeitedUsdc != forfeited
         ) {
             revert OrderLifecycleBook__InvalidTerminalOutcome();
         }

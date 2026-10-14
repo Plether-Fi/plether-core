@@ -114,8 +114,12 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.bountyUsdc = settled.bountyUsdc;
         receipt.bountyDisposition = settled.bountyDisposition;
         receipt.bountyRecipient = settled.bountyRecipient;
-        if (settled.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
-            receipt.bounty.bountyPaidUsdc = settled.bountyUsdc;
+        receipt.bounty.bountyRefundedUsdc = settled.bountyRefundedUsdc;
+        if (
+            settled.bountyDisposition == OrderV3Types.BountyDisposition.Paid
+                || settled.bountyDisposition == OrderV3Types.BountyDisposition.PaidAndRefunded
+        ) {
+            receipt.bounty.bountyPaidUsdc = settled.bountyUsdc - settled.bountyRefundedUsdc;
         } else if (settled.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
             receipt.bounty.bountyRetainedUsdc = settled.bountyUsdc;
         }
@@ -169,11 +173,8 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.bountyRecipient = input.bountyRecipient;
         receipt.bountyDisposition = input.bountyDisposition;
         receipt.failure = input.failure;
-        if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
-            receipt.bounty.bountyRefundedUsdc = input.bountyUsdc;
-        } else {
-            receipt.bounty.bountyForfeitedUsdc = input.bountyUsdc;
-        }
+        receipt.bounty.bountyRefundedUsdc = input.bountyRefundedUsdc;
+        receipt.bounty.bountyForfeitedUsdc = input.bountyUsdc - input.bountyRefundedUsdc;
         _state(host, receipt, true);
         _state(host, receipt, false);
         // The lifecycle book independently checks reason, evidence, recipient, entitlement and disposition.
@@ -192,23 +193,27 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         if (!failureIsEmpty) {
             revert OrderRouterExecutionSidecar__InvalidSettledReason();
         }
-        if (input.bountyUsdc == 0) {
-            if (input.bountyDisposition != OrderV3Types.BountyDisposition.None || input.bountyRecipient != address(0)) {
-                revert OrderRouterExecutionSidecar__InvalidSettledReason();
-            }
-        } else if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
-            if (
-                input.bountyDisposition != OrderV3Types.BountyDisposition.RefundedToAccount
-                    || input.bountyRecipient != pending.account
-            ) {
-                revert OrderRouterExecutionSidecar__InvalidSettledReason();
-            }
-        } else if (
-            input.bountyDisposition != OrderV3Types.BountyDisposition.Forfeited
-                || input.bountyRecipient != ICfdEngineCore(host.engine()).protocolTreasury()
+        uint256 refund = input.reason == OrderV3Types.TerminalReason.RiskOff
+            ? input.bountyUsdc
+            : pending.commitment.bountyFromPledgeUsdc;
+        OrderV3Types.BountyDisposition disposition;
+        address recipient;
+        if (input.bountyUsdc != 0) {
+            uint256 forfeited = input.bountyUsdc - refund;
+            recipient = forfeited == 0 ? pending.account : ICfdEngineCore(host.engine()).protocolTreasury();
+            disposition = refund == 0
+                ? OrderV3Types.BountyDisposition.Forfeited
+                : forfeited == 0
+                    ? OrderV3Types.BountyDisposition.RefundedToAccount
+                    : OrderV3Types.BountyDisposition.ForfeitedAndRefunded;
+        }
+        if (
+            input.bountyRefundedUsdc != refund || input.bountyDisposition != disposition
+                || input.bountyRecipient != recipient
         ) {
             revert OrderRouterExecutionSidecar__InvalidSettledReason();
         }
+
         if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
             if (
                 input.executionMode != OrderV3Types.ExecutionMode.None

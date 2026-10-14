@@ -158,6 +158,25 @@ bounded by each handler's actor set and input range.
   order margins/bounties and source generations, treasury/keeper entitlements, tranche principal, Junior shares and
   all request/claim escrows. The existing reference
   waterfall priority arithmetic is extended with independently summed terminal account PnL before LP pricing.
+  Source-bound close bounties add `collectiblePledge` independently of the remaining bounty classification. Original
+  submitted funding and source generation determine escrow amount and ownership; removing a reservation classification
+  alone cannot erase collectible backing. A pledged commitment requires an empty account queue; later free-funded
+  peers remain legal. The model prices LP NAV with `M + C + E`, restores `P` before testing liquidation health, and
+  authenticates terminal paid/refunded/forfeited components against its own input history. `assessWithoutCollection`
+  checkpoints old-basis carry before refund, preserving arrears and changing only subsequent borrow basis. The normal
+  comparator checks the Clearinghouse escrow tuple and independent Book epoch; it never resynchronizes expectations
+  from either production record.
+  Mandatory prelude counters are `mixedFailureRefunds`, `rejectedPledgeOverlap`, `freeOrdersBehindPledgedHead`,
+  `restoredSolventLiquidations`, `pledgeLiquidationRefunds`, and `lpEpochsWithCollectibleEscrow`. Generated
+  `commitPledgeFundedClose` actions retain escrow across later economic actions. A generated partial pledge-funded close
+  returns before changing mark, carry, custody or model state when fewer than two lots remain, because halving one lot
+  would submit zero size. The deterministic 85→43→1-lot replay in `PerpMixedAccountingInvariant.t.sol` checks this
+  generator boundary and normal model preservation; it does not classify Router's zero-size rejection as an accounting
+  defect. Focused `PerpMixedPendingOrders`
+  regressions cover mixed failure with a surviving free-funded peer, restored-solvent liquidation, LP settlement across
+  reservation/refund, and a lost-escrow fault detected by the normal comparator. The domain remains four traders, two
+  Junior LPs, fixed Senior owners, five orders per account and twenty globally. Its external keeper is flat; this model
+  does not generate corrupt/quarantined records or carry-bearing keeper accounts.
   Deterministic preludes require both VPI signs, deferred claims, a zero-pledge claim-supported partial close,
   retained arrears, rejected withdrawal, held/retried settlement, Junior cancellation/payout and two same-address
   liquidations followed by legal residual withdrawals. Mock-token cash shocks are explicit external inflows/outflows

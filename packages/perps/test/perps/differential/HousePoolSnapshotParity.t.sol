@@ -337,3 +337,44 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
     }
 
 }
+
+contract HousePoolSeededClaimReleaseSnapshotParityTest is HousePoolAccountingParityBase {
+
+    using stdStorage for StdStorage;
+
+    function _initialJuniorDeposit() internal pure override returns (uint256) {
+        return 0;
+    }
+
+    /// @dev A released trader-claim reserve is ordinary distributable equity, not part of the pending revenue bucket.
+    ///      Its seeded-owner restoration must allow the subsequent pending revenue to follow the same claimant path.
+    function test_ClaimReleaseRestoresSeededSeniorBeforePendingRevenueSettles() public {
+        uint256 seededAssets = pool.totalAssets();
+        assertEq(seededAssets, 2000e6, "fixture should begin with only the two seed positions");
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 0, "claims should wipe stored LP principal");
+
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 10e6);
+        assertEq(pool.pendingTradingRevenueUsdc(), 10e6, "revenue should remain queued until reconcile");
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets - 20e6);
+
+        _assertPendingAccounting(ExpectedAccounting(30e6, 0, 1000e6, 0, 0, 0));
+        assertEq(seniorVault.totalAssets(), 30e6, "released claim and revenue should both belong to seeded senior");
+    }
+
+    function test_ClaimReleaseRestoresSeededJuniorBeforePendingRevenueSettles() public {
+        uint256 seededAssets = pool.totalAssets();
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 10e6);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(seededAssets - 1020e6);
+
+        _assertPendingAccounting(ExpectedAccounting(1000e6, 30e6, 1000e6, 0, 0, 0));
+        assertEq(juniorVault.totalAssets(), 30e6, "released claim and revenue should both belong to seeded junior");
+    }
+
+}

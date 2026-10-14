@@ -4,7 +4,7 @@ This change is for a fresh deployment. It is not an upgrade or recovery of the e
 
 ## Commitment and execution
 
-`CloseCommitmentLib.project` is the shared commitment calculator used by the engine planner and prospective preview. It validates even a zero bounty, checkpoints carry, and reserves the snapshotted bounty from free settlement followed by eligible position pledge. Reservation changes classification, not custody. It immediately changes side margin and borrow base. Partial commitments require fully collected carry and strict maintenance/FAD health of the entire exposed position after reservation. Claims, unrealized gains, liquidation reserve, VPI backing, and other orders' reservations do not fund the bounty.
+`CloseCommitmentLib.project` is the shared commitment calculator used by the engine planner and prospective preview. It validates even a zero bounty, checkpoints carry, and reserves the snapshotted bounty from free settlement followed by eligible position pledge. Reservation changes classification, not custody. It immediately changes side margin and borrow base. The pledge-funded portion remains in an authenticated, order-bound collectible escrow mirror, so reservation alone does not reduce LP marked backing. Partial commitments require fully collected carry and strict maintenance/FAD health of the entire exposed position after reservation. Claims, unrealized gains, liquidation reserve, VPI backing, and other orders' reservations do not fund the bounty.
 
 Execution preserves price-PnL collection, gain withholding, negative-VPI clawback, spendable action reserve, and free-settlement priority. For full closes, liquidation-reserve surplus is released into free settlement before pledge attribution. Terminal-safe pledge release then funds charges before terminal-only committed-order margin. The clearinghouse verifies the released-pledge attribution against its current buckets. Receipt fields satisfy:
 
@@ -22,33 +22,52 @@ The router owner may set `RouterConfig.closeOrderExecutionBountyUsdc` to zero th
 
 Exact client-ID replay is idempotent. Ordinary queued-exposure, protection, deposit and margin-action checks remain in force. Global execution FIFO, oracle, delay, authorization, configuration, and execution bounds remain binding.
 
+A close may use pledge only when the account has no pending orders. If its actual post-carry funding needs even one
+pledge atom while an earlier account order exists, `PledgeBountyRequiresEmptyQueue` reverts the complete commitment,
+including carry collection and identifiers. Later orders remain supported when their bounty is entirely free-funded.
+No peer cancellation or reordering occurs. This binds refundable pledge to the position generation that supplied it.
+
+For original bounty `B = F + P`, ordinary failure or expiry restores `P` to that position and pays only `F` to the
+executor. Self-execution releases `F` to free settlement after restoring `P`; it does not transfer custody. The split
+is the original funding amount, not a percentage or later balance calculation. Successful execution pays/releases all
+`B`, consuming collectible escrow eligibility inside the successful close mutation. That success-contingent cost is
+recognized once at execution. Successful self-execution retains its full entitlement, including a possible bounded
+residual after an underwater close.
+
+Liquidation restores `P` before the existing Engine health and loss assessment and forfeits only `F` to treasury.
+If restoration makes the position healthy, its isolated liquidation frame rolls back: the pledged order stays pending
+and neither part is paid. Valid preceding risk-off refunds remain effective. On success, liquidation clears only the
+liquidated account; other accounts keep their relative queue order. A returned pledge may immediately fund liquidation
+loss and is not a new withdrawable entitlement.
+
 PendingOpen protection can be explicitly cancelled without cancelling its parent order. Triggered protection executes its linked close. Latched protection retries its original reservation, including an explicitly active zero reservation. Protection bounty ownership remains associated with that protection.
 
 ## Reservation authority and recovery
 
-The clearinghouse owns backing and provenance; the lifecycle book owns intent and frozen entitlement. Bounty records have explicit None/Active/Settled/Moved/Quarantined state, account association through authenticated namespaces and IDs, free/pledge funding, and source position epoch. `positionEpoch` increments only on flat-to-open transitions.
+The clearinghouse owns backing, provenance and the single source-bound collectible escrow mirror; the lifecycle book independently records original funding and source epoch beside intent and frozen entitlement. Bounty records have explicit None/Active/Settled/Moved/Quarantined state, account association through authenticated namespaces and IDs, free/pledge funding, and source position epoch. `positionEpoch` increments only on flat-to-open transitions.
 
 Execution validates reservation identity, active state, entitlement, provenance totals, protected-reserve floor, and custody. A mismatch is retryable and leaves the whole item unchanged. `expireOrder(orderId)` is permissionless after `block.timestamp > orderTiming(orderId).executionDeadline`, requires no oracle update, and can unlink an expired later entry without executing it ahead of FIFO. The submission deadline `submitBy` does not shorten a committed order's execution window.
 
 | Expired record | Disposition |
 | --- | --- |
-| Consistent | Existing expiry/protection policy |
-| Authenticated, fully backed, entitlement differs | No keeper payment; refund actual backing by provenance |
+| Consistent ordinary close | Pay original free-funded part; restore pledged part to its original live position |
+| Consistent protection attempt | Existing protection retention/cleanup policy |
+| Authenticated, fully backed and exactly reconcilable against Book provenance | No keeper payment; refund free funding to free settlement and pledged funding to the original live position |
 | Missing or settled | No movement |
 | Wrong owner | Leave the foreign record untouched |
 | Invalid provenance, custody, or aggregate accounting | Quarantine identifiable backing, preserve disputed classifications, emit `LedgerInvariantViolation` |
 
-Mismatch cleanup emits `ExpiredReservationMismatch`. Its receipt reports the actual refund and discrepancy; the difference from entitlement is not a receivable. Same-live-epoch pledge refunds return to pledge. Otherwise they become free settlement. Before refund changes the borrow base, accrued carry is checkpointed without collection or an oracle update, preserving arrears. An anomalous protection attempt terminates as Failed.
+Mismatch cleanup emits `ExpiredReservationMismatch`. Its receipt reports the actual refund and discrepancy; the difference from entitlement is not a receivable. Pledge never becomes free settlement or attaches to a later position generation. Unreconcilable identified backing is quarantined and stays locked; only its matching collectible eligibility is removed inside an authenticated Engine curve mutation. Quarantining a later free-funded record cannot clear an earlier pledged order's eligibility. Before refund changes the borrow base, accrued carry is checkpointed without collection or an oracle update, preserving arrears. An anomalous protection attempt terminates as Failed.
 
-Automatic queue recovery assumes authenticated identities and valid aggregate accounting. Arbitrary synthetic custody/ownership corruption is not automatically repaired. There is no administrative balance-repair endpoint.
+Automatic queue recovery assumes authenticated identities and valid aggregate accounting. A self-consistent clearinghouse split that disagrees with independent Book provenance is insufficient authority. If the curve or escrow ownership cannot be authenticated, resolution fails closed without movement. Arbitrary synthetic custody/ownership corruption is not automatically repaired. There is no administrative balance-repair endpoint.
 
 ## Abandoned zero-bounty orders: keeper responsibility
 
-The protocol-operated order keeper owns FIFO liveness, including unpaid cleanup when the configured close bounty is zero. Its operator must fund native gas for `expireOrder`; the protocol pays no bounty for a zero-entitlement order and does not mint a cleanup subsidy. Any account may perform the same cleanup as a fallback. Keeper cleanup must not depend on the submitting user returning.
+The protocol-operated order keeper owns FIFO liveness, including unpaid cleanup when the configured close bounty is zero or an ordinary failed close was entirely pledge-funded. Its operator must fund native gas for `expireOrder`; a zero-free-funded failure pays no executor bounty and the protocol does not mint a cleanup subsidy. Any account may perform the same cleanup as a fallback. Keeper cleanup must not depend on the submitting user returning.
 
 The external keeper must implement this policy before activation:
 
-1. Monitor `nextExecuteId()` and read the head's stored `pendingIntent` / `orderTiming`, including its bounty entitlement and committed execution deadline. A zero bounty must not remove the head from monitoring.
+1. Monitor `nextExecuteId()` and read the head's stored `pendingIntent` / `orderTiming`, including its bounty entitlement, original funding split and committed execution deadline. A zero bounty or zero free-funded part must not remove the head from monitoring.
 2. While the head is live, preserve FIFO. Do not attempt to skip it or expire it at deadline equality. A user may execute it; operator-funded execution is an explicit operational choice, not a promised keeper reward.
 3. Once a fresh chain timestamp is strictly greater than `executionDeadline`, submit permissionless `expireOrder(head)` without oracle data or an oracle fee. Do not wait for an oracle service to recover. The transaction sender pays native gas.
 4. Confirm the terminal receipt and queue advancement before moving on. If another actor executed, expired or liquidated the order first, reread state and continue; do not repeatedly retry a stale ID. Verify reservation cleanup from canonical state/events.
@@ -61,6 +80,13 @@ An account may submit another attempt after expiry, and multiple accounts can cr
 ## ABI and consumer migration
 
 Intent domain is V3. Receipt and execution-configuration domains are V4. The `OrderV3Types` schema includes `submitBy` and `executionWindowSeconds`; receipts append authenticated timing. Requests, pending intents and receipts contain no close-mode field. Regenerate all tuple consumers together. Archived release ABIs remain the historical decoders.
+
+Source-bound bounty resolution preserves the public `OrderRequest` and `OrderReceipt` field layouts. It appends
+`PaidAndRefunded` and `ForfeitedAndRefunded` without renumbering earlier dispositions. Existing paid/refunded/forfeited/
+retained numeric fields report the authenticated components and sum to committed entitlement for ordinary terminal
+outcomes. Discrepancy recovery preserves original entitlement separately from the actual recovered movement. A refund denotes
+original position backing when pledge-funded, not wallet cash. SDK/indexer enum handling, internal Engine/Clearinghouse/
+Book interfaces, and storage change and must ship together; this is not a universal ABI/storage-compatible patch.
 
 Use the new request-taking overload:
 
@@ -84,6 +110,12 @@ The execution sidecar constructor creates an immutable, storage-free `OrderRecov
 
 This feature PR does not define a release candidate. Release versioning, artifact generation and activation belong to the broader release containing this change. Generate consumer interfaces from that release's finalized source and verify constructor-inclusive initcode, deployed runtime hashes and component bindings together.
 
+The Engine, Router, Clearinghouse and their authenticated books must be deployed as one compatible fresh stack.
+One-time or immutable bindings prevent a Router-only hot swap. Never apply the new marked cap to an already populated
+deployment with zero-initialized escrow mirrors. Migrating existing orders or positions needs a separate authenticated
+migration design; no deployment or migration is authorized by this source change. A predeployment rollback is a source
+revert; recovery after a populated deployment is an operational migration decision.
+
 Activation requires the full regression/invariant suites, production size checks, historical evidence, and a fresh-stack smoke test with assistance disabled: deposit, open Max, execute, and ordinary full and partial zero-free closes. Retire new subsidy issuance only for that verified new stack. Preserve old-stack servicing and authorized reconciliation. Deployment and activation remain separate operator actions.
 
 ## Verification status and provenance
@@ -100,7 +132,7 @@ New work adds pledge-funded commitment, released-pledge charge funding, strict r
 
 ## Storage and read optimization
 
-The internal lifecycle record packs the two bounty-source amounts into one slot. Bounty widths match the clearinghouse's existing uint96 limit; carry and custody amounts retain uint256, including values above uint128. Pre-commitment custody is reconstructed exactly as post-commitment custody plus collected carry. Commitment validates that identity before accepting the record. Order identity remains in the router order, and pledge funding provenance, including the source position epoch, remains in the clearinghouse reservation.
+The internal lifecycle record packs the two uint96 bounty-source amounts and uint64 source epoch into one slot. Carry and custody amounts retain uint256, including values above uint128. Pre-commitment custody is reconstructed exactly as post-commitment custody plus collected carry. Commitment validates that identity before accepting the record. Order identity remains in the router order; Book and clearinghouse independently record funding and epoch so neither record alone authorizes a refund.
 
 Actual commitment loads only the relevant side and funding/health fields, while prospective previews retain the full execution snapshot. Both use the unchanged `CloseCommitmentLib` calculation. The pure planner's `planCloseCommit` returns only commitment effects; its unused projected-snapshot return was removed from the new ABI. Planner consumers must use the matching interface.
 

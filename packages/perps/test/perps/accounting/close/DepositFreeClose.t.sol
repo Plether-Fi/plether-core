@@ -12,10 +12,12 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
+import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 interface ICloseRequestPreview {
@@ -178,6 +180,132 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         vm.prank(KEEPER);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "reentrancy guard is restored");
+    }
+
+    function test_FailedCloseResolverFailureRollsBackEverySettlement() public {
+        _failedCloseSettlementRollsBack(0);
+    }
+
+    function test_FailedClosePayoutFailureRollsBackPledgeRestoration() public {
+        _failedCloseSettlementRollsBack(1);
+    }
+
+    function test_FailedCloseCurveSyncFailureRollsBackPledgeRestoration() public {
+        _failedCloseSettlementRollsBack(2);
+    }
+
+    function test_FailedCloseBookFailureRollsBackPaymentAndQueueRemoval() public {
+        _failedCloseSettlementRollsBack(3);
+    }
+
+    function _failedCloseSettlementRollsBack(
+        uint8 fault
+    ) private {
+        uint256 freeFunding = router.closeOrderExecutionBountyUsdc() / 3;
+        _openNormally(CfdTypes.Side.SHORT, freeFunding);
+        uint256 pledgeBeforeCommit = clearinghouse.pnlPledgeUsdc(ACCOUNT);
+        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
+        vm.prank(ACCOUNT);
+        uint64 id = router.commitOrder(request);
+        uint256 pledgeFunding = router.closeOrderExecutionBountyUsdc() - freeFunding;
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ACCOUNT), pledgeFunding);
+        vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
+        bytes32 beforeState = _failedCloseState(id);
+        bytes memory failure = abi.encodeWithSignature("InjectedSettlementFailure(uint8)", fault);
+        if (fault == 0) {
+            vm.mockCallRevert(
+                address(engine), abi.encodeWithSelector(ICfdEngineCore.resolveCloseBounty.selector), failure
+            );
+        } else if (fault == 1) {
+            vm.mockCallRevert(address(engine), abi.encodeWithSelector(ICfdEngineCore.creditBounty.selector), failure);
+        } else if (fault == 2) {
+            vm.mockCallRevert(
+                address(engine.terminalNavBook()),
+                abi.encodeWithSelector(ITerminalNavBookV2.syncFromEngine.selector, ACCOUNT),
+                failure
+            );
+        } else {
+            vm.mockCallRevert(
+                address(router.lifecycleBook()), abi.encodeWithSelector(IOrderLifecycleBook.finalize.selector), failure
+            );
+        }
+        vm.expectRevert(failure);
+        vm.prank(KEEPER);
+        router.expireOrder(id);
+        assertEq(_failedCloseState(id), beforeState, "terminal item must roll back to its post-commitment state");
+        vm.clearMockedCalls();
+        vm.recordLogs();
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory retried = router.expireOrder(id);
+        assertEq(uint8(retried.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
+        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), pledgeBeforeCommit);
+        assertEq(clearinghouse.balanceUsdc(KEEPER), keeperBefore + freeFunding);
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+        assertEq(router.nextExecuteId(), 0);
+        _assertFailedBountyReceipt(id, freeFunding, pledgeFunding);
+    }
+
+    function _assertFailedBountyReceipt(
+        uint64 id,
+        uint256 freeFunding,
+        uint256 pledgeFunding
+    ) private {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool found;
+        for (uint256 i; i < logs.length; ++i) {
+            if (
+                logs[i].emitter != address(router.lifecycleBook()) || logs[i].topics.length != 4
+                    || logs[i].topics[0] != IOrderLifecycleBook.OrderFinalized.selector
+            ) {
+                continue;
+            }
+            (,, uint64 terminalTime, OrderV3Types.OrderReceipt memory receipt) =
+                abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
+            assertTrue(router.lifecycleBook().verifyReceipt(receipt, terminalTime));
+            assertEq(receipt.orderId, id);
+            assertEq(receipt.bounty.bountyPaidUsdc, freeFunding);
+            assertEq(receipt.bounty.bountyRefundedUsdc, pledgeFunding);
+            assertEq(receipt.bounty.bountyForfeitedUsdc, 0);
+            assertEq(receipt.bounty.bountyRetainedUsdc, 0);
+            assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.PaidAndRefunded));
+            assertEq(receipt.bountyRecipient, KEEPER);
+            found = true;
+        }
+        assertTrue(found, "missing authenticated mixed-failure receipt");
+    }
+
+    function _failedCloseState(
+        uint64 id
+    ) private view returns (bytes32) {
+        (bool ok, bytes memory position) =
+            address(engine).staticcall(abi.encodeWithSelector(ICfdEngineCore.positions.selector, ACCOUNT));
+        assertTrue(ok);
+        (uint96 escrow, uint64 owner, uint64 epoch) = clearinghouse.collectibleCloseEscrow(ACCOUNT);
+        bytes32 balances = keccak256(
+            abi.encode(
+                clearinghouse.getAccountUsdcBuckets(ACCOUNT),
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id),
+                clearinghouse.balanceUsdc(KEEPER),
+                escrow,
+                owner,
+                epoch
+            )
+        );
+        bytes32 positionState = keccak256(abi.encode(position, engine.unsettledCarryUsdc(ACCOUNT)));
+        return keccak256(
+            abi.encode(
+                balances,
+                positionState,
+                router.lifecycleBook().pendingIntent(id),
+                router.accountHeadOrderId(ACCOUNT),
+                router.pendingOrderCounts(ACCOUNT),
+                router.pendingCloseSize(ACCOUNT),
+                router.nextExecuteId()
+            )
+        );
     }
 
     function test_StandardFullShortZeroFree() public {
@@ -501,7 +629,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         _maxOpenClose(CfdTypes.Side.SHORT, true);
     }
 
-    function test_RepeatedExpiryExhaustsBountyFundingWithoutSilentlyWaivingIt() public {
+    function test_RepeatedExpiryRestoresPledgeWithoutPayingCleanup() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.closeOrderExecutionBountyUsdc = 1e6;
         _setRouterConfig(config);
@@ -510,43 +638,39 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint64 openId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 50e6, PRICE, false);
         bytes[] memory update = _mockPythUpdateData(PRICE);
         vm.prank(KEEPER);
-        router.executeOrder(openId, update);
+        OrderV3Types.ExecutionResult memory opened = router.executeOrder(openId, update);
+        assertEq(uint8(opened.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         uint256 free = clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, free);
-        uint256 attempts;
-        for (; attempts < 60; ++attempts) {
+        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+        for (uint256 attempt; attempt < 60; ++attempt) {
             OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, 1000e18);
+            request.bounds.executionWindowSeconds = 1;
             vm.prank(ACCOUNT);
-            try router.commitOrder(request) returns (uint64 id) {
-                vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
-                router.expireOrder(id);
-            } catch {
-                break;
-            }
-        }
-        assertGt(attempts, 1);
-        assertLt(attempts, 60, "ordinary bounty backing actually exhausted");
-        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, 1000e18);
-        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT)));
-        uint64 nextId = router.nextCommitId();
-        (bool previewOk, bytes memory previewError) = address(previewer)
-            .staticcall(
-                abi.encodeCall(
-                    ICloseRequestPreview.previewClose,
-                    (address(engine), ACCOUNT, request, KEEPER, PRICE, uint64(vm.getBlockTimestamp()))
-                )
+            uint64 id = router.commitOrder(request);
+            uint256 reservedPledge = clearinghouse.pnlPledgeUsdc(ACCOUNT);
+            uint256 custodyAfterCommit = clearinghouse.balanceUsdc(ACCOUNT);
+            IMarginClearinghouse.BountyReservation memory reservation =
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
+            assertEq(reservation.freeFundedUsdc, 0);
+            assertEq(reservation.pledgeFundedUsdc, 1e6);
+            vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
+            vm.prank(KEEPER);
+            OrderV3Types.ExecutionResult memory expired = router.expireOrder(id);
+            assertEq(uint8(expired.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
+            assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), reservedPledge + 1e6, "expiry restores original pledge");
+            assertEq(
+                clearinghouse.balanceUsdc(ACCOUNT), custodyAfterCommit, "expiry checkpoints but does not collect carry"
             );
-        assertFalse(previewOk);
-        assertEq(bytes4(previewError), ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        vm.expectRevert(previewError);
-        vm.prank(ACCOUNT);
-        router.commitOrder(request);
-        assertEq(router.closeOrderExecutionBountyUsdc(), 1e6, "failed attempts do not waive the configured bounty");
-        assertEq(keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT))), bucketsBefore);
-        assertEq(router.nextCommitId(), nextId);
-        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+            assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
+            assertEq(clearinghouse.collectibleCloseEscrowUsdc(ACCOUNT), 0);
+            assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+            assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+            assertEq(router.nextExecuteId(), 0);
+        }
+        assertEq(clearinghouse.balanceUsdc(KEEPER), keeperBefore, "pledge cannot fund failed-attempt compensation");
+        assertEq(router.closeOrderExecutionBountyUsdc(), 1e6);
         (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
         assertEq(remaining, 1000e18);
     }
@@ -684,6 +808,8 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2);
         vm.prank(ACCOUNT);
         uint64 first = router.commitOrder(request);
+        // Later orders remain legal when their bounty is wholly funded by free settlement.
+        _fundTrader(ACCOUNT, router.closeOrderExecutionBountyUsdc());
         request = _request(CfdTypes.Side.LONG, SIZE / 2);
         request.bounds.executionWindowSeconds -= 1;
         vm.prank(ACCOUNT);
@@ -731,12 +857,47 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
             // Invalid provenance sum is quarantined without releasing disputed classifications.
             uint256 word = uint256(vm.load(address(clearinghouse), slots[0]));
             vm.store(address(clearinghouse), slots[0], bytes32(word + (uint256(1) << 160)));
-        } else {
+        } else if (kind == 3) {
             // Missing record with disputed classifications left intact: no fabricated refund.
             for (uint256 i; i < 3; ++i) {
                 vm.store(address(clearinghouse), bytes32(uint256(slots[0]) + i), bytes32(0));
             }
+        } else if (kind == 4) {
+            // Keep amount and F+P internally consistent, but forge one pledge atom into free funding.
+            // The independently recorded Book split must reject this even though local sum checks pass.
+            bytes32 fundingSlot = bytes32(uint256(slots[0]) + 1);
+            uint256 word = uint256(vm.load(address(clearinghouse), fundingSlot));
+            vm.store(address(clearinghouse), fundingSlot, bytes32(word + (uint256(1) << 8) - (uint256(1) << 104)));
+            IMarginClearinghouse.BountyReservation memory forged =
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
+            assertEq(forged.freeFundedUsdc, 1);
+            assertEq(forged.freeFundedUsdc + forged.pledgeFundedUsdc, forged.amountUsdc);
+        } else {
+            // A locally consistent zero bounty is not the independently committed nonzero entitlement.
+            uint256 word = uint256(vm.load(address(clearinghouse), slots[0]));
+            vm.store(address(clearinghouse), slots[0], bytes32(word & uint256(type(uint160).max)));
+            vm.store(
+                address(clearinghouse),
+                bytes32(uint256(slots[0]) + 1),
+                bytes32(uint256(IMarginClearinghouse.BountyReservationState.Active))
+            );
+            assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id).amountUsdc, 0);
         }
+        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT)));
+        bytes32 reservationBefore =
+            keccak256(abi.encode(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id)));
+        bytes[] memory update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory retried = router.executeOrder(id, update);
+        assertEq(uint8(retried.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(retried.pendingReason), uint8(OrderV3Types.PendingReason.ReceiptFailure));
+        assertEq(keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT))), bucketsBefore);
+        assertEq(
+            keccak256(abi.encode(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id))),
+            reservationBefore
+        );
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ACCOUNT), router.closeOrderExecutionBountyUsdc());
+        assertEq(router.accountHeadOrderId(ACCOUNT), id);
         uint256 custody = clearinghouse.balanceUsdc(ACCOUNT);
         uint256 reserve = clearinghouse.actionReserveUsdc(ACCOUNT);
         uint256 keeper = clearinghouse.balanceUsdc(KEEPER);
@@ -753,9 +914,20 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         if (kind == 1) {
             assertEq(afterRecord.account, address(0xBAD));
         }
-        if (kind == 2) {
+        if (kind == 2 || kind >= 4) {
             assertEq(uint8(afterRecord.state), uint8(IMarginClearinghouse.BountyReservationState.Quarantined));
         }
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ACCOUNT), 0, "disputed backing is no longer collectible");
+        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0, "quarantine cannot unlock custody");
+        assertEq(router.nextExecuteId(), 0);
+    }
+
+    function test_SelfConsistentWrongFundingSplitRetriesThenQuarantines() public {
+        _reservationAnomaly(4);
+    }
+
+    function test_ZeroReservationAmountCannotEraseBookEntitlement() public {
+        _reservationAnomaly(5);
     }
 
     function test_SettledReservationExpiryMovesNoFunds() public {
@@ -784,7 +956,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         uint64 id = router.commitOrder(request);
         uint256 margin = clearinghouse.pnlPledgeUsdc(ACCOUNT);
         uint256 backing = router.closeOrderExecutionBountyUsdc();
-        // Synthetic stale provenance models a recoverable old reservation after a real close/reopen lifecycle.
+        // Synthetic stale provenance after a real close/reopen lifecycle must remain quarantined.
         vm.record();
         clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
         (bytes32[] memory slots,) = vm.accesses(address(clearinghouse));
@@ -797,8 +969,13 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
         router.expireOrder(id);
         assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin, "old backing cannot change new position pledge");
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, backing);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0, "stale pledge cannot become free");
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), backing, "disputed custody remains locked");
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ACCOUNT), 0, "quarantine removes collectible eligibility");
+        assertEq(
+            uint8(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id).state),
+            uint8(IMarginClearinghouse.BountyReservationState.Quarantined)
+        );
     }
 
 }

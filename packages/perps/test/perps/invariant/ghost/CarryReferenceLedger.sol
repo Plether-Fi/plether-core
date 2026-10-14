@@ -197,6 +197,26 @@ contract CarryReferenceLedger {
         poolDepth += paid;
     }
 
+    /// @notice Assess old exposure before refunding collateral, retaining all assessed carry as arrears.
+    /// @dev Source-position refunds change future borrowing basis without collecting their returned backing.
+    function assessWithoutCollection(
+        address account,
+        uint256 timestamp
+    ) external {
+        Account storage state = _account(account);
+        advance(timestamp);
+        if (!state.active) {
+            return;
+        }
+        uint256 endIndex = _sides[state.side].index;
+        uint256 newlyAssessed = amountFromIndex(state.borrowBase, endIndex - state.lastIndex);
+        state.arrears += newlyAssessed;
+        state.totalNewCarry += newlyAssessed;
+        totalNewCarry += newlyAssessed;
+        state.lastIndex = endIndex;
+        state.lastTime = timestamp;
+    }
+
     /// @notice Project collection solely from this ledger's submitted action history, without changing any clock.
     /// @dev Stored arrears may have newly credited backing. Eligibility must use unpaid after this projection,
     ///      not arrears alone; claim/bounty credits deliberately do not collect their new backing a second time.

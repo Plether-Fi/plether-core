@@ -24,6 +24,7 @@ export function buildExpireOrderV3(router: Address, orderId: bigint): SmartAccou
 /** Stable consumer copy; funding and health failures must not share the old 'underwater' message. */
 export const closeFailureMessages = {
   bountyFunding: "Free USDC and eligible position margin cannot back the configured keeper reward.",
+  pledgeQueue: "Let pending orders finish, or add enough free USDC to cover this close's keeper reward.",
   carryFunding: "Accrued carry must be fully collected before a partial reduction. Review a full exit.",
   actionFunding: "This reduction cannot fund its charges while preserving the remaining position. Review a full exit.",
   residualHealth: "This reduction would leave the remaining position below its required margin.",
@@ -31,6 +32,7 @@ export const closeFailureMessages = {
 } as const;
 
 const closeErrors = parseAbi([
+  "error OrderRouter__PledgeBountyRequiresEmptyQueue()",
   "error CfdEngine__InsufficientCloseOrderBountyBacking(uint256 required,uint256 available,uint256 unpaidCarry)",
   "error CfdEngine__PartialCloseCarryUnfunded(uint256 unpaidCarry)",
   "error CfdEngine__PartialCloseUnhealthy()",
@@ -41,10 +43,11 @@ const closeErrors = parseAbi([
 ]);
 
 /** Returns undefined for unrecognized data: unknown failures must never be treated as safe to consume. */
-export function classifyCloseFailureV3(data: Hex): "bountyFunding" | "carryFunding" | "actionFunding" | "residualHealth" | "reservationMismatch" | undefined {
+export function classifyCloseFailureV3(data: Hex): "bountyFunding" | "pledgeQueue" | "carryFunding" | "actionFunding" | "residualHealth" | "reservationMismatch" | undefined {
   try {
     const error = decodeErrorResult({ abi: closeErrors, data });
     switch (error.errorName) {
+      case "OrderRouter__PledgeBountyRequiresEmptyQueue": return data.length === 10 ? "pledgeQueue" : undefined;
       case "CfdEngine__InsufficientCloseOrderBountyBacking": return "bountyFunding";
       case "CfdEngine__PartialCloseCarryUnfunded": return "carryFunding";
       case "CfdEngine__PartialCloseUnhealthy": return "residualHealth";

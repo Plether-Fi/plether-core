@@ -45,8 +45,8 @@ library AccountLensViewTypes {
     /// @param closeReachableUsdc Legacy close view equal to free settlement, not a complete close-settlement bound.
     /// @param liquidationReachableSettlementUsdc Total settlement less execution-bounty reservations, floored at zero;
     ///        includes locked value liquidation may release and excludes trader claims.
-    /// @param terminalPriceCollectibleCapUsdc Exact live-position price-loss cap: PnL pledge plus same-account claim,
-    ///        clipped to maximum endpoint loss; zero without a live position.
+    /// @param terminalPriceCollectibleCapUsdc Live-position terminal price-loss cap: PnL pledge, same-account claim
+    ///        and refundable pledged-close escrow, clipped to maximum endpoint loss; zero without a live position.
     /// @param accountEquityUsdc Raw clearinghouse settlement equity before live PnL and carry.
     /// @param freeBuyingPowerUsdc Raw clearinghouse equity less all typed locked-margin buckets, floored at zero.
     /// @param hasPosition Whether the account currently has a nonzero position.
@@ -59,8 +59,8 @@ library AccountLensViewTypes {
     ///        unrealized price PnL. VPI, generic settlement, and action reserves are excluded. Carry uncovered by both
     ///        margin and free settlement and an underfunded negative-VPI reserve independently fail health checks.
     /// @param liquidatable Whether exact price risk breaches the active margin requirement, projected carry remains
-    ///        uncovered, or the negative-VPI reserve is underfunded; this cached-mark diagnostic does not validate mark
-    ///        freshness.
+    ///        uncovered, or the negative-VPI reserve is underfunded. This cached-mark diagnostic does not validate
+    ///        mark freshness or include pending pledged-close escrow that Router restores before liquidation.
     struct AccountLedgerSnapshot {
         uint256 settlementBalanceUsdc;
         uint256 freeSettlementUsdc;

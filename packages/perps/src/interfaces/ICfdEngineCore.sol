@@ -12,10 +12,13 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 ///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngineCore is ICfdEngineTypes {
 
-    function refundCloseBounty(
+    function resolveCloseBounty(
         address account,
+        uint64 orderId,
         uint256 freeUsdc,
-        uint256 pledgeUsdc
+        uint256 pledgeUsdc,
+        uint64 sourcePositionEpoch,
+        bool quarantine
     ) external;
     function positionEpoch(
         address account
@@ -99,9 +102,8 @@ interface ICfdEngineCore is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Reserves the fixed close-order execution bounty exclusively from free settlement.
-    /// @dev Callable only by the configured router. Realizes margin-first carry, then funds the bounty from free
-    ///      settlement while protecting all locked buckets.
+    /// @notice Reserves the fixed close-order execution bounty from free settlement, then eligible position pledge.
+    /// @dev Callable only by the configured router. Realizes margin-first carry before funding the bounty.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close
     /// @param amountUsdc Execution bounty amount to reserve

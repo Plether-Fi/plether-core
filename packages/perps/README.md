@@ -414,7 +414,10 @@ Important details:
   can never execute, even after governance unpauses. Permissionless cleanup returns their remaining committed margin
   and complete execution bounty to the trader's free internal settlement without an oracle or Engine checkpoint;
   the protocol incident keeper pays cleanup gas and receives no bounty.
-- Execution-time user-invalid opens, protocol-state invalidations, and terminal-invalid closes pay the keeper from their snapshotted reservation. Zero-bounty closes pay no reward; the protocol order keeper's operator funds expiry gas to preserve FIFO liveness. See [abandoned zero-bounty cleanup](DEPOSIT_FREE_CLOSE.md#abandoned-zero-bounty-orders-keeper-responsibility).
+- Ordinary failed opens pay their snapshotted bounty. Ordinary failed closes pay only original free funding and
+  restore original pledged funding to the source position. Zero-bounty and wholly pledge-funded failures pay no
+  reward; the protocol order keeper funds expiry gas to preserve FIFO liveness. See
+  [unpaid cleanup](DEPOSIT_FREE_CLOSE.md#abandoned-zero-bounty-orders-keeper-responsibility).
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules and the fixed LP-owned frozen-close spread.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
 
@@ -563,9 +566,11 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
 
 - Open execution bounties are locked from free settlement as action reserve at commit time. Close execution bounties
   use post-carry free settlement first, then reclassify eligible PnL pledge as action reserve without moving tokens.
-  Pledge-funded reservation reduces position margin and updates its borrowing basis and terminal curve immediately.
+  Pledge-funded reservation reduces position margin and updates its borrowing basis immediately. Its source-bound
+  refundable escrow stays in the terminal collectible cap until successful execution earns the bounty.
 - Live-position custody is split between a price-PnL pledge and a dedicated liquidation-charge reserve. Pending-order
-  and action reserves are separate again; only the PnL pledge enters the terminal price-loss cap.
+  and action reserves are separate again. Only physical PnL pledge, same-account claim and the eligible refundable
+  pledged-close escrow enter the marked price-loss cap; other reserves remain excluded.
 - Position protection snapshots and reserves a trigger bounty plus a linked-close execution bounty at creation. The
   default reserve is `0.20 + 0.20 = 0.40 USDC`, funded from free settlement only.
 - Cancellation before trigger refunds the unpaid protection reserve. Triggering pays the trigger portion exactly once
@@ -575,6 +580,10 @@ Order and liquidation bounties are margin transfers inside `MarginClearinghouse`
   latched protection. That relatching cleanup is intentionally unpaid; retry moves the retained amount into the fresh
   attempt without reserving or charging the trader again. Position mismatch instead uses ordinary paid cleanup.
 - Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
+- Ordinary close failure or expiry restores original pledged funding to its source position and pays only original
+  free-funded value. Liquidation restores pledged funding before health/loss assessment and forfeits only free funding
+  to treasury. A wholly pledge-funded failure is unpaid cleanup; successful self-execution still releases the whole
+  committed bounty under the existing success policy.
 - The configured liquidation charge is capped by the dedicated liquidation reserve, then allocated using timelocked
   `keeperShareBps` and `protocolShareBps` values whose sum cannot exceed `10_000`.
 - The rounded-down keeper and protocol shares are credited directly inside `MarginClearinghouse`; the protocol share
@@ -657,9 +666,11 @@ in the same request window aggregate into the controller's current redemption po
 
 LP share pricing uses one exact signed terminal-NAV snapshot for both deposits and redemptions. Each position stores
 whole 100-token lots and exact entry cost. `TerminalNavBookV2` evaluates its marked LP-side price PnL and caps a
-positive LP receivable by that trader's dedicated PnL pledge plus nettable same-account claim. Marked trader profits
+positive LP receivable by that trader's dedicated PnL pledge, nettable same-account claim and authenticated refundable
+close-bounty escrow bound to its live position generation. Marked trader profits
 reduce NAV; only collectible marked trader losses increase NAV. Carry, VPI, fees, frozen spreads, order margin,
-liquidation reserves, and action reserves are excluded from this pre-close price-PnL book.
+liquidation reserves, and other action reserves are excluded from this pre-close price-PnL book. Reservation and failure
+refund preserve the cap at fixed mark and claims; successful execution recognizes the pledged bounty cost once.
 
 The snapshot derives both distributable equity and an explicit terminal deficit from:
 
@@ -976,7 +987,8 @@ The system can complete terminal transitions even when immediate pool cash is in
 The Engine exports one signed terminal price-PnL adjustment for both LP entry and exit share pricing.
 
 - Unrealized trader profits are exact marked LP liabilities.
-- Unrealized trader losses count only up to that account's PnL pledge plus nettable claim.
+- Unrealized trader losses count only up to that account's PnL pledge, nettable claim and source-bound refundable
+  close-bounty escrow. The escrow is marked backing, not physical pool cash or borrow collateral.
 - Price basis comes from exact entry-cost atoms, not a rounded average entry price.
 - The resulting marked receivable affects NAV but is not physical withdrawal cash before collection.
 - A negative terminal equity is exposed as an explicit deficit and blocks deposit activation.
@@ -1083,6 +1095,10 @@ authorizes settlement.
   require no unpaid carry and strict post-reservation maintenance/FAD health; zero-bounty commitments still validate
   admission. Claims and other protected reserves cannot fund the bounty. Funding provenance and position-generation
   refund rules are specified in [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy).
+- A pledge-funded close requires an empty account queue; later wholly free-funded orders remain legal. Commitment
+  needing pledge with a pending account order fails atomically with `PledgeBountyRequiresEmptyQueue`.
+- Ordinary failed-close cleanup pays only original free funding and returns pledge to its source position. It removes
+  just that order, preserving peers. The protocol keeper must fund unpaid cleanup when original free funding is zero.
 - Failed-order rewards stay independent from pool liquidity because they are paid from clearinghouse-reserved trader value rather than LP cash.
 
 ### Execute rules
@@ -1096,7 +1112,8 @@ authorizes settlement.
   the FIFO tail; the ordinary execution keeper then settles that close against its first eligible post-trigger tick.
 - Before Engine mutation, the stateless policy evaluator reconstructs the same authoritative snapshot consumed by
   the configured planner and evaluates every caller bound in canonical `ConstraintKind` order. Equality passes.
-- Reservation release for execution/terminal classification does not checkpoint carry. The evaluator and Engine
+- Free-funded reservation release for execution/terminal classification does not checkpoint carry. Pledged refunds
+  checkpoint old-basis carry without collecting it before restoring source margin. The evaluator and Engine
   account for carry from the canonical Engine state; if the item is retryable, its rollback frame restores the
   reservation.
 - Slippage, expiry, config mismatch, exact-shape typed planner rejection, execution-mode rejection, and financial
@@ -1138,17 +1155,19 @@ time, whether the price reached the Engine, exact bounty recipient/disposition, 
 economics fields. Full receipt data remains in the event; compact state remains queryable on chain after the Router
 fully deletes its terminal order record. A liquidation-driven queued-order receipt uses the state observed after
 liquidation in both state-summary slots; the position's liquidation economics remain canonical in the Engine's
-liquidation events, while the order receipt separately records its exact forfeited bounty.
+liquidation events, while the order receipt separately records exact forfeited free funding and refunded pledge.
 
 Pre-oracle expiry and config-mismatch receipts use `PriceSource.None`, zero execution price and oracle time, and
 `priceReachedEngine == false`; the cached neutral mark and pool depth may still be reported as accounting context.
 Risk-off receipts likewise use `RiskOff`, execution mode and price source `None`, and the permissionless cleaner as
 executor. A nonzero reserved bounty is returned to the account with `RefundedToAccount`; the cleaner receives
-nothing. Liquidation cleanup records `AccountLiquidated`, retains the original keeper as executor, and marks a
-nonzero remaining queued-order bounty `Forfeited` to the Engine's protocol-treasury account. A zero bounty ordinarily
-uses `BountyDisposition.None` and the zero recipient; an authenticated protection attempt may instead retain an
-explicitly active zero reservation for retry.
-A failed registered protection attempt records its retained bounty, including an active zero reservation, as
+nothing. Ordinary close failure reports original free funding as paid and pledged funding as refunded; a mixed result
+uses `PaidAndRefunded`. Liquidation cleanup records `AccountLiquidated`, retains the original keeper as executor, and
+forfeits free funding to the Engine's protocol treasury while restoring pledged funding; a mixed result uses
+`ForfeitedAndRefunded`. A pledged refund is position backing and may settle liquidation loss immediately. On every
+terminal path, a zero bounty uses `BountyDisposition.None` and the zero recipient. An authenticated protection
+attempt may instead retain an explicitly active zero reservation for retry. A failed registered protection attempt
+records its retained bounty, including an active zero reservation, as
 `BountyDisposition.RetainedForProtectionRetry` with a zero recipient only while the exact protected position still
 matches, because custody remains reserved for the next attempt. A missing or mismatched position instead records
 ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally resolves the protection as `Failed`.
@@ -1349,6 +1368,11 @@ Clearinghouse, Pool, vault, monitor, and emergency-coordinator wiring, and activ
 binding is correct. Do not mix a V3 Router/Book with legacy Router queue state or reuse an already-wired Engine; V1
 pending orders, client ids, and outcomes are not imported. Recovery from a Book or immutable-binding fault likewise
 requires containment and a new compatible stack rather than storage repair.
+
+Source-bound close-bounty refunds also require the connected fresh stack. Public `OrderRequest` and `OrderReceipt`
+field layouts stay stable; appended mixed disposition values require compatible SDK/indexer decoding, and internal
+interfaces and Clearinghouse/Book storage change. Never combine the new cap with old pending records or zero-initialized
+escrow mirrors on a populated stack. Migration of an existing deployment requires a separate authenticated design.
 
 The latched-retry lifecycle is likewise a fresh-stack boundary. The Router-created stateful protection Book and the
 predeployed lifecycle Book cannot be upgraded or populated from the old stack. Before switching application manifests,

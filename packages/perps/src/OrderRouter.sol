@@ -185,18 +185,20 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
     ) external returns (IMarginClearinghouse.BountyRecovery memory recovery) {
         _onlySelfCall();
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
-        if (block.timestamp <= lifecycleBook.pendingIntent(orderId).timing.executionDeadline) {
+        OrderV3Types.PendingIntent memory pending = lifecycleBook.pendingIntent(orderId);
+        if (block.timestamp <= pending.timing.executionDeadline) {
             revert OrderRouter__OrderNotExpired();
         }
-        recovery = clearinghouse.recoverExpiredBounty(order.account, orderId);
+        uint256 freeUsdc = lifecycleBook.isProtectionAttempt(orderId)
+            ? pending.executionBountyUsdc
+            : pending.commitment.bountyFromFreeUsdc;
+        uint256 pledgeUsdc = pending.commitment.bountyFromPledgeUsdc;
+        uint64 epoch = lifecycleBook.sourcePositionEpoch(orderId);
+        recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeUsdc, pledgeUsdc, epoch);
         if (recovery.freeUsdc != 0 || recovery.pledgeUsdc != 0) {
-            (uint256 liveSize,,,,,,) = engine.positions(order.account);
-            bool samePosition = liveSize != 0 && engine.positionEpoch(order.account) == recovery.sourcePositionEpoch;
-            engine.refundCloseBounty(
-                order.account,
-                recovery.freeUsdc + (samePosition ? 0 : recovery.pledgeUsdc),
-                samePosition ? recovery.pledgeUsdc : 0
-            );
+            engine.resolveCloseBounty(order.account, orderId, recovery.freeUsdc, recovery.pledgeUsdc, epoch, false);
+        } else if (recovery.discrepancy != 3) {
+            engine.resolveCloseBounty(order.account, orderId, freeUsdc, pledgeUsdc, epoch, true);
         }
         // An invalid margin ledger is left protected; expiry must not invent a release.
         try clearinghouse.releaseOrderReservationForTerminalCleanup(orderId) {} catch {}
@@ -259,8 +261,9 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Releases order margin, settles or retains its bounty, and deletes its ephemeral Router record.
     /// @dev The recipient is explicit because the item rollback boundary changes `msg.sender` to the Router. When the
-    ///      source account executes its own order, only the bounty classification is released and no Engine carry
-    ///      checkpoint occurs; all other recipients use the canonical Engine bounty-credit path. A failed protection
+    ///      source account executes its own order, paid bounty is released without beneficiary carry collection.
+    ///      An ordinary failed close first returns pledge to its original position with a checkpoint-only refund,
+    ///      then pays only its original free-funded portion. Other recipients use the Engine bounty-credit path. A failed protection
     ///      attempt may instead reattribute the bounty to its protection namespace without unlocking settlement,
     ///      allowing a later attempt to reuse the same reserve.
     function settleOrderFromSidecar(
@@ -275,35 +278,66 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         _onlySelfCall();
         (, CfdTypes.Order memory order) = _pendingOrder(orderId);
         clearinghouse.releaseOrderReservationForTerminalCleanup(orderId);
-        uint256 bountyUsdc =
-            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId).amountUsdc;
-
-        bool retained = !success && lifecycleBook.isProtectionAttempt(orderId)
-            && positionProtectionBook.handleFailedProtectionAttempt(orderId, order.account, reason, bountyUsdc);
-
-        settlement.bountyUsdc = bountyUsdc;
-        if (retained) {
-            settlement.bountyDisposition = OrderV3Types.BountyDisposition.RetainedForProtectionRetry;
-        } else {
-            clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, orderId);
-            if (bountyUsdc != 0) {
-                settlement.bountyRecipient = bountyRecipient;
-                settlement.bountyDisposition = OrderV3Types.BountyDisposition.Paid;
-            }
-            if (bountyUsdc == 0) {
-                // Explicit zero entitlement is settled without custody movement.
-            } else if (bountyRecipient == order.account) {
-                clearinghouse.releaseReservedExecutionBountyToSource(order.account, bountyUsdc);
-            } else {
-                engine.creditBounty(order.account, bountyRecipient, bountyUsdc, accountingPrice, accountingPublishTime);
-            }
-        }
+        settlement =
+            _settleTerminalBounty(order, success, reason, bountyRecipient, accountingPrice, accountingPublishTime);
         if (success) {
             emit OrderExecuted(orderId, executionPrice);
         }
         _deleteOrder(
             orderId, success ? IOrderRouterAccounting.OrderStatus.Executed : IOrderRouterAccounting.OrderStatus.Failed
         );
+    }
+
+    function _settleTerminalBounty(
+        CfdTypes.Order memory order,
+        bool success,
+        OrderV3Types.TerminalReason reason,
+        address bountyRecipient,
+        uint256 accountingPrice,
+        uint64 accountingPublishTime
+    ) private returns (IOrderRouterExecutionHost.BountySettlement memory settlement) {
+        IMarginClearinghouse.BountyReservation memory reservation =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, order.orderId);
+        uint256 bountyUsdc = reservation.amountUsdc;
+
+        bool protectionAttempt = lifecycleBook.isProtectionAttempt(order.orderId);
+        bool retained = !success && protectionAttempt
+            && positionProtectionBook.handleFailedProtectionAttempt(order.orderId, order.account, reason, bountyUsdc);
+
+        settlement.bountyUsdc = bountyUsdc;
+        if (retained) {
+            settlement.bountyDisposition = OrderV3Types.BountyDisposition.RetainedForProtectionRetry;
+        } else {
+            clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, order.orderId);
+            uint256 paidUsdc = bountyUsdc;
+            if (!success && order.isClose && !protectionAttempt && reservation.pledgeFundedUsdc != 0) {
+                settlement.bountyRefundedUsdc = reservation.pledgeFundedUsdc;
+                paidUsdc = reservation.freeFundedUsdc;
+                engine.resolveCloseBounty(
+                    order.account,
+                    order.orderId,
+                    0,
+                    reservation.pledgeFundedUsdc,
+                    reservation.sourcePositionEpoch,
+                    false
+                );
+                settlement.bountyRecipient = order.account;
+                settlement.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
+            }
+            if (paidUsdc != 0) {
+                settlement.bountyRecipient = bountyRecipient;
+                settlement.bountyDisposition = settlement.bountyRefundedUsdc == 0
+                    ? OrderV3Types.BountyDisposition.Paid
+                    : OrderV3Types.BountyDisposition.PaidAndRefunded;
+            }
+            if (paidUsdc == 0) {
+                // Explicit zero entitlement is settled without custody movement.
+            } else if (bountyRecipient == order.account) {
+                clearinghouse.releaseReservedExecutionBountyToSource(order.account, paidUsdc);
+            } else {
+                engine.creditBounty(order.account, bountyRecipient, paidUsdc, accountingPrice, accountingPublishTime);
+            }
+        }
     }
 
     /// @notice Refunds a cutoff-invalid open without carry checkpointing and deletes its ephemeral record.

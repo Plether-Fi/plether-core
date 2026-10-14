@@ -310,7 +310,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     /// @notice Returns the exact account-local cap committed to the terminal price-PnL book.
-    /// @dev Claims are included only for a live position and unreachable collateral is clipped at the side endpoint.
+    /// @dev Claims and refundable close escrow are included only for a live position. The cap is clipped at the
+    ///      side endpoint; the escrow remains excluded from physical margin and liquidation health until restored.
     function _terminalPriceCollectibleCapUsdc(
         address account,
         CfdTypes.Position memory pos
@@ -324,8 +325,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         uint256 maximumCollectibleUsdc = pos.side == CfdTypes.Side.LONG
             ? lots * engineContract.CAP_PRICE() - entryCostUsdcAtoms
             : entryCostUsdcAtoms;
-        uint256 candidateCapUsdc =
-            engineContract.clearinghouse().pnlPledgeUsdc(account) + engineContract.traderClaimBalanceUsdc(account);
+        IMarginClearinghouse clearinghouse = engineContract.clearinghouse();
+        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engineContract.traderClaimBalanceUsdc(account)
+            + clearinghouse.collectibleCloseEscrowUsdc(account);
         effectiveCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
     }
 

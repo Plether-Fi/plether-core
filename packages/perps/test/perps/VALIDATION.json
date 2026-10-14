@@ -1,1046 +1,2644 @@
 {
-  "schema_version": 2,
-  "validation_generation": "mixed-accounting-extensions-final1",
+  "schema_version": 3,
   "status": "passed",
   "acceptance_complete": true,
-  "recorded_utc": "2026-10-11T10:34:58.305881+00:00",
-  "scope": "Complete nonfork quick/CI runner partitions and full CI production codegen; one changed main-mixed invariant entrypoint at three full audit seeds.",
+  "recorded_utc": "2026-10-14T07:19:49.180598+00:00",
+  "validation_generation": "source-bound-close-bounty-r2",
   "source": {
-    "archive": {
-      "bytes": 1984366,
-      "path": "artifacts/perps-extensions/final1-frozen/tested-source.tar.gz",
-      "sha256": "1462043ff731e9802d1c9f08fd8b164013312b68b1d9ca516e00f5841afeff0f"
-    },
-    "base_commit": "340c63119ee67d931eb352ac4b6f3c789089ce8e",
-    "content_sha256": "723b0bff82c9b242eb6ec387bc1af8aebec0e22c2c7da2a5599f11131a1c291a",
-    "dependencies": {
-      "forge-std": {
-        "actual_revision": "f5495c9b993bfc6e79dd52adfdcb7dac0a1da918",
-        "gitlink_revision": "f5495c9b993bfc6e79dd52adfdcb7dac0a1da918",
-        "runtime_checkout": "/Users/stan/Code/Plether/plether-core/lib/forge-std"
-      },
-      "morpho-blue": {
-        "actual_revision": "55d2d99304fb3fb930c688462ae2ccabb1d533ad",
-        "gitlink_revision": "55d2d99304fb3fb930c688462ae2ccabb1d533ad",
-        "runtime_checkout": "/Users/stan/Code/Plether/plether-core/lib/morpho-blue"
-      },
-      "openzeppelin-contracts": {
-        "actual_revision": "fcbae5394ae8ad52d8e580a3477db99814b9d565",
-        "gitlink_revision": "fcbae5394ae8ad52d8e580a3477db99814b9d565",
-        "runtime_checkout": "/Users/stan/Code/Plether/plether-core/lib/openzeppelin-contracts"
-      }
-    },
-    "dependency_environment": {
-      "bytes": 449,
-      "path": "artifacts/perps-extensions/final1-frozen/validation-dependencies.env.sh",
-      "sha256": "0fb712033deed338bd40c8f2df65401ab935fe5fd5aaa47791a549e5c0cc9e7c"
-    },
+    "execution_source_sha256": "c06b4dd29d6f3031c4be3ff2f974d5793a1b661114240c70a310def24add3a87",
+    "file_count": 1158,
+    "base_commit": "550d0a642e3fe854a5542edcdc18cbeafc0744b6",
     "manifest": {
-      "bytes": 158313,
-      "path": "artifacts/perps-extensions/final1-frozen/source-manifest.json",
-      "sha256": "48b92bf4f61516fe74f2cf2e05280cc59c0f246a06b46b8610b54c0e0860b6f0"
+      "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+      "bytes": 208980,
+      "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
     },
-    "revision_note": "Uncommitted implementation on the recorded base commit, identified by the frozen content hash. The only execution-source change after testing is the derived shard timing refresh; documentation is outside that identity.",
-    "execution_source_file_count": 1104
-  },
-  "execution_report": {
-    "path": "artifacts/perps-extensions/final1-execution-report.json",
-    "bytes": 255375,
-    "sha256": "9be3cb7d1a9f7abd37195e70b9c5ef079e0809fa25fc91b3017f49ebfc933d4a"
-  },
-  "evidence_report_normalization": {
-    "note": "The frozen helper compares recomputed Python tuples with JSON-decoded arrays. A report-only adapter normalizes the recomputed closure through JSON; all original acceptance assertions remain in force.",
-    "adapter": {
-      "path": "artifacts/perps-extensions/final1-report-adapter.py",
-      "bytes": 750,
-      "sha256": "8fa27ea0f848728610e7d1786f6af8e17449a1df35cb33debea00319eead3b0f"
+    "archive": {
+      "path": "objects/sha256/d9/d95a047d70b57ec0126623ef88485339efb00acae1256aeec319fd8a10b7f525",
+      "bytes": 2122739,
+      "sha256": "d95a047d70b57ec0126623ef88485339efb00acae1256aeec319fd8a10b7f525"
     },
-    "diagnosis": {
-      "path": "artifacts/perps-extensions/final1-report-normalization.json",
-      "bytes": 635,
-      "sha256": "dec0d1a043239f47385fe5c55b072270078dd1e34db05c3a1d94d21fa6cdffbc"
+    "excluded_derived_metadata": [
+      "packages/perps/test/perps/VALIDATION.json",
+      "scripts/perps-shard-weights.json"
+    ]
+  },
+  "raw_shard_discovery": {
+    "tests": 2207,
+    "entrypoints": 219,
+    "universe_id_sha256": "3779a7cc85d733df7dd8560ccc77898f58b27295763388eb6f9a499cca4cf2dc",
+    "raw_selections": [
+      {
+        "path": "objects/sha256/92/92d747cf2e50d54a702182bcbdb4af3f8c65b651b02d7437cd52f2b45996b28f",
+        "bytes": 43211,
+        "sha256": "92d747cf2e50d54a702182bcbdb4af3f8c65b651b02d7437cd52f2b45996b28f"
+      },
+      {
+        "path": "objects/sha256/a2/a237b3b1377208ce352b61f3c92090ff1fc6422c28ed531efef31bc2adc90498",
+        "bytes": 40365,
+        "sha256": "a237b3b1377208ce352b61f3c92090ff1fc6422c28ed531efef31bc2adc90498"
+      },
+      {
+        "path": "objects/sha256/57/57e6dd69dbb406315f896308796e372b1e3e8f92623f54fc821dedcf95e570c0",
+        "bytes": 41113,
+        "sha256": "57e6dd69dbb406315f896308796e372b1e3e8f92623f54fc821dedcf95e570c0"
+      },
+      {
+        "path": "objects/sha256/00/00371428681d65082598dd51683731d3e6af8f3d8cdeae5acac925739a43e856",
+        "bytes": 33545,
+        "sha256": "00371428681d65082598dd51683731d3e6af8f3d8cdeae5acac925739a43e856"
+      }
+    ],
+    "source_attestation": {
+      "path": "objects/sha256/51/519257af26b4879a730ed3aff07e8bcc242a341c1520570cef7c9f968c1919ba",
+      "bytes": 8670,
+      "sha256": "519257af26b4879a730ed3aff07e8bcc242a341c1520570cef7c9f968c1919ba"
+    },
+    "assignment": {
+      "path": "objects/sha256/4b/4b1f88e8f4b1802bb9d46a684cea6c427ee8e0dc567abea9c4ed6dea7122d7de",
+      "bytes": 11461,
+      "sha256": "4b1f88e8f4b1802bb9d46a684cea6c427ee8e0dc567abea9c4ed6dea7122d7de"
+    },
+    "inventory": {
+      "path": "objects/sha256/c9/c92938fd72fbb8f4f35377b99f134fdc756811f96f8dfa25459d4625194b59c5",
+      "bytes": 60615,
+      "sha256": "c92938fd72fbb8f4f35377b99f134fdc756811f96f8dfa25459d4625194b59c5"
+    },
+    "regex": {
+      "path": "objects/sha256/44/449dff62264a07db3fd01895b8b905360d4dbecea95adf8c873d50659cde4944",
+      "bytes": 4311,
+      "sha256": "449dff62264a07db3fd01895b8b905360d4dbecea95adf8c873d50659cde4944"
+    },
+    "provenance": {
+      "path": "objects/sha256/87/876860b30bc5a9beae2c1981a8f80671ecb4506dd3c695c413ae25550de57b73",
+      "bytes": 6229,
+      "sha256": "876860b30bc5a9beae2c1981a8f80671ecb4506dd3c695c413ae25550de57b73"
     }
   },
   "partitions": {
-    "ci": {
-      "artifacts": {
-        "all-tests.json": {
-          "bytes": 145202,
-          "path": "artifacts/perps-extensions/final1-fast-ci/all-tests.json",
-          "sha256": "d1f57f2ab646c5a40d6aa1df2ed99afb4658030c4878e961ecd3019e5a8b2297"
-        },
-        "inventory.json": {
-          "bytes": 59577,
-          "path": "artifacts/perps-extensions/final1-fast-ci/inventory.json",
-          "sha256": "df4f96e42c2fb8d0c2a618b879638f3dbea35409e820a94f49b90adf6afc0ade"
-        },
-        "pr-selection.json": {
-          "bytes": 151,
-          "path": "artifacts/perps-extensions/final1-fast-ci/pr-selection.json",
-          "sha256": "f3158e440c6ecb5944b780b1c529e62926fdca160acb057ab699d1eea90ae90d"
-        }
-      },
-      "correctness": 2071,
-      "entrypoints": 215,
-      "production_gates": 77,
-      "tests": 2148,
-      "universe_sha256": "447e1cc984c119845c41272749b169790def2a379046cc404b7c266bf95ec039"
-    },
     "quick": {
-      "artifacts": {
-        "all-tests.json": {
-          "bytes": 145202,
-          "path": "artifacts/perps-extensions/final1-fast-quick/all-tests.json",
-          "sha256": "d1f57f2ab646c5a40d6aa1df2ed99afb4658030c4878e961ecd3019e5a8b2297"
-        },
-        "inventory.json": {
-          "bytes": 59577,
-          "path": "artifacts/perps-extensions/final1-fast-quick/inventory.json",
-          "sha256": "df4f96e42c2fb8d0c2a618b879638f3dbea35409e820a94f49b90adf6afc0ade"
-        },
-        "pr-selection.json": {
-          "bytes": 151,
-          "path": "artifacts/perps-extensions/final1-fast-quick/pr-selection.json",
-          "sha256": "f3158e440c6ecb5944b780b1c529e62926fdca160acb057ab699d1eea90ae90d"
-        }
+      "tests": 2207,
+      "correctness": 2122,
+      "production_gates": 85,
+      "universe_id_sha256": "3779a7cc85d733df7dd8560ccc77898f58b27295763388eb6f9a499cca4cf2dc",
+      "all_tests": {
+        "path": "objects/sha256/53/5358477aec335313c999e610dfb0c7302fa4596bbc20a2f0596492c9cf888cd3",
+        "bytes": 169994,
+        "sha256": "5358477aec335313c999e610dfb0c7302fa4596bbc20a2f0596492c9cf888cd3"
       },
-      "correctness": 2071,
-      "entrypoints": 215,
-      "production_gates": 77,
-      "tests": 2148,
-      "universe_sha256": "447e1cc984c119845c41272749b169790def2a379046cc404b7c266bf95ec039"
+      "summary": {
+        "path": "objects/sha256/69/69a07744c15c765db313e2ef096d2ebff692f81e386f0b269c8492692960a000",
+        "bytes": 151,
+        "sha256": "69a07744c15c765db313e2ef096d2ebff692f81e386f0b269c8492692960a000"
+      },
+      "provenance": {
+        "path": "objects/sha256/d0/d0b48ef7c6cad3ae19aa4c1a46a8ddcb0eb903b9101f7302465366a7509dd257",
+        "bytes": 1032,
+        "sha256": "d0b48ef7c6cad3ae19aa4c1a46a8ddcb0eb903b9101f7302465366a7509dd257"
+      }
+    },
+    "ci": {
+      "tests": 2207,
+      "correctness": 2122,
+      "production_gates": 85,
+      "universe_id_sha256": "3779a7cc85d733df7dd8560ccc77898f58b27295763388eb6f9a499cca4cf2dc",
+      "all_tests": {
+        "path": "objects/sha256/53/5358477aec335313c999e610dfb0c7302fa4596bbc20a2f0596492c9cf888cd3",
+        "bytes": 169994,
+        "sha256": "5358477aec335313c999e610dfb0c7302fa4596bbc20a2f0596492c9cf888cd3"
+      },
+      "summary": {
+        "path": "objects/sha256/69/69a07744c15c765db313e2ef096d2ebff692f81e386f0b269c8492692960a000",
+        "bytes": 151,
+        "sha256": "69a07744c15c765db313e2ef096d2ebff692f81e386f0b269c8492692960a000"
+      },
+      "provenance": {
+        "path": "objects/sha256/d0/d0b48ef7c6cad3ae19aa4c1a46a8ddcb0eb903b9101f7302465366a7509dd257",
+        "bytes": 1032,
+        "sha256": "d0b48ef7c6cad3ae19aa4c1a46a8ddcb0eb903b9101f7302465366a7509dd257"
+      }
     }
   },
-  "lanes": [
-    {
-      "id": "quick-production-gates",
-      "status": "passed",
+  "lanes": {
+    "quick_correctness": {
+      "path": "revalidation-r2/quick-final/correctness",
+      "counts": {
+        "passed": 2122,
+        "failed": 0,
+        "skipped": 0
+      },
       "profile": "quick",
+      "via_ir": false,
       "seed": "0xdeadbeef",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": true
+      "kinds": {
+        "Unit": 2027,
+        "Fuzz": 73,
+        "Invariant": 22
       },
-      "counts": {
-        "failed": 0,
-        "passed": 77,
-        "skipped": 0
+      "invariants": {
+        "tests": 22,
+        "runs": 352,
+        "calls": 45056,
+        "reverts": 0,
+        "discards": 0
       },
-      "test_kinds": {
-        "Fuzz": 0,
-        "Invariant": 2,
-        "Unit": 75
+      "selected_id_sha256": "bad48f632fcc98f966376a9cc9cbe1088670fab5c24b462e0169da63c7af75a1",
+      "duration_seconds": 3375.474,
+      "run": {
+        "path": "objects/sha256/c2/c226376c42ed249f57b2d0d97c583d4713f34834ab6b60d23693c97a73e94e51",
+        "bytes": 12248,
+        "sha256": "c226376c42ed249f57b2d0d97c583d4713f34834ab6b60d23693c97a73e94e51"
       },
-      "configured_budgets": {
-        "fuzz_runs": 256,
-        "invariant_depth": 128,
-        "invariant_runs": 16
+      "selection": {
+        "path": "objects/sha256/e2/e27e4622f73e4e00d771f82e709ef9509f1f47b6082a4b02b8a003002fe9c1e2",
+        "bytes": 143289,
+        "sha256": "e27e4622f73e4e00d771f82e709ef9509f1f47b6082a4b02b8a003002fe9c1e2"
       },
-      "actual_fuzz_runs_per_fuzz_test": null,
-      "actual_invariant_execution": {
-        "tests": 2,
-        "runs_per_test_min": 16,
-        "runs_per_test_max": 16,
-        "total_calls": 4096,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
-      },
-      "duration_seconds": 152.911,
-      "selected_test_id_sha256": "4e69d38f7c855246857a625e26a4444837ef213111668c30d7895cbbbb3d3716",
-      "per_test_evidence_sha256": "384fe8a5b9264ad9e1005f2225163f6294d85ceb3d0d8061f50787782c39363b",
-      "artifacts": {
-        "run.json": {
-          "bytes": 10951,
-          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/run.json",
-          "sha256": "3a26d7e0a83db68e0bd956afb432a2e3288a6033109ff7bf4d5f6beff2f98301"
-        },
-        "results.json": {
-          "bytes": 14868467,
-          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/results.json",
-          "sha256": "6a1a13a76005ef158ad5b8188c5052338d1fc816b22002512c269470e5b882de"
-        },
-        "execution-coverage.json": {
-          "bytes": 84,
-          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/execution-coverage.json",
-          "sha256": "75ca6b6dbf853c10ca9141fdb59714de36fc2cfdf661c387f36418c6919c3d8d"
-        },
-        "replay.sh": {
-          "bytes": 515,
-          "path": "artifacts/perps-extensions/final1-fast-quick/production-gates/replay.sh",
-          "sha256": "cb33405d46daa6fcaab201b7916276306af890ad69e006c13ea5ec4b64ecc0b0"
-        }
+      "results": {
+        "path": "objects/sha256/56/567d190c66a406ee24bf29473bfd284620c261b583a51a0336cc63210fef6279",
+        "bytes": 84220618,
+        "sha256": "567d190c66a406ee24bf29473bfd284620c261b583a51a0336cc63210fef6279"
       },
       "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 774,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-result.json",
-          "sha256": "ee7defbc45f98835831cde666a5d0968e9c8028f8e50b4eec175ffff775cec11"
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-guard-start.json": {
-          "bytes": 679,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-start.json",
-          "sha256": "9e82a82db033b2f93e5f1153e67124dc9138802d0b3002ba932e19c819168ab9"
-        },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-after.json",
-          "sha256": "4aaf783e220538e21b0aeceed37269c2320ecf4703808b5739f9b048ac0db558"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-before.json",
-          "sha256": "faf4d2ddc0cbe15015f49763e091176a2ba1c3b36411f9b1e1cfa059ee5480d1"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         }
       }
     },
-    {
-      "id": "quick-correctness",
-      "status": "passed",
+    "quick_production_gates": {
+      "path": "revalidation-r2/quick-final/production-gates",
+      "counts": {
+        "passed": 85,
+        "failed": 0,
+        "skipped": 0
+      },
       "profile": "quick",
+      "via_ir": true,
       "seed": "0xdeadbeef",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": false
+      "kinds": {
+        "Unit": 83,
+        "Invariant": 2
       },
-      "counts": {
-        "failed": 0,
-        "passed": 2071,
-        "skipped": 0
-      },
-      "test_kinds": {
-        "Fuzz": 67,
-        "Invariant": 22,
-        "Unit": 1982
-      },
-      "configured_budgets": {
-        "fuzz_runs": 256,
-        "invariant_depth": 128,
-        "invariant_runs": 16
-      },
-      "actual_fuzz_runs_per_fuzz_test": 256,
-      "actual_invariant_execution": {
-        "tests": 22,
-        "runs_per_test_min": 16,
-        "runs_per_test_max": 16,
-        "total_calls": 45056,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
-      },
-      "duration_seconds": 3058.874,
-      "selected_test_id_sha256": "fbd7dd88346ee6978a53f1fdbcd08a82c9f0a0255c630805d54bc4e8e14fb1f4",
-      "per_test_evidence_sha256": "44b8ff598c875938a3945669a1e2a62ca371666f9bfb7a97e400c93e937d981e",
-      "artifacts": {
-        "run.json": {
-          "bytes": 11016,
-          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/run.json",
-          "sha256": "e72d3bad5f1e7cdb91ada074c934d8b648c1217bed636bca3247fa87657cea1a"
-        },
-        "results.json": {
-          "bytes": 80064741,
-          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/results.json",
-          "sha256": "6d5c70ce6fbafcd057cad79dbd0cc6cc5407dcf7c2f5f5aadea501cc8fe35993"
-        },
-        "execution-coverage.json": {
-          "bytes": 88,
-          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/execution-coverage.json",
-          "sha256": "8bdf2a0091c0523d11678d0592911b9139ec84c6adec648c7e4c903f3436d879"
-        },
-        "replay.sh": {
-          "bytes": 516,
-          "path": "artifacts/perps-extensions/final1-fast-quick/correctness/replay.sh",
-          "sha256": "1f92a9fa039a3e290e23d797e6a04ab578600a7aa1891953b61382f310402f00"
-        }
-      },
-      "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 774,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-result.json",
-          "sha256": "ee7defbc45f98835831cde666a5d0968e9c8028f8e50b4eec175ffff775cec11"
-        },
-        "source-guard-start.json": {
-          "bytes": 679,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-guard-start.json",
-          "sha256": "9e82a82db033b2f93e5f1153e67124dc9138802d0b3002ba932e19c819168ab9"
-        },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-after.json",
-          "sha256": "4aaf783e220538e21b0aeceed37269c2320ecf4703808b5739f9b048ac0db558"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-quick/source-manifest-before.json",
-          "sha256": "faf4d2ddc0cbe15015f49763e091176a2ba1c3b36411f9b1e1cfa059ee5480d1"
-        }
-      }
-    },
-    {
-      "id": "ci-production-gates",
-      "status": "passed",
-      "profile": "ci",
-      "seed": "0xdeadbeef",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": true
-      },
-      "counts": {
-        "failed": 0,
-        "passed": 77,
-        "skipped": 0
-      },
-      "test_kinds": {
-        "Fuzz": 0,
-        "Invariant": 2,
-        "Unit": 75
-      },
-      "configured_budgets": {
-        "fuzz_runs": 2000,
-        "invariant_depth": 256,
-        "invariant_runs": 32
-      },
-      "actual_fuzz_runs_per_fuzz_test": null,
-      "actual_invariant_execution": {
+      "invariants": {
         "tests": 2,
-        "runs_per_test_min": 32,
-        "runs_per_test_max": 32,
-        "total_calls": 16384,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
+        "runs": 32,
+        "calls": 4096,
+        "reverts": 0,
+        "discards": 0
       },
-      "duration_seconds": 247.57,
-      "selected_test_id_sha256": "4e69d38f7c855246857a625e26a4444837ef213111668c30d7895cbbbb3d3716",
-      "per_test_evidence_sha256": "14b0aa650c74dc64d57da4a8fd1ef96dc48a77212afcc291eef29341e6ce7497",
-      "artifacts": {
-        "run.json": {
-          "bytes": 10936,
-          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/run.json",
-          "sha256": "38064567b642c0b6a5f3d0e04e82e730ba8e612186a1217963e7ae89a0cd24ab"
-        },
-        "results.json": {
-          "bytes": 20109996,
-          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/results.json",
-          "sha256": "bc9f3c154789d4b4d112a11b4b2b9da991a54af3fb6d6f48055a895820130dcb"
-        },
-        "execution-coverage.json": {
-          "bytes": 84,
-          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/execution-coverage.json",
-          "sha256": "75ca6b6dbf853c10ca9141fdb59714de36fc2cfdf661c387f36418c6919c3d8d"
-        },
-        "replay.sh": {
-          "bytes": 512,
-          "path": "artifacts/perps-extensions/final1-fast-ci/production-gates/replay.sh",
-          "sha256": "2dda903515dbd2bb6bb54b91738e44803647eda18ba3f6134d2d9e367c466b4c"
-        }
+      "selected_id_sha256": "e5da71633b70c906c81a3e06fd7b657938a2836ff4b38d2a814a7cb847195d05",
+      "duration_seconds": 1388.782,
+      "run": {
+        "path": "objects/sha256/b0/b08666b2edc9004b719a460a8425b872f56d6de46e93fffdc264d8009222dd1e",
+        "bytes": 12771,
+        "sha256": "b08666b2edc9004b719a460a8425b872f56d6de46e93fffdc264d8009222dd1e"
+      },
+      "selection": {
+        "path": "objects/sha256/e4/e4f0cc85ad9fb5abcc3179eceafe77475a1f9748fde73cf407b04f488e5a0f7e",
+        "bytes": 6796,
+        "sha256": "e4f0cc85ad9fb5abcc3179eceafe77475a1f9748fde73cf407b04f488e5a0f7e"
+      },
+      "results": {
+        "path": "objects/sha256/dd/ddb16c3f2f49e7d8282db78a3a98cb145e0ac5503456225207a655f33589d121",
+        "bytes": 15470373,
+        "sha256": "ddb16c3f2f49e7d8282db78a3a98cb145e0ac5503456225207a655f33589d121"
       },
       "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 771,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-result.json",
-          "sha256": "43d79500bc4c67a6b52562f44b26f6318635ede10ca582a47e8a28d75ce5e1b4"
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-guard-start.json": {
-          "bytes": 676,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-start.json",
-          "sha256": "105ac40eb2933b765273f99336bd3f97a32d1d9d10839c479f93d441a1d92b96"
-        },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-after.json",
-          "sha256": "4294c8a8e52931aabab97a16ff7635f4fdccca09469008170679c6121aa6dbc0"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-before.json",
-          "sha256": "297642ccfe32237343eeb75c5ed90602153ecfd4f59c77a663ca7a441e1e64d1"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         }
+      },
+      "scratch_source_bracket": {
+        "path": "objects/sha256/58/58c3434909a78150f6c45e02435d537e9fd949aa6eeba7ce40841e0d9b6a60c8",
+        "bytes": 8862,
+        "sha256": "58c3434909a78150f6c45e02435d537e9fd949aa6eeba7ce40841e0d9b6a60c8"
       }
     },
-    {
-      "id": "ci-correctness",
-      "status": "passed",
-      "profile": "ci",
-      "seed": "0xdeadbeef",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": false
-      },
+    "ci_correctness": {
+      "path": "revalidation-r2/ci-fast-final/correctness",
       "counts": {
+        "passed": 2122,
         "failed": 0,
-        "passed": 2071,
         "skipped": 0
       },
-      "test_kinds": {
-        "Fuzz": 67,
-        "Invariant": 22,
-        "Unit": 1982
+      "profile": "ci",
+      "via_ir": false,
+      "seed": "0xdeadbeef",
+      "kinds": {
+        "Unit": 2027,
+        "Fuzz": 73,
+        "Invariant": 22
       },
-      "configured_budgets": {
-        "fuzz_runs": 2000,
-        "invariant_depth": 256,
-        "invariant_runs": 32
-      },
-      "actual_fuzz_runs_per_fuzz_test": 2000,
-      "actual_invariant_execution": {
+      "invariants": {
         "tests": 22,
-        "runs_per_test_min": 32,
-        "runs_per_test_max": 32,
-        "total_calls": 180224,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
+        "runs": 704,
+        "calls": 180224,
+        "reverts": 0,
+        "discards": 0
       },
-      "duration_seconds": 3638.219,
-      "selected_test_id_sha256": "fbd7dd88346ee6978a53f1fdbcd08a82c9f0a0255c630805d54bc4e8e14fb1f4",
-      "per_test_evidence_sha256": "2758a2339e7465ec45253c07f79b46438932413eac0d56d17d082cdaab0ccd06",
-      "artifacts": {
-        "run.json": {
-          "bytes": 11002,
-          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/run.json",
-          "sha256": "3bdfa936cb4868a4a41cfae783f7e601811c0823542e5cd04f97e8456109097d"
-        },
-        "results.json": {
-          "bytes": 88740440,
-          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/results.json",
-          "sha256": "c43743bc74eed768540e342b2b345990dba50c7485e4cf8a2685e4d3cdb171ef"
-        },
-        "execution-coverage.json": {
-          "bytes": 88,
-          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/execution-coverage.json",
-          "sha256": "8bdf2a0091c0523d11678d0592911b9139ec84c6adec648c7e4c903f3436d879"
-        },
-        "replay.sh": {
-          "bytes": 513,
-          "path": "artifacts/perps-extensions/final1-fast-ci/correctness/replay.sh",
-          "sha256": "e9ced25f1e9c5f97674b6a7c49f1be86078110bfb1cb355327a500d0dee67d53"
-        }
+      "selected_id_sha256": "bad48f632fcc98f966376a9cc9cbe1088670fab5c24b462e0169da63c7af75a1",
+      "duration_seconds": 4886.332,
+      "run": {
+        "path": "objects/sha256/4c/4ce40050e53f3ecb342eb566940ea29c70e2ebd9a0d2feeb5fb05ab57fc2a4a1",
+        "bytes": 12248,
+        "sha256": "4ce40050e53f3ecb342eb566940ea29c70e2ebd9a0d2feeb5fb05ab57fc2a4a1"
+      },
+      "selection": {
+        "path": "objects/sha256/e2/e27e4622f73e4e00d771f82e709ef9509f1f47b6082a4b02b8a003002fe9c1e2",
+        "bytes": 143289,
+        "sha256": "e27e4622f73e4e00d771f82e709ef9509f1f47b6082a4b02b8a003002fe9c1e2"
+      },
+      "results": {
+        "path": "objects/sha256/20/20b6833b7e6305f67c43f058eb3dc1152b37649e4906f6bf5c3b6c0611bca171",
+        "bytes": 92707828,
+        "sha256": "20b6833b7e6305f67c43f058eb3dc1152b37649e4906f6bf5c3b6c0611bca171"
       },
       "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 771,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-result.json",
-          "sha256": "43d79500bc4c67a6b52562f44b26f6318635ede10ca582a47e8a28d75ce5e1b4"
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-guard-start.json": {
-          "bytes": 676,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-guard-start.json",
-          "sha256": "105ac40eb2933b765273f99336bd3f97a32d1d9d10839c479f93d441a1d92b96"
-        },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-after.json",
-          "sha256": "4294c8a8e52931aabab97a16ff7635f4fdccca09469008170679c6121aa6dbc0"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-fast-ci/source-manifest-before.json",
-          "sha256": "297642ccfe32237343eeb75c5ed90602153ecfd4f59c77a663ca7a441e1e64d1"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         }
       }
     },
-    {
-      "id": "full-production-ci",
-      "status": "passed",
+    "ci_production_gates": {
+      "path": "revalidation-r2/ci-fast-final/production-gates",
+      "counts": {
+        "passed": 85,
+        "failed": 0,
+        "skipped": 0
+      },
       "profile": "ci",
+      "via_ir": true,
       "seed": "0xdeadbeef",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": true
+      "kinds": {
+        "Unit": 83,
+        "Invariant": 2
       },
-      "counts": {
-        "failed": 0,
-        "passed": 2148,
-        "skipped": 0
+      "invariants": {
+        "tests": 2,
+        "runs": 64,
+        "calls": 16384,
+        "reverts": 0,
+        "discards": 0
       },
-      "test_kinds": {
-        "Fuzz": 67,
-        "Invariant": 24,
-        "Unit": 2057
+      "selected_id_sha256": "e5da71633b70c906c81a3e06fd7b657938a2836ff4b38d2a814a7cb847195d05",
+      "duration_seconds": 521.605,
+      "run": {
+        "path": "objects/sha256/4a/4aae8a1577d7802ba5134e82b9f92e563627e63a69a069c162e757583328c45c",
+        "bytes": 12776,
+        "sha256": "4aae8a1577d7802ba5134e82b9f92e563627e63a69a069c162e757583328c45c"
       },
-      "configured_budgets": {
-        "fuzz_runs": 2000,
-        "invariant_depth": 256,
-        "invariant_runs": 32
+      "selection": {
+        "path": "objects/sha256/e4/e4f0cc85ad9fb5abcc3179eceafe77475a1f9748fde73cf407b04f488e5a0f7e",
+        "bytes": 6796,
+        "sha256": "e4f0cc85ad9fb5abcc3179eceafe77475a1f9748fde73cf407b04f488e5a0f7e"
       },
-      "actual_fuzz_runs_per_fuzz_test": 2000,
-      "actual_invariant_execution": {
-        "tests": 24,
-        "runs_per_test_min": 32,
-        "runs_per_test_max": 32,
-        "total_calls": 196608,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
-      },
-      "duration_seconds": 2844.79,
-      "selected_test_id_sha256": "447e1cc984c119845c41272749b169790def2a379046cc404b7c266bf95ec039",
-      "per_test_evidence_sha256": "c0ef73af8238a01ebfceaad244d428dd3312b2a065afb3065d6c5fd5a5789f37",
-      "artifacts": {
-        "run.json": {
-          "bytes": 3172,
-          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/run.json",
-          "sha256": "5c071acc969d4e53f31d14a383b2ba06ade8c7c29b2c73cdb155978dbc9f168c"
-        },
-        "results.json": {
-          "bytes": 108415107,
-          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/results.json",
-          "sha256": "932a81515fb2e84a4e170709b6a284dcd4b3a62056111a45d1e4f7b9f1f6a27e"
-        },
-        "execution-coverage.json": {
-          "bytes": 88,
-          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/execution-coverage.json",
-          "sha256": "cb88ae4b7d42ce538ccdb15a6d23fb0dbf68d0cce0d43e98da434b5fb05a625d"
-        },
-        "replay.sh": {
-          "bytes": 891,
-          "path": "artifacts/perps-extensions/final1-production-ci/full-nonfork/replay.sh",
-          "sha256": "08dcb09d6ea7d28c06e39522cf4143275a8c751618e0ed47a21cf00b3fb165f6"
-        }
+      "results": {
+        "path": "objects/sha256/d2/d26cb74358b3219befdf84d1d5647e40407e0168d51da80ee9bcd132f6f73b9c",
+        "bytes": 20595107,
+        "sha256": "d26cb74358b3219befdf84d1d5647e40407e0168d51da80ee9bcd132f6f73b9c"
       },
       "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 965,
-          "path": "artifacts/perps-extensions/final1-production-ci/source-guard-result.json",
-          "sha256": "41a87a58397090d81ca6830bb873b4138acc7cb6eb806eae1f0aadb5f8f56ab5"
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-guard-start.json": {
-          "bytes": 870,
-          "path": "artifacts/perps-extensions/final1-production-ci/source-guard-start.json",
-          "sha256": "c3a2e8cf0100634d3f09c3876c15fea39d6d482627fa8da4ab832b628d2f6f6b"
-        },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-production-ci/source-manifest-after.json",
-          "sha256": "5f35bb818f2c3ddc37185a51553ea86585ef3d3ac208ddb30219b50441efd0de"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-production-ci/source-manifest-before.json",
-          "sha256": "acabccb1b2f936426ad056f27717f3e9cd0d1ddaa781ec6ce677acf2cd09d916"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         }
+      },
+      "scratch_source_bracket": {
+        "path": "objects/sha256/58/58c3434909a78150f6c45e02435d537e9fd949aa6eeba7ce40841e0d9b6a60c8",
+        "bytes": 8862,
+        "sha256": "58c3434909a78150f6c45e02435d537e9fd949aa6eeba7ce40841e0d9b6a60c8"
       }
-    },
+    }
+  },
+  "production_ci_shards": [
     {
-      "id": "mixed-audit-0xdeadbeef",
-      "status": "passed",
-      "profile": "audit",
+      "path": "revalidation-r2/production-ci/shard-0/shard-0",
+      "counts": {
+        "passed": 635,
+        "failed": 0,
+        "skipped": 0
+      },
+      "profile": "ci",
+      "via_ir": true,
       "seed": "0xdeadbeef",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": true
+      "kinds": {
+        "Unit": 605,
+        "Fuzz": 26,
+        "Invariant": 4
       },
-      "counts": {
-        "failed": 0,
-        "passed": 10,
-        "skipped": 0
+      "invariants": {
+        "tests": 4,
+        "runs": 128,
+        "calls": 32768,
+        "reverts": 0,
+        "discards": 0
       },
-      "test_kinds": {
-        "Fuzz": 0,
-        "Invariant": 1,
-        "Unit": 9
+      "selected_id_sha256": "b913db51f97a7bac15f740516ddc97b10234f57ce7a8649a32bf62558d6cf427",
+      "duration_seconds": 2725.414,
+      "run": {
+        "path": "objects/sha256/70/70292ec2ce41641b081d670e1dce963621edfd03ced14828c44dd32c28a90b78",
+        "bytes": 3816,
+        "sha256": "70292ec2ce41641b081d670e1dce963621edfd03ced14828c44dd32c28a90b78"
       },
-      "configured_budgets": {
-        "fuzz_runs": 20000,
-        "invariant_depth": 1000,
-        "invariant_runs": 256
+      "selection": {
+        "path": "objects/sha256/92/92d747cf2e50d54a702182bcbdb4af3f8c65b651b02d7437cd52f2b45996b28f",
+        "bytes": 43211,
+        "sha256": "92d747cf2e50d54a702182bcbdb4af3f8c65b651b02d7437cd52f2b45996b28f"
       },
-      "actual_fuzz_runs_per_fuzz_test": null,
-      "actual_invariant_execution": {
-        "tests": 1,
-        "runs_per_test_min": 256,
-        "runs_per_test_max": 256,
-        "total_calls": 256000,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
-      },
-      "duration_seconds": 1264.205,
-      "selected_test_id_sha256": "7507868b20bdb0fec24db4e68afe0e406e4e1afe54a67bafee67f94223f4f086",
-      "per_test_evidence_sha256": "7beed4a52288b99521149254127ae4e7b737f2d10ec238afea3ee5b327cc1da9",
-      "artifacts": {
-        "run.json": {
-          "bytes": 3291,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/run.json",
-          "sha256": "3d07915c71cb15b5e4d1ec7e3a27a0a3fdb4152fe883c603b024d1d36301e83e"
-        },
-        "results.json": {
-          "bytes": 12391808,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/results.json",
-          "sha256": "330464cbd1d3e6bae1782d7d388b2bfd73a98f7447cfeebd8b95947cb3f94233"
-        },
-        "execution-coverage.json": {
-          "bytes": 84,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/execution-coverage.json",
-          "sha256": "9fac80450ad29c95a103da8b9000b89ea5dc1a5ee0317e287ee5cf4a88d84649"
-        },
-        "replay.sh": {
-          "bytes": 961,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/main-mixed/replay.sh",
-          "sha256": "42f9533795a2906b0c9bf86c4db9e16f9942aea7fcca5002c15691975ef87812"
-        }
+      "results": {
+        "path": "objects/sha256/60/60d34b880e3ad2e6c6e90dfa43860131c7023e56d580fce20fe015774eaeb903",
+        "bytes": 21827217,
+        "sha256": "60d34b880e3ad2e6c6e90dfa43860131c7023e56d580fce20fe015774eaeb903"
       },
       "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 1017,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-guard-result.json",
-          "sha256": "c3eada4d1a09ea1647e9371fce37f4193164faa4e7f8afb58ec830a7ae06487d"
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-guard-start.json": {
-          "bytes": 922,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-guard-start.json",
-          "sha256": "597551cb65bec85b005a3bb6ea119b8bc2817864b6a91dafdc95b37cd0254a77"
-        },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-manifest-after.json",
-          "sha256": "ef8d236e27c3d26561e95a951f31b5e3d948f1dc584ea2ef328fc3fcf2a79ffb"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-audit-deadbeef/source-manifest-before.json",
-          "sha256": "fd18764c72c079b4887fba339feb5366ad9ac3aaee4750320a2709084aae4176"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         }
       }
     },
     {
-      "id": "mixed-audit-0x1",
-      "status": "passed",
-      "profile": "audit",
-      "seed": "0x1",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": true
-      },
+      "path": "revalidation-r2/production-ci/shard-1/shard-1",
       "counts": {
+        "passed": 551,
         "failed": 0,
-        "passed": 10,
         "skipped": 0
       },
-      "test_kinds": {
-        "Fuzz": 0,
-        "Invariant": 1,
-        "Unit": 9
+      "profile": "ci",
+      "via_ir": true,
+      "seed": "0xdeadbeef",
+      "kinds": {
+        "Unit": 533,
+        "Fuzz": 10,
+        "Invariant": 8
       },
-      "configured_budgets": {
-        "fuzz_runs": 20000,
-        "invariant_depth": 1000,
-        "invariant_runs": 256
+      "invariants": {
+        "tests": 8,
+        "runs": 256,
+        "calls": 65536,
+        "reverts": 0,
+        "discards": 0
       },
-      "actual_fuzz_runs_per_fuzz_test": null,
-      "actual_invariant_execution": {
-        "tests": 1,
-        "runs_per_test_min": 256,
-        "runs_per_test_max": 256,
-        "total_calls": 256000,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
+      "selected_id_sha256": "da62c619c54e05f8580218b2656673f52a158f4315a9f230d6b039a78a1419d3",
+      "duration_seconds": 2279.115,
+      "run": {
+        "path": "objects/sha256/d5/d596b8562da06ea13a5ea0f47d5d86a7b73f31f36b363d42d62312f610ef72b5",
+        "bytes": 3816,
+        "sha256": "d596b8562da06ea13a5ea0f47d5d86a7b73f31f36b363d42d62312f610ef72b5"
       },
-      "duration_seconds": 1267.424,
-      "selected_test_id_sha256": "7507868b20bdb0fec24db4e68afe0e406e4e1afe54a67bafee67f94223f4f086",
-      "per_test_evidence_sha256": "92ef358459db78f4c4dbc32516468b4f21fd17db7dcdaf9207df0b02a48ace5d",
-      "artifacts": {
-        "run.json": {
-          "bytes": 3235,
-          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/run.json",
-          "sha256": "01e41b35f6565493c8d26c49eef3dca05795a31e85bd7ed1d093d05eb7265ffc"
-        },
-        "results.json": {
-          "bytes": 12586385,
-          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/results.json",
-          "sha256": "2c6ccf1d4179e02cb561dc4caa50705be1edc0b7a72617bf4d50f6558b0adc34"
-        },
-        "execution-coverage.json": {
-          "bytes": 84,
-          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/execution-coverage.json",
-          "sha256": "9fac80450ad29c95a103da8b9000b89ea5dc1a5ee0317e287ee5cf4a88d84649"
-        },
-        "replay.sh": {
-          "bytes": 940,
-          "path": "artifacts/perps-extensions/final1-audit-1/main-mixed/replay.sh",
-          "sha256": "d76ee19de06edc935494299f13a218eb2f7536807ad8fc35153b26569205bcf9"
-        }
+      "selection": {
+        "path": "objects/sha256/a2/a237b3b1377208ce352b61f3c92090ff1fc6422c28ed531efef31bc2adc90498",
+        "bytes": 40365,
+        "sha256": "a237b3b1377208ce352b61f3c92090ff1fc6422c28ed531efef31bc2adc90498"
+      },
+      "results": {
+        "path": "objects/sha256/68/682f4e169486aff691884e92beee65fa319bc233c3524177f2d051708ee9485d",
+        "bytes": 46304945,
+        "sha256": "682f4e169486aff691884e92beee65fa319bc233c3524177f2d051708ee9485d"
       },
       "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 1010,
-          "path": "artifacts/perps-extensions/final1-audit-1/source-guard-result.json",
-          "sha256": "f2f9643e61faaca4c7a5263c282303aa36c69b36da46e70db22ed615d7e3a2e9"
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-guard-start.json": {
-          "bytes": 915,
-          "path": "artifacts/perps-extensions/final1-audit-1/source-guard-start.json",
-          "sha256": "21c3ad15d92daea46c1e539e4a10b392d22ca50619dbef6e2e54616b189a4eb3"
-        },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-audit-1/source-manifest-after.json",
-          "sha256": "5c44d52c4a065a6dc79c49b71516b842385ebaf3b306de68145806eb9701e0a9"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-audit-1/source-manifest-before.json",
-          "sha256": "531bdea0452c112346f2daab05c96aff082ca8c170266abcf9bc001b5bc971ad"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         }
       }
     },
     {
-      "id": "mixed-audit-0x2",
-      "status": "passed",
-      "profile": "audit",
-      "seed": "0x2",
-      "compiler": {
-        "optimizer": true,
-        "optimizer_runs": 200,
-        "solc": "0.8.35",
-        "via_ir": true
-      },
+      "path": "revalidation-r2/production-ci/shard-2/shard-2",
       "counts": {
+        "passed": 578,
         "failed": 0,
-        "passed": 10,
         "skipped": 0
       },
-      "test_kinds": {
-        "Fuzz": 0,
-        "Invariant": 1,
-        "Unit": 9
+      "profile": "ci",
+      "via_ir": true,
+      "seed": "0xdeadbeef",
+      "kinds": {
+        "Unit": 559,
+        "Fuzz": 14,
+        "Invariant": 5
       },
-      "configured_budgets": {
-        "fuzz_runs": 20000,
-        "invariant_depth": 1000,
-        "invariant_runs": 256
+      "invariants": {
+        "tests": 5,
+        "runs": 160,
+        "calls": 40960,
+        "reverts": 0,
+        "discards": 0
       },
-      "actual_fuzz_runs_per_fuzz_test": null,
-      "actual_invariant_execution": {
-        "tests": 1,
-        "runs_per_test_min": 256,
-        "runs_per_test_max": 256,
-        "total_calls": 256000,
-        "total_reverts": 0,
-        "failed_corpus_replays": 0,
-        "handler_discards": 0
+      "selected_id_sha256": "e5bf71253ef57b52fa6519676dc0537b6800cae5ce52badfb4086ea0ff929599",
+      "duration_seconds": 3508.345,
+      "run": {
+        "path": "objects/sha256/aa/aa5c2f64623e9b63e98ca3a9aac934b539616209dde997043bc83a6bd645c297",
+        "bytes": 3816,
+        "sha256": "aa5c2f64623e9b63e98ca3a9aac934b539616209dde997043bc83a6bd645c297"
       },
-      "duration_seconds": 1261.092,
-      "selected_test_id_sha256": "7507868b20bdb0fec24db4e68afe0e406e4e1afe54a67bafee67f94223f4f086",
-      "per_test_evidence_sha256": "262dc7c896278f2b2d0e8dac71b0d1e01a2553676f71a6893268535cbb3813b7",
-      "artifacts": {
-        "run.json": {
-          "bytes": 3235,
-          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/run.json",
-          "sha256": "8af1893546a8178a7e1ae16b7efbafce93cb005dec344bc8c78d7932946655bb"
-        },
-        "results.json": {
-          "bytes": 12276968,
-          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/results.json",
-          "sha256": "b91a872ba406224f8f1e9df108e744cf838344da8bc187f9a3855a55452a7b1d"
-        },
-        "execution-coverage.json": {
-          "bytes": 84,
-          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/execution-coverage.json",
-          "sha256": "9fac80450ad29c95a103da8b9000b89ea5dc1a5ee0317e287ee5cf4a88d84649"
-        },
-        "replay.sh": {
-          "bytes": 940,
-          "path": "artifacts/perps-extensions/final1-audit-2/main-mixed/replay.sh",
-          "sha256": "7b303500dbebe3d86957571ec41c4bbfaa61e2995a239831e27360cc2c4604e1"
-        }
+      "selection": {
+        "path": "objects/sha256/57/57e6dd69dbb406315f896308796e372b1e3e8f92623f54fc821dedcf95e570c0",
+        "bytes": 41113,
+        "sha256": "57e6dd69dbb406315f896308796e372b1e3e8f92623f54fc821dedcf95e570c0"
+      },
+      "results": {
+        "path": "objects/sha256/a8/a82ab39a2897f4034ec2a72f2721856369c8a20723e188b85d148412b70f684e",
+        "bytes": 22468023,
+        "sha256": "a82ab39a2897f4034ec2a72f2721856369c8a20723e188b85d148412b70f684e"
       },
       "source_guard": {
-        "source-guard-result.json": {
-          "bytes": 1010,
-          "path": "artifacts/perps-extensions/final1-audit-2/source-guard-result.json",
-          "sha256": "959401d1d67848a51b9996a9e5ee719973cdb2d7f2e1e24481b69cb3df7db2cd"
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-guard-start.json": {
-          "bytes": 915,
-          "path": "artifacts/perps-extensions/final1-audit-2/source-guard-start.json",
-          "sha256": "1f32aa1238907c286fe8e74ea1193c75b2d4e2dfea44038f363c8978ee0c3058"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
+        }
+      }
+    },
+    {
+      "path": "revalidation-r2/production-ci/shard-3/shard-3",
+      "counts": {
+        "passed": 443,
+        "failed": 0,
+        "skipped": 0
+      },
+      "profile": "ci",
+      "via_ir": true,
+      "seed": "0xdeadbeef",
+      "kinds": {
+        "Fuzz": 23,
+        "Unit": 413,
+        "Invariant": 7
+      },
+      "invariants": {
+        "tests": 7,
+        "runs": 224,
+        "calls": 57344,
+        "reverts": 0,
+        "discards": 0
+      },
+      "selected_id_sha256": "483b67639837734355643b40667dcfeecbeea65f1a8f7e0e5297a9dc579f9737",
+      "duration_seconds": 3329.01,
+      "run": {
+        "path": "objects/sha256/da/da64d1a03fabae063f5b1efedfa8587274700c7508264c521a63db88aa1ddc50",
+        "bytes": 3815,
+        "sha256": "da64d1a03fabae063f5b1efedfa8587274700c7508264c521a63db88aa1ddc50"
+      },
+      "selection": {
+        "path": "objects/sha256/00/00371428681d65082598dd51683731d3e6af8f3d8cdeae5acac925739a43e856",
+        "bytes": 33545,
+        "sha256": "00371428681d65082598dd51683731d3e6af8f3d8cdeae5acac925739a43e856"
+      },
+      "results": {
+        "path": "objects/sha256/0d/0dc7831b0d22812cd9f278eda3becc1486a10ed29b92d34441a8e72efc177c97",
+        "bytes": 22532028,
+        "sha256": "0dc7831b0d22812cd9f278eda3becc1486a10ed29b92d34441a8e72efc177c97"
+      },
+      "source_guard": {
+        "before": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         },
-        "source-manifest-after.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-audit-2/source-manifest-after.json",
-          "sha256": "29931d67222513439548066f8cfbab0382debc11ef62b30774e6865dee33fe19"
-        },
-        "source-manifest-before.json": {
-          "bytes": 158313,
-          "path": "artifacts/perps-extensions/final1-audit-2/source-manifest-before.json",
-          "sha256": "6b97d1fad0ee18172ed86493ce98615bf68637a8526f5334b20418b6069f0cd0"
+        "after": {
+          "path": "objects/sha256/b8/b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4",
+          "bytes": 208980,
+          "sha256": "b883b50f5699d27d805ae1a02c459c4f03e29074e01c3fa136194dcd79e638a4"
         }
       }
     }
   ],
   "changed_invariant_audit": {
-    "audit_policy": "Three audit seeds cover new/changed invariant test campaigns and changed test-support closures. Transitive production-source impact is reported separately and receives complete production CI; it is not represented as a complete package audit.",
-    "distinct_invariants": [
-      "packages/perps/test/perps/invariant/properties/PerpMixedAccountingInvariant.t.sol:PerpMixedAccountingInvariantTest::invariant_PersistentPublicMixedAccounting"
-    ],
+    "status": "passed",
+    "entrypoints": 17,
+    "properties_per_seed": 20,
     "seeds": [
       "0xdeadbeef",
       "0x1",
       "0x2"
     ],
-    "selection_basis": {
-      "bytes": 91552,
-      "path": "artifacts/perps-extensions/final1-frozen/invariant-dependency-closure.json",
-      "sha256": "fb7ff0709effc4dc0bf203ad4a1534061def9d26dceb6a055c3f636f44e4cf8a"
+    "effective_totals": {
+      "calls": 15360000,
+      "discards": 0,
+      "invariants": 60,
+      "reverts": 0,
+      "runs": 15360
     },
-    "total_calls": 768000,
-    "transitive_runtime_invariant_entrypoints": [
-      "packages/perps/test/perps/invariant/properties/GovernedSeniorCapacityInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/OracleEthConservationInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/OracleSynchronizationInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpAccountingInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpClosePreviewParityInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpEconomicConservationInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpExplicitAccountingInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpFeeFlowInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpHousePoolLifecycleInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpIndependentClaimInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpMixedAccountingInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpMultiAccountInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpOracleBoundaryInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpOraclePathInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpPreviewInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpTerminalNavBruteForceInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpTraderClaimInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpValueConservationInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpVpiFrozenAccountingInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpWaterfallReferenceInvariant.t.sol"
-    ]
-  },
-  "production_fix": {
-    "summary": "A flat historical-price open checkpoints both carry indexes using the old side borrowing bases and depth before adding new exposure, while preserving a newer cached accounting mark.",
-    "source": "packages/perps/src/CfdEngine.sol",
-    "source_sha256": "e709a8f9dfb5b904622e5d3ba3f246c49497a79ae0ba128b9e9d0824a52a0758",
-    "regression": "packages/perps/test/perps/accounting/carry/HistoricalOpenCarry.t.sol",
-    "regression_sha256": "d33fdf20de4f4276f008b95eb0de6b561bfd68dfca46f6bec4d7abb3c63e31b7",
-    "proof": {
-      "path": "artifacts/perps-extensions/final1-preflight/perps-historical-open-size-safe-proof/manifest.json",
-      "bytes": 2340,
-      "sha256": "96b3eff015028d59fda61eb453c5b7ae247f29a47b4fb487afba9dc0a53e80a8"
+    "plan": {
+      "path": "objects/sha256/45/45bb2227f869f355fbb42798acec4de36be7451cc2ce1620a042764816e024c6",
+      "bytes": 8715,
+      "sha256": "45bb2227f869f355fbb42798acec4de36be7451cc2ce1620a042764816e024c6"
     },
-    "fail_before": {
-      "compiler_mode": "non-IR",
-      "passed": 0,
-      "failed": 3,
-      "skipped": 0
+    "summary": {
+      "path": "objects/sha256/85/85ee63466b857552cbc1c15aba44a3a5b9e27dc0e2f696902b6189bf2598c209",
+      "bytes": 14878,
+      "sha256": "85ee63466b857552cbc1c15aba44a3a5b9e27dc0e2f696902b6189bf2598c209"
     },
-    "pass_after": {
-      "compiler_mode": "production via-IR",
-      "regressions_passed": 3,
-      "unchanged_runtime_gate_passed": 1,
-      "failed": 0,
-      "skipped": 0
+    "evidence_index": {
+      "path": "objects/sha256/aa/aa0fdc90264210ec42e68884740da58df832e00e1108834725681d87e80a05ac",
+      "bytes": 202100,
+      "sha256": "aa0fdc90264210ec42e68884740da58df832e00e1108834725681d87e80a05ac"
     },
-    "runtime_bytes": 24423,
-    "unchanged_runtime_gate_bytes": 24439,
-    "api_abi_storage_layout_changes": false
-  },
-  "supplementary_existing_carry_regressions": {
-    "counts": {
-      "passed": 3,
-      "failed": 0,
-      "skipped": 0
-    },
-    "run": {
-      "path": "artifacts/perps-extensions/final1-carry-smoke3/existing-increases/run.json",
-      "bytes": 3800,
-      "sha256": "84607c948916fb47c4b4ca77f717e61848d2d6238a1b4a1721752d16fbae2c33"
-    },
-    "coverage": {
-      "path": "artifacts/perps-extensions/final1-carry-smoke3/existing-increases/execution-coverage.json",
-      "bytes": 82,
-      "sha256": "e2d4e480a1522b7f125af6ec91d63ae27477461307337b9ecc8707e7ecc03f11"
-    },
-    "results": {
-      "path": "artifacts/perps-extensions/final1-carry-smoke3/existing-increases/results.json",
-      "bytes": 71141,
-      "sha256": "ee0043c821854bb1c36af5cf38d117dd54ae156018d0e83fc715088b481e5f52"
-    },
-    "source_guard": {
-      "path": "artifacts/perps-extensions/final1-carry-smoke3/source-guard-result.json",
-      "bytes": 1270,
-      "sha256": "75392e23e3bfdd48c77cc6595be2a25e1efe5c8a4730db24ca97a91c9e000fbf"
-    }
-  },
-  "repository_checks": {
-    "status": "passed",
-    "report": {
-      "path": "artifacts/perps-extensions/final1-static-final/results.json",
-      "bytes": 2922,
-      "sha256": "a7e1cdfd06ade788188afbeb9b820d9843b78f40218c2d1958a06b4c5ae36362"
-    },
-    "checks": [
+    "lanes": [
       {
-        "name": "format",
-        "command": [
-          "forge",
-          "fmt",
-          "--check",
-          "packages",
-          "test",
-          "script"
-        ],
-        "started_utc": "2026-10-11T10:31:53.852479+00:00",
-        "finished_utc": "2026-10-11T10:31:54.180566+00:00",
-        "exit_code": 0,
-        "log": "artifacts/perps-extensions/final1-static-final/format.log",
-        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-01-PerpWaterfallReferenceInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "cea21cbc49a78e4cd0dab486ee3012a0018c47a8c96d0e854eb81c742619fb5e",
+        "duration_seconds": 220.804,
+        "run": {
+          "path": "objects/sha256/24/240b1414c26c55836227b179872672e12ea43f6d8d2ad0841297a585b38d1df2",
+          "bytes": 3960,
+          "sha256": "240b1414c26c55836227b179872672e12ea43f6d8d2ad0841297a585b38d1df2"
+        },
+        "selection": {
+          "path": "objects/sha256/20/20abe1469a4032efad5fa9ae4b1aa15787e749aa1d8d80903737e8378892b7c4",
+          "bytes": 196,
+          "sha256": "20abe1469a4032efad5fa9ae4b1aa15787e749aa1d8d80903737e8378892b7c4"
+        },
+        "results": {
+          "path": "objects/sha256/08/08096a2db55ebb7cd09a0f2ffd69032777d4659bf9b7a1f742f9287bab21484e",
+          "bytes": 2646481,
+          "sha256": "08096a2db55ebb7cd09a0f2ffd69032777d4659bf9b7a1f742f9287bab21484e"
+        }
       },
       {
-        "name": "diff",
-        "command": [
-          "git",
-          "diff",
-          "--check"
-        ],
-        "started_utc": "2026-10-11T10:31:54.181039+00:00",
-        "finished_utc": "2026-10-11T10:31:54.203416+00:00",
-        "exit_code": 0,
-        "log": "artifacts/perps-extensions/final1-static-final/diff.log",
-        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-02-PerpTraderClaimInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "235389bf95257a415d55abe8d9dd049cc09516a4bdc699a70c19dea2093fe5e1",
+        "duration_seconds": 223.159,
+        "run": {
+          "path": "objects/sha256/5c/5ca4dd97b6047e205ee931ed17fce92f2347566c14c1a56e834fd7e28e7ea11b",
+          "bytes": 3911,
+          "sha256": "5ca4dd97b6047e205ee931ed17fce92f2347566c14c1a56e834fd7e28e7ea11b"
+        },
+        "selection": {
+          "path": "objects/sha256/92/929825221dbfaf3248daebc6a7414abf30da1b634ba08bdc0fe6798a50370965",
+          "bytes": 176,
+          "sha256": "929825221dbfaf3248daebc6a7414abf30da1b634ba08bdc0fe6798a50370965"
+        },
+        "results": {
+          "path": "objects/sha256/e0/e03e01f57ca27fecfe2566d3270c2975243bb906875c51946aaf5c83ea14564b",
+          "bytes": 694414,
+          "sha256": "e03e01f57ca27fecfe2566d3270c2975243bb906875c51946aaf5c83ea14564b"
+        }
       },
       {
-        "name": "boundaries",
-        "command": [
-          "bash",
-          "scripts/check-package-boundaries.sh"
-        ],
-        "started_utc": "2026-10-11T10:31:54.203771+00:00",
-        "finished_utc": "2026-10-11T10:31:54.321062+00:00",
-        "exit_code": 0,
-        "log": "artifacts/perps-extensions/final1-static-final/boundaries.log",
-        "sha256": "7c017733d9e25d79e1cb4dcbf83fa1b42bad5141a67e787c65d16927a4c489ee"
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-03-GovernedSeniorCapacityInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "a754b1ce4c20fc46b2678e9270931303bc8a642757f1089b612e4841bb1d88a7",
+        "duration_seconds": 398.156,
+        "run": {
+          "path": "objects/sha256/60/6026667b8837e99b0ad03501b1939d1e94ada19b01ad9b488b0a2f940a77e9cc",
+          "bytes": 3960,
+          "sha256": "6026667b8837e99b0ad03501b1939d1e94ada19b01ad9b488b0a2f940a77e9cc"
+        },
+        "selection": {
+          "path": "objects/sha256/cc/cc3652026ee088549da41e59991bfbdde1a3089ea01fd42d2bb4908b59a77b38",
+          "bytes": 192,
+          "sha256": "cc3652026ee088549da41e59991bfbdde1a3089ea01fd42d2bb4908b59a77b38"
+        },
+        "results": {
+          "path": "objects/sha256/cb/cb960d122290c1862c5ddef87eee5fc0539387282a85ad5365721020ccf17f6c",
+          "bytes": 47507,
+          "sha256": "cb960d122290c1862c5ddef87eee5fc0539387282a85ad5365721020ccf17f6c"
+        }
       },
       {
-        "name": "test-map",
-        "command": [
-          "python3",
-          "scripts/check-perps-test-map.py"
-        ],
-        "started_utc": "2026-10-11T10:31:54.321871+00:00",
-        "finished_utc": "2026-10-11T10:31:54.457835+00:00",
-        "exit_code": 0,
-        "log": "artifacts/perps-extensions/final1-static-final/test-map.log",
-        "sha256": "9ca818cb61663e0130bf5067933859cb8cefd5deea070a651bac055ee5c4e9a0"
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-04-PerpTerminalNavBruteForceInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "76d9fc097661c2892991df2d6a542c92af17c01a849664a5ba9d063faeea3b28",
+        "duration_seconds": 341.634,
+        "run": {
+          "path": "objects/sha256/6d/6d7aa6afc215323775621f3c158cd886dfcf0574cea1bb2e394786d00143db1b",
+          "bytes": 3981,
+          "sha256": "6d7aa6afc215323775621f3c158cd886dfcf0574cea1bb2e394786d00143db1b"
+        },
+        "selection": {
+          "path": "objects/sha256/99/9907701d79dbfda02ba3315d3ca9add56b41ff531a530c8e365ec38961d17c9a",
+          "bytes": 201,
+          "sha256": "9907701d79dbfda02ba3315d3ca9add56b41ff531a530c8e365ec38961d17c9a"
+        },
+        "results": {
+          "path": "objects/sha256/1b/1b725a3593e723565cbd1813bde61d99cc1f46cc1c44f6bf40678ee2cfbc7816",
+          "bytes": 1203238,
+          "sha256": "1b725a3593e723565cbd1813bde61d99cc1f46cc1c44f6bf40678ee2cfbc7816"
+        }
       },
       {
-        "name": "vectors",
-        "command": [
-          "python3",
-          "scripts/generate-perps-carry-vectors.py",
-          "--check"
-        ],
-        "started_utc": "2026-10-11T10:31:54.458484+00:00",
-        "finished_utc": "2026-10-11T10:31:54.502204+00:00",
-        "exit_code": 0,
-        "log": "artifacts/perps-extensions/final1-static-final/vectors.log",
-        "sha256": "92f4e525f83c58f6ab5fc173527a245b8223384753608cc1f192fc0018a4f53c"
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-05-PerpClosePreviewParityInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "860e78f0c17034c1eb4d4f1a4196900d9243e919713283ff722e15a93a3c88ea",
+        "duration_seconds": 837.459,
+        "run": {
+          "path": "objects/sha256/ed/ed2aba9166ad30ca031a15d2b3e6619f6d03abefb1f19322a0016f6475ec2b4c",
+          "bytes": 3960,
+          "sha256": "ed2aba9166ad30ca031a15d2b3e6619f6d03abefb1f19322a0016f6475ec2b4c"
+        },
+        "selection": {
+          "path": "objects/sha256/af/affaa830173e64fd387eadea9884ae3ed4030a10185a795d44302ce78489f6e0",
+          "bytes": 201,
+          "sha256": "affaa830173e64fd387eadea9884ae3ed4030a10185a795d44302ce78489f6e0"
+        },
+        "results": {
+          "path": "objects/sha256/a0/a06dcb60f4ec09f742ba4b84767599c10c3201c6a3bd8bcbec64b5c5420fa9ac",
+          "bytes": 896517,
+          "sha256": "a06dcb60f4ec09f742ba4b84767599c10c3201c6a3bd8bcbec64b5c5420fa9ac"
+        }
       },
       {
-        "name": "inventory",
-        "command": [
-          "python3",
-          "scripts/perps-test-inventory.py"
-        ],
-        "started_utc": "2026-10-11T10:31:54.502545+00:00",
-        "finished_utc": "2026-10-11T10:31:54.590589+00:00",
-        "exit_code": 0,
-        "log": "artifacts/perps-extensions/final1-static-final/inventory.log",
-        "sha256": "3dbc2498a8b6efd2acdf43750e4399bdbb2318bebcb21077e1f32b718127b1ea"
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-06-PerpHousePoolLifecycleInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "923d3a3b3891e23d70cf11ca7847eb8a4c65da49e82acd80747af7f82b122dc6",
+        "duration_seconds": 1014.921,
+        "run": {
+          "path": "objects/sha256/94/9476c1a9bdea88d578185271e091d4fddcfb71cb24a67a7344859f019924c89c",
+          "bytes": 3961,
+          "sha256": "9476c1a9bdea88d578185271e091d4fddcfb71cb24a67a7344859f019924c89c"
+        },
+        "selection": {
+          "path": "objects/sha256/82/8270ddb93cad657001170fa478c1d85e0aa79f90cbe530aeca10bc8f21035975",
+          "bytes": 303,
+          "sha256": "8270ddb93cad657001170fa478c1d85e0aa79f90cbe530aeca10bc8f21035975"
+        },
+        "results": {
+          "path": "objects/sha256/ba/baa8e829ab594d7784b3d22067aea258fe3e2d9b9d44963bbb1ccb79856550f8",
+          "bytes": 516209,
+          "sha256": "baa8e829ab594d7784b3d22067aea258fe3e2d9b9d44963bbb1ccb79856550f8"
+        }
       },
       {
-        "name": "runner-tests",
-        "command": [
-          "python3",
-          "-m",
-          "unittest",
-          "discover",
-          "-s",
-          "scripts",
-          "-p",
-          "test_perps*.py"
-        ],
-        "started_utc": "2026-10-11T10:31:54.591274+00:00",
-        "finished_utc": "2026-10-11T10:32:22.343684+00:00",
-        "exit_code": 0,
-        "log": "artifacts/perps-extensions/final1-static-final/runner-tests.log",
-        "sha256": "9c9ec54f59741982fca1308f5dc923ad3ca197b1cec581da187a6067c68f335e"
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-07-PerpValueConservationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "8d41e95568f3482ee4ce341ba56ca7610d932ac7a48442097d8f41b12ff51a2b",
+        "duration_seconds": 901.315,
+        "run": {
+          "path": "objects/sha256/55/55f5436bf737dff1f8b779ed976b86df9f7a24fde35bbc4dd71c3b98c947683d",
+          "bytes": 3953,
+          "sha256": "55f5436bf737dff1f8b779ed976b86df9f7a24fde35bbc4dd71c3b98c947683d"
+        },
+        "selection": {
+          "path": "objects/sha256/55/55b1264786e84ed773ce1d4b6338fcf1b2136c73cc626cecd6a2edf4b7156979",
+          "bytes": 186,
+          "sha256": "55b1264786e84ed773ce1d4b6338fcf1b2136c73cc626cecd6a2edf4b7156979"
+        },
+        "results": {
+          "path": "objects/sha256/22/220eb57cdfac8f45a2274419a2f8e1719ae7fc7c5f0c046e23b9aa9bf59d84e7",
+          "bytes": 14379078,
+          "sha256": "220eb57cdfac8f45a2274419a2f8e1719ae7fc7c5f0c046e23b9aa9bf59d84e7"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-08-PerpExplicitAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "d4a187a321e5c0b3ff5fee36eb940825a2bf3516dcfd814d114bb649de980282",
+        "duration_seconds": 1086.419,
+        "run": {
+          "path": "objects/sha256/12/1229a35add60ed4a09aea94a1605290964f285dcfc2326b94bbcfed0e3de180a",
+          "bytes": 3961,
+          "sha256": "1229a35add60ed4a09aea94a1605290964f285dcfc2326b94bbcfed0e3de180a"
+        },
+        "selection": {
+          "path": "objects/sha256/d0/d05c3762fabe3bcfdd77ac00349c5240ab034c8eb4e57017f294123b2b5b36d9",
+          "bytes": 193,
+          "sha256": "d05c3762fabe3bcfdd77ac00349c5240ab034c8eb4e57017f294123b2b5b36d9"
+        },
+        "results": {
+          "path": "objects/sha256/89/89a1c3e2b9f49d8f60b1593c628ab00870dffbb96b2c5c9494c84b620667ebc4",
+          "bytes": 14286801,
+          "sha256": "89a1c3e2b9f49d8f60b1593c628ab00870dffbb96b2c5c9494c84b620667ebc4"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-09-PerpMixedAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "e697d822d71352293d3703dc73c7414a121a0bfdb7649b5b7070ebbe51e41212",
+        "duration_seconds": 981.773,
+        "run": {
+          "path": "objects/sha256/69/6928c524754df5899f27c3f4ef0b6b5901195914f4e800fbc38724e509466713",
+          "bytes": 3939,
+          "sha256": "6928c524754df5899f27c3f4ef0b6b5901195914f4e800fbc38724e509466713"
+        },
+        "selection": {
+          "path": "objects/sha256/64/64511fb1010fba126fb14168d9b0e1466d6a606f4de19370c0e3a487350fbcc0",
+          "bytes": 174,
+          "sha256": "64511fb1010fba126fb14168d9b0e1466d6a606f4de19370c0e3a487350fbcc0"
+        },
+        "results": {
+          "path": "objects/sha256/62/628cfb1dcaedcdc794431f9f998a0fd5e0896f6b9d4b107623a2edb957618f57",
+          "bytes": 2994399,
+          "sha256": "628cfb1dcaedcdc794431f9f998a0fd5e0896f6b9d4b107623a2edb957618f57"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-10-PerpPreviewInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "8af34370b6a28edd03b9b219025b18f4549e8b5737b8cebc73ce250f7ebfa29e",
+        "duration_seconds": 1908.151,
+        "run": {
+          "path": "objects/sha256/f1/f1adb9788e9fbe3a307c2177d204c5bba373e545e683af1413d0c28ee2424952",
+          "bytes": 3884,
+          "sha256": "f1adb9788e9fbe3a307c2177d204c5bba373e545e683af1413d0c28ee2424952"
+        },
+        "selection": {
+          "path": "objects/sha256/40/40672e616add0a386af8ba18b51f1b4393dbb79ce18da98e0f3335650761105a",
+          "bytes": 172,
+          "sha256": "40672e616add0a386af8ba18b51f1b4393dbb79ce18da98e0f3335650761105a"
+        },
+        "results": {
+          "path": "objects/sha256/f8/f866c6e95af20f70cec679e2c1d733ae70e43457094a9bbe6c4e933780da87da",
+          "bytes": 1178956,
+          "sha256": "f866c6e95af20f70cec679e2c1d733ae70e43457094a9bbe6c4e933780da87da"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-11-PerpEconomicConservationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "c0daa0f01fae5abbd4a24fa52a246597b44d1efc6f9972d140549520a6853f96",
+        "duration_seconds": 2143.501,
+        "run": {
+          "path": "objects/sha256/7f/7fbb8772396ea11b7a119f0fdcaf26d03e7e965512dd05ef8d89391d547278c8",
+          "bytes": 3975,
+          "sha256": "7fbb8772396ea11b7a119f0fdcaf26d03e7e965512dd05ef8d89391d547278c8"
+        },
+        "selection": {
+          "path": "objects/sha256/87/87eee04ad09ef65b30657975aa243bbb4a2f36233714e453b4b11bf10b0a63df",
+          "bytes": 203,
+          "sha256": "87eee04ad09ef65b30657975aa243bbb4a2f36233714e453b4b11bf10b0a63df"
+        },
+        "results": {
+          "path": "objects/sha256/d8/d8aeeeacb57bfb4357dba372e8021c62d031f938c96dd1e170e8aee6608bf0a3",
+          "bytes": 427545,
+          "sha256": "d8aeeeacb57bfb4357dba372e8021c62d031f938c96dd1e170e8aee6608bf0a3"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-12-PerpOraclePathInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "6cd3d26d3e6f047e2be96b2c1482ac39fddabffe50e9576b91310853af52a858",
+        "duration_seconds": 166.137,
+        "run": {
+          "path": "objects/sha256/0e/0e6ba0bb756cbb1648a761ec8abb5b86ee26cf1d0560215e45474c8b3d111787",
+          "bytes": 3904,
+          "sha256": "0e6ba0bb756cbb1648a761ec8abb5b86ee26cf1d0560215e45474c8b3d111787"
+        },
+        "selection": {
+          "path": "objects/sha256/ca/ca8fa539f2a965e05f46f1516ec500c29e4f00a4561628418bc336f86b9592f4",
+          "bytes": 176,
+          "sha256": "ca8fa539f2a965e05f46f1516ec500c29e4f00a4561628418bc336f86b9592f4"
+        },
+        "results": {
+          "path": "objects/sha256/86/86af306f2363049cbde7bdac83d801f6fb2d7c1fc88d4cb649fe6db68ab2e32c",
+          "bytes": 804964,
+          "sha256": "86af306f2363049cbde7bdac83d801f6fb2d7c1fc88d4cb649fe6db68ab2e32c"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-13-OracleEthConservationInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "c28e7fb1db21aba595e3950ce4582b17ab8bf870ca5e6015c2010538ea911c5d",
+        "duration_seconds": 2875.561,
+        "run": {
+          "path": "objects/sha256/b4/b41425f498b83f5b93da7aa941d5943a83b508a4b96095e3f9db7df9a9f9d9a4",
+          "bytes": 3954,
+          "sha256": "b41425f498b83f5b93da7aa941d5943a83b508a4b96095e3f9db7df9a9f9d9a4"
+        },
+        "selection": {
+          "path": "objects/sha256/d3/d3cf223061f0a95a328c097e2ecf1c190afe7305125fa0a7ef19f95c6941c44c",
+          "bytes": 229,
+          "sha256": "d3cf223061f0a95a328c097e2ecf1c190afe7305125fa0a7ef19f95c6941c44c"
+        },
+        "results": {
+          "path": "objects/sha256/bc/bc007a7b8badfa303643c7d572ababa11992ad8e9457b066f8665311eeff4f90",
+          "bytes": 37815677,
+          "sha256": "bc007a7b8badfa303643c7d572ababa11992ad8e9457b066f8665311eeff4f90"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-14-PerpAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "1623193c9d122b052950ee91b9c765bd99124878c83635a22a39f30b3bf10d02",
+        "duration_seconds": 33671.663,
+        "run": {
+          "path": "objects/sha256/3f/3f10ce99a37e06ac0747883ae42981f873923bd6557dd6134859d09a346743f9",
+          "bytes": 3906,
+          "sha256": "3f10ce99a37e06ac0747883ae42981f873923bd6557dd6134859d09a346743f9"
+        },
+        "selection": {
+          "path": "objects/sha256/6e/6e8514c54940d5cd13d8d0cbfd4317ad18e76320dab5721509514acf7d47f745",
+          "bytes": 181,
+          "sha256": "6e8514c54940d5cd13d8d0cbfd4317ad18e76320dab5721509514acf7d47f745"
+        },
+        "results": {
+          "path": "objects/sha256/7a/7adff2bb220ede9c23267f30a8fa7be893078876b038d325385ecc4d1d24a597",
+          "bytes": 2106917,
+          "sha256": "7adff2bb220ede9c23267f30a8fa7be893078876b038d325385ecc4d1d24a597"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-15-PerpMultiAccountInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "79e5460977055249eb9257f8a2c34861e9ad0a0af1e5a4e03e4c08e4a5e8b1f5",
+        "duration_seconds": 1472.959,
+        "run": {
+          "path": "objects/sha256/d6/d6fef09c3fc9ab436da49c5b9cd4ba2642cc3798572c58fd75c933d86e88fe93",
+          "bytes": 3919,
+          "sha256": "d6fef09c3fc9ab436da49c5b9cd4ba2642cc3798572c58fd75c933d86e88fe93"
+        },
+        "selection": {
+          "path": "objects/sha256/dc/dcfff28c5ee7541128d6d6248ac822d7e5812bc272f0b7757dafa722a31c8146",
+          "bytes": 181,
+          "sha256": "dcfff28c5ee7541128d6d6248ac822d7e5812bc272f0b7757dafa722a31c8146"
+        },
+        "results": {
+          "path": "objects/sha256/32/327b87573fad252029578647c28107edae9a65e9e05e3d26f1eda831902da8d8",
+          "bytes": 362284,
+          "sha256": "327b87573fad252029578647c28107edae9a65e9e05e3d26f1eda831902da8d8"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-16-PerpInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "cb5c43efd47dc5dd4f60ea45999c592ba1efd891e87f85512abcc465230fd779",
+        "duration_seconds": 9620.196,
+        "run": {
+          "path": "objects/sha256/72/72cbdc162d1968d7eef7df9de7ba1221bc16ca6888da6f4e5573e15cf14a0921",
+          "bytes": 3835,
+          "sha256": "72cbdc162d1968d7eef7df9de7ba1221bc16ca6888da6f4e5573e15cf14a0921"
+        },
+        "selection": {
+          "path": "objects/sha256/67/67e19841358b77d1252d1a7d4d8b1b68149e41db3c5239cf2f665f424492b137",
+          "bytes": 256,
+          "sha256": "67e19841358b77d1252d1a7d4d8b1b68149e41db3c5239cf2f665f424492b137"
+        },
+        "results": {
+          "path": "objects/sha256/48/485d3c363769cedff00e725813656e8641d44609f35939ad993463d9dea2bb22",
+          "bytes": 2855793,
+          "sha256": "485d3c363769cedff00e725813656e8641d44609f35939ad993463d9dea2bb22"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-deadbeef-17-OracleSynchronizationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0xdeadbeef",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "a270dda636cdef2bf95efbf650eeff853addfa138b110f3e4110b4680755de38",
+        "duration_seconds": 4598.831,
+        "run": {
+          "path": "objects/sha256/9a/9a88090dbcad14ff318dbd99a7ae4812a8b150219b3480ccf98c8527316145b4",
+          "bytes": 3954,
+          "sha256": "9a88090dbcad14ff318dbd99a7ae4812a8b150219b3480ccf98c8527316145b4"
+        },
+        "selection": {
+          "path": "objects/sha256/d8/d8818a84aaf470ab9f7bc21ea76a0ee0cab0e2a0ca83ce77cdfdeb824d7bc9c4",
+          "bytes": 198,
+          "sha256": "d8818a84aaf470ab9f7bc21ea76a0ee0cab0e2a0ca83ce77cdfdeb824d7bc9c4"
+        },
+        "results": {
+          "path": "objects/sha256/e9/e9f20bf39d08de66f5da16493d448cdd4971753cbae0224d4a525ec2ade28209",
+          "bytes": 15287195,
+          "sha256": "e9f20bf39d08de66f5da16493d448cdd4971753cbae0224d4a525ec2ade28209"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-01-PerpWaterfallReferenceInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "cea21cbc49a78e4cd0dab486ee3012a0018c47a8c96d0e854eb81c742619fb5e",
+        "duration_seconds": 189.421,
+        "run": {
+          "path": "objects/sha256/f7/f76dd16d13de43b801e7fe8d0c2d7e44d22ff48c564035a86850a6e2a1f318f3",
+          "bytes": 3911,
+          "sha256": "f76dd16d13de43b801e7fe8d0c2d7e44d22ff48c564035a86850a6e2a1f318f3"
+        },
+        "selection": {
+          "path": "objects/sha256/20/20abe1469a4032efad5fa9ae4b1aa15787e749aa1d8d80903737e8378892b7c4",
+          "bytes": 196,
+          "sha256": "20abe1469a4032efad5fa9ae4b1aa15787e749aa1d8d80903737e8378892b7c4"
+        },
+        "results": {
+          "path": "objects/sha256/78/783a26c777e434eb0c749fb427d8dc11c4a4db92aa71235d9b7ecc7e9d6a14c3",
+          "bytes": 2678189,
+          "sha256": "783a26c777e434eb0c749fb427d8dc11c4a4db92aa71235d9b7ecc7e9d6a14c3"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-02-PerpTraderClaimInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "235389bf95257a415d55abe8d9dd049cc09516a4bdc699a70c19dea2093fe5e1",
+        "duration_seconds": 203.511,
+        "run": {
+          "path": "objects/sha256/89/89350181c748245b44a1a10778e0aaa7e928f728877d35fee3ad0b784222b5f5",
+          "bytes": 3862,
+          "sha256": "89350181c748245b44a1a10778e0aaa7e928f728877d35fee3ad0b784222b5f5"
+        },
+        "selection": {
+          "path": "objects/sha256/92/929825221dbfaf3248daebc6a7414abf30da1b634ba08bdc0fe6798a50370965",
+          "bytes": 176,
+          "sha256": "929825221dbfaf3248daebc6a7414abf30da1b634ba08bdc0fe6798a50370965"
+        },
+        "results": {
+          "path": "objects/sha256/30/301b7fe486af15d094bf6716727259687893d019b12c585b7a661aa8e91c02b9",
+          "bytes": 525300,
+          "sha256": "301b7fe486af15d094bf6716727259687893d019b12c585b7a661aa8e91c02b9"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-03-GovernedSeniorCapacityInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "a754b1ce4c20fc46b2678e9270931303bc8a642757f1089b612e4841bb1d88a7",
+        "duration_seconds": 412.629,
+        "run": {
+          "path": "objects/sha256/c8/c89facd6b358dfaade677153089fce582c371d6bd63609e8c76d3a22a097171b",
+          "bytes": 3911,
+          "sha256": "c89facd6b358dfaade677153089fce582c371d6bd63609e8c76d3a22a097171b"
+        },
+        "selection": {
+          "path": "objects/sha256/cc/cc3652026ee088549da41e59991bfbdde1a3089ea01fd42d2bb4908b59a77b38",
+          "bytes": 192,
+          "sha256": "cc3652026ee088549da41e59991bfbdde1a3089ea01fd42d2bb4908b59a77b38"
+        },
+        "results": {
+          "path": "objects/sha256/ea/eae5b32045812007db7ef0f8662421782c44d566d1da1782af1f26606a93ec4e",
+          "bytes": 49505,
+          "sha256": "eae5b32045812007db7ef0f8662421782c44d566d1da1782af1f26606a93ec4e"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-04-PerpTerminalNavBruteForceInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "76d9fc097661c2892991df2d6a542c92af17c01a849664a5ba9d063faeea3b28",
+        "duration_seconds": 343.657,
+        "run": {
+          "path": "objects/sha256/e4/e4960d01b0e123b393c6d5d56004ea1e4d585a5d8079641b33e9e71d518da127",
+          "bytes": 3932,
+          "sha256": "e4960d01b0e123b393c6d5d56004ea1e4d585a5d8079641b33e9e71d518da127"
+        },
+        "selection": {
+          "path": "objects/sha256/99/9907701d79dbfda02ba3315d3ca9add56b41ff531a530c8e365ec38961d17c9a",
+          "bytes": 201,
+          "sha256": "9907701d79dbfda02ba3315d3ca9add56b41ff531a530c8e365ec38961d17c9a"
+        },
+        "results": {
+          "path": "objects/sha256/ba/ba2b4865db84532bc2c62e56ca437ae9d220423c18c737493c016792a951ec07",
+          "bytes": 1157861,
+          "sha256": "ba2b4865db84532bc2c62e56ca437ae9d220423c18c737493c016792a951ec07"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-05-PerpClosePreviewParityInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "860e78f0c17034c1eb4d4f1a4196900d9243e919713283ff722e15a93a3c88ea",
+        "duration_seconds": 761.084,
+        "run": {
+          "path": "objects/sha256/82/8252a67fa8005b69a698c714c55fff3d121d65f076002ce1e98527776df56142",
+          "bytes": 3911,
+          "sha256": "8252a67fa8005b69a698c714c55fff3d121d65f076002ce1e98527776df56142"
+        },
+        "selection": {
+          "path": "objects/sha256/af/affaa830173e64fd387eadea9884ae3ed4030a10185a795d44302ce78489f6e0",
+          "bytes": 201,
+          "sha256": "affaa830173e64fd387eadea9884ae3ed4030a10185a795d44302ce78489f6e0"
+        },
+        "results": {
+          "path": "objects/sha256/af/af9c86a3bc8c2b84fce152b453054b849879e71f529815640417908ef93bcc6a",
+          "bytes": 653663,
+          "sha256": "af9c86a3bc8c2b84fce152b453054b849879e71f529815640417908ef93bcc6a"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-06-PerpHousePoolLifecycleInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "923d3a3b3891e23d70cf11ca7847eb8a4c65da49e82acd80747af7f82b122dc6",
+        "duration_seconds": 1004.62,
+        "run": {
+          "path": "objects/sha256/17/177cbc2ba26f9bff1ce77b52cce2bcb0f72e3581354ff0fa75017d9fe7b97ff9",
+          "bytes": 3911,
+          "sha256": "177cbc2ba26f9bff1ce77b52cce2bcb0f72e3581354ff0fa75017d9fe7b97ff9"
+        },
+        "selection": {
+          "path": "objects/sha256/82/8270ddb93cad657001170fa478c1d85e0aa79f90cbe530aeca10bc8f21035975",
+          "bytes": 303,
+          "sha256": "8270ddb93cad657001170fa478c1d85e0aa79f90cbe530aeca10bc8f21035975"
+        },
+        "results": {
+          "path": "objects/sha256/7f/7faa49b46749d1b74a269b1fa7cea897cd809b9899f60aae56cd300fffc2cc52",
+          "bytes": 544910,
+          "sha256": "7faa49b46749d1b74a269b1fa7cea897cd809b9899f60aae56cd300fffc2cc52"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-07-PerpValueConservationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "8d41e95568f3482ee4ce341ba56ca7610d932ac7a48442097d8f41b12ff51a2b",
+        "duration_seconds": 1098.727,
+        "run": {
+          "path": "objects/sha256/b0/b07b70bb3487df3289c79242d3fde0d39c0fbb5b81fdc05ea9a260a0d058d09e",
+          "bytes": 3905,
+          "sha256": "b07b70bb3487df3289c79242d3fde0d39c0fbb5b81fdc05ea9a260a0d058d09e"
+        },
+        "selection": {
+          "path": "objects/sha256/55/55b1264786e84ed773ce1d4b6338fcf1b2136c73cc626cecd6a2edf4b7156979",
+          "bytes": 186,
+          "sha256": "55b1264786e84ed773ce1d4b6338fcf1b2136c73cc626cecd6a2edf4b7156979"
+        },
+        "results": {
+          "path": "objects/sha256/3e/3e9af4f4d5fdb076320b67c417fdf8606d541de2b8de9ff2bcedc083cd70f1d5",
+          "bytes": 14331570,
+          "sha256": "3e9af4f4d5fdb076320b67c417fdf8606d541de2b8de9ff2bcedc083cd70f1d5"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-08-PerpExplicitAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "d4a187a321e5c0b3ff5fee36eb940825a2bf3516dcfd814d114bb649de980282",
+        "duration_seconds": 1418.413,
+        "run": {
+          "path": "objects/sha256/c4/c4191ad1fdfe7cd39984b1366999317ac4924bb40bb2baf6e871bced5ae40513",
+          "bytes": 3912,
+          "sha256": "c4191ad1fdfe7cd39984b1366999317ac4924bb40bb2baf6e871bced5ae40513"
+        },
+        "selection": {
+          "path": "objects/sha256/d0/d05c3762fabe3bcfdd77ac00349c5240ab034c8eb4e57017f294123b2b5b36d9",
+          "bytes": 193,
+          "sha256": "d05c3762fabe3bcfdd77ac00349c5240ab034c8eb4e57017f294123b2b5b36d9"
+        },
+        "results": {
+          "path": "objects/sha256/b5/b5991a92f4ac1896356b4e278dac48a0292419d2f5a644fc43174d5d337fa87e",
+          "bytes": 14267229,
+          "sha256": "b5991a92f4ac1896356b4e278dac48a0292419d2f5a644fc43174d5d337fa87e"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-09-PerpMixedAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "e697d822d71352293d3703dc73c7414a121a0bfdb7649b5b7070ebbe51e41212",
+        "duration_seconds": 1526.339,
+        "run": {
+          "path": "objects/sha256/e9/e99c72ae8e5ef6f7b85ddc22a23da040a985114571764496374eb96356d56797",
+          "bytes": 3891,
+          "sha256": "e99c72ae8e5ef6f7b85ddc22a23da040a985114571764496374eb96356d56797"
+        },
+        "selection": {
+          "path": "objects/sha256/64/64511fb1010fba126fb14168d9b0e1466d6a606f4de19370c0e3a487350fbcc0",
+          "bytes": 174,
+          "sha256": "64511fb1010fba126fb14168d9b0e1466d6a606f4de19370c0e3a487350fbcc0"
+        },
+        "results": {
+          "path": "objects/sha256/7c/7c1130f4326efc8117d47de746097f367587e41092cf4fab1c83bbc6d977bf87",
+          "bytes": 2402305,
+          "sha256": "7c1130f4326efc8117d47de746097f367587e41092cf4fab1c83bbc6d977bf87"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-10-PerpPreviewInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "8af34370b6a28edd03b9b219025b18f4549e8b5737b8cebc73ce250f7ebfa29e",
+        "duration_seconds": 2565.425,
+        "run": {
+          "path": "objects/sha256/f6/f65d4cbb1f7ce40326c4a09508543d3bf739aeafc309d8680adcc54b39e8ae1c",
+          "bytes": 3835,
+          "sha256": "f65d4cbb1f7ce40326c4a09508543d3bf739aeafc309d8680adcc54b39e8ae1c"
+        },
+        "selection": {
+          "path": "objects/sha256/40/40672e616add0a386af8ba18b51f1b4393dbb79ce18da98e0f3335650761105a",
+          "bytes": 172,
+          "sha256": "40672e616add0a386af8ba18b51f1b4393dbb79ce18da98e0f3335650761105a"
+        },
+        "results": {
+          "path": "objects/sha256/15/151932ed079cf1b17e633d6d2fe2270079930d93c3a833d835d51817fa6d1c15",
+          "bytes": 1548710,
+          "sha256": "151932ed079cf1b17e633d6d2fe2270079930d93c3a833d835d51817fa6d1c15"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-11-PerpEconomicConservationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "c0daa0f01fae5abbd4a24fa52a246597b44d1efc6f9972d140549520a6853f96",
+        "duration_seconds": 1505.765,
+        "run": {
+          "path": "objects/sha256/ca/cad178e4b40de9bee55e2d23627f316a02a4e7c89da7e5a8501af18fe5bc721c",
+          "bytes": 3926,
+          "sha256": "cad178e4b40de9bee55e2d23627f316a02a4e7c89da7e5a8501af18fe5bc721c"
+        },
+        "selection": {
+          "path": "objects/sha256/87/87eee04ad09ef65b30657975aa243bbb4a2f36233714e453b4b11bf10b0a63df",
+          "bytes": 203,
+          "sha256": "87eee04ad09ef65b30657975aa243bbb4a2f36233714e453b4b11bf10b0a63df"
+        },
+        "results": {
+          "path": "objects/sha256/76/76e348c08da43fb9acb98587796702e786aebea050b9b7adfa876ddd5bee2957",
+          "bytes": 440524,
+          "sha256": "76e348c08da43fb9acb98587796702e786aebea050b9b7adfa876ddd5bee2957"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-12-PerpOraclePathInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "6cd3d26d3e6f047e2be96b2c1482ac39fddabffe50e9576b91310853af52a858",
+        "duration_seconds": 61.354,
+        "run": {
+          "path": "objects/sha256/83/83fb33d6654b8db1a97443226faef812af2ca259f9dc9acb849ed13e120fb447",
+          "bytes": 3854,
+          "sha256": "83fb33d6654b8db1a97443226faef812af2ca259f9dc9acb849ed13e120fb447"
+        },
+        "selection": {
+          "path": "objects/sha256/ca/ca8fa539f2a965e05f46f1516ec500c29e4f00a4561628418bc336f86b9592f4",
+          "bytes": 176,
+          "sha256": "ca8fa539f2a965e05f46f1516ec500c29e4f00a4561628418bc336f86b9592f4"
+        },
+        "results": {
+          "path": "objects/sha256/a2/a2c498fe958429bff9947a0ea58f81496d4a2202f059160e1d50076f2f71110d",
+          "bytes": 797294,
+          "sha256": "a2c498fe958429bff9947a0ea58f81496d4a2202f059160e1d50076f2f71110d"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-13-OracleEthConservationInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "c28e7fb1db21aba595e3950ce4582b17ab8bf870ca5e6015c2010538ea911c5d",
+        "duration_seconds": 1982.283,
+        "run": {
+          "path": "objects/sha256/56/56e8521dc98baa27737b3d67611b730ff9c222725e038990f7f7a64cb56d0586",
+          "bytes": 3905,
+          "sha256": "56e8521dc98baa27737b3d67611b730ff9c222725e038990f7f7a64cb56d0586"
+        },
+        "selection": {
+          "path": "objects/sha256/d3/d3cf223061f0a95a328c097e2ecf1c190afe7305125fa0a7ef19f95c6941c44c",
+          "bytes": 229,
+          "sha256": "d3cf223061f0a95a328c097e2ecf1c190afe7305125fa0a7ef19f95c6941c44c"
+        },
+        "results": {
+          "path": "objects/sha256/ba/ba37b17475a5d1817e48bb7dfd0ede73b47caa81b479be160a525a191877528b",
+          "bytes": 37098945,
+          "sha256": "ba37b17475a5d1817e48bb7dfd0ede73b47caa81b479be160a525a191877528b"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-14-PerpAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "1623193c9d122b052950ee91b9c765bd99124878c83635a22a39f30b3bf10d02",
+        "duration_seconds": 32358.324,
+        "run": {
+          "path": "objects/sha256/27/27906b17dac6c84a52b5e151fccc60008abf6bbdaea4a8ddd42a4aac00c35a6a",
+          "bytes": 3857,
+          "sha256": "27906b17dac6c84a52b5e151fccc60008abf6bbdaea4a8ddd42a4aac00c35a6a"
+        },
+        "selection": {
+          "path": "objects/sha256/6e/6e8514c54940d5cd13d8d0cbfd4317ad18e76320dab5721509514acf7d47f745",
+          "bytes": 181,
+          "sha256": "6e8514c54940d5cd13d8d0cbfd4317ad18e76320dab5721509514acf7d47f745"
+        },
+        "results": {
+          "path": "objects/sha256/51/51dab786cb27c56c44dde7ec3277e75ed8672c67d1931c5f74d5a7f72681768b",
+          "bytes": 2130371,
+          "sha256": "51dab786cb27c56c44dde7ec3277e75ed8672c67d1931c5f74d5a7f72681768b"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-15-PerpMultiAccountInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "79e5460977055249eb9257f8a2c34861e9ad0a0af1e5a4e03e4c08e4a5e8b1f5",
+        "duration_seconds": 1581.802,
+        "run": {
+          "path": "objects/sha256/84/84905a17ad4dffcd62dee94ddeb32fdbd405006aa315362a14db25b176c09645",
+          "bytes": 3870,
+          "sha256": "84905a17ad4dffcd62dee94ddeb32fdbd405006aa315362a14db25b176c09645"
+        },
+        "selection": {
+          "path": "objects/sha256/dc/dcfff28c5ee7541128d6d6248ac822d7e5812bc272f0b7757dafa722a31c8146",
+          "bytes": 181,
+          "sha256": "dcfff28c5ee7541128d6d6248ac822d7e5812bc272f0b7757dafa722a31c8146"
+        },
+        "results": {
+          "path": "objects/sha256/c7/c7e4d3498e50f9e631c7206a346f669d58c8913831b1d594a2e6d99d81e677a3",
+          "bytes": 430701,
+          "sha256": "c7e4d3498e50f9e631c7206a346f669d58c8913831b1d594a2e6d99d81e677a3"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-16-PerpInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "cb5c43efd47dc5dd4f60ea45999c592ba1efd891e87f85512abcc465230fd779",
+        "duration_seconds": 9463.843,
+        "run": {
+          "path": "objects/sha256/13/13eb5b79c7c235a04a2ee98b98fc23bb998b27ce2551162b0a075fa05855f583",
+          "bytes": 3786,
+          "sha256": "13eb5b79c7c235a04a2ee98b98fc23bb998b27ce2551162b0a075fa05855f583"
+        },
+        "selection": {
+          "path": "objects/sha256/67/67e19841358b77d1252d1a7d4d8b1b68149e41db3c5239cf2f665f424492b137",
+          "bytes": 256,
+          "sha256": "67e19841358b77d1252d1a7d4d8b1b68149e41db3c5239cf2f665f424492b137"
+        },
+        "results": {
+          "path": "objects/sha256/15/15ea51f95d99e07c13cf166417dcb0588904fd3bb50bc66e0e6d25bee1334027",
+          "bytes": 3794357,
+          "sha256": "15ea51f95d99e07c13cf166417dcb0588904fd3bb50bc66e0e6d25bee1334027"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-1-17-OracleSynchronizationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x1",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "a270dda636cdef2bf95efbf650eeff853addfa138b110f3e4110b4680755de38",
+        "duration_seconds": 2307.195,
+        "run": {
+          "path": "objects/sha256/1a/1ad9baf0879e76124ae2cff1eba3e5841cc42809015bf6c30ffabdd65ded04be",
+          "bytes": 3905,
+          "sha256": "1ad9baf0879e76124ae2cff1eba3e5841cc42809015bf6c30ffabdd65ded04be"
+        },
+        "selection": {
+          "path": "objects/sha256/d8/d8818a84aaf470ab9f7bc21ea76a0ee0cab0e2a0ca83ce77cdfdeb824d7bc9c4",
+          "bytes": 198,
+          "sha256": "d8818a84aaf470ab9f7bc21ea76a0ee0cab0e2a0ca83ce77cdfdeb824d7bc9c4"
+        },
+        "results": {
+          "path": "objects/sha256/41/417a2183b6a20d7344e2511d1b0b9ab08d5f036f716f85c85939017d11379a83",
+          "bytes": 15287194,
+          "sha256": "417a2183b6a20d7344e2511d1b0b9ab08d5f036f716f85c85939017d11379a83"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-01-PerpWaterfallReferenceInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "cea21cbc49a78e4cd0dab486ee3012a0018c47a8c96d0e854eb81c742619fb5e",
+        "duration_seconds": 282.641,
+        "run": {
+          "path": "objects/sha256/e4/e4bb5f3b8a812dec68cb0698ac0b92922a69738a7646aec5ccd8daa876802c50",
+          "bytes": 3911,
+          "sha256": "e4bb5f3b8a812dec68cb0698ac0b92922a69738a7646aec5ccd8daa876802c50"
+        },
+        "selection": {
+          "path": "objects/sha256/20/20abe1469a4032efad5fa9ae4b1aa15787e749aa1d8d80903737e8378892b7c4",
+          "bytes": 196,
+          "sha256": "20abe1469a4032efad5fa9ae4b1aa15787e749aa1d8d80903737e8378892b7c4"
+        },
+        "results": {
+          "path": "objects/sha256/c1/c118b721442e412e9bbbc8ad590c409d755e00827be5483960bc4f31e2211a74",
+          "bytes": 2781817,
+          "sha256": "c118b721442e412e9bbbc8ad590c409d755e00827be5483960bc4f31e2211a74"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-02-PerpTraderClaimInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "235389bf95257a415d55abe8d9dd049cc09516a4bdc699a70c19dea2093fe5e1",
+        "duration_seconds": 295.487,
+        "run": {
+          "path": "objects/sha256/a8/a8ccc1f933e84ac66427bb3a33640715fa8949eb34109a6fee222b7564dd6241",
+          "bytes": 3862,
+          "sha256": "a8ccc1f933e84ac66427bb3a33640715fa8949eb34109a6fee222b7564dd6241"
+        },
+        "selection": {
+          "path": "objects/sha256/92/929825221dbfaf3248daebc6a7414abf30da1b634ba08bdc0fe6798a50370965",
+          "bytes": 176,
+          "sha256": "929825221dbfaf3248daebc6a7414abf30da1b634ba08bdc0fe6798a50370965"
+        },
+        "results": {
+          "path": "objects/sha256/e6/e6e40cd8a6bae2ed2d93fede3a3db62eae9ae74c424a714225c5cc1ebcd930c3",
+          "bytes": 643177,
+          "sha256": "e6e40cd8a6bae2ed2d93fede3a3db62eae9ae74c424a714225c5cc1ebcd930c3"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-03-GovernedSeniorCapacityInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "a754b1ce4c20fc46b2678e9270931303bc8a642757f1089b612e4841bb1d88a7",
+        "duration_seconds": 448.756,
+        "run": {
+          "path": "objects/sha256/30/3026033c9ca40415ca159cac1c92a881851428a8ab1e481c8333169fd5a8874d",
+          "bytes": 3911,
+          "sha256": "3026033c9ca40415ca159cac1c92a881851428a8ab1e481c8333169fd5a8874d"
+        },
+        "selection": {
+          "path": "objects/sha256/cc/cc3652026ee088549da41e59991bfbdde1a3089ea01fd42d2bb4908b59a77b38",
+          "bytes": 192,
+          "sha256": "cc3652026ee088549da41e59991bfbdde1a3089ea01fd42d2bb4908b59a77b38"
+        },
+        "results": {
+          "path": "objects/sha256/b6/b615d480f611cddedfc1cd0acab89d39cfef7164ae2a0901c2a42c0c941adb0c",
+          "bytes": 54233,
+          "sha256": "b615d480f611cddedfc1cd0acab89d39cfef7164ae2a0901c2a42c0c941adb0c"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-04-PerpTerminalNavBruteForceInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "76d9fc097661c2892991df2d6a542c92af17c01a849664a5ba9d063faeea3b28",
+        "duration_seconds": 397.552,
+        "run": {
+          "path": "objects/sha256/99/9928f09d421d79eadcae5f2aa95ae772c53412fdc11609b53c20e7c48fdac974",
+          "bytes": 3932,
+          "sha256": "9928f09d421d79eadcae5f2aa95ae772c53412fdc11609b53c20e7c48fdac974"
+        },
+        "selection": {
+          "path": "objects/sha256/99/9907701d79dbfda02ba3315d3ca9add56b41ff531a530c8e365ec38961d17c9a",
+          "bytes": 201,
+          "sha256": "9907701d79dbfda02ba3315d3ca9add56b41ff531a530c8e365ec38961d17c9a"
+        },
+        "results": {
+          "path": "objects/sha256/78/78e1898f3fe5c1ee8bf9a1413cca24e07819aed48a077b628e9f3133c1aa1ff2",
+          "bytes": 884899,
+          "sha256": "78e1898f3fe5c1ee8bf9a1413cca24e07819aed48a077b628e9f3133c1aa1ff2"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-05-PerpClosePreviewParityInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "860e78f0c17034c1eb4d4f1a4196900d9243e919713283ff722e15a93a3c88ea",
+        "duration_seconds": 814.959,
+        "run": {
+          "path": "objects/sha256/2d/2dc80e5525d476c378eedf84c5715c6e0385970236c39c3df154311199f120ee",
+          "bytes": 3911,
+          "sha256": "2dc80e5525d476c378eedf84c5715c6e0385970236c39c3df154311199f120ee"
+        },
+        "selection": {
+          "path": "objects/sha256/af/affaa830173e64fd387eadea9884ae3ed4030a10185a795d44302ce78489f6e0",
+          "bytes": 201,
+          "sha256": "affaa830173e64fd387eadea9884ae3ed4030a10185a795d44302ce78489f6e0"
+        },
+        "results": {
+          "path": "objects/sha256/fd/fd5d5217fb710e2dedca8aa672936ea5f8f49b606c70b318d32854d0e71e8f1f",
+          "bytes": 576419,
+          "sha256": "fd5d5217fb710e2dedca8aa672936ea5f8f49b606c70b318d32854d0e71e8f1f"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-06-PerpHousePoolLifecycleInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "923d3a3b3891e23d70cf11ca7847eb8a4c65da49e82acd80747af7f82b122dc6",
+        "duration_seconds": 1009.214,
+        "run": {
+          "path": "objects/sha256/0c/0c9066d0a3c0a698ef25d59eec8bbdfc986c4b6735e23eca7530b136fec0dc9d",
+          "bytes": 3912,
+          "sha256": "0c9066d0a3c0a698ef25d59eec8bbdfc986c4b6735e23eca7530b136fec0dc9d"
+        },
+        "selection": {
+          "path": "objects/sha256/82/8270ddb93cad657001170fa478c1d85e0aa79f90cbe530aeca10bc8f21035975",
+          "bytes": 303,
+          "sha256": "8270ddb93cad657001170fa478c1d85e0aa79f90cbe530aeca10bc8f21035975"
+        },
+        "results": {
+          "path": "objects/sha256/d1/d1393565f4196dca29d9a38cca3ecf373256dd4f46c363ad6bb6349fe778d030",
+          "bytes": 567209,
+          "sha256": "d1393565f4196dca29d9a38cca3ecf373256dd4f46c363ad6bb6349fe778d030"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-07-PerpValueConservationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "8d41e95568f3482ee4ce341ba56ca7610d932ac7a48442097d8f41b12ff51a2b",
+        "duration_seconds": 892.706,
+        "run": {
+          "path": "objects/sha256/5f/5f81a386c20daeaf7d04f73ed865549e996e63c9389eea10ff167ecb14da59ba",
+          "bytes": 3904,
+          "sha256": "5f81a386c20daeaf7d04f73ed865549e996e63c9389eea10ff167ecb14da59ba"
+        },
+        "selection": {
+          "path": "objects/sha256/55/55b1264786e84ed773ce1d4b6338fcf1b2136c73cc626cecd6a2edf4b7156979",
+          "bytes": 186,
+          "sha256": "55b1264786e84ed773ce1d4b6338fcf1b2136c73cc626cecd6a2edf4b7156979"
+        },
+        "results": {
+          "path": "objects/sha256/9a/9aa1c97d71548fd494385dcd5b0028d29d1b24332178a4cfebcd205e6297be12",
+          "bytes": 14381895,
+          "sha256": "9aa1c97d71548fd494385dcd5b0028d29d1b24332178a4cfebcd205e6297be12"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-08-PerpExplicitAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "d4a187a321e5c0b3ff5fee36eb940825a2bf3516dcfd814d114bb649de980282",
+        "duration_seconds": 1077.172,
+        "run": {
+          "path": "objects/sha256/87/871555a1910496e46e808d4082567ab5263d61a3724942a4c9b6aa9b37d8fa69",
+          "bytes": 3912,
+          "sha256": "871555a1910496e46e808d4082567ab5263d61a3724942a4c9b6aa9b37d8fa69"
+        },
+        "selection": {
+          "path": "objects/sha256/d0/d05c3762fabe3bcfdd77ac00349c5240ab034c8eb4e57017f294123b2b5b36d9",
+          "bytes": 193,
+          "sha256": "d05c3762fabe3bcfdd77ac00349c5240ab034c8eb4e57017f294123b2b5b36d9"
+        },
+        "results": {
+          "path": "objects/sha256/bf/bf5f7312ec112df26e517178cdfb2eb9c86b02468d8e6a40899a25dade09d00a",
+          "bytes": 14275591,
+          "sha256": "bf5f7312ec112df26e517178cdfb2eb9c86b02468d8e6a40899a25dade09d00a"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-09-PerpMixedAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "e697d822d71352293d3703dc73c7414a121a0bfdb7649b5b7070ebbe51e41212",
+        "duration_seconds": 1124.204,
+        "run": {
+          "path": "objects/sha256/c4/c4170fb95dde9f52d7a9f9ca30cfbd666bc18d7475f05ecdfa64e2d00232c278",
+          "bytes": 3891,
+          "sha256": "c4170fb95dde9f52d7a9f9ca30cfbd666bc18d7475f05ecdfa64e2d00232c278"
+        },
+        "selection": {
+          "path": "objects/sha256/64/64511fb1010fba126fb14168d9b0e1466d6a606f4de19370c0e3a487350fbcc0",
+          "bytes": 174,
+          "sha256": "64511fb1010fba126fb14168d9b0e1466d6a606f4de19370c0e3a487350fbcc0"
+        },
+        "results": {
+          "path": "objects/sha256/c2/c28868092c61d82a3501e42884680c6532c9431090de66151a24e31b38751d5c",
+          "bytes": 2581373,
+          "sha256": "c28868092c61d82a3501e42884680c6532c9431090de66151a24e31b38751d5c"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-10-PerpPreviewInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "8af34370b6a28edd03b9b219025b18f4549e8b5737b8cebc73ce250f7ebfa29e",
+        "duration_seconds": 1926.784,
+        "run": {
+          "path": "objects/sha256/b5/b5288450bc7f7ded366500ea7062a299b8743ed3e6f6751008ea40b645cf80e1",
+          "bytes": 3835,
+          "sha256": "b5288450bc7f7ded366500ea7062a299b8743ed3e6f6751008ea40b645cf80e1"
+        },
+        "selection": {
+          "path": "objects/sha256/40/40672e616add0a386af8ba18b51f1b4393dbb79ce18da98e0f3335650761105a",
+          "bytes": 172,
+          "sha256": "40672e616add0a386af8ba18b51f1b4393dbb79ce18da98e0f3335650761105a"
+        },
+        "results": {
+          "path": "objects/sha256/28/28e0c9fa62e385a1cde736629248367992bda6a9081a00297c5a108bfc5d1475",
+          "bytes": 1057462,
+          "sha256": "28e0c9fa62e385a1cde736629248367992bda6a9081a00297c5a108bfc5d1475"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-11-PerpEconomicConservationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "c0daa0f01fae5abbd4a24fa52a246597b44d1efc6f9972d140549520a6853f96",
+        "duration_seconds": 2129.802,
+        "run": {
+          "path": "objects/sha256/e0/e04fee100c7fb97ce3afc8eea814a74a338729035840681ea47e998ee90c4639",
+          "bytes": 3926,
+          "sha256": "e04fee100c7fb97ce3afc8eea814a74a338729035840681ea47e998ee90c4639"
+        },
+        "selection": {
+          "path": "objects/sha256/87/87eee04ad09ef65b30657975aa243bbb4a2f36233714e453b4b11bf10b0a63df",
+          "bytes": 203,
+          "sha256": "87eee04ad09ef65b30657975aa243bbb4a2f36233714e453b4b11bf10b0a63df"
+        },
+        "results": {
+          "path": "objects/sha256/3d/3d7b6902c03716f83edd35d17a247e28fc682476fc36270fce8a5927d304adf1",
+          "bytes": 408798,
+          "sha256": "3d7b6902c03716f83edd35d17a247e28fc682476fc36270fce8a5927d304adf1"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-12-PerpOraclePathInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "6cd3d26d3e6f047e2be96b2c1482ac39fddabffe50e9576b91310853af52a858",
+        "duration_seconds": 162.18,
+        "run": {
+          "path": "objects/sha256/6c/6c54d20074f1ffd51beb80a711d1688a7ca7b37543ceb998ba864dde5a69c52c",
+          "bytes": 3854,
+          "sha256": "6c54d20074f1ffd51beb80a711d1688a7ca7b37543ceb998ba864dde5a69c52c"
+        },
+        "selection": {
+          "path": "objects/sha256/ca/ca8fa539f2a965e05f46f1516ec500c29e4f00a4561628418bc336f86b9592f4",
+          "bytes": 176,
+          "sha256": "ca8fa539f2a965e05f46f1516ec500c29e4f00a4561628418bc336f86b9592f4"
+        },
+        "results": {
+          "path": "objects/sha256/d3/d38c56f4924f599de50a0e1f3f29e47e678e7b2292d06e11b4f7a15bfb87f3a8",
+          "bytes": 800447,
+          "sha256": "d38c56f4924f599de50a0e1f3f29e47e678e7b2292d06e11b4f7a15bfb87f3a8"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-13-OracleEthConservationInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "c28e7fb1db21aba595e3950ce4582b17ab8bf870ca5e6015c2010538ea911c5d",
+        "duration_seconds": 2877.118,
+        "run": {
+          "path": "objects/sha256/2f/2f52ae4a224b702d87ce56c3c374e96feb5b08ddd0016c259e0169729deba084",
+          "bytes": 3905,
+          "sha256": "2f52ae4a224b702d87ce56c3c374e96feb5b08ddd0016c259e0169729deba084"
+        },
+        "selection": {
+          "path": "objects/sha256/d3/d3cf223061f0a95a328c097e2ecf1c190afe7305125fa0a7ef19f95c6941c44c",
+          "bytes": 229,
+          "sha256": "d3cf223061f0a95a328c097e2ecf1c190afe7305125fa0a7ef19f95c6941c44c"
+        },
+        "results": {
+          "path": "objects/sha256/a9/a9f54f58a3e3903533c011ae985d4da6eb50237a838bdd4d55a1826eeb07ee01",
+          "bytes": 37711992,
+          "sha256": "a9f54f58a3e3903533c011ae985d4da6eb50237a838bdd4d55a1826eeb07ee01"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-14-PerpAccountingInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "1623193c9d122b052950ee91b9c765bd99124878c83635a22a39f30b3bf10d02",
+        "duration_seconds": 33646.964,
+        "run": {
+          "path": "objects/sha256/ca/ca79bd3114e022991ec77028589665e99ba2fc6c5d8b8e2011261231a5c3310e",
+          "bytes": 3857,
+          "sha256": "ca79bd3114e022991ec77028589665e99ba2fc6c5d8b8e2011261231a5c3310e"
+        },
+        "selection": {
+          "path": "objects/sha256/6e/6e8514c54940d5cd13d8d0cbfd4317ad18e76320dab5721509514acf7d47f745",
+          "bytes": 181,
+          "sha256": "6e8514c54940d5cd13d8d0cbfd4317ad18e76320dab5721509514acf7d47f745"
+        },
+        "results": {
+          "path": "objects/sha256/f1/f12303667ed3a71a095812d29ec3acfc39825946a2de7c88ed3bad712cb3639f",
+          "bytes": 1894246,
+          "sha256": "f12303667ed3a71a095812d29ec3acfc39825946a2de7c88ed3bad712cb3639f"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-15-PerpMultiAccountInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "79e5460977055249eb9257f8a2c34861e9ad0a0af1e5a4e03e4c08e4a5e8b1f5",
+        "duration_seconds": 1455.933,
+        "run": {
+          "path": "objects/sha256/ed/ed4a116e65392161e4eed63ecad836bb371b3cd78bdbba8641e4ca516009dce1",
+          "bytes": 3870,
+          "sha256": "ed4a116e65392161e4eed63ecad836bb371b3cd78bdbba8641e4ca516009dce1"
+        },
+        "selection": {
+          "path": "objects/sha256/dc/dcfff28c5ee7541128d6d6248ac822d7e5812bc272f0b7757dafa722a31c8146",
+          "bytes": 181,
+          "sha256": "dcfff28c5ee7541128d6d6248ac822d7e5812bc272f0b7757dafa722a31c8146"
+        },
+        "results": {
+          "path": "objects/sha256/45/45769d04b5bb55e6db53bb53cc83729bde484b5f8a03c8dcebc7703e70475e7b",
+          "bytes": 356128,
+          "sha256": "45769d04b5bb55e6db53bb53cc83729bde484b5f8a03c8dcebc7703e70475e7b"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-16-PerpInvariant",
+        "counts": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 2
+        },
+        "invariants": {
+          "tests": 2,
+          "runs": 512,
+          "calls": 512000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "cb5c43efd47dc5dd4f60ea45999c592ba1efd891e87f85512abcc465230fd779",
+        "duration_seconds": 9661.626,
+        "run": {
+          "path": "objects/sha256/f3/f3eb5b7ee4c2ff73a439d0877c4e54f19c689be275b710570d66dc8cbdc05fec",
+          "bytes": 3786,
+          "sha256": "f3eb5b7ee4c2ff73a439d0877c4e54f19c689be275b710570d66dc8cbdc05fec"
+        },
+        "selection": {
+          "path": "objects/sha256/67/67e19841358b77d1252d1a7d4d8b1b68149e41db3c5239cf2f665f424492b137",
+          "bytes": 256,
+          "sha256": "67e19841358b77d1252d1a7d4d8b1b68149e41db3c5239cf2f665f424492b137"
+        },
+        "results": {
+          "path": "objects/sha256/8f/8f8efa64cdeb1d7974f3f119fd331185437ab069b6eb7e8c2d9eaf5e9084d405",
+          "bytes": 3545564,
+          "sha256": "8f8efa64cdeb1d7974f3f119fd331185437ab069b6eb7e8c2d9eaf5e9084d405"
+        }
+      },
+      {
+        "path": "final-audit-r2/audit-runs/final-grouped-2-17-OracleSynchronizationInvariant",
+        "counts": {
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "profile": "audit",
+        "via_ir": true,
+        "seed": "0x2",
+        "kinds": {
+          "Invariant": 1
+        },
+        "invariants": {
+          "tests": 1,
+          "runs": 256,
+          "calls": 256000,
+          "reverts": 0,
+          "discards": 0
+        },
+        "selected_id_sha256": "a270dda636cdef2bf95efbf650eeff853addfa138b110f3e4110b4680755de38",
+        "duration_seconds": 2161.554,
+        "run": {
+          "path": "objects/sha256/36/369dd0011d935b1685dcb069fd605eb4d388d8c4a0c2b96dc8fc05aab047edfe",
+          "bytes": 3905,
+          "sha256": "369dd0011d935b1685dcb069fd605eb4d388d8c4a0c2b96dc8fc05aab047edfe"
+        },
+        "selection": {
+          "path": "objects/sha256/d8/d8818a84aaf470ab9f7bc21ea76a0ee0cab0e2a0ca83ce77cdfdeb824d7bc9c4",
+          "bytes": 198,
+          "sha256": "d8818a84aaf470ab9f7bc21ea76a0ee0cab0e2a0ca83ce77cdfdeb824d7bc9c4"
+        },
+        "results": {
+          "path": "objects/sha256/1e/1e0f1967efcff108d1bcb547309df6139a2637c0e8ccf4d6862605606812d9ca",
+          "bytes": 15287195,
+          "sha256": "1e0f1967efcff108d1bcb547309df6139a2637c0e8ccf4d6862605606812d9ca"
+        }
       }
-    ],
-    "runner_tests_passed": 34,
-    "test_map_references": 170,
-    "checked_in_carry_vectors": 61
-  },
-  "current_fault_controls": {
-    "evidence_scope": "Named tests in the complete current-source execution selections; not a claim to have rerun historical compiled-production mutation campaigns.",
-    "files": [
-      "packages/perps/test/perps/accounting/carry/CarryReferenceLedger.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpMixedAccountingInvariant.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpMixedLiquidation.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpMixedLpLifecycle.t.sol",
-      "packages/perps/test/perps/invariant/properties/PerpMixedPendingOrders.t.sol"
-    ],
-    "detected_faults": [
-      "Double carry collection, lost arrears and phantom carry cash",
-      "Cross-account settlement credit and unrecorded pool cash",
-      "Corrupted old claims, terminal arrears, retained cash and keeper credits",
-      "Stale LP pricing, corrupted cumulative entitlements, wrong withdrawal rounding and premature dust sweep",
-      "Missing pending margin and lost queue head"
     ]
   },
-  "post_test_derived_metadata": {
-    "scripts/perps-shard-weights.json": {
-      "current_sha256": "6f5c7e15d8aaee9e7c44911dbf412cfcec28b3822cb8742b9278e0e63741a32b",
-      "tested_sha256": "7694d67dcfd934543a3f0eba3fcf604827c0062f3de75b111fd87364de500a6d"
+  "static_and_sdk": {
+    "static": {
+      "path": "objects/sha256/21/2102b351fa79fb4f6525f5012e9d0295c6ebdb49127923655b1e2789c6d4b9ca",
+      "bytes": 6841,
+      "sha256": "2102b351fa79fb4f6525f5012e9d0295c6ebdb49127923655b1e2789c6d4b9ca"
+    },
+    "sdk": {
+      "path": "objects/sha256/a9/a92cb18d2434083d0b1310d16b3999ff1c5dbfd9fcab312d441e33e04acfa19c",
+      "bytes": 1901,
+      "sha256": "a92cb18d2434083d0b1310d16b3999ff1c5dbfd9fcab312d441e33e04acfa19c"
+    },
+    "runner_shard_unit_tests": 34,
+    "test_map_references": 194,
+    "sdk_tests": 47
+  },
+  "final_workspace_checks": {
+    "result": {
+      "path": "objects/sha256/af/af930736d1de3701e0f5ffa1cacdca19e177986e6fea0f2d0d54cff5efb15b1b",
+      "bytes": 5690,
+      "sha256": "af930736d1de3701e0f5ffa1cacdca19e177986e6fea0f2d0d54cff5efb15b1b"
+    },
+    "weights_sha256": "c34488544c3204b7b98099f70d40993a4b77b4955ac4d63cb15250757a9f93a2",
+    "check_count": 8,
+    "test_map_references": 194,
+    "runner_shard_unit_tests": 34,
+    "refreshed_nonfork_shards": [
+      54,
+      55,
+      53,
+      57
+    ]
+  },
+  "compatibility": {
+    "report": {
+      "path": "objects/sha256/15/152704a27493260cffb0f4b489309389b1890def87825aaa757b1c6aaf97f3dd",
+      "bytes": 118269,
+      "sha256": "152704a27493260cffb0f4b489309389b1890def87825aaa757b1c6aaf97f3dd"
+    },
+    "public_tuple_or_hash_domain_change": false,
+    "internal_abi_and_storage_changed": true,
+    "fresh_connected_deployment_required": true,
+    "populated_state_migration_validated": false
+  },
+  "fault_controls": {
+    "production_mutations_killed": 9,
+    "one_lot_model_mutations_killed": 1,
+    "production_results": {
+      "path": "objects/sha256/30/301c222c7b0a790e006d5a50bad6cb24c33dfc7a7540493dff1cbd695387cb4c",
+      "bytes": 13160,
+      "sha256": "301c222c7b0a790e006d5a50bad6cb24c33dfc7a7540493dff1cbd695387cb4c"
+    },
+    "source_attestation": {
+      "path": "objects/sha256/ce/cefa304c373e16202e6bfa62f19161492e7c819e965f1892af67f6b879b05232",
+      "bytes": 260,
+      "sha256": "cefa304c373e16202e6bfa62f19161492e7c819e965f1892af67f6b879b05232"
+    },
+    "one_lot_results": {
+      "path": "objects/sha256/8c/8ca429ed557cebfb12866dcfab0bcb6d2a36725937785fa05bb893d818e7fa1d",
+      "bytes": 2703,
+      "sha256": "8ca429ed557cebfb12866dcfab0bcb6d2a36725937785fa05bb893d818e7fa1d"
     }
+  },
+  "timing_refresh": {
+    "weights": {
+      "path": "objects/sha256/c3/c34488544c3204b7b98099f70d40993a4b77b4955ac4d63cb15250757a9f93a2",
+      "bytes": 15296,
+      "sha256": "c34488544c3204b7b98099f70d40993a4b77b4955ac4d63cb15250757a9f93a2"
+    },
+    "attestation": {
+      "path": "objects/sha256/b3/b30c8b3e070bf60e78bf6bacea68443115d711327d2809cd685e7d8209a65b49",
+      "bytes": 4185,
+      "sha256": "b30c8b3e070bf60e78bf6bacea68443115d711327d2809cd685e7d8209a65b49"
+    },
+    "measured_tests": 2207,
+    "source_result_paths": [
+      "objects/sha256/60/60d34b880e3ad2e6c6e90dfa43860131c7023e56d580fce20fe015774eaeb903",
+      "objects/sha256/68/682f4e169486aff691884e92beee65fa319bc233c3524177f2d051708ee9485d",
+      "objects/sha256/a8/a82ab39a2897f4034ec2a72f2721856369c8a20723e188b85d148412b70f684e",
+      "objects/sha256/0d/0dc7831b0d22812cd9f278eda3becc1486a10ed29b92d34441a8e72efc177c97"
+    ]
+  },
+  "gate_chain": {
+    "path": "objects/sha256/e4/e4057151f36a1437f67798bbd97226fb7fa6a4bfe634db6bfc741a5fdb8d2669",
+    "bytes": 977,
+    "sha256": "e4057151f36a1437f67798bbd97226fb7fa6a4bfe634db6bfc741a5fdb8d2669"
   },
   "historical_evidence": {
+    "status": "historical_only",
     "immutable_git_pointer": {
-      "commit": "340c63119ee67d931eb352ac4b6f3c789089ce8e",
-      "git_blob": "2a557f1ee1cf12fb7be6823afcc26e0eedbc8fb8",
+      "commit": "550d0a642e3fe854a5542edcdc18cbeafc0744b6",
       "path": "packages/perps/test/perps/VALIDATION.json",
-      "sha256": "b4fc3a140cb32598356bfc72eecd9c3d56d6fac9b85b00fdec29885649fd48e2"
+      "git_blob": "3fd0355568bb09458da1d34b6a7bca7a63531398",
+      "sha256": "8b909bd920850ce05e708017504e01cf4bf194db5ab7e97c09818c59f51da68c"
     },
-    "prior_validation": {
-      "bytes": 275030,
-      "path": "artifacts/perps-extensions/final1-frozen/historical/VALIDATION.previous.json",
-      "sha256": "b4fc3a140cb32598356bfc72eecd9c3d56d6fac9b85b00fdec29885649fd48e2"
+    "superseded_r1_execution_source_sha256": "332e604e6301b3fd795d4f03ad12380b38ffce14876f474267690797ba4757c5",
+    "superseded_r1_manifest": {
+      "path": "objects/sha256/42/42923dc8541621ef11b466ae47c75ad37bec454aff3a8845dcdc13c5ae298ac4",
+      "bytes": 208980,
+      "sha256": "42923dc8541621ef11b466ae47c75ad37bec454aff3a8845dcdc13c5ae298ac4"
     },
-    "status": "historical; does not establish current-source acceptance"
-  },
-  "preflight_evidence": {
-    "manifest": {
-      "path": "artifacts/perps-extensions/final1-preflight/manifest.json",
-      "bytes": 2827,
-      "sha256": "12c0287c0687f1d6cc20a8a2b508de9ff170b206aaaaa00bdbcdc793cb821f1e"
-    },
-    "note": "Preserves unsuccessful preflight classifications, the original runtime-size failure and focused runs. These are historical development evidence, not substitutes for final-source acceptance."
+    "note": "Neither the pre-r2 tracked validation nor prior-source runs satisfy this r2 acceptance."
   },
   "limitations": [
-    "No fork/live-network or instrumented coverage run is asserted by this report.",
-    "Three targeted main-mixed audit seeds are not a complete package audit.",
-    "Finite input domains and mocked oracle data do not establish complete economic correctness or real-network verification.",
-    "Recorded corpus locations do not alone prove empty starting corpora.",
-    "Artifacts are local; these hashes do not establish remote availability.",
-    "Replay requires the preserved dependency environment and a fresh artifact destination; recorded replay scripts may otherwise overwrite evidence."
+    "No fork or live-network RPC integration is claimed.",
+    "No instrumented line/branch coverage run is claimed.",
+    "Finite audit seeds and bounded mocked histories cannot prove arbitrary states.",
+    "Fresh connected deployment required; populated-state migration is unvalidated."
   ],
-  "evidence_availability": "Detailed logs, results and source archives are local ignored artifacts. Their hashes and replay metadata are recorded here; remote availability is not asserted. The previous tracked validation is retained by the immutable Git pointer."
+  "evidence_transport": {
+    "format": "POSIX ustar compressed with zstd",
+    "archive": {
+      "plugin_relative_path": "artifacts/bounty-fix/validation/evidence-bundle-r2/objects.tar.zst",
+      "bytes": 8955723,
+      "sha256": "6243852cf6a821332e1449c2e639c036effdc4a798be072b89bd1a729087c5bb"
+    },
+    "index_plugin_relative_path": "artifacts/bounty-fix/validation/evidence-bundle-r2/index.json",
+    "original_candidate_sha256": "b983decaccce9ad15889d810027a9236ca6d9dfe90d2540fd1866f22c016c0ad",
+    "archive_member_scheme": "objects/sha256/<first 2 hex characters of SHA256>/<full SHA256>",
+    "descriptor_path_scheme": "Each descriptor path is its archive member path relative to extraction_root.",
+    "extraction_root": "Directory containing VALIDATION.portable.json and index.json after archive extraction.",
+    "extraction_command": "zstd -dc objects.tar.zst | tar -xf - -C <extraction_root>"
+  }
 }

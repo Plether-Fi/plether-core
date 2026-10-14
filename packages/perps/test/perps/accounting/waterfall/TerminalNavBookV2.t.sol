@@ -81,6 +81,26 @@ contract TerminalNavBookV2Test is TerminalNavBookV2TestFixture {
         assertEq(state.base.intercept, -int256(uint256(entryCost)));
     }
 
+    function test_CollectibleCloseEscrowReclassificationPreservesCurveAtEveryBoundary() public {
+        address account = address(1);
+        _set(account, _curveInput(1000, 100_000e6, 20_000e6, CfdTypes.Side.LONG));
+        bytes32 original = book.curveHashOf(account);
+        driver.reclassifyPledgeToEscrow(account, 200_001);
+        assertEq(driver.collectibleCloseEscrowUsdc(account), 200_001);
+        assertEq(driver.pnlPledgeUsdc(account), 20_000e6 - 200_001);
+        assertEq(driver.authenticate(account), original, "only the funding classification changed");
+        (bytes32 pending,) = driver.sync(account, original);
+        assertEq(pending, original);
+        assertEq(book.terminalLpPriceDeltaUsdcAtoms(1.2e8 - 1), 20_000e6 - 1000);
+        assertEq(book.terminalLpPriceDeltaUsdcAtoms(1.2e8), 20_000e6);
+        assertEq(book.terminalLpPriceDeltaUsdcAtoms(1.2e8 + 1), 20_000e6);
+        driver.restoreEscrowToPledge(account);
+        assertEq(driver.authenticate(account), original);
+        (bytes32 restored,) = driver.sync(account, pending);
+        assertEq(restored, original);
+        assertEq(driver.collectibleCloseEscrowUsdc(account), 0);
+    }
+
     function test_LongCappedCurveUsesInclusiveBreakpoint() public {
         address account = address(1);
         uint112 lots = 1000;

@@ -8,6 +8,7 @@ import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
@@ -70,7 +71,7 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         effects.settlementAfterUsdc = (uint256(1) << 200) + cash;
         effects.settlementBeforeUsdc = effects.settlementAfterUsdc + carry;
         effects.freeSettlementAfterUsdc = cash;
-        book.recordCommitment(1, effects);
+        book.recordCommitment(1, effects, effects.bountyFromPledgeUsdc == 0 ? 0 : 1);
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(1);
         assertEq(keccak256(abi.encode(pending.commitment)), keccak256(abi.encode(effects)));
     }
@@ -83,11 +84,234 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
         effects.carryCollectedUsdc = 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
-        book.recordCommitment(1, effects);
+        book.recordCommitment(1, effects, effects.bountyFromPledgeUsdc == 0 ? 0 : 1);
         effects.settlementBeforeUsdc = 1;
         effects.bountyFromFreeUsdc -= 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
-        book.recordCommitment(1, effects);
+        book.recordCommitment(1, effects, effects.bountyFromPledgeUsdc == 0 ? 0 : 1);
+    }
+
+    function test_CommitmentSourceEpochMatchesFundingDomain() public {
+        OrderV3Types.OrderRequest memory request = _request(bytes32("source-epoch-domain"));
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
+        book.recordCommitment(1, effects, 1);
+        effects.bountyFromFreeUsdc -= 1;
+        effects.bountyFromPledgeUsdc = 1;
+        vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
+        book.recordCommitment(1, effects, 0);
+        book.recordCommitment(1, effects, type(uint64).max);
+        assertEq(book.sourcePositionEpoch(1), type(uint64).max);
+    }
+
+    function testFuzz_FailedCloseAuthenticatesExactFundingComponents(
+        uint96 rawPledge,
+        bool liquidation,
+        bool selfExecution
+    ) public {
+        _startRecordingLogs();
+        uint256 pledge = bound(rawPledge, 1, EXECUTION_BOUNTY_USDC);
+        uint256 free = EXECUTION_BOUNTY_USDC - pledge;
+        OrderV3Types.OrderRequest memory request = _request(bytes32("split-failure"));
+        request.isClose = true;
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.bountyFromFreeUsdc = free;
+        effects.bountyFromPledgeUsdc = pledge;
+        book.recordCommitment(1, effects, 9);
+        vm.mockCall(ENGINE, abi.encodeWithSignature("protocolTreasury()"), abi.encode(PROTOCOL_TREASURY));
+        OrderV3Types.OrderReceipt memory receipt = liquidation
+            ? _accountLiquidatedReceipt(1, request, intentHash)
+            : _failedReceipt(1, ACCOUNT, request, intentHash);
+        receipt.commitment = effects;
+        receipt.executor = selfExecution ? ACCOUNT : EXECUTOR;
+        receipt.bounty.bountyPaidUsdc = liquidation ? 0 : free;
+        receipt.bounty.bountyForfeitedUsdc = liquidation ? free : 0;
+        receipt.bounty.bountyRefundedUsdc = pledge;
+        receipt.bountyRecipient = free == 0 ? ACCOUNT : liquidation ? PROTOCOL_TREASURY : receipt.executor;
+        receipt.bountyDisposition = free == 0
+            ? OrderV3Types.BountyDisposition.RefundedToAccount
+            : liquidation
+                ? OrderV3Types.BountyDisposition.ForfeitedAndRefunded
+                : OrderV3Types.BountyDisposition.PaidAndRefunded;
+
+        // Preserve the total B while stealing one pledge atom for the keeper or treasury.
+        receipt.bounty.bountyRefundedUsdc -= 1;
+        if (liquidation) {
+            receipt.bounty.bountyForfeitedUsdc += 1;
+        } else {
+            receipt.bounty.bountyPaidUsdc += 1;
+        }
+        _expectInvalidTerminal(receipt);
+        receipt.bounty.bountyRefundedUsdc += 1;
+        if (liquidation) {
+            receipt.bounty.bountyForfeitedUsdc -= 1;
+        } else {
+            receipt.bounty.bountyPaidUsdc -= 1;
+        }
+        book.finalize(receipt);
+        assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
+        assertEq(book.sourcePositionEpoch(1), 0, "terminal order clears pending provenance");
+    }
+
+    function test_SuccessStillAuthenticatesFullBountyWithoutPledgeRefund() public {
+        _startRecordingLogs();
+        OrderV3Types.OrderRequest memory request = _request(bytes32("split-success"));
+        request.isClose = true;
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.bountyFromPledgeUsdc = EXECUTION_BOUNTY_USDC;
+        book.recordCommitment(1, effects, 7);
+        OrderV3Types.OrderReceipt memory receipt = _executedReceipt(1, ACCOUNT, request, intentHash);
+        receipt.commitment = effects;
+        receipt.bounty.bountyPaidUsdc -= 1;
+        receipt.bounty.bountyRefundedUsdc = 1;
+        receipt.bountyDisposition = OrderV3Types.BountyDisposition.PaidAndRefunded;
+        _expectInvalidTerminal(receipt);
+        receipt.bounty.bountyPaidUsdc += 1;
+        receipt.bounty.bountyRefundedUsdc = 0;
+        receipt.bountyDisposition = OrderV3Types.BountyDisposition.Paid;
+        book.finalize(receipt);
+        assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
+    }
+
+    function test_FundingValidatorRejectsSelfConsistentWrongSplitEpochAndEscrow() public {
+        OrderV3Types.OrderRequest memory request = _request(bytes32("funding-provenance"));
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.bountyFromFreeUsdc = 400_000;
+        effects.bountyFromPledgeUsdc = 600_000;
+        book.recordCommitment(1, effects, 7);
+        IMarginClearinghouse.BountyReservation memory reservation = IMarginClearinghouse.BountyReservation({
+            account: ACCOUNT,
+            amountUsdc: uint96(EXECUTION_BOUNTY_USDC),
+            state: IMarginClearinghouse.BountyReservationState.Active,
+            freeFundedUsdc: 400_000,
+            pledgeFundedUsdc: 600_000,
+            sourcePositionEpoch: 7
+        });
+        vm.mockCall(
+            CLEARINGHOUSE, abi.encodeWithSelector(IMarginClearinghouse.validateBountyReservation.selector), bytes("")
+        );
+        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
+        book.validateBountyFunding(1);
+        reservation.freeFundedUsdc += 1;
+        reservation.pledgeFundedUsdc -= 1;
+        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
+        _expectFundingMismatch();
+        reservation.freeFundedUsdc -= 1;
+        reservation.pledgeFundedUsdc += 1;
+        reservation.sourcePositionEpoch = 8;
+        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
+        _expectFundingMismatch();
+        reservation.sourcePositionEpoch = 7;
+        _mockFunding(reservation, 599_999, 1, 7, 1e18, 7);
+        _expectFundingMismatch();
+        _mockFunding(reservation, 600_000, 2, 7, 1e18, 7);
+        _expectFundingMismatch();
+        _mockFunding(reservation, 600_000, 1, 8, 1e18, 7);
+        _expectFundingMismatch();
+        _mockFunding(reservation, 600_000, 1, 7, 0, 7);
+        _expectFundingMismatch();
+        _mockFunding(reservation, 600_000, 1, 7, 1e18, 8);
+        _expectFundingMismatch();
+    }
+
+    function test_FundingValidatorAllowsLaterFreeFundedOrderWithDifferentEscrowOwner() public {
+        OrderV3Types.OrderRequest memory request = _request(bytes32("free-after-pledge"));
+        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        book.recordCommitment(1, effects, 0);
+        IMarginClearinghouse.BountyReservation memory reservation = IMarginClearinghouse.BountyReservation({
+            account: ACCOUNT,
+            amountUsdc: uint96(EXECUTION_BOUNTY_USDC),
+            state: IMarginClearinghouse.BountyReservationState.Active,
+            freeFundedUsdc: uint96(EXECUTION_BOUNTY_USDC),
+            pledgeFundedUsdc: 0,
+            sourcePositionEpoch: 0
+        });
+        vm.mockCall(
+            CLEARINGHOUSE, abi.encodeWithSelector(IMarginClearinghouse.validateBountyReservation.selector), bytes("")
+        );
+        _mockFunding(reservation, 600_000, 2, 7, 1e18, 7);
+        book.validateBountyFunding(1);
+        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
+        _expectFundingMismatch();
+    }
+
+    function _mockFunding(
+        IMarginClearinghouse.BountyReservation memory reservation,
+        uint96 escrow,
+        uint64 escrowOrderId,
+        uint64 escrowEpoch,
+        uint256 size,
+        uint64 liveEpoch
+    ) private {
+        vm.mockCall(
+            CLEARINGHOUSE,
+            abi.encodeWithSelector(IMarginClearinghouse.getBountyReservation.selector),
+            abi.encode(reservation)
+        );
+        vm.mockCall(
+            CLEARINGHOUSE,
+            abi.encodeWithSignature("collectibleCloseEscrow(address)", ACCOUNT),
+            abi.encode(escrow, escrowOrderId, escrowEpoch)
+        );
+        vm.mockCall(ENGINE, abi.encodeWithSignature("positionEpoch(address)", ACCOUNT), abi.encode(liveEpoch));
+        vm.mockCall(
+            ENGINE,
+            abi.encodeWithSignature("positions(address)", ACCOUNT),
+            abi.encode(size, uint256(0), uint256(0), uint256(0), CfdTypes.Side.LONG, uint64(0), int256(0))
+        );
+    }
+
+    function _expectFundingMismatch() private {
+        vm.expectRevert(
+            abi.encodeWithSelector(IOrderLifecycleBook.OrderLifecycleBook__BountyFundingMismatch.selector, uint64(1))
+        );
+        book.validateBountyFunding(1);
+    }
+
+    function test_MismatchRecoveryUsesExactIndependentFundingAfterEntitlementCorruption() public {
+        _startRecordingLogs();
+        OrderV3Types.OrderRequest memory request = _request(bytes32("corrupt-reported-entitlement"));
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
+        CfdEnginePlanTypes.CloseCommitment memory effects;
+        effects.bountyFromFreeUsdc = 400_000;
+        effects.bountyFromPledgeUsdc = 600_000;
+        book.recordCommitment(1, effects, 7);
+        vm.record();
+        book.pendingIntent(1);
+        (bytes32[] memory reads,) = vm.accesses(address(book));
+        uint256 corrupted;
+        for (uint256 i; i < reads.length; ++i) {
+            if (vm.load(address(book), reads[i]) == bytes32(EXECUTION_BOUNTY_USDC)) {
+                vm.store(address(book), reads[i], bytes32(EXECUTION_BOUNTY_USDC + 1));
+                ++corrupted;
+            }
+        }
+        assertEq(corrupted, 1, "fault changes only the standalone reported entitlement word");
+        assertEq(book.pendingIntent(1).commitment.bountyFromFreeUsdc, effects.bountyFromFreeUsdc);
+        assertEq(book.pendingIntent(1).commitment.bountyFromPledgeUsdc, effects.bountyFromPledgeUsdc);
+        vm.warp(uint256(book.orderTiming(1).executionDeadline) + 1);
+        OrderV3Types.OrderReceipt memory receipt = _riskOffReceipt(1, request, intentHash);
+        receipt.reason = OrderV3Types.TerminalReason.ExpiredReservationMismatch;
+        receipt.commitment = effects;
+        receipt.bounty.bountyEntitlementUsdc = EXECUTION_BOUNTY_USDC + 1;
+        receipt.bounty.discrepancy = OrderV3Types.ReservationDiscrepancy.Amount;
+        receipt.bountyUsdc = EXECUTION_BOUNTY_USDC - 1;
+        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+        vm.expectRevert(
+            abi.encodeWithSelector(IOrderLifecycleBook.OrderLifecycleBook__ReceiptIdentityMismatch.selector, uint64(1))
+        );
+        book.finalize(receipt);
+        receipt.bountyUsdc = EXECUTION_BOUNTY_USDC;
+        receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+        book.finalize(receipt);
+        assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
     }
 
     function testFuzz_PackedBoundsPreserveEveryPublicValue(
@@ -163,6 +387,8 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         );
         assertEq(book.CONFIG_SCHEMA_HASH(), keccak256("PletherExecutionConfigV4"));
         assertEq(uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry), 4);
+        assertEq(uint8(OrderV3Types.BountyDisposition.PaidAndRefunded), 5);
+        assertEq(uint8(OrderV3Types.BountyDisposition.ForfeitedAndRefunded), 6);
         assertEq(uint8(PositionProtectionTypes.PositionProtectionStatus.Executed), 4);
         assertEq(uint8(PositionProtectionTypes.PositionProtectionStatus.Failed), 5);
         assertEq(uint8(PositionProtectionTypes.PositionProtectionStatus.Cancelled), 6);

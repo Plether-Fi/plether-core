@@ -229,8 +229,8 @@ interface ICfdEngineTypes {
     /// @param closeReachableUsdc Legacy close reachability value, exactly equal to `freeSettlementUsdc`.
     /// @param liquidationReachableSettlementUsdc Settlement balance available to liquidation after excluding
     ///        router-attributed execution-bounty reserves; this can include value liquidation releases.
-    /// @param terminalPriceCollectibleCapUsdc Exact live-position price-loss cap: PnL pledge plus same-account claim,
-    ///        clipped to the maximum loss reachable inside the configured price domain; zero without a live position.
+    /// @param terminalPriceCollectibleCapUsdc Live-position terminal price-loss cap: PnL pledge, same-account claim
+    ///        and refundable pledged-close escrow, clipped to maximum endpoint loss; zero without a live position.
     /// @param accountEquityUsdc Clearinghouse-local settlement balance, excluding unrealized PnL and trader claims.
     /// @param freeBuyingPowerUsdc Clearinghouse-local free settlement, excluding engine withdrawal guards.
     /// @param traderClaimBalanceUsdc Separate senior HousePool payout liability owed to the account.
