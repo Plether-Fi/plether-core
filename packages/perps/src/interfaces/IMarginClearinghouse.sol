@@ -578,27 +578,6 @@ interface IMarginClearinghouse {
         uint256 amount
     ) external;
 
-    /// @notice Reserves free-settlement USDC for a fresh close-order execution bounty after engine checkpointing.
-    /// @dev Callable only by the engine or its bound settlement sidecar on the atomic fresh close-bounty path. This
-    ///      hook does not call back into the engine because carry was already checkpointed in the active accounting
-    ///      mutation. No tokens move.
-    /// @param account Account whose free settlement should be reserved
-    /// @param amount USDC amount to reserve
-    function reserveCloseExecutionBountyFromSettlement(
-        address account,
-        uint256 amount
-    ) external;
-
-    /// @notice Reserves free-settlement USDC for a stale close-order execution bounty without checkpointing carry.
-    /// @dev Callable only by the engine or its bound settlement sidecar on the bounded stale close-bounty path. No
-    ///      tokens move.
-    /// @param account Account whose free settlement should be reserved
-    /// @param amount USDC amount to reserve
-    function reserveStaleCloseExecutionBountyFromSettlement(
-        address account,
-        uint256 amount
-    ) external;
-
     /// @notice Returns the explicit USDC bucket split after subtracting typed locked-margin buckets.
     /// @dev This clearinghouse-local view excludes unrealized PnL, trader claims, and engine withdrawal guards.
     /// @param account Account to inspect

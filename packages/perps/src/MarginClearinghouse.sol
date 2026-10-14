@@ -1710,32 +1710,6 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             + reservedSettlementUsdc[account];
     }
 
-    /// @notice Locks free settlement as reserved settlement for the engine's fresh close-execution bounty path.
-    /// @dev Callable only by the configured engine or its currently reported settlement sidecar after the engine has
-    ///      checkpointed carry in its active accounting mutation. This hook deliberately does not call back into the
-    ///      engine. The settlement balance is unchanged, and insufficient free settlement reverts.
-    /// @param account Account whose free settlement should be reserved
-    /// @param amount Amount to reserve in six-decimal USDC units
-    function reserveCloseExecutionBountyFromSettlement(
-        address account,
-        uint256 amount
-    ) external onlyOperator {
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
-    }
-
-    /// @notice Locks free settlement as reserved settlement for the engine's stale close-execution bounty path.
-    /// @dev Callable only by the configured engine or its currently reported settlement sidecar. This bounded stale
-    ///      path deliberately does not checkpoint carry. The settlement balance is unchanged, and insufficient free
-    ///      settlement reverts.
-    /// @param account Account whose free settlement should be reserved
-    /// @param amount Amount to reserve in six-decimal USDC units
-    function reserveStaleCloseExecutionBountyFromSettlement(
-        address account,
-        uint256 amount
-    ) external onlyOperator {
-        _lockMargin(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, amount);
-    }
-
     /// @notice Moves already-reserved settlement value between two internal clearinghouse accounts.
     /// @dev Callable only by the configured engine. Decreases the source's reserved bucket and settlement balance, then
     ///      credits the recipient's settlement balance; no ERC-20 transfer occurs. The recipient must be nonzero even

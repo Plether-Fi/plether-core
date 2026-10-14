@@ -386,7 +386,7 @@ contract MarginClearinghouseTest is Test {
         assertEq(summary.activeReservationCount, 0);
     }
 
-    function test_GenericReservedUnlockCheckpointsButFreshEngineBountyLockDoesNotReenter() public {
+    function test_GenericReservedUnlockCheckpointsCarry() public {
         vm.prank(alice);
         clearinghouse.deposit(aliceAccount, 1000 * 1e6);
 
@@ -409,42 +409,7 @@ contract MarginClearinghouseTest is Test {
             "Reserved-settlement checkpoint should use the mutated account"
         );
 
-        uint256 checkpointCallsBeforeFreshBountyLock = mockEngine.carryCheckpointCalls();
-        vm.prank(engine);
-        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 50 * 1e6);
-
-        assertEq(
-            mockEngine.carryCheckpointCalls(),
-            checkpointCallsBeforeFreshBountyLock,
-            "Engine-controlled fresh bounty lock must not reenter the engine checkpoint hook"
-        );
-        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 50 * 1e6);
-    }
-
-    function test_CloseBountySettlementHooks_AuthorizeOnlyEngineAndBoundSidecar() public {
-        address sidecar = address(0x5E771E);
-        vm.prank(alice);
-        clearinghouse.deposit(aliceAccount, 1000 * 1e6);
-        mockEngine.setSettlementSidecar(sidecar);
-
-        vm.prank(engine);
-        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 10 * 1e6);
-        vm.prank(sidecar);
-        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 20 * 1e6);
-        vm.prank(sidecar);
-        clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(aliceAccount, 30 * 1e6);
-
-        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 60 * 1e6, "authorized paths must reserve exactly");
-
-        vm.prank(address(mockRouter));
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
-        clearinghouse.reserveCloseExecutionBountyFromSettlement(aliceAccount, 1);
-
-        vm.prank(alice);
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
-        clearinghouse.reserveStaleCloseExecutionBountyFromSettlement(aliceAccount, 1);
-
-        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 60 * 1e6, "rejected callers must not mutate reserve");
+        assertEq(clearinghouse.actionReserveUsdc(aliceAccount), 0);
     }
 
     // Defense-in-depth: these malformed clearinghouse indexes cannot be created through production entrypoints.
