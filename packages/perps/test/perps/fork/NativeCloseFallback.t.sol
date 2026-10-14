@@ -33,13 +33,14 @@ contract NativeCloseFallbackTest is SourceBoundBountyFixture {
     address constant FACTORY = 0x13E9ed32155810FDbd067D4522C492D6f68E5944;
     address constant IMPLEMENTATION = 0x28426d752372D68d34340bd94390950DcE3C9ec3;
     address constant OWNER = address(0xA11CE);
+    uint256 constant SOURCE_RPC_BLOCK = 319_094_449;
     INativeSimpleAccount private account;
 
     function setUp() public override {
         string memory rpc = vm.envString("NATIVE_CLOSE_FORK_RPC_URL");
-        vm.createSelectFork(rpc);
+        vm.createSelectFork(rpc, SOURCE_RPC_BLOCK);
         assertEq(block.chainid, 421_614);
-        emit log_named_uint("SimpleAccount source fork RPC block", vm.getBlockNumber());
+        emit log_named_uint("SimpleAccount source fork RPC block", SOURCE_RPC_BLOCK);
         assertEq(FACTORY.codehash, 0xa2e635152a61e180383c7afc045620b7461ef6f43ba27d592262513106b991b7);
         assertEq(IMPLEMENTATION.codehash, 0x689a90eff03926a12aedad2fc6d4fdbcbdd9ffac86e7d0d70ce6355961305c74);
         // Account creation is fixture setup through the real factory's EntryPoint SenderCreator.
