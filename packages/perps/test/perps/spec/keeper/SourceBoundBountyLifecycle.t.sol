@@ -10,6 +10,112 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 
 contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
 
+    /// @dev regression; source: ACCOUNTING_SPEC.md#close-order-bounty-policy.
+    function test_SourceBindingRejectsWrongAmountEpochAndRebinding() public {
+        _bountyPosition(CfdTypes.Side.LONG);
+        uint256 bounty = router.closeOrderExecutionBountyUsdc();
+        uint64 id = router.nextCommitId();
+        // Exercise the authorized boundary between reserving backing and recording its provenance.
+        vm.prank(address(router));
+        engine.reserveCloseOrderExecutionBounty(BOUNTY_TRADER, BOUNTY_SIZE, bounty);
+        bytes32 beforeState = _bountyStateDigest(id);
+        for (uint256 i; i < 3; ++i) {
+            vm.expectRevert(bytes4(keccak256("MarginClearinghouse__InvalidBountyReservation()")));
+            vm.prank(address(router));
+            clearinghouse.recordFundedBountyReservation(
+                BOUNTY_TRADER,
+                IMarginClearinghouse.BountyKind.Order,
+                id,
+                bounty,
+                i == 0 ? bounty + 1 : bounty,
+                i == 1 ? 0 : 2
+            );
+            assertEq(_bountyStateDigest(id), beforeState, "invalid provenance must not consume backing");
+            (, uint64 escrowOrder, uint64 escrowEpoch) = clearinghouse.collectibleCloseEscrow(BOUNTY_TRADER);
+            assertEq(escrowOrder, 0);
+            assertEq(escrowEpoch, 0);
+            assertEq(clearinghouse.totalBountyReservationsUsdc(BOUNTY_TRADER), 0);
+        }
+        vm.prank(address(router));
+        clearinghouse.recordFundedBountyReservation(
+            BOUNTY_TRADER, IMarginClearinghouse.BountyKind.Order, id, bounty, bounty, 1
+        );
+        beforeState = _bountyStateDigest(id);
+        vm.expectRevert(bytes4(keccak256("MarginClearinghouse__InvalidBountyReservation()")));
+        vm.prank(address(router));
+        clearinghouse.recordFundedBountyReservation(
+            BOUNTY_TRADER, IMarginClearinghouse.BountyKind.Order, id + 1, bounty, bounty, 1
+        );
+        assertEq(_bountyStateDigest(id), beforeState, "backing cannot be rebound to another order");
+        assertEq(clearinghouse.totalBountyReservationsUsdc(BOUNTY_TRADER), bounty);
+        assertEq(_bountyReservation(id + 1).account, address(0));
+    }
+
+    /// @dev regression; source: ACCOUNTING_SPEC.md#close-order-bounty-policy.
+    function test_SourceEscrowRejectsWrongOrderWithoutBlockingSuccessfulClose() public {
+        _bountyPosition(CfdTypes.Side.LONG);
+        uint64 id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        bytes32 beforeState = _bountyStateDigest(id);
+        for (uint256 i; i < 2; ++i) {
+            vm.expectRevert(bytes4(keccak256("MarginClearinghouse__InvalidBountyReservation()")));
+            vm.prank(address(engine));
+            clearinghouse.consumeCollectibleCloseEscrow(BOUNTY_TRADER, i == 0 ? 0 : id + 1);
+            assertEq(_bountyStateDigest(id), beforeState, "foreign order must not earn escrow");
+        }
+        _bountyExecute(id, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        _assertBountyResolved(id);
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), 0);
+    }
+
+    /// @dev regression; source: ACCOUNTING_SPEC.md#close-order-bounty-policy.
+    function test_SourceResolverRejectsPrematureQuarantineMismatchAndStaleEpoch() public {
+        uint256 originalPledge = _bountyPosition(CfdTypes.Side.LONG);
+        uint256 bounty = router.closeOrderExecutionBountyUsdc();
+        uint64 id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        bytes32 beforeState = _bountyStateDigest(id);
+        for (uint256 i; i < 2; ++i) {
+            vm.expectRevert(bytes4(keccak256("MarginClearinghouse__InvalidBountyReservation()")));
+            vm.prank(address(router));
+            engine.resolveCloseBounty(BOUNTY_TRADER, id, 0, i == 0 ? bounty : bounty + 1, 1, i != 0);
+            assertEq(_bountyStateDigest(id), beforeState, "invalid restoration must roll back the Engine call");
+        }
+        vm.prank(address(router));
+        clearinghouse.takeBountyReservation(BOUNTY_TRADER, IMarginClearinghouse.BountyKind.Order, id);
+        beforeState = _bountyStateDigest(id);
+        // Fault control: the live source generation no longer matches the authenticated reservation.
+        vm.mockCall(
+            address(engine), abi.encodeWithSelector(engine.positionEpoch.selector, BOUNTY_TRADER), abi.encode(2)
+        );
+        vm.expectRevert(bytes4(keccak256("MarginClearinghouse__InvalidBountyReservation()")));
+        vm.prank(address(router));
+        engine.resolveCloseBounty(BOUNTY_TRADER, id, 0, bounty, 1, false);
+        vm.clearMockedCalls();
+        assertEq(_bountyStateDigest(id), beforeState, "stale source must not receive a pledge refund");
+        vm.prank(address(router));
+        engine.resolveCloseBounty(BOUNTY_TRADER, id, 0, bounty, 1, false);
+        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), originalPledge);
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), 0);
+        assertEq(clearinghouse.actionReserveUsdc(BOUNTY_TRADER), 0);
+    }
+
+    /// @dev regression; source: ACCOUNTING_SPEC.md#close-order-bounty-policy.
+    function test_SourceResolverRejectsMalformedClearinghouseReturnData() public {
+        _bountyPosition(CfdTypes.Side.LONG);
+        uint256 bounty = router.closeOrderExecutionBountyUsdc();
+        uint64 id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
+        bytes32 beforeState = _bountyStateDigest(id);
+        bytes memory callData =
+            abi.encodeCall(IMarginClearinghouse.resolveCloseBounty, (BOUNTY_TRADER, id, 0, bounty, uint64(1), false));
+        for (uint256 i; i < 2; ++i) {
+            vm.mockCall(address(clearinghouse), callData, new bytes(i == 0 ? 0 : 64));
+            vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+            vm.prank(address(router));
+            engine.resolveCloseBounty(BOUNTY_TRADER, id, 0, bounty, 1, false);
+            vm.clearMockedCalls();
+            assertEq(_bountyStateDigest(id), beforeState, "malformed restoration result must roll back");
+        }
+    }
+
     struct RiskOffState {
         uint256 pledge;
         uint256 bounty;
