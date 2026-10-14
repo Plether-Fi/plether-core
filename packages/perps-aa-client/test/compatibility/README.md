@@ -26,16 +26,25 @@ old-stack bindings remain unchanged. `terminalHistory.test.ts` independently
 checks the archived V4 ABI and shares a current receipt hash vector with the
 Solidity lifecycle tests.
 
-The reviewed source-bound bounty extension adds exactly two zero-argument error
-entries to the generated protection ABI:
+The reviewed source-bound bounty extension adds two zero-argument error entries
+to the generated protection ABI:
 `OrderRouter__PledgeBountyRequiresEmptyQueue()` and
 `OrderRouter__RestoredPledgeMadeSolvent()`. It retains the source-candidate 0.2.0
-version; no package publication or deployed compatibility is implied.
+version; no package publication or deployed compatibility is implied. Its historical
+candidate hash was `0xee750da38a95fac8079820ac2c4501e6c59f73c55d570388b69dcf3601cb1066`.
+
+The settlement-floor fix adds exactly four more errors, matching the Router's
+declarations: `OrderRouter__SettlementFloorUnsupported()`,
+`OrderRouter__SettlementFloorOrderPending(uint64 orderId)`, and
+`OrderRouter__SettlementFloorFunding` / `OrderRouter__SettlementFloorWithdrawal`,
+both taking `(uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc,
+uint256 maxGrossDebitUsdc)`. No historical ABI entry changes or disappears.
 `baseline.json` remains unchanged. The compatibility assertion checks the complete
-new ABI hash `0xee750da38a95fac8079820ac2c4501e6c59f73c55d570388b69dcf3601cb1066`,
-then removes exactly those two full declarations and requires reconstruction of
-the historical complete hash. It does not ignore arbitrary errors. All eleven
+current ABI hash `0x04a062fcc4bf7b94828d9064e7ca95f9f6990d59e35f83a4abcb2ba884095deb`,
+then removes exactly those six full declarations, including parameter names and
+internal types, and requires reconstruction of the historical complete hash.
+It does not ignore arbitrary errors. All eleven
 action vectors, runtime exports, sponsorship and UserOperation hashes remain
-identical. A control rejects missing/altered additions, extra errors and removed
+identical. A control rejects each missing/altered addition, extra errors and removed
 functions. Public request/receipt tuples and V3-intent/V4-receipt hash domains do
 not change; internal protocol interfaces and storage still require a fresh stack.

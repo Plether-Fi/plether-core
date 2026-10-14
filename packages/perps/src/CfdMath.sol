@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Panic} from "@openzeppelin/contracts/utils/Panic.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @title CfdMath
@@ -104,22 +105,38 @@ library CfdMath {
         uint256 depthUsdc,
         uint256 vpiFactorWad
     ) internal pure returns (uint256 costUsdc) {
-        if (depthUsdc == 0 || skewUsdc == 0) {
-            return 0;
+        bool valid;
+        (valid, costUsdc) = tryGetSkewCost(skewUsdc, depthUsdc, vpiFactorWad);
+        if (!valid) {
+            Panic.panic(Panic.UNDER_OVERFLOW);
         }
+    }
 
-        // Scale to WAD internally to prevent precision loss on squaring
+    /// @notice Computes the original VPI curve only when all of its intermediates are representable.
+    /// @dev The domain and floor order exactly match `getSkewCost`, including scaling and squaring when the factor
+    ///      is zero. Opens use the boolean to classify numeric rejection; other callers retain the overflow panic.
+    function tryGetSkewCost(
+        uint256 skewUsdc,
+        uint256 depthUsdc,
+        uint256 vpiFactorWad
+    ) internal pure returns (bool valid, uint256 costUsdc) {
+        if (depthUsdc == 0 || skewUsdc == 0) {
+            return (true, 0);
+        }
+        if (skewUsdc > type(uint256).max / 1e12 || depthUsdc > type(uint256).max / 1e12) {
+            return (false, 0);
+        }
         uint256 skewWad = skewUsdc * 1e12;
         uint256 depthWad = depthUsdc * 1e12;
-
-        // S_WAD^2 / D_WAD => S^2 / D in WAD units
+        if (skewWad > type(uint256).max / skewWad) {
+            return (false, 0);
+        }
         uint256 sqSkewOverDepthWad = (skewWad * skewWad) / depthWad;
-
-        // Cost = (k * (S^2 / D)) / 2
+        if (vpiFactorWad != 0 && sqSkewOverDepthWad > type(uint256).max / vpiFactorWad) {
+            return (false, 0);
+        }
         uint256 costWad = (vpiFactorWad * sqSkewOverDepthWad) / WAD / 2;
-
-        // Scale back to 6 decimals (USDC)
-        costUsdc = costWad / 1e12;
+        return (true, costWad / 1e12);
     }
 
     /// @notice Calculates the VPI charge/rebate for a trade.
@@ -136,11 +153,30 @@ library CfdMath {
         uint256 depthUsdc,
         uint256 vpiFactorWad
     ) internal pure returns (int256 vpiUsdc) {
-        uint256 preCost = getSkewCost(preSkewUsdc, depthUsdc, vpiFactorWad);
-        uint256 postCost = getSkewCost(postSkewUsdc, depthUsdc, vpiFactorWad);
+        bool valid;
+        (valid, vpiUsdc) = tryCalculateVPI(preSkewUsdc, postSkewUsdc, depthUsdc, vpiFactorWad);
+        if (!valid) {
+            Panic.panic(Panic.UNDER_OVERFLOW);
+        }
+    }
 
-        // This primitive leaves rebates uncapped; callers enforce reserve backing and close-lifetime limits.
-        vpiUsdc = int256(postCost) - int256(preCost);
+    /// @notice Returns a charge/rebate without panicking on unsupported VPI arithmetic.
+    function tryCalculateVPI(
+        uint256 preSkewUsdc,
+        uint256 postSkewUsdc,
+        uint256 depthUsdc,
+        uint256 vpiFactorWad
+    ) internal pure returns (bool valid, int256 vpiUsdc) {
+        (bool preValid, uint256 preCost) = tryGetSkewCost(preSkewUsdc, depthUsdc, vpiFactorWad);
+        if (!preValid) {
+            return (false, 0);
+        }
+        (bool postValid, uint256 postCost) = tryGetSkewCost(postSkewUsdc, depthUsdc, vpiFactorWad);
+        if (!postValid) {
+            return (false, 0);
+        }
+        // Each cost is <= uint256.max / 1e18 / 2 / 1e12, so both the cast and difference fit int256.
+        return (true, int256(postCost) - int256(preCost));
     }
 
 }

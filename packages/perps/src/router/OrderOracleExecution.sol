@@ -37,14 +37,15 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         }
         housePool = IHousePool(_housePool);
         engineLens = ICfdEngineLens(_engineLens);
-        _setOracleConfig(_pletherOracle);
+        _validateOracleConfig(_pletherOracle);
+        pletherOracle = IPletherOracle(_pletherOracle);
     }
 
-    /// @notice Validates and installs a Plether oracle wired to this router's engine and HousePool.
+    /// @notice Validates a Plether oracle wired to this router's engine and HousePool.
     /// @param newPletherOracle Candidate deployed oracle address.
-    function _setOracleConfig(
+    function _validateOracleConfig(
         address newPletherOracle
-    ) internal {
+    ) internal view {
         if (newPletherOracle == address(0) || newPletherOracle.code.length == 0) {
             revert OrderRouter__InvalidPletherOracle();
         }
@@ -70,7 +71,6 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         } catch {
             revert OrderRouter__InvalidPletherOracle();
         }
-        pletherOracle = oracle;
     }
 
 }

@@ -115,6 +115,10 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 _assertGolden(row, twin);
                 assertTrue(vm.revertToState(startingState));
                 for (uint8 kind = 1; kind <= 9; kind++) {
+                    if (kind == 7) {
+                        _settlementFloorAdmission(row, twin, startingState);
+                        continue;
+                    }
                     if (action == 3 && kind >= 8) {
                         _fullCloseIgnoresPositionBounds(row, kind);
                         assertTrue(vm.revertToState(startingState));
@@ -159,6 +163,47 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                 assertTrue(vm.revertToState(scenario));
                 vm.deleteStateSnapshot(scenario);
             }
+        }
+    }
+
+    /// @dev A positive minimum now has an admission boundary: the flat opening must reserve its full
+    /// gross allowance. Self-execution remains conservative because its gross debit includes its bounty.
+    function _settlementFloorAdmission(
+        Row memory row,
+        OrderV3Types.OrderReceipt memory twin,
+        uint256 startingState
+    ) private {
+        uint256 gross = twin.economics.grossAccountDebitUsdc;
+        uint256 custody = clearinghouse.balanceUsdc(ACCOUNT);
+        uint256 boundary = row.action == 0 ? custody - gross : twin.economics.postSettlementBalanceUsdc;
+        for (uint8 adjacent; adjacent < 3; adjacent++) {
+            OrderV3Types.OrderRequest memory request = _request(row);
+            request.bounds.maxGrossAccountDebitUsdc = gross;
+            request.bounds.minPostSettlementBalanceUsdc =
+                adjacent == 0 ? boundary : adjacent == 1 ? boundary + 1 : boundary - 1;
+            State memory before_ = _state();
+            if (row.action != 0) {
+                vm.expectRevert(IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported.selector);
+                vm.prank(ACCOUNT);
+                router.commitOrder(request);
+                _assertCommitRollback(before_);
+            } else if (adjacent == 1) {
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        IOrderRouterErrors.OrderRouter__SettlementFloorFunding.selector,
+                        router.nextCommitId(),
+                        custody,
+                        request.bounds.minPostSettlementBalanceUsdc,
+                        gross
+                    )
+                );
+                vm.prank(ACCOUNT);
+                router.commitOrder(request);
+                _assertCommitRollback(before_);
+            } else {
+                _assertGolden(row, _execute(row, request, false, 0, 0));
+            }
+            assertTrue(vm.revertToState(startingState));
         }
     }
 
@@ -415,7 +460,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         VpiGolden memory golden,
         uint8 kind
     ) private {
-        uint256 actual = kind == 3 ? golden.gross : kind == 4 ? golden.charge : kind == 5 ? FEE : golden.settlement;
+        uint256 actual = kind == 3 ? golden.gross : kind == 4 ? golden.charge : kind == 5 ? FEE : FUNDING - golden.gross;
         uint256 startingState = vm.snapshotState();
         for (uint8 adjacent; adjacent < 3; adjacent++) {
             if (actual == 0 && adjacent == 1) {
@@ -428,6 +473,26 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
                     : (_minimum(kind) ? actual - 1 : actual + 1);
             OrderV3Types.OrderRequest memory request = _request(row);
             _setLimit(request, kind, limit);
+            if (kind == 7) {
+                request.bounds.maxGrossAccountDebitUsdc = golden.gross;
+                if (adjacent == 1) {
+                    State memory before_ = _state();
+                    vm.expectRevert(
+                        abi.encodeWithSelector(
+                            IOrderRouterErrors.OrderRouter__SettlementFloorFunding.selector,
+                            router.nextCommitId(),
+                            FUNDING,
+                            limit,
+                            golden.gross
+                        )
+                    );
+                    vm.prank(ACCOUNT);
+                    router.commitOrder(request);
+                    _assertCommitRollback(before_);
+                    assertTrue(vm.revertToState(startingState));
+                    continue;
+                }
+            }
             if (kind == 3 && limit < 200_000) {
                 State memory before_ = _state();
                 vm.expectRevert(

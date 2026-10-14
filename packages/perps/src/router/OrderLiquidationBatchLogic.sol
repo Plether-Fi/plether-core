@@ -10,6 +10,7 @@ import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
@@ -17,6 +18,7 @@ import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouter
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
+import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
@@ -236,6 +238,15 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(orderId);
         }
         _queueCommittedOrder(host, account, orderId, request, executionBountyUsdc);
+        uint256 minimum = request.bounds.minPostSettlementBalanceUsdc;
+        if (minimum != 0) {
+            // Reservations have completed. A positive floor reserves the declared worst-case debit, not a preview.
+            uint256 balance = IMarginClearinghouse(host.engine().clearinghouse()).balanceUsdc(account);
+            uint256 maximumDebit = request.bounds.maxGrossAccountDebitUsdc;
+            if (balance < minimum || balance - minimum < maximumDebit) {
+                revert OrderRouter__SettlementFloorFunding(orderId, balance, minimum, maximumDebit);
+            }
+        }
     }
 
     function _validateFreshRequest(
@@ -271,6 +282,16 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         OrderValidationLib.validateBaseCommit(request.sizeDelta, request.marginDelta, request.isClose);
+        uint64 head = host.accountHeadOrderId(account);
+        if (head != 0 && host.lifecycleBook().pendingPolicy(head).minPostSettlementBalanceUsdc != 0) {
+            revert OrderRouter__SettlementFloorOrderPending(head);
+        }
+        if (bounds.minPostSettlementBalanceUsdc != 0) {
+            (uint256 positionSize,,,,,,) = host.engine().positions(account);
+            if (request.isClose || positionSize != 0 || head != 0) {
+                revert OrderRouter__SettlementFloorUnsupported();
+            }
+        }
         if (enforceProtectionLock && host.positionProtectionBook().activePositionProtectionId(account) != 0) {
             revert OrderRouter__ProtectionActive();
         }
@@ -371,22 +392,28 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) private view returns (uint256 executionBountyUsdc) {
         ICfdEngineCore engine = host.engine();
         uint256 commitPrice = _commitReferencePrice(engine);
-        uint256 notionalUsdc = (sizeDelta * commitPrice) / DecimalConstants.USDC_TO_TOKEN_SCALE;
+        uint256 lots = sizeDelta / CfdTypes.SIZE_QUANTUM;
+        if (lots > type(uint112).max || marginDelta > uint256(type(int256).max)) {
+            revert OrderRouter__PredictableOpenInvalid(uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
+        }
+        // Quantum was checked at admission. uint112 lots times the uint32-capped mark fits uint144 exactly.
+        uint256 notionalUsdc = lots * commitPrice;
         if (notionalUsdc < host.minOpenNotionalUsdc()) {
             revert OrderRouter__CommitValidation(11);
         }
 
         uint64 commitMarkTime = engine.lastMarkTime();
+        uint8 revertCode = host.engineLensForCommit()
+            .previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
+        if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
+            revert OrderRouter__PredictableOpenInvalid(revertCode);
+        }
         if (commitMarkTime != 0) {
             IPletherOracle.PolicySnapshot memory policy = host.pletherOracle().getOrderExecutionPolicy(false);
             if (!OracleFreshnessPolicyLib.isStale(commitMarkTime, policy.maxStaleness, block.timestamp)) {
-                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = host.engineLensForCommit()
-                    .previewOpenFailurePolicyCategory(
-                        account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime
-                    );
+                CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
+                    CfdEnginePlanLib.getOpenFailurePolicyCategory(CfdEnginePlanTypes.OpenRevertCode(revertCode));
                 if (OrderFailurePolicyLib.isPredictablyInvalidOpen(failureCategory)) {
-                    uint8 revertCode = host.engineLensForCommit()
-                        .previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
                     revert OrderRouter__PredictableOpenInvalid(revertCode);
                 }
             }
@@ -456,6 +483,36 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                     adverseConfidenceMultiplierBps: config.adverseConfidenceMultiplierBps
                 })
             );
+    }
+
+    /// @notice Preserves all active oracle policies when the Router finalizes an oracle rotation.
+    /// @dev The Router authenticates the admin and validates candidate wiring before delegation. Reading, applying,
+    ///      and verifying policy here avoids embedding this rotation-only code in Router constructor bytecode.
+    ///      The Router installs the new pointer only after this returns, so a rejected or incomplete policy is atomic.
+    function applyOracleConfig(
+        IOrderRouterAdminHost.OracleConfig calldata config
+    ) external {
+        _requireDelegateCall();
+        IPletherOracle activeOracle = IOrderLiquidationBatchHost(address(this)).pletherOracle();
+        IPletherOracle candidate = IPletherOracle(config.pletherOracle);
+        IPletherOracle.OracleConfig memory policy = _oraclePolicy(activeOracle);
+        candidate.applyConfig(policy);
+        if (keccak256(abi.encode(_oraclePolicy(candidate))) != keccak256(abi.encode(policy))) {
+            revert OrderRouter__InvalidPletherOracle();
+        }
+    }
+
+    function _oraclePolicy(
+        IPletherOracle oracle
+    ) private view returns (IPletherOracle.OracleConfig memory policy) {
+        policy = IPletherOracle.OracleConfig({
+            orderExecutionStalenessLimit: oracle.orderExecutionStalenessLimit(),
+            liquidationStalenessLimit: oracle.liquidationStalenessLimit(),
+            basketMaxConfidenceRatioBps: oracle.basketMaxConfidenceRatioBps(),
+            orderSettlementWindow: oracle.orderSettlementWindow(),
+            maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+            adverseConfidenceMultiplierBps: oracle.adverseConfidenceMultiplierBps()
+        });
     }
 
     /// @notice Refreshes the pool-accounting mark and settles matured LP epochs in one rollback frame.

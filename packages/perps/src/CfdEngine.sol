@@ -214,11 +214,20 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         claimAmountUsdc = amount;
-        pool.payOut(address(clearinghouse), claimAmountUsdc);
+        _payTraderClaim(account, claimAmountUsdc, positionRemainsOpen);
+    }
+
+    /// @dev Caller validates liquidity before this common pool payout and corresponding custody credit.
+    function _payTraderClaim(
+        address account,
+        uint256 amountUsdc,
+        bool positionRemainsOpen
+    ) private {
+        pool.payOut(address(clearinghouse), amountUsdc);
         if (positionRemainsOpen) {
-            clearinghouse.creditPnlPledge(account, claimAmountUsdc);
+            clearinghouse.creditPnlPledge(account, amountUsdc);
         } else {
-            clearinghouse.settleUsdc(account, int256(claimAmountUsdc));
+            clearinghouse.settleUsdc(account, int256(amountUsdc));
         }
     }
 
@@ -720,7 +729,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     // ==========================================
 
     /// @notice Validates that a clearinghouse withdrawal leaves an open position sufficiently collateralized.
-    /// @dev Callable only by the clearinghouse after its provisional balance debit. Accounts without positions pass.
+    /// @dev Callable only by the clearinghouse after its provisional balance debit. Flat accounts retain any pending
+    ///      open's funded settlement minimum.
     ///      Open positions require non-degraded mode and a fresh cached mark. Collectible carry is then realized, any
     ///      uncovered remainder blocks withdrawal. Negative lifetime VPI must remain fully reserve-backed, and price
     ///      equity must exceed the stricter of initial margin and the active maintenance/FAD requirement. Every
@@ -733,12 +743,17 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__NotClearinghouse();
         }
 
-        if (_positions[account].lots == 0) {
+        bool syncCurve = _positions[account].lots > 0;
+        bytes32 expectedOldHash;
+        if (syncCurve) {
+            expectedOldHash = _beginTerminalCurveMutation(account);
+        } else if (orderRouter == address(0)) {
             return;
         }
-        bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         settlementSidecar.validateWithdraw(account);
-        _endTerminalCurveMutation(account, expectedOldHash);
+        if (syncCurve) {
+            _endTerminalCurveMutation(account, expectedOldHash);
+        }
     }
 
     // ==========================================
@@ -841,12 +856,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         if (_canPayFreshPoolPayout(amountUsdc)) {
-            pool.payOut(address(clearinghouse), amountUsdc);
-            if (positionRemainsOpen) {
-                clearinghouse.creditPnlPledge(account, amountUsdc);
-            } else {
-                clearinghouse.settleUsdc(account, int256(amountUsdc));
-            }
+            _payTraderClaim(account, amountUsdc, positionRemainsOpen);
         } else {
             traderClaimBalanceUsdc[account] += amountUsdc;
             totalTraderClaimBalanceUsdc += amountUsdc;

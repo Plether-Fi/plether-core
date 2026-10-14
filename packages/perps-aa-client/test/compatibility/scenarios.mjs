@@ -98,6 +98,22 @@ export async function assertCompatibility(client, fixture) {
   const additions = [
     { type: 'error', name: 'OrderRouter__PledgeBountyRequiresEmptyQueue', inputs: [] },
     { type: 'error', name: 'OrderRouter__RestoredPledgeMadeSolvent', inputs: [] },
+    { type: 'error', name: 'OrderRouter__SettlementFloorFunding', inputs: [
+      { name: 'orderId', type: 'uint64', internalType: 'uint64' },
+      { name: 'balanceUsdc', type: 'uint256', internalType: 'uint256' },
+      { name: 'minimumUsdc', type: 'uint256', internalType: 'uint256' },
+      { name: 'maxGrossDebitUsdc', type: 'uint256', internalType: 'uint256' },
+    ] },
+    { type: 'error', name: 'OrderRouter__SettlementFloorOrderPending', inputs: [
+      { name: 'orderId', type: 'uint64', internalType: 'uint64' },
+    ] },
+    { type: 'error', name: 'OrderRouter__SettlementFloorUnsupported', inputs: [] },
+    { type: 'error', name: 'OrderRouter__SettlementFloorWithdrawal', inputs: [
+      { name: 'orderId', type: 'uint64', internalType: 'uint64' },
+      { name: 'balanceUsdc', type: 'uint256', internalType: 'uint256' },
+      { name: 'minimumUsdc', type: 'uint256', internalType: 'uint256' },
+      { name: 'maxGrossDebitUsdc', type: 'uint256', internalType: 'uint256' },
+    ] },
   ]
   const removed = []
   const historicalAbi = client.positionProtectionBookAbi.filter(item => {
@@ -107,9 +123,9 @@ export async function assertCompatibility(client, fixture) {
     }
     return true
   })
-  assert.deepEqual(removed, additions, 'Source-bound compatibility permits exactly the two reviewed zero-argument errors')
-  assert.equal(current.protectionAbiHash, '0xee750da38a95fac8079820ac2c4501e6c59f73c55d570388b69dcf3601cb1066',
-    'Complete source-bound protection ABI differs from the reviewed candidate')
+  assert.deepEqual(removed, additions, 'Compatibility permits exactly the reviewed source-bound bounty and settlement-floor errors')
+  assert.equal(current.protectionAbiHash, '0x04a062fcc4bf7b94828d9064e7ca95f9f6990d59e35f83a4abcb2ba884095deb',
+    'Complete protection ABI differs from the reviewed candidate')
   const historicalHash = keccak256(new TextEncoder().encode(JSON.stringify(historicalAbi)))
   assert.equal(historicalHash, fixture.protectionAbiHash, 'Removing exactly the reviewed errors must restore the complete historical ABI')
   assert.deepEqual({ ...current, protectionAbiHash: historicalHash }, fixture,

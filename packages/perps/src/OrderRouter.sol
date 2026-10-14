@@ -9,6 +9,7 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 
@@ -406,12 +407,15 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Applies a finalized oracle integration configuration.
     /// @dev Callable only by this router's deployed admin. The new oracle must be deployed, expose a nonzero
-    ///      Pyth contract, and be wired to this router's engine and HousePool.
+    ///      Pyth contract, and be wired to this router's engine and HousePool. The sidecar copies and verifies
+    ///      the active policy before this entrypoint installs the candidate, all within the same rollback frame.
     /// @param config Timelocked oracle-address configuration to apply.
     function applyOracleConfig(
         IOrderRouterAdminHost.OracleConfig calldata config
     ) external nonReentrant {
-        _applyOracleConfig(config);
+        _validateOracleRotation(config);
+        _delegateToKeeperSidecar();
+        pletherOracle = IPletherOracle(config.pletherOracle);
     }
 
     /// @notice Applies a mark-refresh oracle update and pushes its mark price to the engine.

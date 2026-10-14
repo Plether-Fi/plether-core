@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Panic} from "@openzeppelin/contracts/utils/Panic.sol";
 import {CfdMath} from "@plether/perps/CfdMath.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
@@ -79,9 +80,40 @@ library OpenAccountingLib {
     function buildOpenState(
         OpenInputs memory inputs
     ) internal pure returns (OpenState memory state) {
-        uint256 addedLots = CfdMath.sizeToLots(inputs.sizeDelta);
-        uint256 currentLots = CfdMath.sizeToLots(inputs.currentSize);
+        CfdMath.sizeToLots(inputs.sizeDelta);
+        CfdMath.sizeToLots(inputs.currentSize);
+        bool valid;
+        (valid, state,) = tryBuildOpenState(inputs);
+        if (!valid) {
+            Panic.panic(Panic.UNDER_OVERFLOW);
+        }
+    }
+
+    /// @notice Builds open economics inside canonical position storage and original VPI arithmetic bounds.
+    /// @dev Requires the authoritative cap/price (at most uint32.max) and governance-capped fee/margin rates. The
+    ///      uint112 lot and uint144 entry bounds prove size and scaled entry fit int256; notional times a capped
+    ///      10,000-bps rate fits uint256. The checked VPI product bounds cost plus the fee below int256.max.
+    /// @return valid Whether every request-dependent numeric operation is representable.
+    /// @return state Open economics, diagnostic only when invalid.
+    /// @return rawLiquidationRequirementUsdc Unfloored notional liquidation requirement used for minimum-size policy.
+    function tryBuildOpenState(
+        OpenInputs memory inputs
+    ) internal pure returns (bool valid, OpenState memory state, uint256 rawLiquidationRequirementUsdc) {
+        if (inputs.sizeDelta % CfdTypes.SIZE_QUANTUM != 0 || inputs.currentSize % CfdTypes.SIZE_QUANTUM != 0) {
+            return (false, state, 0);
+        }
+        uint256 addedLots = inputs.sizeDelta / CfdTypes.SIZE_QUANTUM;
+        uint256 currentLots = inputs.currentSize / CfdTypes.SIZE_QUANTUM;
+        if (
+            currentLots > type(uint112).max || addedLots > type(uint112).max - currentLots
+                || inputs.currentEntryCostUsdcAtoms > type(uint144).max
+        ) {
+            return (false, state, 0);
+        }
         uint256 addedEntryCostUsdcAtoms = addedLots * inputs.price;
+        if (addedEntryCostUsdcAtoms > type(uint144).max - inputs.currentEntryCostUsdcAtoms) {
+            return (false, state, 0);
+        }
         state.addedMaxProfitUsdc =
             CfdMath.calculateExactMaxProfit(addedLots, addedEntryCostUsdcAtoms, inputs.side, inputs.capPrice);
         state.oldEntryNotional = inputs.currentEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
@@ -92,9 +124,12 @@ library OpenAccountingLib {
         state.newEntryNotional = state.newEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE;
         state.postSkewUsdc = inputs.postSkewUsdc;
 
-        state.vpiUsdc = CfdMath.calculateVPI(
+        (valid, state.vpiUsdc) = CfdMath.tryCalculateVPI(
             inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.riskParams.vpiFactor
         );
+        if (!valid) {
+            return (false, state, 0);
+        }
         state.notionalUsdc = addedEntryCostUsdcAtoms;
         state.executionFeeUsdc = (state.notionalUsdc * inputs.executionFeeBps) / 10_000;
         state.tradeCostUsdc = state.vpiUsdc + int256(state.executionFeeUsdc);
@@ -103,10 +138,17 @@ library OpenAccountingLib {
         if (state.initialMarginRequirementUsdc < inputs.riskParams.minBountyUsdc) {
             state.initialMarginRequirementUsdc = inputs.riskParams.minBountyUsdc;
         }
-        state.liquidationReserveTargetUsdc = (newLots * inputs.price * inputs.riskParams.bountyBps) / 10_000;
+        uint256 resultingNotionalUsdc = newLots * inputs.price;
+        if (inputs.riskParams.bountyBps != 0 && resultingNotionalUsdc > type(uint256).max / inputs.riskParams.bountyBps)
+        {
+            return (false, state, 0);
+        }
+        rawLiquidationRequirementUsdc = (resultingNotionalUsdc * inputs.riskParams.bountyBps) / 10_000;
+        state.liquidationReserveTargetUsdc = rawLiquidationRequirementUsdc;
         if (state.liquidationReserveTargetUsdc < inputs.riskParams.minBountyUsdc) {
             state.liquidationReserveTargetUsdc = inputs.riskParams.minBountyUsdc;
         }
+        return (true, state, rawLiquidationRequirementUsdc);
     }
 
 }

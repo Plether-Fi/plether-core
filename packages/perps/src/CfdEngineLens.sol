@@ -275,8 +275,10 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postSize = delta.newPosSize;
         preview.postMarginUsdc = delta.positionMarginAfterOpen;
         preview.postEntryPrice = delta.newPosEntryPrice;
+        if (delta.revertCode == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED) {
+            return preview;
+        }
         preview.postVpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
-
         if (!delta.valid) {
             return preview;
         }

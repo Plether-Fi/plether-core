@@ -62,13 +62,13 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
         maxPruneOrdersPerCall = config.maxPruneOrdersPerCall;
     }
 
-    /// @notice Installs an admin-finalized Plether oracle after wiring validation.
+    /// @notice Authenticates an admin-finalized oracle rotation and validates candidate wiring before policy copying.
     /// @param config Timelocked oracle-address configuration finalized by this router's admin.
-    function _applyOracleConfig(
+    function _validateOracleRotation(
         IOrderRouterAdminHost.OracleConfig calldata config
-    ) internal {
+    ) internal view {
         _onlyAdmin();
-        _setOracleConfig(config.pletherOracle);
+        _validateOracleConfig(config.pletherOracle);
     }
 
 }

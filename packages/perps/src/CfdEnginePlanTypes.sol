@@ -183,7 +183,9 @@ library CfdEnginePlanTypes {
         /// @notice Order-supplied margin cannot fund the position's required dedicated liquidation reserve.
         LIQUIDATION_RESERVE_UNFUNDED,
         /// @notice Existing VPI backing is deficient, or free settlement plus new pledge cannot back resulting negative VPI.
-        VPI_REBATE_RESERVE_UNFUNDED
+        VPI_REBATE_RESERVE_UNFUNDED,
+        /// @notice The open exceeds canonical position storage or representable accounting intermediates.
+        NUMERIC_DOMAIN_EXCEEDED
     }
 
     /// @notice Planned open/increase result and all values needed by the settlement sidecar.
@@ -272,7 +274,9 @@ library CfdEnginePlanTypes {
         PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE,
         /// @notice Dedicated reserve does not fully back the position's negative lifetime-VPI obligation.
         VPI_REBATE_RESERVE_UNDERFUNDED,
-        PARTIAL_CLOSE_UNHEALTHY
+        PARTIAL_CLOSE_UNHEALTHY,
+        /// @notice The committed close direction differs from the nonzero live position.
+        SIDE_MISMATCH
     }
 
     /// @notice Coarse close-payout classification; price PnL and action economics are settled separately.

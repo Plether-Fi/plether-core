@@ -541,12 +541,27 @@ intends no practical ceiling. Fields that are independently required nonzero on 
 | `maxActionChargeUsdc` | Maximum net planner-assessed action charge across carry, VPI, fee, and frozen spread as applicable |
 | `maxExplicitFeesUsdc` | Maximum execution fee plus any assessed frozen-close spread |
 | `maxPostPositionSize` | Maximum live size after execution |
-| `minPostSettlementBalanceUsdc` | Minimum total internal settlement balance after execution and bounty disposition, including value classified in locked buckets |
+| `minPostSettlementBalanceUsdc` | Minimum total internal settlement balance after execution and bounty disposition, including locked buckets; positive values require a funded first open on a flat account |
 | `minPostPositionEquityUsdc` | Minimum resulting live-position equity |
 | `maxPostLeverageBps` | Maximum resulting leverage in basis points |
 
-A terminal full close applies every non-position bound but skips post-position equity and leverage checks because no
-position survives. No other path silently relaxes a caller bound.
+A positive settlement minimum is admitted only for an open on a flat account with no pending orders. Let `B` be
+settlement custody, `M` the requested minimum and `G` the maximum gross debit. Commitment requires `B >= M` and
+`B - M >= G` after all reservations. Both withdrawal APIs preserve that same funded floor until the order is terminal;
+normal custody locks also apply. For example, `B=1000`, `M=700`, `G=200` leaves at most 100 withdrawable. Self-execution
+still funds the entire declared gross allowance, including its bounty. Deposits and claim or keeper credits increase
+surplus; they do not relax the floor. The account remains flat while the isolated open is pending.
+
+Positive minima on increases or closes, or behind another pending order, are rejected explicitly. A pending funded-floor
+open blocks later fresh same-account orders. Exact client-ID replays still return the original order identity. Zero
+minima preserve ordinary overlap and close availability. A positive minimum with an unlimited gross-debit maximum is
+unfundable. Pure SDK builders reject statically unsupported combinations; callers must use current state or simulation
+for flatness, queue and custody admission. No caller bound is silently rewritten.
+
+Execution and terminal bounty settlement can spend the allowance while the order remains linked. Terminal queue
+removal releases the floor; retryable execution and receipt-finalization rollback retain it. The account lens caps its
+withdrawal estimate to the smaller of ordinary free settlement and floor surplus. Full closes require a zero settlement
+minimum at admission and skip post-position equity and leverage checks because no position survives.
 
 ### Trader claim balance
 
@@ -671,6 +686,13 @@ close-bounty escrow bound to its live position generation. Marked trader profits
 reduce NAV; only collectible marked trader losses increase NAV. Carry, VPI, fees, frozen spreads, order margin,
 liquidation reserves, and other action reserves are excluded from this pre-close price-PnL book. Reservation and failure
 refund preserve the cap at fixed mark and claims; successful execution recognizes the pledged bounty cost once.
+
+Pending indexed carry and retained arrears are trader debt, excluded from LP NAV until cash is collected. Activated
+shares, including unclaimed deposit shares in escrow, share that collection; funded redemption claims do not. A trader
+and incoming LP can therefore time collection after activation to share historical carry. The protocol intentionally
+uses collection-time ownership without sweeping accounts or assigning carry to historical LP cohorts. Where collection
+consumes pledge already valued as a capped price-loss receivable, the receivable falls: net NAV changes by collected
+cash plus the change in terminal price PnL, rather than necessarily increasing by the full cash collection.
 
 The snapshot derives both distributable equity and an explicit terminal deficit from:
 
@@ -957,11 +979,13 @@ Carry behavior:
   `unsettledCarryUsdc`. The full incoming credit is applied afterward and can pay arrears at a later checkpoint, even
   at the same timestamp. Claim payouts still require pool cash to cover all outstanding claims after collection; a
   failure rolls back the whole transaction.
-- Is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator.
+- Advances side indexes before borrowing-base, pool-asset, or risk-parameter mutations change the rate denominator.
+  Individual-account collection remains lazy; LP liquidity changes do not sweep trader accounts.
 - On an owner `deposit` / `depositMargin`, realized carry may be collected from post-deposit settlement in the same
   transaction. Credit-only `depositFor` does not checkpoint or collect carry; that liability remains due.
 - On withdraw, carry is realized before settlement balance is reduced.
-- Flows to LP trading revenue once realized.
+- Flows to LP trading revenue once collected. Uncollected indexed debt and arrears do not increase LP NAV; current
+  shares own the collected revenue under the normal tranche waterfall, regardless of when that debt accrued.
 - Guard and risk checks project carry against active position margin first, then free settlement. The reduced pledge
   determines price-risk health. Carry uncovered by both buckets blocks withdrawal and independently makes the position
   liquidatable; same-account claims cannot pay carry. Stored arrears can coexist with new claim or bounty credits, so
@@ -1060,6 +1084,15 @@ These domains answer different questions. They should not silently share assumpt
 - The router reserves the execution bounty in `MarginClearinghouse` at commit time.
 - A `PendingOpen` or `Armed` protection is not a pending order and does not occupy the global FIFO. An account with an
   active protection cannot commit a conflicting discretionary order.
+
+Open numeric-domain failures use typed code `11`, including when changed exposure or collateral reaches a limit
+after commitment. Checked VPI arithmetic preserves the original scaling and division order. Supported opens also
+respect the terminal NAV book: resulting pledge plus trader claim fits `uint144`, total active lots fit `int112`,
+and `longLots * CAP_PRICE + 2 * shortEntryCostUsdcAtoms` fits `int144`. The last expression safely bounds the book's
+entry-plus-collectible-cap budget without extra snapshot fields. At the current `2e8` price cap, the lot limit already
+implies that bound; at caps above about `2^31` price atoms it can conservatively reject enormous aggregate books that
+would fit because some collateral is uncollectible. These checks change admission, not successful in-domain rounding.
+Known numeric failures finalize and release the queue; malformed dependency errors and unknown panics remain retryable.
 
 ### Authoritative execution configuration
 
@@ -1186,6 +1219,11 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
   stack whose Router still uses an older `PletherOracle` is fail-soft: the current-feed section is unknown,
   `observationComplete` is false, and `completeObservationDigest` is zero until a compatible oracle is
   timelock-rotated into the Router.
+- Oracle rotation preserves the six active policy settings at finalization: order/liquidation staleness, basket
+  confidence ratio, settlement window, component publish-time divergence, and adverse confidence multiplier. The
+  Router validates the candidate's wiring, copies policy through its existing keeper sidecar, checks readback, and
+  only then installs the candidate. Any rejection or mismatch rolls back the complete finalization, including the
+  proposal and configuration version. Existing config-pinned orders still invalidate on a successful rotation.
 - The reported confidence belongs to the neutral pre-cap basket, while the returned execution mark may be capped.
   Consumers therefore cannot always reproduce the configured confidence ratio by dividing confidence by the capped
   mark. Use `policyValid` and the configured ratio for monitoring; do not reinterpret that post-cap quotient as an

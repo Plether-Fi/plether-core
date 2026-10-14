@@ -1327,6 +1327,74 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__SettlementFloorFunding",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "balanceUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minimumUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxGrossDebitUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__SettlementFloorOrderPending",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__SettlementFloorUnsupported",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__SettlementFloorWithdrawal",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "balanceUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minimumUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxGrossDebitUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__SideMismatch",
     "inputs": []
   },
