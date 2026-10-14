@@ -2061,7 +2061,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     ) internal returns (uint64 id) {
         OrderV3Types.OrderRequest memory request = _orderRequest(i, lots, contribution, isClose);
         if (lots == 0) {
-            // A generated half-close of a one-lot remainder reaches base validation before minimum notional.
+            // Explicit zero-size probes reach base validation before minimum notional.
             _rejectCommit(i, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ZeroSize.selector));
             ++rejectedSmallOrders;
             return 0;

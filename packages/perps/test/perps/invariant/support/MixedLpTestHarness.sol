@@ -25,6 +25,14 @@ contract MixedLpTestHarness is PerpMixedAccountingHandler {
         address owner_
     ) PerpMixedAccountingHandler(usdc_, pyth_, engine_, clearinghouse_, pool_, junior_, senior_, router_, owner_) {}
 
+    /// @dev Deterministic admission probe, outside the generated positive-size action domain.
+    function rejectZeroSizeClose(
+        uint256 i
+    ) external {
+        _commitTrade(i, 0, 0, true);
+        assertModel();
+    }
+
     function changeRawPoolCash(
         uint256 nextCash
     ) external {

@@ -217,7 +217,15 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         assertEq(handler.traderState(2).lots, 1, "the generated half-close must round to zero lots");
         uint256 rejectionsBefore = handler.rejectedSmallOrders();
         uint64 cursorBefore = handler.orders().nextId();
+        bytes32 economicsBefore = handler.economicFingerprint(2);
+        bytes32 modelBefore = keccak256(abi.encode(handler.traderState(2)));
         handler.commitPledgeFundedClose(378_607_894_605_621_696_302_822_193_767_330, false);
+        assertEq(handler.rejectedSmallOrders(), rejectionsBefore, "generator excludes zero-size requests");
+        assertEq(handler.economicFingerprint(2), economicsBefore, "guard preserves production economics");
+        assertEq(keccak256(abi.encode(handler.traderState(2))), modelBefore, "guard preserves the ghost ledger");
+
+        // Probe Router admission explicitly; the ordinary generator must keep its positive-size guard.
+        handler.rejectZeroSizeClose(2);
         assertEq(handler.rejectedSmallOrders(), rejectionsBefore + 1);
         assertEq(handler.orders().nextId(), cursorBefore, "zero-size rejection allocates no order identity");
         assertEq(handler.orders().count(2), 0, "zero-size rejection leaves no reservation or queue entry");
