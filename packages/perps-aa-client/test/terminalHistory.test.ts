@@ -49,6 +49,25 @@ describe("authenticated terminal history", () => {
     const rpcLog = { ...input.log, blockNumber: 900_000n };
     expect(decodeVerifiedOrderFinalized({ ...input, log: rpcLog }).receipt).toEqual(receipt);
   });
+  it.each([5, 6])("authenticates mixed bounty disposition %s without changing the receipt tuple or hash domain", bountyDisposition => {
+    // This is a consumer encoding/authentication fixture; on-chain Book tests establish economic authority.
+    const mixed: OrderReceiptV4 = { ...receipt, status: 3, reason: bountyDisposition === 5 ? 2 : 9,
+      bountyDisposition, bountyUsdc: 200_000n, bountyRecipient: router, executor: router,
+      commitment: { ...receipt.commitment, bountyFromFreeUsdc: 50_000n, bountyFromPledgeUsdc: 150_000n },
+      bounty: { ...receipt.bounty, bountyEntitlementUsdc: 200_000n, bountyRefundedUsdc: 150_000n,
+        bountyPaidUsdc: bountyDisposition === 5 ? 50_000n : 0n,
+        bountyForfeitedUsdc: bountyDisposition === 6 ? 50_000n : 0n },
+    };
+    const mixedHash = hashOrderReceiptV4({ ...context, receipt: mixed });
+    const mixedSummary = { ...summary, status: mixed.status, reason: mixed.reason, receiptHash: mixedHash };
+    const log = { ...logFor(mixed), data: encodeAbiParameters(event.inputs.filter((p) => !p.indexed),
+      [mixedHash, context.terminalBlock, context.terminalTime, mixed]) };
+    expect(decodeVerifiedOrderFinalized({ ...input, summary: mixedSummary, log }).receipt).toEqual(mixed);
+    const changed = { ...mixed, bounty: { ...mixed.bounty, bountyRefundedUsdc: 150_001n } };
+    const forged = { ...log, data: encodeAbiParameters(event.inputs.filter((p) => !p.indexed),
+      [mixedHash, context.terminalBlock, context.terminalTime, changed]) };
+    expect(() => decodeVerifiedOrderFinalized({ ...input, summary: mixedSummary, log: forged })).toThrow(/authenticated history/);
+  });
   it("rejects altered economics, commitment, bounty and indexed identity", () => {
     for (const changed of [
       { ...receipt, economics: { ...receipt.economics, postSettlementBalanceUsdc: 1n } },

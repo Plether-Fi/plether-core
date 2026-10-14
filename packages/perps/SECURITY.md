@@ -186,8 +186,10 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   migration path. Engine wiring validates the bound Engine, price cap, size quantum, and completely empty book before
   accepting it once.
 - `MarginClearinghouse` broad operator paths trust only `engine` and `settlementSidecar` to move trader custody across settlement and seizure buckets; router access is limited to reservation lifecycle paths needed for queued orders.
-- Close-execution bounty paths, including stale fallback, lock eligible free settlement as action reserve. They must not
-  reclassify PnL pledge without an atomic terminal-curve resynchronization and a new security review.
+- Close-execution bounty paths lock post-carry free settlement and eligible pledge as action reserve. Pledge funding
+  requires an empty account queue and an atomic Engine curve mutation that installs the order/epoch-bound collectible
+  mirror. Refund, successful consumption and quarantine must resolve that eligibility inside the same authenticated
+  boundary; Router classification changes alone cannot mutate the cap.
 - Negative lifetime VPI is protected by a dedicated sub-balance of action reserve. Generic action collection must not
   cross the combined floor of protected execution bounties plus `max(-vpiAccrued, 0)`.
 - `HousePool.payOut(...)` and `HousePool.recordClaimantInflow(...)` trust only `engine` and `settlementSidecar`; unsolicited raw pool cash must be admitted through owner-governed excess accounting, and protocol fees stay in treasury clearinghouse margin.
@@ -257,6 +259,8 @@ These are the highest-value properties an auditor should expect to hold.
 | Terminal evidence | Every terminal transition finalizes one authenticated Book receipt after economic settlement; a receipt failure rolls back that item |
 | Single terminal owner | Router records are fully deleted terminally, while the Book retains permanent client identity, lifecycle outcome, and the full-receipt hash |
 | Bounty conservation | Clearinghouse-reserved execution bounty value is conserved across order lifecycle transitions until distributed or absorbed, and is excluded from close-loss reachability while reserved |
+| Refundable pledged-close backing | One authenticated order/epoch-bound pledged escrow per account enters marked NAV while refundable; it is not free collateral or extra cash. Failure restores pledge; successful close consumes eligibility; liquidation restores before health/loss assessment |
+| Source-lifetime admission | A pledge-funded ordinary close requires no pending account order. Later orders must be entirely free-funded, preserving the pledged head's source epoch without peer cancellation |
 | VPI reserve conservation | Every live negative lifetime-VPI balance has equal dedicated action-reserve backing; only an exact clawback, equivalent withholding, or lower surviving target may consume or release it |
 | Reservation source of truth | Clearinghouse records own committed order margin, its active FIFO, all bounty classifications, and account bounty totals; Router and protection views compose these records |
 | Protection post-lock safety | Existing-position protection uses exact entry basis and only PnL pledge plus same-account claim for price equity; free/action reserves are excluded, uncovered carry and underfunded negative VPI fail closed, and equality at the stricter initial/active threshold is rejected |
@@ -265,7 +269,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
 | Credit-only funding | Exact token receipt increases beneficiary settlement only; no Engine hook, carry checkpoint, reserve allocation, or payer authority |
-| Carry-neutral reservation release | Execution/cleanup reservation release does not checkpoint carry, and a retryable item rollback restores the reservation |
+| Carry-safe reservation resolution | Free-funded reservation release does not checkpoint carry. Pledged refund checkpoints old-basis carry without collecting it before restoring pledge; retryable item rollback restores every classification |
 
 ### HousePool and LP accounting
 
@@ -273,7 +277,7 @@ These are the highest-value properties an auditor should expect to hold.
 |-----------|-------------|
 | Canonical asset boundary | Pool depth is based on `min(rawAssets, accountedAssets)`, not raw token balance alone |
 | Symmetric terminal NAV | LP entry and exit pricing use the same signed exact terminal price delta and waterfall snapshot |
-| Receivable/cash separation | Positive marked receivables are capped by account pledge/claim value and never increase physical redemption funding before collection |
+| Receivable/cash separation | Positive marked receivables are capped by account pledge/claim plus eligible refundable pledged-close escrow and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
 | Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
 | Junior covenant | Junior redemption funding cannot leave active protected exposure (`E`, excluding `R`) above the configured share of Senior-plus-Junior claimant capital |
@@ -526,19 +530,20 @@ Terminal classification is deliberately allow-listed:
 - configuration mismatch fails terminally before oracle/Engine execution,
 - exact-shape typed planner rejections, execution-mode violations, and financial-constraint violations fail
   terminally and record selector/category/code/constraint evidence,
-- ordinary terminal failure cleanup pays the executor from the exact clearinghouse-reserved bounty; the reason does
-  not change that routing,
+- ordinary open failure pays the executor from its reserved bounty; ordinary close failure pays only the original
+  free-funded part and restores the original pledged part to the same live position epoch,
 - registered protection-attempt failure is the narrow exception: when the exact protected position remains, cleanup
   records `RetainedForProtectionRetry`, pays no executor, moves `Triggered -> Latched`, and preserves the original
   execution bounty for the next attempt,
-- terminal-invalid closes pay the keeper from the already locked action reserve rather than refunding it to the trader wallet,
+- terminal-invalid closes never release pledged funding to the trader wallet or a reopened position; a zero-free-funded
+  failure is unpaid cleanup,
 - open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
 - persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
   the trader's order plus attached `PendingOpen` protection reserves internally in one no-checkpoint clearinghouse
   release without paying the cleanup caller; its receipt records no price source and, for a nonzero order bounty,
   `RefundedToAccount`,
 - liquidation cleanup records each remaining order as `AccountLiquidated`, preserves the original keeper as receipt
-  executor, and records a nonzero queued bounty as `Forfeited` to `CfdEngine.protocolTreasury()`,
+  executor, restores pledged funding before health/loss assessment and forfeits only original free funding to treasury,
 - close-only, same-block/MEV, historical-price availability, insufficient gas, and mark-price ordering remain
   nonterminal,
 - an unknown selector, panic, out-of-gas, empty or malformed revert, or malformed success payload is never decoded as
@@ -598,7 +603,8 @@ pool depth, oracle time, whether the price reached the Engine, bounty recipient/
 and normalized economics fields. Its hash additionally commits to chain, Book, Router, terminal block, and terminal
 time. For queued orders removed by account liquidation, the receipt's state-only economics use the state observed
 after liquidation in both summary slots; Engine liquidation events remain the source for the position transition,
-while the order receipt records the exact bounty forfeiture.
+while the order receipt records the exact free-funded forfeiture and pledged refund. A pledged refund means restored
+position backing and may be consumed by that liquidation; it does not imply wallet entitlement.
 
 At registration, `IntentRegistered` emits the complete `OrderRequest` preimage alongside its canonical hash and the
 actual reserved bounty. Terminal verification therefore needs only canonical chain logs plus the Book's permanent
@@ -607,8 +613,10 @@ compact outcome; it does not rely on an agent retaining private request data.
 Expiry and configuration mismatch are pre-oracle terminal paths: their receipts use `PriceSource.None`, zero
 execution price and oracle publish time, and `priceReachedEngine == false`, even though they may report the stored
 neutral mark and current pool depth as context. Risk-off uses the same no-price convention. Any terminal receipt with
-a zero bounty must use `BountyDisposition.None` and the zero recipient; `Paid`, `RefundedToAccount`, and `Forfeited`
-describe only nonzero value movement.
+a zero bounty must use `BountyDisposition.None` and the zero recipient. Mixed `PaidAndRefunded` and
+`ForfeitedAndRefunded` append to the existing enum without renumbering it. The Book checks exact components against
+its independent original funding record and source epoch, not merely their sum. Public request/receipt field layouts
+remain stable; enum consumers, internal interfaces and storage require the compatible fresh stack.
 
 Book finalization occurs last and is fail closed. If identity, status/reason, bounty, or event construction cannot be
 finalized, the enclosing item reverts: Engine/Clearinghouse/Router changes are not allowed to persist without their
@@ -648,9 +656,11 @@ This is a deliberate trade-off: preserve close and liquidation liveness during r
 
 LP entry and exit pricing consume the same authenticated terminal snapshot. The Engine stores whole 100-token lots
 and exact entry cost, while `TerminalNavBookV2` aggregates each account's LP-side marked price PnL. A positive LP
-receivable is capped by only that account's `pnlPledgeUsdc + traderClaimBalanceUsdc`; liquidation, order, and action
-reserves cannot inflate it. A negative value is the exact marked price amount LPs owe the trader within the bounded
-market.
+receivable is capped by that account's `pnlPledgeUsdc + traderClaimBalanceUsdc` plus its authenticated source-bound
+refundable pledged-close escrow. Other liquidation, order and action reserves cannot inflate it. A negative value is
+the exact marked price amount LPs owe the trader within the bounded market. The escrow is existing reserved custody,
+not an added reserve or physical pool asset. Its reservation/refund is pricing-neutral; successful full-bounty payment
+consumes eligibility and recognizes the authorized success cost once, including self-execution.
 
 Security consequences:
 
@@ -699,7 +709,7 @@ terminal remainder is refunded, any shares delivered back to a wallet restart th
 time.
 
 Atomic Engine-to-book synchronization is a critical trust boundary. Any path that changes position lots, exact entry
-cost, side, PnL pledge, or same-account claim must finish by installing the matching curve or removing it. The
+cost, side, PnL pledge, same-account claim, or collectible close-bounty eligibility must finish by installing the matching curve or removing it. The
 optimistic old-curve hash and monotonic book version protect against stale mutation plans; they are not a substitute
 for invariant and differential testing of every settlement path.
 
@@ -1029,11 +1039,16 @@ Liquidation performs bounded account-local cleanup of that account's pending ord
 This preserves terminal liveness without requiring an unbounded global queue scan.
 
 Before liquidation, cutoff-invalid opens receive the same full internal risk-off refund and `RiskOff` receipt as
-standalone cleanup. If the account remains liquidatable, every other pending order is terminally recorded as
-`AccountLiquidated`; a nonzero reserved execution bounty is `Forfeited` to `CfdEngine.protocolTreasury()`, and the
-receipt's executor is the original keeper rather than the Router self-call address. A zero bounty uses disposition
-`None` and the zero recipient. The Router live records are fully deleted only within the same rollback frame as
-reservation settlement and Book finalization.
+standalone cleanup. An isolated inner frame then authenticates reservations, restores source-bound pledge and runs
+the existing Engine health/settlement path. If restored pledge makes the account healthy, the inner frame rolls back,
+preserving the pledged order and both funding parts while retaining valid outer risk-off refunds. Only the exact direct
+Engine solvent failure receives that classification; other errors propagate.
+
+If the account remains liquidatable, every other pending order is terminally recorded as `AccountLiquidated`;
+free-funded bounty goes to treasury and pledged funding returns to loss-bearing pledge. Mixed outcomes use
+`ForfeitedAndRefunded`. The executor is the original keeper, not the Router self-call address. A zero bounty uses
+`None` and the zero recipient. Router records are deleted within the same rollback frame as reservation settlement
+and Book finalization; other accounts retain relative FIFO order.
 
 Batch liquidation validates and pays for one shared Pyth snapshot, updates the neutral mark once, and isolates each
 account in its own rollback frame. Solvent and positionless accounts are skipped without losing prior successes, while
@@ -1060,6 +1075,9 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 - account-scoped client ids are permanent; a terminal or config-invalidated id cannot be reused for a replacement
   request, so clients must generate and persist unique ids,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
+- ordinary failed closes funded wholly from pledge also require unpaid cleanup. The protocol keeper must fund gas
+  for permissionless oracle-free expiry; bounded deadlines and queues do not guarantee a positive keeper incentive
+  or prevent repeated fresh invalid submissions,
 - failed protection-attempt cleanup is deliberately unpaid so the single user-funded bounty can survive retries;
   liveness therefore depends on keepers processing the terminal attempt and separately appending a retry, and operators
   must alert on prolonged `Latched` state without a live child,

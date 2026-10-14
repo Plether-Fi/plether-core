@@ -11,6 +11,10 @@ interface IOrderRouterErrors {
     /// @notice Close admission was requested for an opening order.
     error OrderRouter__NotCloseOrder();
     error OrderRouter__OrderNotExpired();
+    /// @notice Pledge-funded bounty must belong to the first pending order of its source position.
+    error OrderRouter__PledgeBountyRequiresEmptyQueue();
+    /// @notice Internal liquidation marker; pledge restoration made the position solvent.
+    error OrderRouter__RestoredPledgeMadeSolvent();
 
     /// @notice Terminal result of one independently isolated liquidation-batch item.
     enum LiquidationBatchResult {

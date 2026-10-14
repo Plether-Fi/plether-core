@@ -34,6 +34,7 @@ contract TerminalNavEngineDriver {
     mapping(address account => uint256 entryCostUsdcAtoms) private _entryCosts;
     mapping(address account => uint256 pledgeUsdc) private _pledges;
     mapping(address account => uint256 claimUsdc) private _claims;
+    mapping(address account => uint256 amountUsdc) public collectibleCloseEscrowUsdc;
 
     constructor(
         uint32 capPrice
@@ -56,6 +57,22 @@ contract TerminalNavEngineDriver {
         _entryCosts[account] = input.entryCostUsdcAtoms;
         _pledges[account] = input.collectibleCapUsdcAtoms;
         _claims[account] = 0;
+        delete collectibleCloseEscrowUsdc[account];
+    }
+
+    function reclassifyPledgeToEscrow(
+        address account,
+        uint256 amount
+    ) external {
+        _pledges[account] -= amount;
+        collectibleCloseEscrowUsdc[account] += amount;
+    }
+
+    function restoreEscrowToPledge(
+        address account
+    ) external {
+        _pledges[account] += collectibleCloseEscrowUsdc[account];
+        delete collectibleCloseEscrowUsdc[account];
     }
 
     function clearPosition(
@@ -65,6 +82,7 @@ contract TerminalNavEngineDriver {
         delete _entryCosts[account];
         delete _pledges[account];
         delete _claims[account];
+        delete collectibleCloseEscrowUsdc[account];
     }
 
     function setRejectPositionReads(

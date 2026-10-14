@@ -512,11 +512,24 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     function executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
-        uint64 publishTime
+        uint64 publishTime,
+        uint64 orderId
     ) external onlyEngine {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
+        // A successful close earns its bounty now. Until this point refundable pledged funding stays collectible.
+        clearinghouse.consumeCollectibleCloseEscrow(delta.account, orderId);
+        _executeClose(delta, currentPosition, clearinghouse);
+    }
+
+    /// @dev Keep order identity and publish-time arguments outside the settlement frame's non-IR stack budget.
+    function _executeClose(
+        CfdEnginePlanTypes.CloseDelta calldata delta,
+        CfdTypes.Position calldata currentPosition,
+        IMarginClearinghouse clearinghouse
+    ) private {
+        ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         uint256 marginBefore = clearinghouse.pnlPledgeUsdc(delta.account);
         host.settlementApplySideDelta(
             delta.side,

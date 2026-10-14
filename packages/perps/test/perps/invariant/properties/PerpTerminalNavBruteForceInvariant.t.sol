@@ -118,7 +118,7 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         assertEq(
             uint256(bookState.totalEffectiveCapUsdcAtoms),
             totals.totalEffectiveCapUsdcAtoms,
-            "Book cap budget must match canonical pledge-plus-claim caps"
+            "Book cap budget must match canonical pledge, claim and contingent escrow caps"
         );
 
         uint256[] memory marks = new uint256[](10 + accountStates.length * 6);

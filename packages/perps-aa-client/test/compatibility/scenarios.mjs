@@ -93,7 +93,27 @@ export function captureCompatibility(client) {
 }
 
 export async function assertCompatibility(client, fixture) {
-  assert.deepEqual(captureCompatibility(client), fixture, 'Published package changed the baseline encoding, hashes, ABI, or exports')
+  const current = captureCompatibility(client)
+  // Reviewed source-candidate extension: preserve the immutable app fixture and prove the exact error-only delta.
+  const additions = [
+    { type: 'error', name: 'OrderRouter__PledgeBountyRequiresEmptyQueue', inputs: [] },
+    { type: 'error', name: 'OrderRouter__RestoredPledgeMadeSolvent', inputs: [] },
+  ]
+  const removed = []
+  const historicalAbi = client.positionProtectionBookAbi.filter(item => {
+    if (item.type === 'error' && additions.some(addition => addition.name === item.name)) {
+      removed.push(item)
+      return false
+    }
+    return true
+  })
+  assert.deepEqual(removed, additions, 'Source-bound compatibility permits exactly the two reviewed zero-argument errors')
+  assert.equal(current.protectionAbiHash, '0xee750da38a95fac8079820ac2c4501e6c59f73c55d570388b69dcf3601cb1066',
+    'Complete source-bound protection ABI differs from the reviewed candidate')
+  const historicalHash = keccak256(new TextEncoder().encode(JSON.stringify(historicalAbi)))
+  assert.equal(historicalHash, fixture.protectionAbiHash, 'Removing exactly the reviewed errors must restore the complete historical ABI')
+  assert.deepEqual({ ...current, protectionAbiHash: historicalHash }, fixture,
+    'Published package changed the baseline encoding, hashes, ABI, or exports')
   const finalEnvelope = client.normalizePaymasterResponse(response())
   const stubEnvelope = client.normalizePaymasterResponse(response('00'))
   // Every protection action traverses the hardened native-sponsorship path.

@@ -615,19 +615,40 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _endTerminalCurveMutation(account, expectedOldHash);
     }
 
-    /// @notice Returns authenticated bounty funding without collecting carry or requiring an oracle update.
-    function refundCloseBounty(
+    /// @notice Resolves authenticated bounty funding without collecting carry or requiring an oracle update.
+    function resolveCloseBounty(
         address account,
+        uint64 orderId,
         uint256 freeUsdc,
-        uint256 pledgeUsdc
+        uint256 pledgeUsdc,
+        uint64 sourcePositionEpoch,
+        bool quarantine
     ) external onlyRouter nonReentrant {
         StoredPosition storage pos = _positions[account];
         bytes32 oldHash = _beginTerminalCurveMutation(account);
         unsettledCarryUsdc[account] = _checkpointPositionCarry(account, pos);
-        uint256 beforeMargin = _positionMarginBucketUsdc(account);
-        clearinghouse.refundReservedBounty(account, freeUsdc, pledgeUsdc);
-        _sideState(pos.side).totalMargin += pledgeUsdc;
-        _syncPositionBorrowBaseToMargin(pos, beforeMargin + pledgeUsdc);
+        address target = address(clearinghouse);
+        bytes4 invalidResult = ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector;
+        uint256 restoredPledgeUsdc;
+        assert(this.resolveCloseBounty.selector == IMarginClearinghouse.resolveCloseBounty.selector);
+        // Engine and clearinghouse resolvers share the selector and six-argument input layout. Forward the
+        // fixed-width call, ignoring any trailing calldata, and reuse temporary memory for the one-word
+        // result. Normal borrow/terminal synchronization and the nonReentrant epilogue still run below.
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            calldatacopy(ptr, 0, 196)
+            if iszero(call(gas(), target, 0, ptr, 196, ptr, 32)) {
+                returndatacopy(ptr, 0, returndatasize())
+                revert(ptr, returndatasize())
+            }
+            if iszero(eq(returndatasize(), 32)) {
+                mstore(ptr, invalidResult)
+                revert(ptr, 4)
+            }
+            restoredPledgeUsdc := mload(ptr)
+        }
+        _sideState(pos.side).totalMargin += restoredPledgeUsdc;
+        _syncPositionBorrowBase(account, pos);
         _endTerminalCurveMutation(account, oldHash);
     }
 
@@ -752,7 +773,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice, publishTime);
             _revertIfCloseInvalidTyped(delta.revertCode);
-            _applyClose(delta, publishTime);
+            _applyClose(delta, publishTime, order.orderId);
         } else {
             CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, currentOraclePrice, publishTime);
             _revertIfOpenInvalidTyped(delta.revertCode);
@@ -1274,14 +1295,15 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
     function _applyClose(
         CfdEnginePlanTypes.CloseDelta memory delta,
-        uint64 publishTime
+        uint64 publishTime,
+        uint64 orderId
     ) internal {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
         _realizeCarryFromSettlement(delta.account, pos);
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
-        settlementSidecar.executeClose(delta, currentPosition, publishTime);
+        settlementSidecar.executeClose(delta, currentPosition, publishTime, orderId);
         emit PositionClosed(delta.account, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
 
         unsettledCarryUsdc[delta.account] = 0;

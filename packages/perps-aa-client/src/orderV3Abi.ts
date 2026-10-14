@@ -228,6 +228,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "CfdEngine__PositionIsSolvent",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__AccountQueueCorrupt",
     "inputs": []
   },
@@ -506,6 +511,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__PledgeBountyRequiresEmptyQueue",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__PositionChanged",
     "inputs": []
   },
@@ -553,6 +563,11 @@ export const orderRouterV3Abi = [
   {
     "type": "error",
     "name": "OrderRouter__ProtectionTriggerAlreadyMet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__RestoredPledgeMadeSolvent",
     "inputs": []
   },
   {
@@ -1182,6 +1197,11 @@ export const closePreviewV3Abi = [
         "internalType": "uint8"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__PledgeBountyRequiresEmptyQueue",
+    "inputs": []
   },
   {
     "type": "error",
@@ -2868,6 +2888,17 @@ export const orderLifecycleV5Abi = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "OrderLifecycleBook__BountyFundingMismatch",
+    "inputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
   },
   {
     "type": "error",

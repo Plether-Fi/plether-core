@@ -5,6 +5,7 @@ import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CarryReferenceLedger} from "../../invariant/ghost/CarryReferenceLedger.sol";
 import {CarryReferenceVectors} from "../../shared/CarryReferenceVectors.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {Test} from "forge-std/Test.sol";
@@ -437,6 +438,70 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         assertEq(engine.unsettledCarryUsdc(ALICE), exhausted.arrears - 76e6);
         assertEq(_freeSettlementUsdc(ALICE), 0, "post-deposit collector can use both new deposit and earlier bounty");
         assertEq(clearinghouse.orderMarginUsdc(ALICE), 1000e6);
+    }
+
+    function test_PledgeRefundCheckpointsOldBasisWithoutCollectingAndChangesOnlyFutureCarry() public {
+        _assertRefundCarryHistory(0, 30 days);
+    }
+
+    function test_MixedRefundPrecedesExecutorCarryCollectionAndPreservesGrossNewCredit() public {
+        _assertRefundCarryHistory(100_000, 30 days);
+    }
+
+    function test_PledgeRefundRetainsUnpayableArrearsUntilSubsequentCollection() public {
+        _assertRefundCarryHistory(0, 500 * 365 days);
+    }
+
+    function _assertRefundCarryHistory(
+        uint256 freeFunding,
+        uint256 interval
+    ) private {
+        // The ledger is initialized from fixture constants. All expected states below are submitted actions.
+        // A strictly newer publication replaces the fixture's initial $1 mark with the $0.80 entry mark.
+        vm.warp(vm.getBlockTimestamp() + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(PRICE, uint64(vm.getBlockTimestamp()));
+        referenceLedger.advance(vm.getBlockTimestamp());
+        vm.prank(ALICE);
+        clearinghouse.withdraw(ALICE, 30_000e6 - freeFunding);
+        referenceLedger.withdraw(ALICE, 30_000e6 - freeFunding, vm.getBlockTimestamp());
+        uint256 pledgeFunding = 200_000 - freeFunding;
+        vm.prank(ALICE);
+        uint64 id = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, type(uint256).max, true);
+        referenceLedger.checkpoint(ALICE, vm.getBlockTimestamp());
+        referenceLedger.reserveBountyWithoutCheckpoint(ALICE, freeFunding, pledgeFunding);
+        _assertSystem();
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ALICE), pledgeFunding);
+        uint256 custodyBeforeRefund = clearinghouse.balanceUsdc(ALICE);
+        uint256 poolBeforeRefund = referenceLedger.poolDepth();
+        vm.warp(vm.getBlockTimestamp() + interval);
+        referenceLedger.assessWithoutCollection(ALICE, vm.getBlockTimestamp());
+        referenceLedger.releaseToPledgeWithoutCheckpoint(ALICE, pledgeFunding);
+        uint256 retained = referenceLedger.accountState(ALICE).arrears;
+        assertGt(retained, 0, "refund must reach an actual carry checkpoint");
+        referenceLedger.consumeProtectedWithoutCheckpoint(ALICE, freeFunding);
+        referenceLedger.creditFree(BOB, freeFunding, vm.getBlockTimestamp());
+        vm.prank(BOB);
+        OrderV3Types.ExecutionResult memory result = router.expireOrder(id);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
+        _assertSystem();
+        assertEq(clearinghouse.balanceUsdc(ALICE), custodyBeforeRefund - freeFunding);
+        assertEq(engine.unsettledCarryUsdc(ALICE), retained, "restoring pledge does not pay or erase carry");
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ALICE), 0);
+        if (freeFunding == 0) {
+            assertEq(pool.totalAssets(), poolBeforeRefund, "neither source nor unpaid executor pays at refund");
+        } else {
+            assertEq(_freeSettlementUsdc(BOB), referenceLedger.accountState(BOB).free);
+            assertGe(_freeSettlementUsdc(BOB), freeFunding, "gross bounty is credited after recipient collection");
+        }
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+        _collect(ALICE);
+        uint256 collected = referenceLedger.totalCollected();
+        uint256 arrears = referenceLedger.accountState(ALICE).arrears;
+        _collect(ALICE);
+        assertEq(referenceLedger.totalCollected(), collected, "same-time repeat cannot double collect carry");
+        assertEq(referenceLedger.accountState(ALICE).arrears, arrears);
+        _collect(BOB);
     }
 
     function test_FlatBountyOnlyAdvancesIndexesForFreshMarkAndZeroCreditDoesNothing() public {

@@ -1019,7 +1019,7 @@ contract SnapshottedCloseBountyTest is BasePerpTest {
     }
 
     /// @dev spec; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
-    function test_FailedFullClosePaysOnlyTheSnapshottedBackedBounty() public {
+    function test_FailedFullCloseRestoresTheSnapshottedPledgeBounty() public {
         _fundTrader(trader, 5000e6);
         _fundTrader(counterparty, 50_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
@@ -1055,14 +1055,10 @@ contract SnapshottedCloseBountyTest is BasePerpTest {
         assertEq(sizeAfter, 100_000e18, "The slippage-failed full close leaves the position open");
         assertEq(
             clearinghouse.balanceUsdc(keeper),
-            keeperSettlementBefore + router.closeOrderExecutionBountyUsdc(),
-            "Existing terminal failure policy pays exactly the backed bounty"
+            keeperSettlementBefore,
+            "Pledge-backed failed close pays no keeper compensation"
         );
-        assertEq(
-            marginAfter,
-            marginBefore - router.closeOrderExecutionBountyUsdc(),
-            "No pledge beyond the reservation is consumed"
-        );
+        assertEq(marginAfter, marginBefore, "Terminal failure restores the exact pledged reservation");
     }
 
 }
@@ -1092,6 +1088,98 @@ contract BountyReserveFreeEquityTest is BasePerpTest {
             clearinghouse.balanceUsdc(account),
             lockedBefore,
             "Close commits must not strip locked margin to fund keeper reserves"
+        );
+    }
+
+}
+
+/// @dev Public lifecycle differential isolates escrow restoration while claims and funded VPI are both live.
+contract PledgedBountyClaimVpiLiquidationTest is BasePerpTest {
+
+    address private constant HEAVY = address(0xB07001);
+    address private constant TRADER = address(0xB07002);
+    address private constant KEEPER = address(0xB07003);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
+        params = super._riskParams();
+        params.baseCarryBps = 0;
+        params.vpiFactor = 0.0005e18;
+    }
+
+    function _trade(
+        address account,
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 margin,
+        uint256 price,
+        bool close
+    ) private returns (uint64 id) {
+        vm.prank(account);
+        id = router.commitOrder(side, size, margin, 0, close);
+        bytes[] memory update = _mockPythUpdateData(price);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "claim/VPI setup must execute");
+    }
+
+    function test_LiquidationRestoredPledgeMatchesUnreservedClaimAndVpiRecovery() public {
+        _fundTrader(HEAVY, 6000e6);
+        _trade(HEAVY, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
+        _fundTrader(TRADER, 2000e6);
+        _trade(TRADER, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1e8, false);
+        assertGt(clearinghouse.vpiRebateReserveUsdc(TRADER), 0, "skew-reducing open creates funded negative VPI");
+        // Preserve earned VPI reserves while isolating claim creation from near-zero-depth new VPI charges.
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0;
+        _setRiskParams(params);
+        uint256 shock = usdc.balanceOf(address(pool)) - 1;
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), shock);
+        assertEq(usdc.balanceOf(address(0xDEAD)), shock, "all raw-cash shortage is an explicitly measured token shock");
+        _trade(TRADER, CfdTypes.Side.SHORT, 5000e18, 0, 1.2e8, true);
+        assertGt(engine.traderClaimBalanceUsdc(TRADER), 0, "public profitable close creates a deferred claim");
+        assertGt(clearinghouse.vpiRebateReserveUsdc(TRADER), 0, "remaining position retains funded VPI");
+        uint256 free = clearinghouse.getAccountUsdcBuckets(TRADER).freeSettlementUsdc;
+        vm.prank(TRADER);
+        engine.addMargin(TRADER, free);
+        uint256 claimBefore = engine.traderClaimBalanceUsdc(TRADER);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(TRADER);
+        uint256 snapshot = vm.snapshotState();
+        bytes[] memory update = _mockPythUpdateData(0.2e8);
+        vm.prank(KEEPER);
+        router.executeLiquidation(TRADER, update);
+        assertLt(engine.traderClaimBalanceUsdc(TRADER), claimBefore, "price loss consumes the same-account claim");
+        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), 0);
+        assertEq(clearinghouse.vpiRebateReserveUsdc(TRADER), 0, "liquidation resolves the funded VPI reserve");
+        bytes32 withoutReservation = _liquidationBalances();
+        assertTrue(vm.revertToState(snapshot));
+        vm.prank(TRADER);
+        uint64 id = router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 0, 0, true);
+        uint256 pledgeBounty = router.closeOrderExecutionBountyUsdc();
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(TRADER), pledgeBounty);
+        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), pledgeBefore - pledgeBounty);
+        update = _mockPythUpdateData(0.2e8);
+        vm.prank(KEEPER);
+        router.executeLiquidation(TRADER, update);
+        assertEq(_liquidationBalances(), withoutReservation, "pending pledge cannot reduce claim/VPI/LP loss recovery");
+        assertEq(clearinghouse.collectibleCloseEscrowUsdc(TRADER), 0);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(TRADER), 0);
+        assertEq(router.pendingOrderCounts(TRADER), 0);
+        assertEq(uint8(router.lifecycleBook().lifecycleStatus(id)), uint8(OrderV3Types.LifecycleStatus.Failed));
+    }
+
+    function _liquidationBalances() private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                clearinghouse.getAccountUsdcBuckets(TRADER),
+                clearinghouse.balanceUsdc(KEEPER),
+                clearinghouse.balanceUsdc(engine.protocolTreasury()),
+                engine.traderClaimBalanceUsdc(TRADER),
+                engine.totalTraderClaimBalanceUsdc(),
+                usdc.balanceOf(address(pool)),
+                usdc.balanceOf(address(clearinghouse)),
+                pool.totalAssets()
+            )
         );
     }
 

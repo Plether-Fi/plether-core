@@ -40,18 +40,21 @@ abstract contract RecordedOrderReceipts is Test {
         _cacheReceiptLogs(logs);
     }
 
-    function _verifiedOutcome(
+    function _verifiedReceipt(
         IOrderLifecycleBook book,
         uint64 orderId
-    ) internal returns (OrderV3Types.CompactOutcome memory outcome) {
+    ) internal returns (OrderV3Types.OrderReceipt memory receipt) {
         OrderV3Types.TerminalOutcome memory summary = book.terminalOutcome(orderId);
         if (summary.status == OrderV3Types.LifecycleStatus.None) {
-            return outcome;
+            return receipt;
         }
         _cacheReceiptLogs(vm.getRecordedLogs());
         bytes memory data = _recordedReceipts[address(book)][orderId];
         assertGt(data.length, 0, "missing terminal receipt event");
-        (bytes32 receiptHash, uint64 terminalBlock, uint64 terminalTime, OrderV3Types.OrderReceipt memory receipt) =
+        bytes32 receiptHash;
+        uint64 terminalBlock;
+        uint64 terminalTime;
+        (receiptHash, terminalBlock, terminalTime, receipt) =
             abi.decode(data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
         assertTrue(book.verifyReceipt(receipt, terminalTime), "unauthenticated terminal receipt");
         assertEq(summary.account, receipt.account);
@@ -59,6 +62,19 @@ abstract contract RecordedOrderReceipts is Test {
         assertEq(uint8(summary.status), uint8(receipt.status));
         assertEq(uint8(summary.reason), uint8(receipt.reason));
         assertEq(summary.receiptHash, receiptHash);
+    }
+
+    function _verifiedOutcome(
+        IOrderLifecycleBook book,
+        uint64 orderId
+    ) internal returns (OrderV3Types.CompactOutcome memory outcome) {
+        OrderV3Types.OrderReceipt memory receipt = _verifiedReceipt(book, orderId);
+        OrderV3Types.TerminalOutcome memory summary = book.terminalOutcome(orderId);
+        if (summary.status == OrderV3Types.LifecycleStatus.None) {
+            return outcome;
+        }
+        (, uint64 terminalBlock, uint64 terminalTime,) =
+            abi.decode(_recordedReceipts[address(book)][orderId], (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));
         outcome.account = receipt.account;
         outcome.clientOrderId = receipt.clientOrderId;
         outcome.intentHash = receipt.intentHash;
@@ -81,7 +97,7 @@ abstract contract RecordedOrderReceipts is Test {
         outcome.revertDataHash = receipt.failure.revertDataHash;
         outcome.terminalBlock = terminalBlock;
         outcome.terminalTime = terminalTime;
-        outcome.receiptHash = receiptHash;
+        outcome.receiptHash = summary.receiptHash;
         outcome.timing = receipt.timing;
     }
 

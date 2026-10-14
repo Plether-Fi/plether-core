@@ -8,7 +8,6 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
-import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 
@@ -31,10 +30,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
         address router = engine.orderRouter();
         OrderV3Types.PendingIntent memory pending = _pending(router, orderId);
-        IMarginClearinghouse(engine.clearinghouse())
-            .validateBountyReservation(
-                pending.account, IMarginClearinghouse.BountyKind.Order, orderId, pending.executionBountyUsdc
-            );
+        ICommittedPolicyRouter(router).lifecycleBook().validateBountyFunding(orderId);
         (IOrderRouterAccounting.PendingOrderView memory viewOrder,) =
             IOrderRouterAccounting(router).getPendingOrderView(orderId);
         CfdTypes.Order memory order = CfdTypes.Order({

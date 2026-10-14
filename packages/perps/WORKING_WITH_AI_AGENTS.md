@@ -195,14 +195,25 @@ The submitting agent does not have to be the executor. Any keeper may execute an
 bounded-order request, including an attached protection parent, execution remains inside the limits pinned by the
 account. Only triggered and retried protection close orders use the documented protocol-synthesized envelope; they
 remain subject to ordinary Router, evaluator, Engine, and protection-state checks. Self-execution releases the stored
-order bounty to the account's free settlement; an external keeper receives a clearinghouse credit instead. For a
-nonzero bounty, receipts encode self-execution as `Paid` to `executor == account`; ordinary zero-bounty execution uses
-`None`. `RefundedToAccount` applies to risk-off cleanup and recoverable backing returned by
-`ExpiredReservationMismatch`. A failed registered protection attempt records
+order bounty to the account's free settlement on success; an external keeper receives a clearinghouse credit instead.
+For a nonzero bounty, receipts encode self-execution as `Paid` to `executor == account`; ordinary zero-bounty execution
+uses `None`. `RefundedToAccount` applies to risk-off cleanup and recoverable backing returned by
+`ExpiredReservationMismatch`. An ordinary
+failed close pays/releases only original free funding and restores original pledged funding to its source position.
+A pledge-funded close requires an empty account queue; later free-funded orders remain supported. An actual pledge
+requirement with a pending order returns `OrderRouter__PledgeBountyRequiresEmptyQueue` and rolls commitment back.
+Wait for pending orders to finish or fund the entire bounty from free USDC; do not repeatedly submit the same rejected
+request expecting a different source lifetime. A failed registered protection attempt records
 `RetainedForProtectionRetry`, pays no cleaner, and rolls the same reserved amount back to the latched protection only
 while the exact protected position still matches, including an explicitly active zero reservation. A missing or
 mismatched position instead uses ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally
 resolves the protection as `Failed`.
+
+Ordinary failed-close cleanup with zero original free funding is unpaid. The protocol keeper still monitors it and
+may expire it permissionlessly, without oracle data, after its execution deadline. Terminal cleanup removes only that
+order; retryable failure preserves it. Liquidation restores pledged funding before its health/loss assessment and
+forfeits only free funding. If restoration makes liquidation healthy, its inner attempt rolls back and the pledged
+order remains pending, while preceding valid risk-off refunds remain effective.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
@@ -349,8 +360,11 @@ domains contribute their finalized active configuration versions; pending timelo
 policy and therefore are not committed.
 
 The bounded request ABI and intent-hash domain are V3, including `submitBy` and `executionWindowSeconds`.
-Execution-config and receipt domains are V4. Use the matching request, receipt, and lifecycle interfaces for this
-release; historical V2 request or V3 receipt/config encodings are not interchangeable with the current domains.
+Execution-config and receipt domains are V4. Source-bound close-bounty refunds preserve these domains and public
+request/receipt field layouts, while adding disposition ordinals 5 and 6. Use the matching request, receipt, and
+lifecycle interfaces for this release; historical V2 request or V3 receipt/config encodings are not interchangeable
+with the current domains. Always verify receipts against their actual chain, Book and Router; never reinterpret a
+historical deployment through the current source ABI or assume equal domain labels imply interchangeable bindings.
 
 For a nonzero externally pinned expectation, a later mismatch terminalizes as `ConfigMismatch` unless risk-off,
 expiry, account liquidation, or another terminal cleanup path finalizes the order first. Authenticated protection
@@ -467,6 +481,29 @@ receipt hash for durable state, and the canonical event for the full receipt.
 For `AccountLiquidated`, the order receipt proves queued-order cleanup and bounty disposition. The Engine's
 liquidation events remain canonical for the position's liquidation economics. Both receipt state-summary slots use
 the observed post-liquidation state.
+
+Disposition ordinals are stable and append-only for this release:
+
+| Value | Name | Interpretation |
+| --- | --- | --- |
+| 0 | `None` | Zero bounty movement and zero recipient |
+| 1 | `Paid` | Paid/released amount, including successful self-execution |
+| 2 | `Forfeited` | Free-funded amount credited to treasury |
+| 3 | `RefundedToAccount` | Pure refund; pledged funds return to original position backing |
+| 4 | `RetainedForProtectionRetry` | Reserved for a new protected attempt; no recipient |
+| 5 | `PaidAndRefunded` | Failed ordinary close pays original free funding and restores original pledge |
+| 6 | `ForfeitedAndRefunded` | Liquidation forfeits original free funding and restores original pledge before loss recovery |
+
+Read the numeric components rather than treating every nonzero disposition as full payment. The single recipient is
+the executor for a nonzero paid part, treasury for a nonzero forfeited part, or source account for a pure refund. A
+pledged refund is never an extra wallet entitlement; it may pay liquidation loss immediately. Successful full-bounty
+self-release remains intentional. The SDK decoder authenticates these values as `uint8` through the unchanged full
+receipt hash; it does not independently prove that the contract's accounting policy was correct.
+
+This is a fresh connected-stack release: internal interfaces and Clearinghouse/Book storage change despite stable
+public tuples. Never point a new Router at an already-wired Engine, initialize new escrow mirrors over old pending
+orders, or hot-swap books/sidecars. A populated deployment requires its own reviewed migration. Bind SDK/indexer/keeper
+manifests and generated ABIs to the complete verified new graph before activation.
 
 ## Recommended bounded-order workflow
 

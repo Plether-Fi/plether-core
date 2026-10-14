@@ -104,6 +104,9 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
             ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
             snapshot = _buildRawSnapshot(engine, planner, account, IHousePool(engine.pool()).totalAssets());
             preview.commitment = CloseCommitmentLib.project(snapshot, request.sizeDelta, bounty);
+            if (preview.commitment.bountyFromPledgeUsdc != 0 && router.pendingOrderCounts(account) != 0) {
+                revert IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue();
+            }
             preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
             preview.executionBountyUsdc = bounty;
             delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice, publishTime);

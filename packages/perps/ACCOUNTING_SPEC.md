@@ -28,12 +28,15 @@ The key rules are:
 
 1. Physical USDC and mathematical claims are different objects.
 2. Marked LP equity includes only the portion of an unrealized trader loss collectible from that account's dedicated
-   PnL pledge or nettable same-account trader claim. It is not spendable withdrawal cash before collection.
+   PnL pledge, nettable same-account trader claim, or source-bound refundable close-bounty escrow. It is not spendable
+   withdrawal cash before collection.
 3. LP redemption funding is stricter than protocol solvency.
 4. Risk-increasing admission and LP redemption funding preserve a liability-scaled settlement buffer; the buffer is
    headroom, not a liability, NAV adjustment, yield source, or separately custodied balance.
 5. Pending-order reservations are not free trader collateral.
-6. A trader price loss is collectible only up to the account's PnL pledge plus explicitly nettable claim. Any excess
+6. A trader price loss is collectible only up to the account's PnL pledge plus explicitly nettable claim. Refundable
+   pledged-close escrow contributes to marked backing until an authorized successful execution earns the bounty;
+   failed-close cleanup or liquidation restores it to its original pledge before it can settle price loss. Any excess
    is a diagnostic write-off, not an LP asset, trader claim, or terminal deficit. An unpaid protocol-side payout
    becomes a trader claim; independently negative terminal equity remains explicit as terminal deficit. A waived
    frozen-close spread is an uncollected charge. V2 has no accumulated-debt ledger or repayment selector.
@@ -114,7 +117,9 @@ remainingEntryCost = oldEntryCost - closedEntryCost
 This assigns every entry-cost atom exactly once and preserves all basis dust for the residual position.
 
 For one account at mark `p`, let `entryCost` be exact entry cost and let
-`K = pnlPledgeUsdc + sameAccountTraderClaimUsdc`. Its LP-side terminal price delta is:
+`K = pnlPledgeUsdc + sameAccountTraderClaimUsdc + collectibleCloseBountyEscrowUsdc`. The last term is only the
+original pledge-funded part of an authenticated pending ordinary close, bound to that order and the same live
+position epoch. Its LP-side terminal price delta is:
 
 ```text
 LONG: min(lots * p - entryCost, K)
@@ -122,13 +127,20 @@ SHORT: min(entryCost - lots * p, K)
 ```
 
 A negative result is an amount owed by LPs to the trader. A positive result is capped at value reachable from that
-same account. Carry, VPI, execution/frozen spreads, protocol fees, liquidation reserve, order margin, and action
+same account. Carry, VPI, execution/frozen spreads, protocol fees, liquidation reserve, order margin, and other action
 reserves are deliberately excluded: they are separate realized-settlement quantities, not marked price PnL.
+
+Refundable pledged-close escrow is the sole action-reserve exception. It mirrors already reserved trader custody;
+it creates no cash, free buying power, physical withdrawal capacity, margin, borrow collateral, or additional reserve
+floor. Moving pledge into this escrow and restoring it after failure are pricing-neutral at fixed mark and claims.
+Successful execution consumes its eligibility and pays the full committed bounty, including self-execution under
+the existing policy. That authorized cost is recognized once at success; marked backing is not a guarantee of loss
+recovery before that success-contingent cost. Liquidation restores the escrow before testing health and settling loss.
 
 `TerminalNavBookV2` aggregates these account curves exactly over `[0, CAP_PRICE]`. It is immutable-bound to one
 Engine, writable only by that Engine, and queried at the Engine's authenticated cached mark. The Engine authenticates
 mark availability and book consistency; `HousePool` separately enforces its configured mark-age and oracle-frozen
-policy before LP actions. The Engine updates the position, pledge/claim state, and curve as one atomic transition;
+policy before LP actions. The Engine updates the position, pledge/claim/collectible-escrow state, and curve atomically;
 the book's monotonic version makes the captured snapshot auditable.
 
 ### Frozen-close spread terms
@@ -710,7 +722,7 @@ Question answered:
 
 The canonical clearinghouse split includes:
 
-- `pnlPledgeUsdc`: the only live-position custody reachable by marked price losses,
+- `pnlPledgeUsdc`: live-position custody immediately reachable by marked price losses,
 - `liquidationReserveUsdc`: keeper/protocol liquidation-charge backing, isolated from price PnL,
 - `orderMarginUsdc`: committed open/increase margin,
 - `actionReserveUsdc`: execution bounties and other action charges, including the dedicated negative lifetime-VPI
@@ -740,7 +752,8 @@ Rules:
 
 - reserved value is not withdrawable,
 - reserved value is not free buying power,
-- liquidation, order, and action reserves do not increase the TerminalNavBook collectible cap,
+- liquidation, order, and action reserves do not increase the TerminalNavBook collectible cap except for the
+  authenticated source-bound refundable close-bounty escrow specified below,
 - reserved execution bounty value is not reachable collateral for unrelated price losses,
 - VPI reserve is nonwithdrawable, cannot fund generic action charges, and cannot be extracted by LPs before its
   account obligation settles,
@@ -753,7 +766,11 @@ Rules:
 - close intents source their snapshotted flat bounty from post-carry free settlement first, then eligible position
   PnL pledge, and lock the full amount as action reserve. This reclassifies custody without transferring tokens;
   pledge-funded value immediately reduces position and side margin, updates borrow bases, and resynchronizes the
-  terminal curve,
+  terminal curve. An equal collectible-escrow mirror preserves the account's marked cap while that pledge remains
+  refundable; it does not restore physical margin or its borrowing treatment,
+- pledge funding is allowed only when the account has no pending orders. A nonzero pledge-funded amount with an
+  existing pending order reverts with `PledgeBountyRequiresEmptyQueue`, rolling back commitment carry, reservations,
+  identifiers and intent writes. Later wholly free-funded orders remain legal; no existing peer is cancelled,
 - claims, unrealized gains, liquidation reserve, VPI backing, and other orders' reservations cannot fund the bounty,
 - partial commitments require fully collected carry and exact price-risk equity strictly above the active
   maintenance/FAD requirement for the entire exposed position after reservation. Full commitments do not apply this
@@ -763,20 +780,48 @@ Rules:
 - a configured zero bounty still creates an explicit active reservation and runs carry and admission checks,
 - the amount parked in reservation is bounded by `MAX_PENDING_ORDERS * 1 USDC` per account,
 - collateral reachability should treat that reservation as temporarily unavailable until the order resolves,
-- ordinary terminal-invalid close execution pays the keeper from the clearinghouse-reserved bounty under the existing
-  terminal-order policy; a liquidatable full close may source that reservation from free settlement and eligible pledge.
+- ordinary terminal-invalid close execution and expiry pay or release only the original free-funded part, restoring
+  the original pledge-funded part to its source position. A liquidatable full close may still reserve eligible pledge;
+  a failure with no free-funded part is unpaid cleanup.
 
-The clearinghouse records each bounty's free-funded and pledge-funded amounts and its source position epoch; the
-lifecycle book retains the snapshotted order entitlement. `positionEpoch` advances only when an account goes from
-flat to open. Execution authenticates the reservation and its complete funding before paying it; a mismatch is
-retryable without consuming or reallocating the item.
+Let `B = F + P` be the original snapshotted bounty and its free-funded and pledge-funded amounts; there is no fixed
+percentage split. Let `S` denote account settlement custody, `M` its physical PnL pledge, `R` its action reserve, and
+`E` its collectible close-bounty escrow. The following transitions start after commitment carry collection:
 
-On mismatch-expiry recovery, an authenticated, fully backed record refunds free-funded value to free settlement.
-Pledge-funded value returns to pledge only while the original position epoch remains live; otherwise it becomes free
-settlement and cannot alter a reopened position's pledge. Refunds checkpoint carry without collecting it, update the
-affected margin and borrowing state, and create no new custody. Missing, foreign, settled, or internally inconsistent
-records do not authorize a fabricated refund; inconsistent backing is quarantined. Ordinary consistent expiry and
-position-protection retry retain their existing bounty dispositions.
+| Transition | Custody and classifications | Entitlement and queue |
+| --- | --- | --- |
+| Commit ordinary close | `S` unchanged; `M -= P`, `R += B`, `E += P` | Append one order and record `F`, `P`, source epoch |
+| Ordinary failure or expiry | Restore `P`: `R -= P`, `M += P`, `E -= P`; then `R -= F` | Pay external executor `F` or release `F` to self; finalize and unlink only this order |
+| Successful close | Consume `E -= P` inside the close mutation; settle using physical `M`; `R -= B` | Full `B` paid/released once; finalize and unlink only this order |
+| Successful liquidation | Restore `P` before health/loss assessment; `R -= P`, `M += P`, `E -= P` | Forfeit only `F` to treasury; finalize and clear that account's orders |
+| Retryable rejection | No terminal movement | Preserve order, links, reserves and entitlement |
+
+An external payment also debits source `S`; self-release does not move custody. An external recipient's own carry
+checkpoint may consume its gross credit and send that cash to the pool. Restore source pledge before crediting the
+recipient. Refund checkpoints source carry without collecting it, preserves arrears, and changes only future borrow
+basis. Reserve, refund, successful eligibility consumption and quarantine use authenticated Engine curve-mutation
+frames; classification bookkeeping alone cannot alter `E`.
+
+Clearinghouse and lifecycle Book independently record original `F`, `P` and source epoch. The clearinghouse owns
+custody and the single order-bound escrow mirror; the Book owns intent and frozen entitlement. `positionEpoch`
+advances only on flat-to-open. Before resolving a pledge-funded close, authenticate the exact split, live epoch,
+escrow owner, active reservation and custody. Never attach a stale pledge to a new position or release it as free
+settlement. The pledged item is its account's pending head, and later orders are entirely free-funded. Terminal
+resolution removes only its own links; peers are neither cancelled nor reordered. Duplicate resolution cannot pay
+again. Failure in refund, payout, receipt finalization or unlink rolls back the complete item to post-commitment state.
+
+Before expiry, funding mismatch is retryable and moves nothing. After expiry, exactly reconcilable Book-backed funding
+returns `F` to free settlement and `P` to its original live pledge, with no executor payment. Otherwise identifiable
+suspect backing is quarantined and remains locked; remove only its matching collectible eligibility within an Engine
+curve frame. A later free-funded record cannot clear the pledged head's escrow. Missing, foreign, settled or
+inconsistent records do not authorize fabricated refunds. If the old curve or escrow owner cannot be authenticated,
+fail closed; there is no administrative balance-repair endpoint. Protection retry remains a separate policy.
+
+Receipts keep entitlement `B` and authenticate the exact paid/refunded/forfeited/retained components. Mixed ordinary
+failure uses `PaidAndRefunded` (`F` paid, `P` refunded); mixed liquidation uses `ForfeitedAndRefunded` (`F` forfeited,
+`P` refunded). Pure outcomes retain their matching disposition, and zero bounty uses `None`. A pledge refund denotes
+position backing, not wallet entitlement; liquidation may consume it for loss in the same transaction. Successful
+self-execution retains full `B` release, including a possible bounded residual after an underwater close.
 
 ### Position-protection bounty policy
 
@@ -838,6 +883,10 @@ Component authority is deliberately split:
 Close and liquidation should share the same economic assumptions wherever the question is identical, and differ only where the product deliberately differs.
 
 ### Close settlement
+
+Successful ordinary close planning uses physical PnL pledge and same-account claim. The executing order's authenticated
+pledged escrow eligibility is consumed inside the successful close mutation; it does not add spendable collateral to
+the plan. If that close or later bounty/receipt settlement reverts, the enclosing item restores the eligibility too.
 
 Every voluntary close uses the normal signed VPI curve and the lifetime rebate clamp. While `oracleFrozen`, the same VPI result is combined with a fixed spread on reduced notional. `frozenCloseSpreadBps` defaults to `50` bps (0.50%), is part of the 48-hour timelocked engine risk config, must be nonzero, and is hard-capped at `1,000` bps (10%). For an oracle-frozen voluntary close, the spread replaces the Pyth adverse-confidence price adjustment and is allocated exclusively to LPs; live/FAD-only closes and liquidations retain adverse-confidence pricing.
 
@@ -913,7 +962,8 @@ Required properties:
 
 Liquidation must:
 
-1. collect margin-first carry, then collect position price loss from the reduced PnL pledge and explicitly nettable
+1. restore source-bound pledged-close escrow, then collect margin-first carry and collect position price loss from
+   the reduced PnL pledge and explicitly nettable
    claim, matching the cap after carry collection,
 2. allocate the capped liquidation charge using the configured `keeperShareBps` and `protocolShareBps`, crediting the
    keeper and protocol-treasury shares through clearinghouse settlement and transferring the exact LP remainder to
@@ -922,6 +972,14 @@ Liquidation must:
 4. report uncollateralized price loss above the cap as a diagnostic write-off rather than protocol debt or terminal deficit,
 5. delete the position,
 6. re-evaluate degraded-mode containment.
+
+Risk-off refunds and their existing early health check occur first. A separate inner rollback frame then authenticates
+pending reservations, restores pledged-close escrow, forfeits only free-funded order bounties, invokes the existing
+Engine liquidation health/settlement path, and finalizes account-local queue cleanup. If restoration makes the account
+healthy, roll back this entire inner frame: the pledged order and both funding parts remain pending and no liquidation
+bounty is earned. Previously completed outer risk-off refunds persist. Without such outer work, the single-call
+solvent revert and batch skipped-solvent behavior are preserved. Only the exact direct Engine solvent failure receives
+that classification; unrelated errors do not become healthy outcomes. Other accounts retain their relative FIFO order.
 
 Liquidation-charge rule:
 
@@ -1126,7 +1184,7 @@ The accounting system should preserve the following:
 16. exact position entry cost is conserved across increases and partial closes without reconstructing basis from a
     rounded average price
 17. the terminal book curve for every account equals its live lots, exact entry cost, side, and current
-    `pnlPledge + same-account claim` collectible cap
+    `pnlPledge + same-account claim + eligible source-bound close-bounty escrow` collectible cap
 18. LP deposits and redemptions use the same signed terminal price delta and waterfall snapshot
 19. positive marked receivables do not increase physical cash available to fund redemptions
 20. a current nonzero terminal deficit blocks LP deposit activation
@@ -1148,6 +1206,12 @@ The accounting system should preserve the following:
 31. every successful open or increase leaves `E >= L + ceil(L * settlementBufferBps / 10_000)`
 32. the LP base withdrawal reserve includes `C + L + B`, while terminal NAV, raw degraded-mode detection, custody,
     and yield exclude `B`
+33. at most one ordinary pledged-close escrow exists per account, owned by that account's pending head and live
+    position epoch; later orders are wholly free-funded
+34. ordinary failure restores pledged bounty to its source before paying the original free-funded part; liquidation
+    restores it before health and loss assessment, and successful close consumes its eligibility exactly once
+35. reserve/refund alone cannot change LP pricing at fixed mark and claims; successful bounty payment remains an
+    authorized cost and cannot be charged twice
 
 ## Architecture Goal
 

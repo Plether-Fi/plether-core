@@ -114,9 +114,10 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
 
     function _onOrderCommitted(
         CfdTypes.Order memory order,
-        CfdEnginePlanTypes.CloseCommitment memory effects
+        CfdEnginePlanTypes.CloseCommitment memory effects,
+        uint64 sourcePositionEpoch
     ) internal override {
-        lifecycleBook.recordCommitment(order.orderId, effects);
+        lifecycleBook.recordCommitment(order.orderId, effects, sourcePositionEpoch);
     }
 
     /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.

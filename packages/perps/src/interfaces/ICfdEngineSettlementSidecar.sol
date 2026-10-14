@@ -78,7 +78,8 @@ interface ICfdEngineSettlementSidecar {
     function executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
-        uint64 publishTime
+        uint64 publishTime,
+        uint64 orderId
     ) external;
 
     /// @notice Applies a liquidation settlement delta through the host hooks.

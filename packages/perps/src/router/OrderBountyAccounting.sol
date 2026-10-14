@@ -8,20 +8,25 @@ import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 /// @notice Transfers queued bounty reservations during account liquidation.
 abstract contract OrderBountyAccounting is OrderRouterBase {
 
-    /// @notice Clears all live queued-order bounties for an account and asks the engine to absorb their sum.
+    /// @notice Restores pledged order backing and forfeits only free-funded bounties before liquidation.
     /// @dev Does not release margin or unlink orders; post-liquidation queue cleanup performs those steps.
     ///      A downstream engine revert rolls back every cleared record.
     /// @param account Liquidated account whose bounties are forfeited.
     function _forfeitReservedOrderBountiesOnLiquidation(
         address account
-    ) internal returns (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc) {
+    )
+        internal
+        returns (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc, uint256[] memory pledgeRefundsUsdc)
+    {
         uint256 orderCount = 0;
         for (
             uint64 cursor = accountHeadOrderId[account]; cursor != 0; cursor = orderRecords[cursor].nextAccountOrderId) {
+            lifecycleBook.validateBountyFunding(cursor);
             ++orderCount;
         }
         orderIds = new uint64[](orderCount);
         orderBountiesUsdc = new uint256[](orderCount);
+        pledgeRefundsUsdc = new uint256[](orderCount);
 
         uint256 forfeitedUsdc = _protectionBountiesToForfeitOnLiquidation(account);
         uint256 index = 0;
@@ -30,18 +35,24 @@ abstract contract OrderBountyAccounting is OrderRouterBase {
             orderId != 0;
             orderId = orderRecords[orderId].nextAccountOrderId
         ) {
+            IMarginClearinghouse.BountyReservation memory reservation =
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
             uint256 executionBountyUsdc =
                 clearinghouse.takeBountyReservation(account, IMarginClearinghouse.BountyKind.Order, orderId);
             orderIds[index] = orderId;
             orderBountiesUsdc[index] = executionBountyUsdc;
-            ++index;
-            if (executionBountyUsdc > 0) {
-                forfeitedUsdc += executionBountyUsdc;
+            pledgeRefundsUsdc[index] = reservation.pledgeFundedUsdc;
+            if (reservation.pledgeFundedUsdc != 0) {
+                engine.resolveCloseBounty(
+                    account, orderId, 0, reservation.pledgeFundedUsdc, reservation.sourcePositionEpoch, false
+                );
             }
+            ++index;
+            forfeitedUsdc += reservation.freeFundedUsdc;
         }
 
         if (forfeitedUsdc == 0) {
-            return (orderIds, orderBountiesUsdc);
+            return (orderIds, orderBountiesUsdc, pledgeRefundsUsdc);
         }
 
         engine.absorbReservedExecutionBounty(account, forfeitedUsdc);

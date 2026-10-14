@@ -16,8 +16,22 @@ interface IOrderLifecycleBook {
 
     function recordCommitment(
         uint64 orderId,
-        CfdEnginePlanTypes.CloseCommitment calldata effects
+        CfdEnginePlanTypes.CloseCommitment calldata effects,
+        uint64 sourcePositionEpoch
     ) external;
+
+    /// @notice Pending funding differs from its independently recorded commitment or position escrow.
+    error OrderLifecycleBook__BountyFundingMismatch(uint64 orderId);
+
+    /// @notice Authenticates custody, original funding and live collectible pledge ownership.
+    function validateBountyFunding(
+        uint64 orderId
+    ) external view;
+
+    /// @notice Original pledge position generation, retained only while the order is pending.
+    function sourcePositionEpoch(
+        uint64 orderId
+    ) external view returns (uint64);
 
     /// @notice A mutation was attempted by an address other than the immutable Router.
     error OrderLifecycleBook__Unauthorized();

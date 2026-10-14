@@ -60,6 +60,15 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         bountyReservations;
     mapping(address => uint256) public totalBountyReservationsUsdc;
 
+    /// @dev A mirror of refundable pledged funding inside reserved settlement, never additional custody or margin.
+    ///      Amount changes only inside an Engine terminal-curve frame. Commitment binds its provenance afterward
+    ///      in the same transaction, without changing the collectible amount.
+    struct CollectibleCloseEscrow {
+        uint96 amountUsdc;
+        uint64 orderId;
+        uint64 sourcePositionEpoch;
+    }
+
     error MarginClearinghouse__InvalidBountyReservation();
     event BountyReservationUpdated(
         IMarginClearinghouse.BountyKind indexed kind, uint64 indexed id, address indexed account, uint256 amountUsdc
@@ -73,6 +82,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @dev Zero until `setEngine` is called. Some operations also authorize the engine-reported order router or
     ///      settlement sidecar, as documented on those entrypoints.
     address public engine;
+    mapping(address => CollectibleCloseEscrow) public collectibleCloseEscrow;
 
     /// @notice The caller is not the engine or the engine-derived integration authorized for the operation.
     error MarginClearinghouse__NotOperator();
@@ -1501,6 +1511,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         }
         positionMarginUsdc[account] -= fromPledgeUsdc;
         reservedSettlementUsdc[account] += fromFreeUsdc + fromPledgeUsdc;
+        if (fromPledgeUsdc != 0) {
+            CollectibleCloseEscrow storage escrow = collectibleCloseEscrow[account];
+            escrow.amountUsdc = _toUint96(uint256(escrow.amountUsdc) + fromPledgeUsdc);
+        }
         emit MarginUnlocked(account, IMarginClearinghouse.MarginBucket.Position, fromPledgeUsdc);
         emit MarginLocked(account, IMarginClearinghouse.MarginBucket.ReservedSettlement, fromFreeUsdc + fromPledgeUsdc);
     }
@@ -1526,6 +1540,17 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         _requireBountyOwner(kind);
         if (kind != IMarginClearinghouse.BountyKind.Order) {
             revert MarginClearinghouse__InvalidBountyReservation();
+        }
+        if (pledgeFundedUsdc != 0) {
+            CollectibleCloseEscrow storage escrow = collectibleCloseEscrow[account];
+            if (
+                escrow.amountUsdc != pledgeFundedUsdc || escrow.orderId != 0
+                    || !_hasLiveEscrowSource(account, sourcePositionEpoch)
+            ) {
+                revert MarginClearinghouse__InvalidBountyReservation();
+            }
+            escrow.orderId = id;
+            escrow.sourcePositionEpoch = sourcePositionEpoch;
         }
         _recordBountyReservation(account, kind, id, amountUsdc, pledgeFundedUsdc, sourcePositionEpoch);
     }
@@ -1565,7 +1590,10 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
 
     function recoverExpiredBounty(
         address account,
-        uint64 orderId
+        uint64 orderId,
+        uint256 expectedFreeUsdc,
+        uint256 expectedPledgeUsdc,
+        uint64 expectedSourcePositionEpoch
     ) external returns (IMarginClearinghouse.BountyRecovery memory result) {
         _requireBountyOwner(IMarginClearinghouse.BountyKind.Order);
         IMarginClearinghouse.BountyReservation storage reservation =
@@ -1581,7 +1609,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         uint256 amount = reservation.amountUsdc;
         if (
             uint256(reservation.freeFundedUsdc) + reservation.pledgeFundedUsdc != amount
-                || (reservation.pledgeFundedUsdc != 0 && reservation.sourcePositionEpoch == 0)
+                || reservation.freeFundedUsdc != expectedFreeUsdc || reservation.pledgeFundedUsdc != expectedPledgeUsdc
+                || reservation.sourcePositionEpoch != expectedSourcePositionEpoch
+                || (expectedPledgeUsdc != 0
+                    && (!_hasLiveEscrowSource(account, expectedSourcePositionEpoch)
+                        || !_matchesCloseEscrow(account, orderId, expectedPledgeUsdc, expectedSourcePositionEpoch)))
                 || totalBountyReservationsUsdc[account] < amount
                 || vpiRebateReserveBalances[account] + totalBountyReservationsUsdc[account]
                     > reservedSettlementUsdc[account]
@@ -1602,11 +1634,75 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit BountyReservationUpdated(IMarginClearinghouse.BountyKind.Order, orderId, account, 0);
     }
 
-    function refundReservedBounty(
+    /// @notice Returns the pledge mirror used only by the terminal collectible cap.
+    function collectibleCloseEscrowUsdc(
+        address account
+    ) external view returns (uint256) {
+        return collectibleCloseEscrow[account].amountUsdc;
+    }
+
+    /// @notice Earns the pending close bounty without releasing any of its reserved custody.
+    /// @dev Called by the settlement sidecar inside the Engine's successful-close mutation frame.
+    function consumeCollectibleCloseEscrow(
         address account,
+        uint64 orderId
+    ) external onlyOperator {
+        CollectibleCloseEscrow memory escrow = collectibleCloseEscrow[account];
+        if (escrow.amountUsdc == 0) {
+            return;
+        }
+        IMarginClearinghouse.BountyReservation storage reservation =
+            bountyReservations[IMarginClearinghouse.BountyKind.Order][orderId];
+        if (
+            escrow.orderId != orderId || orderId == 0 || !_hasLiveEscrowSource(account, escrow.sourcePositionEpoch)
+                || reservation.account != account
+                || reservation.state != IMarginClearinghouse.BountyReservationState.Active
+                || reservation.pledgeFundedUsdc != escrow.amountUsdc
+                || reservation.sourcePositionEpoch != escrow.sourcePositionEpoch
+        ) {
+            revert MarginClearinghouse__InvalidBountyReservation();
+        }
+        delete collectibleCloseEscrow[account];
+    }
+
+    /// @notice Restores exact source-bound pledge, or removes only matching quarantined eligibility.
+    /// @dev The Router supplied independent Book provenance to the Engine; classification was already taken.
+    function resolveCloseBounty(
+        address account,
+        uint64 orderId,
         uint256 freeUsdc,
-        uint256 pledgeUsdc
-    ) external onlyEngine {
+        uint256 pledgeUsdc,
+        uint64 sourcePositionEpoch,
+        bool quarantine
+    ) external onlyEngine returns (uint256 restoredPledgeUsdc) {
+        if (quarantine) {
+            // A discrepant later order cannot clear another order's still-collectible backing.
+            if (collectibleCloseEscrow[account].orderId == orderId && orderId != 0) {
+                if (!_matchesCloseEscrow(account, orderId, pledgeUsdc, sourcePositionEpoch)) {
+                    revert MarginClearinghouse__InvalidBountyReservation();
+                }
+                delete collectibleCloseEscrow[account];
+            }
+            return 0;
+        }
+        IMarginClearinghouse.BountyReservation storage reservation =
+            bountyReservations[IMarginClearinghouse.BountyKind.Order][orderId];
+        if (
+            reservation.account != account || reservation.state != IMarginClearinghouse.BountyReservationState.Settled
+                || reservation.pledgeFundedUsdc != pledgeUsdc || reservation.sourcePositionEpoch != sourcePositionEpoch
+                || (freeUsdc != 0 && freeUsdc != reservation.freeFundedUsdc)
+        ) {
+            revert MarginClearinghouse__InvalidBountyReservation();
+        }
+        if (pledgeUsdc != 0) {
+            if (
+                !_matchesCloseEscrow(account, orderId, pledgeUsdc, sourcePositionEpoch)
+                    || !_hasLiveEscrowSource(account, sourcePositionEpoch)
+            ) {
+                revert MarginClearinghouse__InvalidBountyReservation();
+            }
+            delete collectibleCloseEscrow[account];
+        }
         uint256 amount = freeUsdc + pledgeUsdc;
         _requireActionReserveDecreaseAboveProtectedFloor(account, amount);
         reservedSettlementUsdc[account] -= amount;
@@ -1615,6 +1711,29 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         if (pledgeUsdc != 0) {
             emit MarginLocked(account, IMarginClearinghouse.MarginBucket.Position, pledgeUsdc);
         }
+        return pledgeUsdc;
+    }
+
+    function _matchesCloseEscrow(
+        address account,
+        uint64 orderId,
+        uint256 amountUsdc,
+        uint64 sourcePositionEpoch
+    ) private view returns (bool) {
+        CollectibleCloseEscrow memory escrow = collectibleCloseEscrow[account];
+        return escrow.amountUsdc == amountUsdc && escrow.orderId == orderId
+            && escrow.sourcePositionEpoch == sourcePositionEpoch;
+    }
+
+    function _hasLiveEscrowSource(
+        address account,
+        uint64 sourcePositionEpoch
+    ) private view returns (bool) {
+        if (sourcePositionEpoch == 0 || ICfdEngineCore(engine).positionEpoch(account) != sourcePositionEpoch) {
+            return false;
+        }
+        (uint256 size,,,,,,) = ICfdEngineCore(engine).positions(account);
+        return size != 0;
     }
 
     function validateBountyReservation(

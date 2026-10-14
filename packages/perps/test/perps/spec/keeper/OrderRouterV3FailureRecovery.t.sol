@@ -222,6 +222,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         input.executor = KEEPER;
         input.reason = OrderV3Types.TerminalReason.RiskOff;
         input.bountyUsdc = book.pendingIntent(orderId).executionBountyUsdc;
+        input.bountyRefundedUsdc = input.bountyUsdc;
         input.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
         input.bountyRecipient = ALICE;
     }

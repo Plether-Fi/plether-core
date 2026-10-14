@@ -28,6 +28,55 @@ Regenerate integration ABIs: `getOrderReservation` has a new tuple layout, `sync
 clearinghouse exposes typed bounty records and an active margin FIFO. Public order/protection view shapes remain
 unchanged. See [Reservation ledger](RESERVATION_LEDGER.md) for the complete ownership and transition rules.
 
+## Source-bound close-bounty compatibility
+
+The close-bounty release pays an ordinary failed close's original free-funded amount and returns its original
+pledge-funded amount to the position that supplied it. A close may use pledge only when its account has no pending
+orders; later wholly free-funded orders remain legal. Liquidation restores pledged funding before assessing health
+and losses and forfeits only free funding. A zero-free-funded failure earns no cleaner payment. The protocol keeper
+must support and fund oracle-free expiry for those orders as well as configured zero-bounty orders.
+
+Refundable pledged funding remains part of the authenticated marked collectible cap until successful execution earns
+the bounty. It is existing reserved custody, not additional pool cash or withdrawable trader value. Reservation and
+failure refund must not change LP pricing by themselves. Successful execution still pays/releases the full committed
+bounty, including self-execution, and recognizes that authorized cost once. See
+[Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy) for exact custody and rollback transitions.
+
+The public `OrderRequest` and `OrderReceipt` field layouts, V3 intent domain and V4 receipt-hash domain are unchanged by
+this change. Disposition remains encoded as `uint8`; prior ordinals stay `None=0`, `Paid=1`, `Forfeited=2`,
+`RefundedToAccount=3`, and `RetainedForProtectionRetry=4`. Append `PaidAndRefunded=5` and
+`ForfeitedAndRefunded=6`. Update any external exhaustive decoder, labels and receipt reconciliation before activation.
+Use the existing numeric paid/refunded/forfeited/retained fields; a pledged refund is position backing and can be
+consumed by liquidation in that transaction. Preserve original entitlement and authenticate the full receipt.
+
+Internal Engine/settlement, Router and Book interfaces plus Clearinghouse/Book storage change. Generate current
+consumer ABIs from the final build with `python3 scripts/generate-close-v3-abi.py --artifacts-dir <build-output>` and
+retain archived ABIs for historical deployments. Measure EIP-170 runtime and EIP-3860 constructor-inclusive initcode
+for the final compatible graph and keep existing production gas gates; old artifact sizes are historical evidence.
+
+The internal compatibility changes are explicit:
+
+| Component | Changed integration surface |
+| --- | --- |
+| Engine | `resolveCloseBounty(account, orderId, freeUsdc, pledgeUsdc, sourcePositionEpoch, quarantine)` replaces `refundCloseBounty` |
+| Settlement sidecar | `executeClose` receives the executing order id to consume only its own escrow |
+| Clearinghouse | `resolveCloseBounty` replaces `refundReservedBounty`; expiry recovery receives expected free/pledge/epoch; collectible escrow getters and success-consumption entrypoint are added |
+| Lifecycle Book | `recordCommitment` receives independent source epoch; `sourcePositionEpoch` and `validateBountyFunding` expose authenticated provenance |
+| Router callbacks | New self-only `executeRestoredLiquidationItem`; terminal input and bounty settlement output include refunded amount |
+
+Generated SDK ABI additions are error entries: Router `CfdEngine__PositionIsSolvent`,
+`OrderRouter__PledgeBountyRequiresEmptyQueue`, and `OrderRouter__RestoredPledgeMadeSolvent`; preview includes the new
+pledge-queue error; Book adds `OrderLifecycleBook__BountyFundingMismatch(uint64)`. Protection ABI also includes the
+two Router errors through its imported interface. No existing exported SDK function/event tuple changes. Keep those
+new error declarations even when a callback marker is normally consumed inside Router orchestration.
+
+Deploy a fresh connected Engine, Router, Clearinghouse, books and sidecars from the same source revision. Immutable
+and one-time bindings do not permit a Router-only hot swap. Do not attach the new cap to populated state with
+zero-initialized escrow mirrors, import live pledged orders, or infer a migration from unchanged public tuples.
+Existing-state migration requires a separate authenticated design. Source rollback before deployment is a normal
+revert; rollback after a populated immutable deployment is an operational migration decision. This implementation
+does not authorize deployment, broadcast, activation or migration.
+
 ## Scripts
 
 - Deploy script: `script/DeployPerpsArbitrumSepolia.s.sol`

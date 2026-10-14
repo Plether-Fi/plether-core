@@ -41,6 +41,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
             address(this)
         );
         handler.assertModel();
+        handler.exerciseRestoredSolventEscrowHistory();
         _seedInterimLpClaims();
         handler.openOrIncrease(0, 300, 120_000_003);
         handler.requestJuniorDeposit(0, 1500e6);
@@ -48,7 +49,9 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         handler.openOrIncrease(2, 150, 80_000_001);
         handler.openOrIncrease(0, 25, 110_000_003);
         handler.close(2, 50, false);
+        handler.commitPledgeFundedClose(0, true);
         handler.settleJuniorEpoch(true);
+        handler.expirePending(0);
         handler.claimJuniorDeposit(0);
         handler.requestJuniorDeposit(1, 1000e6);
         handler.cancelJuniorDeposit(1);
@@ -79,10 +82,11 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         handler.openOrIncrease(0, 251, 120_000_003);
         handler.openOrIncrease(1, 117, 80_000_001);
         handler.exercisePendingHistories();
+        handler.exercisePledgeEscrowFailureHistory();
 
         // Commitments persist across independently generated economic actions. The synchronous helpers above
         // remain deterministic setup conveniences; generated trading uses the public queue lifecycle below.
-        bytes4[] memory selectors = new bytes4[](28);
+        bytes4[] memory selectors = new bytes4[](29);
         selectors[0] = handler.commitOpen.selector;
         selectors[1] = handler.commitClose.selector;
         selectors[2] = handler.advanceAndCheckpoint.selector;
@@ -111,6 +115,7 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         selectors[25] = handler.pendingMevBoundary.selector;
         selectors[26] = handler.executeSlippageFailure.selector;
         selectors[27] = handler.riskOffPending.selector;
+        selectors[28] = handler.commitPledgeFundedClose.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }
@@ -186,6 +191,12 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         assertGt(handler.riskOffOrders(), 0);
         assertGt(handler.completedBatches(), 0);
         assertGt(handler.pendingMarginConsumed(), 0);
+        assertGt(handler.mixedFailureRefunds(), 0);
+        assertGt(handler.rejectedPledgeOverlap(), 0);
+        assertGt(handler.freeOrdersBehindPledgedHead(), 0);
+        assertGt(handler.restoredSolventLiquidations(), 0);
+        assertGt(handler.pledgeLiquidationRefunds(), 0);
+        assertGt(handler.lpEpochsWithCollectibleEscrow(), 0);
     }
 
     function test_MandatoryPreludeExercisesMixedHistories() public view {
@@ -208,6 +219,32 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         assertEq(handler.orders().nextId(), cursorBefore, "rejected five-lot open allocates no new identity");
         assertEq(handler.orders().count(1), 1, "the earlier 495-lot reservation remains pending");
         assertEq(handler.traderState(1).lots, 0);
+        handler.assertModel();
+    }
+
+    function test_RegressionOneLotPledgeCloseDoesNotSubmitZeroSize() public {
+        // Audit seed 0x2 shrank to these four public handler actions. Earlier partial closes leave
+        // actor 2 with one lot, for which another half-close has no positive size.
+        handler.commitPledgeFundedClose(10_786, false);
+        handler.commitClose(
+            235_399_669_922,
+            2_742_752_018_512_376_947_672_463_408_101_996_658_382_367_066_140_257_046_549_603_650_091_881,
+            false
+        );
+        handler.executeBatch(917_127_867_238_270_632_708_738_302_192_089_914);
+        assertEq(handler.traderState(2).lots, 1, "shrunk history reaches a one-lot remainder");
+        uint64 nextId = handler.orders().nextId();
+        uint256 smallRejections = handler.rejectedSmallOrders();
+        bytes32 economicsBefore = handler.economicFingerprint(2);
+        bytes32 modelBefore = keccak256(abi.encode(handler.traderState(2)));
+        uint256 markTimeBefore = handler.currentMarkTime();
+        handler.commitPledgeFundedClose(341_821_013_369_658_799_147_725_076_362_896_016_228_270_630_917_724_810, false);
+        assertEq(handler.orders().nextId(), nextId, "zero-size partial close is outside generated domain");
+        assertEq(handler.rejectedSmallOrders(), smallRejections, "no zero-size request reaches Router validation");
+        assertEq(handler.economicFingerprint(2), economicsBefore, "guard runs before any carry or withdrawal");
+        assertEq(keccak256(abi.encode(handler.traderState(2))), modelBefore, "ghost balances remain unchanged");
+        assertEq(handler.currentMarkTime(), markTimeBefore, "guard does not refresh the mark");
+        assertEq(handler.traderState(2).lots, 1);
         handler.assertModel();
     }
 

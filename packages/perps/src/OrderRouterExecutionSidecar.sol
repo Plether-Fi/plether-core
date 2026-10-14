@@ -352,20 +352,13 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             revert OrderRouterExecutionSidecar__OrderIdentityMismatch(request.orderId);
         }
 
-        {
-            IMarginClearinghouse reservations = IMarginClearinghouse(ICfdEngineCore(host.engine()).clearinghouse());
-            if (block.timestamp > pending.timing.executionDeadline) {
-                try reservations.validateBountyReservation(
-                    pending.account, IMarginClearinghouse.BountyKind.Order, request.orderId, pending.executionBountyUsdc
-                ) {}
-                catch {
-                    return _recoverExpired(host, book, pending, request);
-                }
-            } else {
-                reservations.validateBountyReservation(
-                    pending.account, IMarginClearinghouse.BountyKind.Order, request.orderId, pending.executionBountyUsdc
-                );
+        if (block.timestamp > pending.timing.executionDeadline) {
+            try book.validateBountyFunding(request.orderId) {}
+            catch {
+                return _recoverExpired(host, book, pending, request);
             }
+        } else {
+            book.validateBountyFunding(request.orderId);
         }
 
         uint64 riskOffCutoff = _riskOffCutoff(host);
@@ -765,10 +758,16 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         OrderV3Types.OrderReceipt memory receipt
     ) private returns (OrderV3Types.ExecutionResult memory result) {
         if (receipt.reason != OrderV3Types.TerminalReason.ExpiredReservationMismatch) {
-            if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
-                receipt.bounty.bountyPaidUsdc = receipt.bountyUsdc;
-            } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Forfeited) {
-                receipt.bounty.bountyForfeitedUsdc = receipt.bountyUsdc;
+            if (
+                receipt.bountyDisposition == OrderV3Types.BountyDisposition.Paid
+                    || receipt.bountyDisposition == OrderV3Types.BountyDisposition.PaidAndRefunded
+            ) {
+                receipt.bounty.bountyPaidUsdc = receipt.bountyUsdc - receipt.bounty.bountyRefundedUsdc;
+            } else if (
+                receipt.bountyDisposition == OrderV3Types.BountyDisposition.Forfeited
+                    || receipt.bountyDisposition == OrderV3Types.BountyDisposition.ForfeitedAndRefunded
+            ) {
+                receipt.bounty.bountyForfeitedUsdc = receipt.bountyUsdc - receipt.bounty.bountyRefundedUsdc;
             } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RefundedToAccount) {
                 receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
             } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
@@ -1254,6 +1253,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         IOrderRouterExecutionHost.BountySettlement memory settlement
     ) private pure {
         receipt.bountyUsdc = settlement.bountyUsdc;
+        receipt.bounty.bountyRefundedUsdc = settlement.bountyRefundedUsdc;
         receipt.bountyRecipient = settlement.bountyRecipient;
         receipt.bountyDisposition = settlement.bountyDisposition;
     }

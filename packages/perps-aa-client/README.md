@@ -167,6 +167,14 @@ bounty funding, carry funding, action funding, and residual health failures
 distinct. `buildExpireOrderV3` encodes permissionless cleanup after the order's
 execution deadline without oracle data.
 
+Pledge funding requires an empty account queue; later wholly free-funded orders
+remain supported. `classifyCloseFailureV3` returns `pledgeQueue` for the exact
+`OrderRouter__PledgeBountyRequiresEmptyQueue()` admission error. Wait for pending
+orders to finish or fund the keeper reward from free USDC. Ordinary close failure
+or expiry pays only the original free-funded amount and restores original pledged
+funding to its source position. A zero-free-funded failure is unpaid cleanup.
+Successful execution still pays/releases the full bounty, including self-execution.
+
 ## Terminal history on the new stack (0.2.0)
 
 The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
@@ -208,6 +216,22 @@ reads now require a supplied full receipt. The archived `orderLifecycleV4Abi`
 export and old-stack action/assistance bindings remain available; choose ABI by
 deployment, and migrate external app/keeper reads before new-stack activation.
 Commitment history remains stored and does not require an event join.
+
+Source-bound refunds keep public request/receipt tuple layouts and the V4 receipt
+hash domain unchanged. `bountyDisposition` is a `uint8`: existing values 0–4 retain
+their meaning; `PaidAndRefunded=5` and `ForfeitedAndRefunded=6` append mixed outcomes.
+The former pays original free funding and restores pledge on ordinary close failure;
+the latter forfeits free funding to treasury and restores pledge before liquidation.
+Use the receipt's paid/refunded/forfeited/retained components, which authenticate the
+split. A pledged refund means position backing, potentially consumed by liquidation
+in the same transaction, not withdrawable wallet cash. `decodeVerifiedOrderFinalized`
+accepts and authenticates both values without an exhaustive enum switch; application
+labels and switches must also support them.
+
+Internal interfaces and Clearinghouse/Book storage change. Deploy the compatible
+connected stack together; unchanged public tuples do not permit a Router hot swap
+or importing populated state with empty escrow mirrors. No publication, deployment,
+activation or live-state migration is performed by these SDK changes.
 
 On Arbitrum, the authenticated `terminalBlock` retains Solidity `block.number`
 semantics (an approximate ancestor-chain block); it is **not** the RPC/L2 log

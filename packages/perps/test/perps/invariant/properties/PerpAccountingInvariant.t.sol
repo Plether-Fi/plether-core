@@ -367,8 +367,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             uint256 maximumCollectibleUsdcAtoms = side == CfdTypes.Side.LONG
                 ? expectedLots * uint256(book.CAP_PRICE()) - expectedEntryCostUsdcAtoms
                 : expectedEntryCostUsdcAtoms;
-            uint256 candidateCapUsdcAtoms =
-                clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
+            uint256 candidateCapUsdcAtoms = clearinghouse.pnlPledgeUsdc(account)
+                + engine.traderClaimBalanceUsdc(account) + clearinghouse.collectibleCloseEscrowUsdc(account);
             uint256 expectedEffectiveCapUsdcAtoms = candidateCapUsdcAtoms < maximumCollectibleUsdcAtoms
                 ? candidateCapUsdcAtoms
                 : maximumCollectibleUsdcAtoms;
@@ -382,7 +382,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             assertEq(
                 curve.effectiveCapUsdcAtoms,
                 expectedEffectiveCapUsdcAtoms,
-                "Curve cap must match clipped claim-plus-pledge collateral"
+                "Curve cap must match clipped claims, pledge and source-bound escrow"
             );
             assertEq(uint256(curve.side), uint256(side), "Curve side must match canonical Engine side");
 

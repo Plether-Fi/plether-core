@@ -40,3 +40,11 @@ it("keeps funding and health errors distinct and leaves unknown failures unclass
   expect(classifyCloseFailureV3(encodeErrorResult({ abi, errorName: "CfdEngine__TypedOrderFailure", args: [1, 6, false] }))).toBeUndefined();
   expect(classifyCloseFailureV3("0xdeadbeef")).toBeUndefined();
 });
+
+it("classifies pledged-bounty queue admission independently from funding and rejects malformed evidence", () => {
+  const abi = parseAbi(["error OrderRouter__PledgeBountyRequiresEmptyQueue()"]);
+  const error = encodeErrorResult({ abi, errorName: "OrderRouter__PledgeBountyRequiresEmptyQueue" });
+  expect(classifyCloseFailureV3(error)).toBe("pledgeQueue");
+  expect(classifyCloseFailureV3(`${error}00`)).toBeUndefined();
+  expect(classifyCloseFailureV3(error.slice(0, -2) as typeof error)).toBeUndefined();
+});

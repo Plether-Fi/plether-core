@@ -25,3 +25,17 @@ The other ten action vectors, sponsorship envelope, historical Book ABI, and
 old-stack bindings remain unchanged. `terminalHistory.test.ts` independently
 checks the archived V4 ABI and shares a current receipt hash vector with the
 Solidity lifecycle tests.
+
+The reviewed source-bound bounty extension adds exactly two zero-argument error
+entries to the generated protection ABI:
+`OrderRouter__PledgeBountyRequiresEmptyQueue()` and
+`OrderRouter__RestoredPledgeMadeSolvent()`. It retains the source-candidate 0.2.0
+version; no package publication or deployed compatibility is implied.
+`baseline.json` remains unchanged. The compatibility assertion checks the complete
+new ABI hash `0xee750da38a95fac8079820ac2c4501e6c59f73c55d570388b69dcf3601cb1066`,
+then removes exactly those two full declarations and requires reconstruction of
+the historical complete hash. It does not ignore arbitrary errors. All eleven
+action vectors, runtime exports, sponsorship and UserOperation hashes remain
+identical. A control rejects missing/altered additions, extra errors and removed
+functions. Public request/receipt tuples and V3-intent/V4-receipt hash domains do
+not change; internal protocol interfaces and storage still require a fresh stack.

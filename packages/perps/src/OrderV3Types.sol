@@ -81,7 +81,11 @@ library OrderV3Types {
         Forfeited,
         RefundedToAccount,
         /// @notice The bounty remains reserved for a fresh attempt of the same latched position protection.
-        RetainedForProtectionRetry
+        RetainedForProtectionRetry,
+        /// @notice The original free-funded part was paid; the original pledge was restored to its position.
+        PaidAndRefunded,
+        /// @notice The free-funded part was forfeited; the pledge was restored before liquidation loss recovery.
+        ForfeitedAndRefunded
     }
 
     /// @notice Canonical reason for a terminal order transition.

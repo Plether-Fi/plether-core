@@ -57,6 +57,7 @@ interface IOrderRouterExecutionHost {
         uint64 oraclePublishTime;
         bool priceReachedEngine;
         uint256 bountyUsdc;
+        uint256 bountyRefundedUsdc;
         address bountyRecipient;
         OrderV3Types.BountyDisposition bountyDisposition;
         OrderV3Types.FailureDetails failure;
@@ -66,6 +67,7 @@ interface IOrderRouterExecutionHost {
     /// @dev Protection attempts may retain their bounty in the protection Book instead of paying the terminal caller.
     struct BountySettlement {
         uint256 bountyUsdc;
+        uint256 bountyRefundedUsdc;
         address bountyRecipient;
         OrderV3Types.BountyDisposition bountyDisposition;
     }

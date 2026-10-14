@@ -55,7 +55,20 @@ jobs:
         with:
           submodules: recursive
 
+      # Retry transient release/attestation download failures; the retry must succeed.
       - name: Install Foundry
+        id: install-foundry
+        continue-on-error: true
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+
+      - name: Wait before retrying Foundry installation
+        if: steps.install-foundry.outcome == 'failure'
+        run: sleep 20
+
+      - name: Retry Foundry installation
+        if: steps.install-foundry.outcome == 'failure'
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.5.1
@@ -319,7 +332,20 @@ jobs:
         with:
           submodules: recursive
 
+      # Retry transient release/attestation download failures; the retry must succeed.
       - name: Install Foundry
+        id: install-foundry
+        continue-on-error: true
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+
+      - name: Wait before retrying Foundry installation
+        if: steps.install-foundry.outcome == 'failure'
+        run: sleep 20
+
+      - name: Retry Foundry installation
+        if: steps.install-foundry.outcome == 'failure'
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.5.1

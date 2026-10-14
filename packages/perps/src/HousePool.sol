@@ -1527,6 +1527,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             couponElapsed,
             markFresh
         );
+        // Nonpending equity can restore seeded LP principal before the queued revenue is routed.
+        allowRevenueContinuation = allowRevenueContinuation
+            || plan.state.waterfall.seniorPrincipal + plan.state.waterfall.juniorPrincipal != 0;
 
         if (couponElapsed > 0) {
             lastSeniorCouponCheckpointTime = block.timestamp;
@@ -1609,6 +1612,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         );
 
         pendingState = plan.state;
+        allowRevenueContinuation = allowRevenueContinuation
+            || pendingState.waterfall.seniorPrincipal + pendingState.waterfall.juniorPrincipal != 0;
 
         if (markFresh) {
             uint256 juniorRevenueWithoutOwners = HousePoolReconcilePlanLib.juniorRevenueWithoutOwners(plan);

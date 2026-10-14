@@ -1261,6 +1261,11 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__PledgeBountyRequiresEmptyQueue",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__PositionChanged",
     "inputs": []
   },
@@ -1308,6 +1313,11 @@ export const positionProtectionBookAbi = [
   {
     "type": "error",
     "name": "OrderRouter__ProtectionTriggerAlreadyMet",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__RestoredPledgeMadeSolvent",
     "inputs": []
   },
   {

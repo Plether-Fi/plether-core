@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {LegacyOrderRequestEncoding} from "./LegacyOrderRequestEncoding.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 /// @dev Test-only adapter for historical scalar-commit coverage. Production deployments intentionally expose only
-///      the bounded V2 commit surface; tests read oracle policy through the production `pletherOracle()` getter.
+///      the bounded V3 commit surface; tests read oracle policy through the production `pletherOracle()` getter.
 contract LegacyOrderRouterHarness is OrderRouter {
 
     constructor(
@@ -31,9 +32,9 @@ contract LegacyOrderRouterHarness is OrderRouter {
         )
     {}
 
-    /// @dev Translates a historical scalar commit into a unique, otherwise-unbounded V2 request.
+    /// @dev Translates a historical scalar commit into a unique, otherwise-unbounded V3 request.
     ///      The self-delegatecall preserves the original test account as `msg.sender` while entering the
-    ///      production V2 `nonReentrant` function exactly once.
+    ///      production V3 `nonReentrant` function exactly once.
     function commitOrder(
         CfdTypes.Side side,
         uint256 sizeDelta,
@@ -41,21 +42,11 @@ contract LegacyOrderRouterHarness is OrderRouter {
         uint256 targetPrice,
         bool isClose
     ) external returns (uint64 orderId) {
-        uint64 proposedOrderId = nextCommitId;
-        bytes32 clientOrderId = keccak256(
-            abi.encode("LegacyOrderRouterHarness", block.chainid, address(this), msg.sender, proposedOrderId)
-        );
-        if (clientOrderId == bytes32(0)) {
-            clientOrderId = bytes32(uint256(1));
-        }
-
+        // The immutable Router's monotonic nonzero id supplies a unique test-only client id.
+        bytes32 clientOrderId = bytes32(uint256(nextCommitId));
         uint256 translatedTargetPrice = targetPrice;
         if (translatedTargetPrice == 0) {
-            if (isClose) {
-                translatedTargetPrice = side == CfdTypes.Side.LONG ? type(uint256).max : 1;
-            } else {
-                translatedTargetPrice = side == CfdTypes.Side.LONG ? 1 : type(uint256).max;
-            }
+            translatedTargetPrice = (side == CfdTypes.Side.LONG) == isClose ? type(uint256).max : 1;
         }
 
         OrderV3Types.OrderRequest memory request = OrderV3Types.OrderRequest({
@@ -67,9 +58,7 @@ contract LegacyOrderRouterHarness is OrderRouter {
             isClose: isClose,
             bounds: OrderV3Types.ExecutionBounds({
                 submitBy: uint64(block.timestamp) + uint64(maxExecutionWindowSeconds),
-                executionWindowSeconds: uint32(
-                    uint256(uint64(block.timestamp) + uint64(maxExecutionWindowSeconds)) - block.timestamp
-                ),
+                executionWindowSeconds: uint32(maxExecutionWindowSeconds),
                 allowedExecutionModes: 7,
                 expectedConfigHash: lifecycleBook.currentExecutionConfigHash(),
                 maxExecutionBountyUsdc: type(uint256).max,
@@ -84,14 +73,16 @@ contract LegacyOrderRouterHarness is OrderRouter {
             })
         });
 
-        (bool success, bytes memory returndata) =
-            address(this).delegatecall(abi.encodeCall(OrderRouter.commitOrder, (request)));
-        if (!success) {
-            assembly ("memory-safe") {
-                revert(add(returndata, 0x20), mload(returndata))
-            }
+        bytes memory payload = LegacyOrderRequestEncoding.encode(request);
+        assembly ("memory-safe") {
+            let success := delegatecall(gas(), address(), add(payload, 32), mload(payload), 0, 0)
+            let output := mload(0x40)
+            returndatacopy(output, 0, returndatasize())
+            if iszero(success) { revert(output, returndatasize()) }
+            if lt(returndatasize(), 32) { revert(0, 0) }
+            orderId := mload(output)
+            if shr(64, orderId) { revert(0, 0) }
         }
-        orderId = abi.decode(returndata, (uint64));
     }
 
 }

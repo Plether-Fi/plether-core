@@ -58,6 +58,50 @@ contract PerpMixedPendingOrdersTest is BasePerpTest {
         handler.assertModel();
     }
 
+    function test_IndependentMixedRefundPreservesLaterFreeFundedOrder() public {
+        handler.openOrIncrease(0, 100, 80_000_002);
+        handler.exercisePledgeEscrowFailureHistory();
+        assertEq(handler.mixedFailureRefunds(), 1);
+        assertEq(handler.rejectedPledgeOverlap(), 1);
+        assertEq(handler.freeOrdersBehindPledgedHead(), 1);
+        handler.assertModel();
+    }
+
+    function test_IndependentRestoredSolvencyPreservesPledgedOrder() public {
+        handler.exerciseRestoredSolventEscrowHistory();
+        assertEq(handler.restoredSolventLiquidations(), 1);
+        assertEq(handler.pledgeLiquidationRefunds(), 1);
+        handler.assertModel();
+    }
+
+    function test_FaultControlNormalCheckerRejectsLostCollectiblePledge() public {
+        handler.openOrIncrease(0, 100, 80_000_002);
+        handler.commitPledgeFundedClose(0, true);
+        vm.mockCall(
+            address(clearinghouse),
+            abi.encodeCall(clearinghouse.collectibleCloseEscrowUsdc, (handler.actorAt(0))),
+            abi.encode(uint256(0))
+        );
+        vm.expectRevert();
+        handler.assertModel();
+        vm.clearMockedCalls();
+        handler.assertModel();
+    }
+
+    function test_IndependentLpEpochSpansPledgeReservationAndRefund() public {
+        handler.openOrIncrease(0, 100, 80_000_002);
+        handler.requestJuniorDeposit(0, 1000e6);
+        handler.commitPledgeFundedClose(0, true);
+        assertGt(handler.pledgeFundedOrders(), 0);
+        handler.refreshMark(140_000_002);
+        handler.settleJuniorEpoch(false);
+        assertEq(handler.lpEpochsWithCollectibleEscrow(), 1);
+        handler.expirePending(0);
+        handler.claimJuniorDeposit(0);
+        assertEq(handler.pledgeFailureRefunds(), 1);
+        handler.assertModel();
+    }
+
     function test_PendingQueuesSurviveCollateralAndCarryActions() public {
         handler.openOrIncrease(0, 100, 80_000_002);
         handler.openOrIncrease(1, 117, 120_000_002);
