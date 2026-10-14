@@ -273,7 +273,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "basket confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
         assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000, "position protection trigger bounty");
-        assertEq(router.closeOrderExecutionBountyUsdc(), 200_000, "position protection close bounty");
+        assertEq(router.closeOrderExecutionBountyUsdc(), 0, "ordinary/protection close execution bounty");
     }
 
     function test_DeploymentGuardsAcceptDistinctCanonicalPositionProtectionBookAndBoundSidecar() public {
