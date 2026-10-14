@@ -318,6 +318,10 @@ benchmarks and deployment gates, and non-via-IR for other correctness tests. `pr
 those two lanes exactly partition unfiltered discovery, with no missing or duplicate tests. The `Package (perps)`
 aggregate check passes only when all four jobs succeed. To replay one PR shard:
 `PERPS_SHARD_MODE=pr FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef bash scripts/run-perps-package-tests.sh 0 4`.
+Either filtered lane may have no tests: the wrapper explicitly permits an empty partition, records zero
+executions and `execution_skipped_reason: empty_partition`, and emits no Forge result file. Unfiltered discovery
+must still be nonempty and include every assigned entrypoint; missing tests, overlap and discovery failures
+remain errors. Standalone recorded runs reject empty execution by default.
 Post-merge and audit shards run production via-IR throughout. PR seed is `0xdeadbeef`; scheduled seeds derive from the
 recorded run ID. The pre-audit target and dispatched deep workflow execute `0xdeadbeef`, `0x1`, and `0x2`.
 No runner silently lowers these budgets. Explicit environment overrides are captured in the effective configuration.

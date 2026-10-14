@@ -74,6 +74,8 @@ paths = [str((test / p).relative_to(package)) for p in entrypoints]
 names = ['test_behavior']
 if os.environ.get('SHARD_TEST_PR') == '1':
     names += ['test_gas_budget']
+    if 'SHARD_TEST_ONLY_TEST' in os.environ:
+        names = [n for n in names if n == os.environ['SHARD_TEST_ONLY_TEST']]
     for flag, keep in [('--match-test', True), ('--no-match-test', False)]:
         if flag in args:
             pattern = args[args.index(flag) + 1]
@@ -82,6 +84,9 @@ if os.environ.get('SHARD_TEST_PR') == '1':
         paths = paths[1:]
 if '--list' in args:
     print(json.dumps({p: {'Example': names} for p in paths}))
+    sys.exit(0)
+if not names:
+    print('No tests found in project!')
     sys.exit(0)
 print(json.dumps({p + ':Example': {'test_results': {
     name + '()': {'status': 'Success', 'duration': {'secs': 0, 'nanos': 1}} for name in names
@@ -200,6 +205,33 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
             self.assertEqual(result.returncode, 0, result.stderr)
             identities.append((self.root / "artifacts/perps/shard-0-scratch.txt").read_text())
         self.assertEqual(identities[0], identities[1])
+        self.assert_cleaned()
+
+    def test_pr_partition_allows_one_empty_lane_and_executes_every_selected_test(self):
+        for only_test, empty_lane in (("test_behavior", "production-gates"),
+                                      ("test_gas_budget", "correctness")):
+            with self.subTest(empty_lane=empty_lane):
+                before = len(self.executions())
+                result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1",
+                                        SHARD_TEST_ONLY_TEST=only_test)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.executions()), before + 1)
+                evidence = self.root / "artifacts/perps"
+                partition = json.loads((evidence / "pr-selection.json").read_text())
+                self.assertGreater(partition["discovered"], 0)
+                self.assertEqual(partition["production"] + partition["correctness"], partition["discovered"])
+                metadata = json.loads((evidence / empty_lane / "run.json").read_text())
+                self.assertEqual(metadata["execution_skipped_reason"], "empty_partition")
+                self.assertEqual(list((evidence / empty_lane).glob("results.*")), [])
+                for field in ("missing", "unexpected", "overlap", "missing_entrypoints"):
+                    self.assertEqual(partition[field], [])
+                self.assert_cleaned()
+
+    def test_pr_partition_rejects_an_entirely_empty_shard(self):
+        result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_ONLY_TEST="none")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not an exact discovery partition", result.stderr)
+        self.assertEqual(self.executions(), [])
         self.assert_cleaned()
 
     def test_pr_partition_rejects_tests_dropped_from_both_filtered_lanes(self):

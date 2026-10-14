@@ -20,12 +20,12 @@ FOUNDRY_VIA_IR=true forge test --offline --threads 1 --root "${package_root}" \
     --no-match-path "${fork_path}" --list --json > "${PERPS_ARTIFACT_DIR}/all-tests.json"
 
 FOUNDRY_VIA_IR=true \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" production-gates -- \
+    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition production-gates -- \
     forge test --offline --threads 1 -vvv --root "${package_root}" --no-match-path "${fork_path}" \
     --match-test "${production_regex}"
 
 FOUNDRY_VIA_IR=false FOUNDRY_OUT=out-ci-fast FOUNDRY_CACHE_PATH=cache-ci-fast \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" correctness -- \
+    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition correctness -- \
     forge test --offline --threads 1 -vvv --root "${package_root}" --no-match-path "${fork_path}" \
     --no-match-test "${production_regex}"
 

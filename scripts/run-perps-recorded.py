@@ -174,6 +174,8 @@ def capture(command, path):
 def main():
     global ACTIVE_METADATA, ACTIVE_OUTPUT
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--allow-empty-partition", action="store_true",
+                        help="allow empty discovery only inside an independently checked lane partition")
     parser.add_argument("lane")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -252,6 +254,22 @@ def main():
             metadata.update(status="discovery_failed", exit_code=1)
             persist()
             raise SystemExit("Assigned entrypoints did not expose executable tests: " + ", ".join(absent))
+    if not selected and args.allow_empty_partition:
+        # Forge emits no result JSON for an empty selection. Record that no
+        # execution was attempted; the caller must verify the complete partition.
+        # Reusing an artifact directory must not retain an earlier execution.
+        for artifact in output.glob("results.*"):
+            artifact.unlink()
+        (output / "execution-coverage.json").write_text(json.dumps({
+            "selected": 0, "executed": 0, "not_run": [], "unexpected_results": []}, indent=2) + "\n")
+        (output / "test-durations.json").write_text("[]\n")
+        metadata.update(status="passed", exit_code=0, execution_skipped_reason="empty_partition",
+                        duration_seconds=round(time.time() - started, 3),
+                        counts={"passed": 0, "failed": 0, "skipped": 0})
+        preserve_corpus(output)
+        persist()
+        print(f"[{args.lane}] empty partition; no tests executed; artifacts={output}", flush=True)
+        return
     print(f"[{args.lane}] {shlex.join(command)}", flush=True)
     metadata.update(status="running", tests_started_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
     persist()
