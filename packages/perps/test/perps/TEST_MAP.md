@@ -314,7 +314,10 @@ PERPS_SHARD_LIST_ONLY=1 bash scripts/run-perps-package-tests.sh 0 4
 | `audit` | 20,000 | 256 | 1,000 | Nightly and pre-audit |
 
 PR CI uses four physical shards, each running Forge with one thread. Each shard uses production via-IR for
-benchmarks and deployment gates, and non-via-IR for other correctness tests. `pr-selection.json` verifies that
+benchmarks and deployment gates, and non-via-IR for other correctness tests. Unfiltered discovery uses non-via-IR;
+its discovered function names (including inherited tests) identify the entrypoints needed by production gates.
+Other test entrypoints and scripts are excluded from via-IR compilation to bound compiler memory. Filename
+substring collisions are retained conservatively. All shared `.sol` helpers remain available. `pr-selection.json` verifies that
 those two lanes exactly partition unfiltered discovery, with no missing or duplicate tests. The `Package (perps)`
 aggregate check passes only when all four jobs succeed. To replay one PR shard:
 `PERPS_SHARD_MODE=pr FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef bash scripts/run-perps-package-tests.sh 0 4`.

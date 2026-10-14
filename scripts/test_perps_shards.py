@@ -71,25 +71,31 @@ entrypoints = [p for p in files if p.endswith('.t.sol')]
 if os.environ.get('SHARD_TEST_EMPTY_ENTRYPOINT') == '1':
     entrypoints = entrypoints[1:]
 paths = [str((test / p).relative_to(package)) for p in entrypoints]
+skips = [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == '--skip']
+paths = [p for p in paths if not any(skip in pathlib.Path(p).name for skip in skips)]
 names = ['test_behavior']
 if os.environ.get('SHARD_TEST_PR') == '1':
     names += ['test_gas_budget']
     if 'SHARD_TEST_ONLY_TEST' in os.environ:
         names = [n for n in names if n == os.environ['SHARD_TEST_ONLY_TEST']]
     for flag, keep in [('--match-test', True), ('--no-match-test', False)]:
-        if flag in args:
+        if flag in args and os.environ.get('SHARD_TEST_IGNORE_FILTERS') != '1':
             pattern = args[args.index(flag) + 1]
             names = [n for n in names if bool(re.search(pattern, n)) == keep]
     if os.environ.get('SHARD_TEST_DROP_CORRECTNESS') == '1' and '--no-match-test' in args:
         paths = paths[1:]
+tests_by_path = {p: names for p in paths}
+if os.environ.get('SHARD_TEST_GAS_SOURCE'):
+    tests_by_path = {p: [n for n in names if n != 'test_gas_budget' or p.endswith(os.environ['SHARD_TEST_GAS_SOURCE'])]
+                     for p in paths}
 if '--list' in args:
-    print(json.dumps({p: {'Example': names} for p in paths}))
+    print(json.dumps({p: {'Example': tests_by_path[p]} for p in paths}))
     sys.exit(0)
 if not names:
     print('No tests found in project!')
     sys.exit(0)
 print(json.dumps({p + ':Example': {'test_results': {
-    name + '()': {'status': 'Success', 'duration': {'secs': 0, 'nanos': 1}} for name in names
+    name + '()': {'status': 'Success', 'duration': {'secs': 0, 'nanos': 1}} for name in tests_by_path[p]
 }} for p in paths}))
 sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
 ''')
@@ -234,6 +240,29 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assertEqual(self.executions(), [])
         self.assert_cleaned()
 
+    def test_pr_compiles_only_discovered_production_sources_with_via_ir(self):
+        listed = self.run_shard(0, PERPS_SHARD_LIST_ONLY="1")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        assigned = listed.stdout.splitlines()
+        # The source has no declared functions: discovery also captures inherited tests.
+        required = assigned[0]
+        result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_GAS_SOURCE=required)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        unfiltered = next(call for call in self.invocations() if '--list' in call['args'])
+        self.assertEqual(unfiltered['settings']['FOUNDRY_VIA_IR'], 'false')
+        production, correctness = self.executions()
+        args = production['args']
+        skips = {args[i + 1] for i, arg in enumerate(args[:-1]) if arg == '--skip'}
+        self.assertIn('script', skips)
+        self.assertFalse(any(skip in Path(required).name for skip in skips))
+        self.assertEqual(skips - {'script'}, {Path(p).name for p in assigned
+                                            if Path(p).name not in Path(required).name})
+        self.assertNotIn('--skip', correctness['args'])
+        partition = json.loads((self.root / 'artifacts/perps/pr-selection.json').read_text())
+        self.assertEqual(partition['production'], 1)
+        self.assertEqual(partition['correctness'], len(assigned))
+        self.assert_cleaned()
+
     def test_pr_partition_rejects_tests_dropped_from_both_filtered_lanes(self):
         result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_DROP_CORRECTNESS="1")
         self.assertNotEqual(result.returncode, 0)
@@ -243,9 +272,9 @@ sys.exit(int(os.environ.get('SHARD_TEST_EXIT', '0')))
         self.assert_cleaned()
 
     def test_pr_partition_rejects_overlapping_lanes(self):
-        # The baseline fake Forge deliberately ignores filters: both lanes report
+        # Deliberately ignore function filters: both lanes report
         # the same test. An apparent pair of passes must not satisfy the gate.
-        result = self.run_shard(0, PERPS_SHARD_MODE="pr")
+        result = self.run_shard(0, PERPS_SHARD_MODE="pr", SHARD_TEST_PR="1", SHARD_TEST_IGNORE_FILTERS="1")
         self.assertNotEqual(result.returncode, 0)
         partition = json.loads((self.root / "artifacts/perps/pr-selection.json").read_text())
         self.assertTrue(partition["overlap"])
