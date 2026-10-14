@@ -1,5 +1,9 @@
 > Historical/additive-preview documentation. For the fresh-stack V3 intent / V4 receipt implementation, use [Deposit-free close migration](DEPOSIT_FREE_CLOSE.md). Keep this historical integration bound to its archived deployment; the new planner tuples are incompatible with v1.2.3.
 
+> The current zero-bounty source removes `previewSponsoredClose` and `validateSponsoredClose`. The sponsored APIs
+> described below belong to archived releases only. New closes use ordinary `previewClose`; their commitment carry
+> is included in the current assessment and bound checks. Historical recovery continues against the original lens.
+
 # Reservation-aware close review
 
 `CfdClosePreview.previewClose` is the pre-commit close-review API. `CfdOrderPolicyEvaluator.assessOrder` remains the execution-state API: its supplied bounty must already have been reserved by commitment.
@@ -39,7 +43,7 @@ Side and partial-close dust validation use the live position. The router instead
 
 ## Sponsored testnet closes
 
-The current source also exposes `previewSponsoredClose(engine, account, request, executor, executionPrice, publishTime)`
+The archived sponsored release exposes `previewSponsoredClose(engine, account, request, executor, executionPrice, publishTime)`
 and `validateSponsoredClose(engine, request, expectedSubsidyUsdc)`. These APIs are restricted to Arbitrum Sepolia
 (`421614`) and the immutable `SPONSORED_ENGINE` v1.2.3 address. The ordinary `previewClose` has no such deployment gate.
 

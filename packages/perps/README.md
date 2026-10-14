@@ -15,6 +15,11 @@ documents the original standalone lens alongside v1.2.3. The
 preserves `previewClose` and adds `previewSponsoredClose` plus `validateSponsoredClose`. These are historical testnet
 release records; the handoff's frontend activation status is not a live deployment check.
 
+The zero-close-bounty source removes those two sponsored-grant methods; use either ordinary `previewClose`
+overload for new orders. Historical grants and pending operations continue to use their archived deployments and
+ABIs. The constructor argument, `SPONSORED_ENGINE` and `MAX_CLOSE_SUBSIDY_USDC` getters, and declared sponsored errors
+remain compatibility-only; they do not enable new grants. Normal gas sponsorship is unaffected.
+
 ## Next release: unused perps API cleanup
 
 The next deployment removes unused privileged clearinghouse entrypoints: `lockCommittedOrderMargin`,
@@ -31,8 +36,10 @@ The follow-up cleanup also removes `HousePool.recordProtocolInflow`, its unused 
 and the retired clearinghouse selectors `reserveCloseExecutionBountyFromPositionMargin` and
 `reserveStaleCloseExecutionBountyFromPositionMargin`. Engine and sidecar inflows continue through
 `recordClaimantInflow`; owner-admitted raw donations use `accountExcess`. The two retired bounty selectors previously
-always reverted. Current close-bounty funding uses the Engine commitment path, taking post-carry free settlement
-first and eligible position pledge second.
+always reverted. The zero-close-bounty cleanup also removes the unused clearinghouse selectors
+`reserveCloseExecutionBountyFromSettlement` and `reserveStaleCloseExecutionBountyFromSettlement`.
+Close commitment still uses the Engine path to assess carry and validate admission, with an authenticated zero
+bounty reservation. Opening/increase bounties and the positive protection trigger reward are unchanged.
 
 Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
 `OrderOraclePolicyLib`. Maintained planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise

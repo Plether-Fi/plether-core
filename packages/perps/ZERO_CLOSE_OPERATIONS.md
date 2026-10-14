@@ -8,6 +8,14 @@ Deploy a coherent fresh stack. This is not an in-place storage-compatible upgrad
 
 The core changes are paired with `plether-app` branch `codex/zero-close-bounties`. Its existing Haskell order keeper and independent protection worker remain the production services. The SDK CLI below is a one-shot diagnostic/operator tool, not another daemon.
 
+The follow-up cleanup removes the USDC grant preview/guard (`previewSponsoredClose`, `validateSponsoredClose`) and
+the unused privileged clearinghouse hooks `reserveCloseExecutionBountyFromSettlement` and
+`reserveStaleCloseExecutionBountyFromSettlement`. The ordinary close previews, constructor and compatibility
+getters, order/receipt tuples, enum numbering and storage layouts remain unchanged. New app orders no longer carry
+USDC-assistance branches; gas-sponsored commitment and owner-paid fallback remain available. Keep archived grant
+ABIs, persisted operation metadata, recovery authorities and historical grant/PnL reconciliation. Do not point an
+old pending grant batch at the new lens. Runtime hashes must be pinned for any future deployment.
+
 ## Keeper operation and funding
 
 Fund operator wallets with native gas from a separately managed operating budget. No contract draws a close subsidy from LP assets, and no contract promises reimbursement. Closing remains permissionless when those wallets are empty; automatic service does not.

@@ -41,3 +41,39 @@ Funded primary/standby operation, a deployed fresh manifest, live outage/failove
 ## Evidence location
 
 Machine-readable run artifacts, source hashes and explicit user-cancellation records are retained outside Git at `/private/tmp/zero-close-validation`; individual logs use `/private/tmp/zero-close-*.log`. The installed SDK artifact is at `/private/tmp/zero-close-sdk-artifact`. These are local temporary paths, not durable CI artifact links. Historical reports were not rewritten, and generated JSON/build output is excluded from the implementation commits.
+
+## Targeted cleanup follow-up, 2026-10-14
+
+This section records the subsequent cleanup relative to core `77ac7786` and app `5e29eb48`; the earlier cancelled
+campaign evidence above remains historical. Core source/test/SDK revisions are `30be05b0` (preview removal),
+`d167dc55` (bookkeeping), and `82be2272` (unused hooks). App cleanup is `324b8774`.
+No full local CI or audit campaign was restarted. Full selections remain GitHub CI's responsibility.
+
+The cleanup removes a net 321 production Solidity lines and 87 frontend production lines. The only removed
+deployed-contract functions are `CfdClosePreview.previewSponsoredClose`, `CfdClosePreview.validateSponsoredClose`,
+`MarginClearinghouse.reserveCloseExecutionBountyFromSettlement`, and
+`MarginClearinghouse.reserveStaleCloseExecutionBountyFromSettlement`. The constructor, compatibility getters,
+remaining ABI fields, enum numbering and storage layouts are unchanged relative to `77ac7786`.
+Protection trigger rewards, carry checkpointing, payout/refund/forfeiture and historical grant recovery remain.
+The generated SDK error registry was also synchronized with the current source; historical ABI fixtures remain.
+
+| Targeted check | Result |
+| --- | --- |
+| Solidity correctness | 333 passed, zero failures/skips; 11 selected entrypoints, 17 suites; quick profile, non-IR, 256 fuzz runs. Includes canonical close preview, carry/bounds, clearinghouse reservations, zero-bounty closes, lifecycle receipt fault controls, protection and liquidation. |
+| Production-codegen gas/size | 15 passed, zero failures/skips; `CfdClosePreviewGas`, `DirectCloseGas`, `SourceBoundBountyGas`, and `PositionProtectionLiquidationBatchGas`; optimizer 200, via-IR, unchanged acceptance gates. This is not the complete production gas selection. |
+| Contract ABI/storage | solc 0.8.35 standard-JSON baseline/current comparison across nine affected contracts/interfaces: exactly the four approved function removals (also reflected in `IMarginClearinghouse`), no additions or other ABI changes, unchanged normalized storage layouts. |
+| SDK | 84 tests passed; typecheck passed; current ABI exports regenerated from the targeted build. |
+| Frontend | 175 focused tests passed; lint, production build and final TypeScript check passed. Includes normal sponsored submission, native fallback, preserved trigger reward, journal hydration and historical authority recovery. |
+| Repository checks | Formatting, diff whitespace, package boundaries, inventory generation and 205 exact test-map references passed. All 39 runner/shard tests passed. Two deleted-suite timing entries removed; remaining measurements retain their historical provenance. |
+
+The tested core `.sol`/SDK `.ts` source and test fingerprint is
+`c358f63047b400ee2caa753e8dea1fccaf6a9623c988330391c8c9664fad355c`.
+It is SHA-256 over sorted existing, tracked/nonignored paths under `packages/perps/src`, `packages/perps/test`,
+and `packages/perps-aa-client/src`, each path and file body followed by NUL. Documentation is excluded.
+The corresponding frontend fingerprint is recorded in the app operations document.
+
+Targeted logs, compiler inputs/outputs, ABI/storage comparison and exact selected entrypoint lists are retained
+locally in `/private/tmp/zero-close-cleanup-validation`. Generated compiler JSON/build output remains outside Git.
+The historical fork tests and archived deployed ABIs remain intact; no RPC fork, live service drill, deployment,
+grant issuance or production transaction was performed by this cleanup. The focused frontend results do not
+supersede the earlier full-suite timeout; GitHub must validate the complete current selection.
