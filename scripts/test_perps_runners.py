@@ -133,7 +133,8 @@ class SelectionTests(unittest.TestCase):
 
 class EvidenceTests(unittest.TestCase):
     def run_lane(self, status="Success", empty=False, no_skips=False, cancel=False,
-                 discovery_failure=False, missing=False, missing_entrypoint=False, custom_env=None):
+                 discovery_failure=False, missing=False, missing_entrypoint=False, custom_env=None,
+                 empty_discovery=False, allow_empty=False):
         temp = tempfile.TemporaryDirectory()
         directory = Path(temp.name)
         forge = directory / "forge"
@@ -148,6 +149,8 @@ elif '--list' in sys.argv:
         print('compiler diagnostic on stdout')
         sys.exit(2)
     tests = ['test_behavior', 'test_missing'] if os.environ['MOCK_MISSING'] == '1' else ['test_behavior']
+    if os.environ['MOCK_EMPTY_DISCOVERY'] == '1':
+        tests = []
     print(json.dumps({'test/Example.t.sol': {'Example': tests}}))
 else:
     assert '--suppress-successful-traces' in sys.argv
@@ -163,6 +166,7 @@ else:
         environment = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],
                            PERPS_ARTIFACT_DIR=str(directory / "evidence"), FOUNDRY_PROFILE="ci",
                            MOCK_STATUS=status, MOCK_EMPTY=str(int(empty)),
+                           MOCK_EMPTY_DISCOVERY=str(int(empty_discovery)),
                            MOCK_SLEEP=str(int(cancel)),
                            MOCK_CACHE_PATH=str(directory / "cache"),
                            MOCK_DISCOVERY_FAILURE=str(int(discovery_failure)), MOCK_MISSING=str(int(missing)),
@@ -175,6 +179,8 @@ else:
             environment["PERPS_EXPECTED_ENTRYPOINTS"] = str(expected)
         command = ["python3", str(ROOT / "scripts/run-perps-recorded.py"), "fixture", "--",
                    "forge", "test", "--root", "packages/perps"]
+        if allow_empty:
+            command.insert(2, "--allow-empty-partition")
         if cancel:
             process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
@@ -223,6 +229,25 @@ else:
         result, metadata, _, _ = self.run_lane("Skipped", no_skips=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(metadata["counts"]["skipped"], 1)
+
+    def test_empty_partition_is_explicit_and_does_not_execute_forge(self):
+        self.assertNotEqual(self.run_lane(empty_discovery=True, empty=True)[0].returncode, 0)
+        result, metadata, _, files = self.run_lane(empty_discovery=True, allow_empty=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(metadata["selected_count"], 0)
+        self.assertEqual(metadata["counts"], {"passed": 0, "failed": 0, "skipped": 0})
+        self.assertEqual(metadata["execution_skipped_reason"], "empty_partition")
+        self.assertNotIn("execution_command", metadata)
+        self.assertNotIn("results.json", files)
+        self.assertIn("execution-coverage.json", files)
+
+    def test_empty_partition_permission_does_not_hide_errors_or_missing_tests(self):
+        for scenario in ({"discovery_failure": True}, {"missing": True}, {"empty": True},
+                         {"empty_discovery": True, "missing_entrypoint": True}):
+            with self.subTest(scenario=scenario):
+                result, metadata, _, _ = self.run_lane(allow_empty=True, **scenario)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("execution_skipped_reason", metadata)
 
     def test_cancellation_retains_phase_budgets_and_flushed_diagnostics(self):
         result, metadata, stderr, _ = self.run_lane(cancel=True)

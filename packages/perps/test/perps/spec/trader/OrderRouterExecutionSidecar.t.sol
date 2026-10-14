@@ -78,7 +78,7 @@ contract OrderRouterExecutionSidecarTest is OrderRouterExecutionSidecarTestFixtu
         bytes memory invalidOpenCode = abi.encodeWithSelector(
             ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
             CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
-            uint8(11),
+            uint8(12),
             false
         );
         (terminal,,) = sidecar.classify(invalidOpenCode);

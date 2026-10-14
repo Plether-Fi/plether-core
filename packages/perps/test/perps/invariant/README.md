@@ -139,7 +139,9 @@ bounded by each handler's actor set and input range.
   Entry prices use $0.80–$1.20 with dust, while mark transitions cover $0.60–$1.40. Generated opens/increases and
   partial commitments fund at least $60 of pledge per existing lot. Synchronous setup helpers retain focused
   live/frozen close funding; separate histories retain zero pledge for claim-supported admission or zero free cash
-  for pledge-funded close bounties. Minimum-notional and close-size commitment rejections require their exact code
+  for pledge-funded close bounties. Partial closes can leave one lot; a generated half-close then requests zero lots.
+  That request is submitted and checked for exact `ZeroSize` rejection and rollback before minimum-notional checks,
+  while a full close of the same one-lot position remains valid. Minimum-notional and close-size commitment rejections require their exact code
   and unchanged accounting. Time has no artificial horizon cap;
   live actions and LP maturities move monotonically past Friday-noon/weekend closures to Monday noon.
   Carry is 500 bps, VPI and frozen spread are

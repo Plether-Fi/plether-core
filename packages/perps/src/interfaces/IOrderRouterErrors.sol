@@ -13,6 +13,18 @@ interface IOrderRouterErrors {
     error OrderRouter__OrderNotExpired();
     /// @notice Pledge-funded bounty must belong to the first pending order of its source position.
     error OrderRouter__PledgeBountyRequiresEmptyQueue();
+    /// @notice A positive settlement minimum requires a flat account's first pending open.
+    error OrderRouter__SettlementFloorUnsupported();
+    /// @notice A pending funded-floor open must finish before another fresh order is committed.
+    error OrderRouter__SettlementFloorOrderPending(uint64 orderId);
+    /// @notice Custody cannot fund both the requested minimum and the complete gross-debit allowance.
+    error OrderRouter__SettlementFloorFunding(
+        uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc, uint256 maxGrossDebitUsdc
+    );
+    /// @notice A withdrawal would make the pending open's funded settlement minimum mutable.
+    error OrderRouter__SettlementFloorWithdrawal(
+        uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc, uint256 maxGrossDebitUsdc
+    );
     /// @notice Internal liquidation marker; pledge restoration made the position solvent.
     error OrderRouter__RestoredPledgeMadeSolvent();
 

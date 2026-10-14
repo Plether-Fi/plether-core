@@ -94,6 +94,9 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         if (!request.isClose) {
             revert CfdClosePreview__NotCloseOrder();
         }
+        if (request.bounds.minPostSettlementBalanceUsdc != 0) {
+            revert IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported();
+        }
         CfdEnginePlanTypes.RawSnapshot memory snapshot;
         CfdEnginePlanTypes.CloseDelta memory delta;
         uint256 bounty;
@@ -213,6 +216,9 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         OrderV3Types.OrderRequest calldata request,
         bool finalRequest
     ) private view {
+        if (request.bounds.minPostSettlementBalanceUsdc != 0) {
+            revert IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported();
+        }
         if (block.chainid != 421_614 || engineAddress != _sponsoredEngine()) {
             revert CfdClosePreview__SponsoredDeploymentMismatch();
         }

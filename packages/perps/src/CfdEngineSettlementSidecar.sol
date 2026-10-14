@@ -11,9 +11,11 @@ import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineS
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
 import {CfdEngineCollateralSnapshotLib} from "@plether/perps/libraries/CfdEngineCollateralSnapshotLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
+import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
 
 /// @dev Engine read surface used by account-action methods externalized from the bytecode-constrained host.
 interface ICfdEngineAccountActionView {
@@ -244,6 +246,16 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
         CfdTypes.Position memory pos = _loadPosition(engine, account);
         if (pos.size == 0) {
+            (uint64 orderId, uint256 minimum, uint256 maxDebit) =
+                OrderSettlementFloorLib.load(engine.orderRouter(), account);
+            if (minimum != 0) {
+                uint256 balance = IMarginClearinghouse(host.clearinghouse()).balanceUsdc(account);
+                if (balance < minimum || balance - minimum < maxDebit) {
+                    revert IOrderRouterErrors.OrderRouter__SettlementFloorWithdrawal(
+                        orderId, balance, minimum, maxDebit
+                    );
+                }
+            }
             return;
         }
         if (engine.degradedMode()) {
@@ -340,6 +352,17 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             engine.positions(account);
     }
 
+    /// @dev Shared by open, close and liquidation settlement; each planned reserve is checked at its original boundary.
+    function _requireVpiReserve(
+        IMarginClearinghouse clearinghouse,
+        address account,
+        uint256 expectedUsdc
+    ) private view {
+        if (clearinghouse.vpiRebateReserveUsdc(account) != expectedUsdc) {
+            revert CfdEngineSettlementSidecar__SettlementMismatch();
+        }
+    }
+
     function _negativeVpiReserveTarget(
         int256 vpiAccruedUsdc
     ) private pure returns (uint256 targetUsdc) {
@@ -402,9 +425,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             IMarginClearinghouse(host.clearinghouse()).getLockedMarginBuckets(delta.account).positionMarginUsdc;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
 
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveBeforeUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeUsdc);
         if (delta.vpiRebateReserveBeforeUsdc > delta.vpiRebateReserveAfterUsdc) {
             clearinghouse.releaseVpiRebateReserve(
                 delta.account, delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc
@@ -445,9 +466,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 clearinghouse.reclassifyPnlPledgeToVpiRebateReserve(delta.account, delta.vpiRebateReserveFromPledgeUsdc);
             }
         }
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveAfterUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterUsdc);
 
         if (delta.liquidationReserveAfterUsdc > delta.liquidationReserveBeforeUsdc) {
             clearinghouse.reclassifyPnlPledgeToLiquidationReserve(
@@ -651,9 +670,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         IMarginClearinghouse clearinghouse,
         CfdEnginePlanTypes.CloseDelta calldata delta
     ) private returns (uint256 protocolFeeCreditedUsdc) {
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveBeforeUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeUsdc);
         if (delta.vpiRebateReserveConsumedUsdc > 0) {
             clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedUsdc);
         }
@@ -682,9 +699,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             }
             protocolFeeCreditedUsdc = creditedUsdc;
         }
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveAfterUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterUsdc);
     }
 
     /// @notice Attributes recovered action charges to frozen spread after fee, carry, and positive VPI priority.
@@ -764,9 +779,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             host.settlementConsumeTraderClaim(delta.account, delta.pricePnlClaimConsumedUsdc);
         }
 
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveBeforeUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveBeforeUsdc);
         if (delta.vpiRebateReserveConsumedUsdc > 0) {
             clearinghouse.consumeVpiRebateReserve(delta.account, host.pool(), delta.vpiRebateReserveConsumedUsdc);
         }
@@ -793,9 +806,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 revert CfdEngineSettlementSidecar__SettlementMismatch();
             }
         }
-        if (clearinghouse.vpiRebateReserveUsdc(delta.account) != delta.vpiRebateReserveAfterUsdc) {
-            revert CfdEngineSettlementSidecar__SettlementMismatch();
-        }
+        _requireVpiReserve(clearinghouse, delta.account, delta.vpiRebateReserveAfterUsdc);
 
         keeperBountyUsdc = delta.keeperBountyUsdc;
         uint256 seizedUsdc = _applyLiquidationSettlementPlan(host, delta, keeper);

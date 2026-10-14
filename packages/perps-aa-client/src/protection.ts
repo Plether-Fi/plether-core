@@ -1,4 +1,4 @@
-import { encodeFunctionData, getAddress, type Address, type ContractFunctionArgs } from "viem";
+import { encodeFunctionData, getAddress, maxUint256, type Address, type ContractFunctionArgs } from "viem";
 import { positionProtectionBookAbi } from "./protectionAbi.js";
 import type { PerpsActionKind, PerpsActionPlan } from "./types.js";
 
@@ -51,6 +51,9 @@ export function buildProtectedOpenAction(input: { account: Address; book: Addres
       !Number.isInteger(request.bounds.executionWindowSeconds) || request.bounds.executionWindowSeconds <= 0 || request.bounds.executionWindowSeconds > 3600 ||
       ![1, 2, 4].includes(request.bounds.allowedExecutionModes) || request.bounds.maxPostLeverageBps <= 0) {
     throw new Error("Protected opens require a fresh bounded V3 opening request");
+  }
+  if (request.bounds.minPostSettlementBalanceUsdc > 0n && request.bounds.maxGrossAccountDebitUsdc === maxUint256) {
+    throw new Error("A positive settlement balance floor requires a finite maxGrossAccountDebitUsdc.");
   }
   return Object.freeze({ ...action("place-protected-order", input.account, input.book, encodeFunctionData({ abi: positionProtectionBookAbi, functionName: "commitOpenOrderWithProtection", args: [request, input.params] })), submissionDeadline: request.bounds.submitBy });
 }

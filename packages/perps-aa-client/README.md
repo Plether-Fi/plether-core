@@ -163,7 +163,7 @@ reductions. The protocol reserves the configured keeper bounty from free USDC,
 then eligible position margin. There is no mode selector or per-order bounty
 waiver. Admin configuration may set the close bounty to zero for all new closes;
 existing orders retain their snapshotted bounty. `classifyCloseFailureV3` keeps
-bounty funding, carry funding, action funding, and residual health failures
+bounty funding, carry funding, action funding, residual health, and live-side mismatch failures
 distinct. `buildExpireOrderV3` encodes permissionless cleanup after the order's
 execution deadline without oracle data.
 
@@ -174,6 +174,23 @@ orders to finish or fund the keeper reward from free USDC. Ordinary close failur
 or expiry pays only the original free-funded amount and restores original pledged
 funding to its source position. A zero-free-funded failure is unpaid cleanup.
 Successful execution still pays/releases the full bounty, including self-execution.
+
+A positive `minPostSettlementBalanceUsdc` is supported only for a first opening
+order while the account has no live position and no pending order. The account
+must fund that minimum plus the full declared `maxGrossAccountDebitUsdc`, after
+commitment reservations; an unlimited gross ceiling cannot be used with a
+positive minimum. No later same-account commitment is allowed until this order
+terminates, and withdrawals must preserve its floor. Exact client-ID retries
+still resolve to the original order. Orders with a zero minimum keep their
+existing funding rules.
+
+The pure builders reject positive floors on closes and positive floors with an
+unlimited gross ceiling; they preserve the supplied values and perform no RPC
+calls. Before signing a positive-floor open, read or simulate against the trusted
+deployment to verify the account is flat, its queue is empty, and funding is
+sufficient. Increases and closes must use a zero minimum. This restriction
+protects the settlement minimum during its pending lifetime; other execution
+bounds still depend on the state at execution.
 
 ## Terminal history on the new stack (0.2.0)
 

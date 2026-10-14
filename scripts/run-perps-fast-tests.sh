@@ -16,16 +16,42 @@ python3 "${repo_root}/scripts/perps-test-inventory.py" > "${PERPS_ARTIFACT_DIR}/
 # Shard callers supply expected source entrypoints; validate them across both lanes.
 expected_entrypoints="${PERPS_EXPECTED_ENTRYPOINTS:-}"
 unset PERPS_EXPECTED_ENTRYPOINTS
-FOUNDRY_VIA_IR=true forge test --offline --threads 1 --root "${package_root}" \
+FOUNDRY_VIA_IR=false FOUNDRY_OUT=out-ci-fast FOUNDRY_CACHE_PATH=cache-ci-fast \
+    forge test --offline --threads 1 --root "${package_root}" \
     --no-match-path "${fork_path}" --list --json > "${PERPS_ARTIFACT_DIR}/all-tests.json"
 
+# Function filters do not bound compiler memory. Exclude entrypoints without
+# production tests from via-IR compilation, using actual discovery (including
+# inherited tests), not source-text guesses. Shared .sol helpers remain available.
+python3 - "${PERPS_ARTIFACT_DIR}/all-tests.json" "${production_regex}" \
+    "${package_root}" "${FOUNDRY_TEST:-test}" > "${PERPS_ARTIFACT_DIR}/production-skip-files.txt" <<'PY'
+import json, re, sys
+from pathlib import Path
+discovered = json.loads(Path(sys.argv[1]).read_text())
+pattern = re.compile(sys.argv[2])
+required_names = {Path(source).name for source, contracts in discovered.items()
+                  if any(pattern.search(name) for names in contracts.values() for name in names)}
+test_root = Path(sys.argv[4])
+if not test_root.is_absolute():
+    test_root = Path(sys.argv[3]) / test_root
+# Forge's --skip matches filename substrings. Retain collisions so ambiguous
+# names can only cause extra compilation, never omission.
+for name in sorted({p.name for p in test_root.rglob('*.t.sol')}):
+    if not any(name in required for required in required_names):
+        print(name)
+PY
+production_skip=(--skip script)
+while IFS= read -r source; do
+    production_skip+=(--skip "${source}")
+done < "${PERPS_ARTIFACT_DIR}/production-skip-files.txt"
+
 FOUNDRY_VIA_IR=true \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" production-gates -- \
+    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition production-gates -- \
     forge test --offline --threads 1 -vvv --root "${package_root}" --no-match-path "${fork_path}" \
-    --match-test "${production_regex}"
+    --match-test "${production_regex}" "${production_skip[@]}"
 
 FOUNDRY_VIA_IR=false FOUNDRY_OUT=out-ci-fast FOUNDRY_CACHE_PATH=cache-ci-fast \
-    python3 "${repo_root}/scripts/run-perps-recorded.py" correctness -- \
+    python3 "${repo_root}/scripts/run-perps-recorded.py" --allow-empty-partition correctness -- \
     forge test --offline --threads 1 -vvv --root "${package_root}" --no-match-path "${fork_path}" \
     --no-match-test "${production_regex}"
 

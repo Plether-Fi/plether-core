@@ -13,6 +13,7 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
+import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
 /// @title CfdEngineAccountLens
@@ -70,7 +71,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     /// @notice Estimates the same-state withdrawal ceiling under the engine's open-position risk policy.
-    /// @dev A flat account returns all current free settlement without degraded-mode or mark-freshness gating. For an
+    /// @dev A flat account returns free settlement above any pending funded floor, without degraded-mode or freshness
+    ///      gating. For an
     ///      open position, the estimate is zero in degraded mode, with no usable cached mark, after the applicable
     ///      engine/HousePool freshness limit, when exact price-risk equity does not exceed the active requirement, or
     ///      when any carry remains uncovered, or when the negative-VPI reserve is underfunded. The calculation
@@ -90,6 +92,17 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         CfdTypes.Position memory pos = _position(account);
         if (pos.size == 0) {
+            (, uint256 minimum, uint256 maxDebit) = OrderSettlementFloorLib.load(engineContract.orderRouter(), account);
+            if (minimum != 0) {
+                uint256 balance = buckets.settlementBalanceUsdc;
+                if (balance < minimum || balance - minimum < maxDebit) {
+                    return 0;
+                }
+                uint256 surplus = balance - minimum - maxDebit;
+                if (surplus < withdrawableUsdc) {
+                    withdrawableUsdc = surplus;
+                }
+            }
             return withdrawableUsdc;
         }
         if (engineContract.degradedMode()) {

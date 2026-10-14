@@ -943,6 +943,24 @@ cash is recorded as LP revenue, and the remaining amount is retained in the
 account-specific `unsettledCarryUsdc` bucket. Only that unpaid remainder enters
 a later terminal action-charge calculation.
 
+Carry ownership is determined at collection. Indexed pending carry and retained
+arrears are trader debt, excluded from LP NAV until cash reaches the pool. LP
+liquidity changes checkpoint side indexes to preserve the old utilization rate;
+they do not sweep individual accounts. Carry collected before a deposit activates
+is reflected in its share price. Shares activated before collection participate
+even while in deposit-claim escrow. Redemption shares participate until funding
+burns them; their funded cash claim has a fixed entitlement afterward.
+
+Consequently, a trader and an incoming LP can time collection after activation
+and share carry accrued before entry. This is an intentional collection-time
+ownership policy, with no historical LP cohort allocation or pending-carry entry
+barrier. Retained arrears follow the same policy when eventually collected.
+The net NAV increase can be smaller than the collected cash: collecting pledged
+margin reduces any price-loss receivable capped by that pledge. For a solvent
+pool at a fixed mark with no other flows, aggregate tranche NAV changes by
+collected carry plus the change in terminal LP-side price PnL. The same collateral cannot contribute
+both its old marked receivable and the newly collected revenue.
+
 **Example.** Let pool assets be $100 million and the full-utilization base rate
 be 5%:
 
@@ -1833,15 +1851,15 @@ guide:
 | Account-capped price collection, write-off isolation, and failed-full-close value safety | `TerminalNavCloseConservation.t.sol`, `TerminalNavIntegrationSecurity.t.sol`, `PerpEconomicConservationInvariant.t.sol`, and `PerpValueConservationInvariant.t.sol`; close/liquidation cleanup and preview parity also use `PerpAccountingInvariant.t.sol` and `PerpExplicitAccountingInvariant.t.sol` |
 | Universal terminal completion and new-risk blocking | Direct close/liquidation and degraded-mode policy tests; no stateful invariant spans every valid insolvent terminal path and every new-risk entry point |
 | Degraded transition and preview/live parity | `PerpPreviewInvariant.t.sol`, `PerpExplicitAccountingInvariant.t.sol` |
-| Carry history and ownership | `PerpValueConservationInvariant.t.sol`; utilization/rate arithmetic and simultaneous two-side carry are direct/model tests, not statefully invariant-tested |
-| VPI lifetime conservation | No nonzero-VPI stateful invariant at this revision; direct VPI unit/fuzz/matrix tests are required |
-| Frozen-spread conservation | No successful nonzero frozen-spread stateful invariant at this revision; dedicated frozen-close tests are required |
+| Carry history and ownership | `PerpMixedAccountingInvariant.t.sol` advances an independent carry ledger across both sides, collateral changes, claims, liquidation, and LP transitions within four reusable traders and fixed risk parameters. `CarryReferenceLedger.t.sol` checks arithmetic vectors; `CarryLpOwnership.t.sol` directly tests collection-time entry/exit ownership with zero Senior coupon and Junior dilution |
+| VPI lifetime conservation | `PerpVpiFrozenAccountingInvariant.t.sol` independently models both VPI signs, lifetime clamps, cash and reserves at a fixed mark with zero carry, a mock pool, and the Engine's Router capability. `PerpMixedAccountingInvariant.t.sol` combines nonzero VPI and carry through the public Router within its bounded actor, order, and configuration domain |
+| Frozen-spread conservation | `PerpVpiFrozenAccountingInvariant.t.sol` requires successful nonzero frozen partial/full closes across freeze/thaw; its fixed-mark model excludes carry. `PerpMixedAccountingInvariant.t.sol` combines frozen spread with carry and queued orders in a bounded campaign. The complete Router regime-authorization matrix remains separate |
 | Oracle/FAD/freshness boundaries | `PerpOracleBoundaryInvariant.t.sol`, `PerpOraclePathInvariant.t.sol` |
 | Regime authorization matrix | Direct oracle-freshness/router/engine policy tests; boundary invariants do not span the complete two-axis action matrix |
 | FIFO and reservation conservation | `PerpAccountingInvariant.t.sol`, `PerpMultiAccountInvariant.t.sol` |
 | Binding order fields and first unique post-commit tick | Direct `OrderRouter.t.sol` tests; no dedicated stateful invariant covers intent immutability or strict historical-tick uniqueness |
 | Active tranche lifecycle, activation-aged cooldowns, direct claim-escrow redemption, and excess | `ClaimableDepositRedeem.t.sol`, `PerpsPublicLensDepositCooldown.t.sol`, `PerpHousePoolLifecycleInvariant.t.sol`, `PerpValueConservationInvariant.t.sol` |
-| Junior-first loss, high-water restoration, coupon ratchet, and recapitalization priority | Direct `HousePool.t.sol` tests plus companion-model vectors; no dedicated stateful waterfall invariant at this revision |
+| Junior-first loss, high-water restoration, coupon ratchet, and recapitalization priority | `PerpWaterfallReferenceInvariant.t.sol` checks persistent real-pool transitions against an input-derived cash/principal/high-water ledger with fixed seed owners. Router authorization and recapitalization inflow are harness boundaries; issuance/redemption, open-position carry, VPI, deferred claims, and raw-cash shortage are outside this dedicated model |
 | Synchronized LP deposit/redemption epochs | Dedicated cutoff, coordinator, FIFO, allocation-dust, plateau-liveness, and exact inverse-rounding integration/fuzz tests; `GovernedSeniorCapacityInvariant.t.sol` statefully covers shared cutoff routing across both request directions plus reservation/covenant safety, but not the complete settlement-phase/backlog state space |
 | Junior maintenance-fee effective supply, escrow ownership, and held accrual | `PerpHousePoolMaintenanceFeeInvariantTest` in `PerpHousePoolLifecycleInvariant.t.sol`, plus direct fee arithmetic and checkpoint tests |
 | Emergency risk-off lifecycle | `EmergencyRiskOffInvariantTest` uses bounded fuzz sequences for request cutoffs, refunds, protective exits, and settlement-hold rollback |

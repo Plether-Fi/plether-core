@@ -18,7 +18,8 @@ interface ICfdEngineAccountLens {
     ) external view returns (ICfdEngineTypes.AccountCollateralView memory viewData);
 
     /// @notice Returns a conservative upper bound on currently withdrawable USDC under engine-side guards.
-    /// @dev Flat accounts return free settlement without applying degraded-mode or mark-freshness gates. For open
+    /// @dev Flat accounts return free settlement above any pending funded floor, without degraded-mode or freshness
+    ///      gates. For open
     ///      positions the view projects carry from active margin first, then free settlement. Price health uses the
     ///      reduced pledge; any remainder uncovered by both sources blocks withdrawal. Claims cannot fund carry.
     ///      The view also applies the stricter of initial and active maintenance margin, degraded mode, and cached-mark

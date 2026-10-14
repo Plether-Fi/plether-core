@@ -203,6 +203,43 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         invariant_PersistentPublicMixedAccounting();
     }
 
+    function test_RegressionOneLotPledgeCloseRejectsZeroSizeWithoutAllocatingOrder() public {
+        // Audit seed 0xdeadbeef: two queued partial closes leave exactly one live lot.
+        handler.commitClose(21_118, 11_063, false);
+        handler.commitClose(
+            12_938,
+            12_989_514_705_740_598_333_484_151_973_466_354_555_343_510_131_890_239_912_606_811_445_340_916_416_975,
+            false
+        );
+        handler.executeBatch(
+            2_837_220_504_266_756_632_723_142_729_865_487_026_003_954_552_410_881_328_926_883_743_677_098
+        );
+        assertEq(handler.traderState(2).lots, 1, "the generated half-close must round to zero lots");
+        uint256 rejectionsBefore = handler.rejectedSmallOrders();
+        uint64 cursorBefore = handler.orders().nextId();
+        bytes32 economicsBefore = handler.economicFingerprint(2);
+        bytes32 modelBefore = keccak256(abi.encode(handler.traderState(2)));
+        handler.commitPledgeFundedClose(378_607_894_605_621_696_302_822_193_767_330, false);
+        assertEq(handler.rejectedSmallOrders(), rejectionsBefore, "generator excludes zero-size requests");
+        assertEq(handler.economicFingerprint(2), economicsBefore, "guard preserves production economics");
+        assertEq(keccak256(abi.encode(handler.traderState(2))), modelBefore, "guard preserves the ghost ledger");
+
+        // Probe Router admission explicitly; the ordinary generator must keep its positive-size guard.
+        handler.rejectZeroSizeClose(2);
+        assertEq(handler.rejectedSmallOrders(), rejectionsBefore + 1);
+        assertEq(handler.orders().nextId(), cursorBefore, "zero-size rejection allocates no order identity");
+        assertEq(handler.orders().count(2), 0, "zero-size rejection leaves no reservation or queue entry");
+        assertEq(handler.traderState(2).lots, 1, "the rejected close preserves the live position");
+        handler.assertModel();
+
+        handler.commitPledgeFundedClose(378_607_894_605_621_696_302_822_193_767_330, true);
+        assertEq(handler.orders().count(2), 1, "a full close of the same one-lot position remains valid");
+        handler.executeHead(false);
+        assertEq(handler.traderState(2).lots, 0, "the valid full close completes");
+        assertEq(handler.orders().count(2), 0);
+        handler.assertModel();
+    }
+
     function test_RegressionQueuedProjectionDoesNotSatisfyLiveMinimumOpenNotional() public {
         // Audit seed 0xdeadbeef, minimized without changing the submitted action inputs.
         handler.commitClose(327_902_434_968_705_076_393_652_476_002_501_640_834_577_837_043_204_913, 32, true);

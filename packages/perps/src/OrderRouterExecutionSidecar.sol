@@ -448,6 +448,26 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         if (!request.oracleFrozen && request.oraclePublishTime <= order.commitTime) {
             return _pendingResult(order.orderId, OrderV3Types.PendingReason.MevBoundary);
         }
+        if (order.isClose) {
+            (uint256 size,,,, CfdTypes.Side side,,) = ICfdEngineCore(host.engine()).positions(order.account);
+            if (size != 0 && side != order.side) {
+                bytes memory evidence = abi.encodeWithSelector(
+                    ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                    CfdEnginePlanTypes.ExecutionFailurePolicyCategory.UserInvalid,
+                    uint8(CfdEnginePlanTypes.CloseRevertCode.SIDE_MISMATCH),
+                    true
+                );
+                return _settleNonEngine(
+                    host,
+                    book,
+                    order,
+                    pending,
+                    request,
+                    OrderV3Types.TerminalReason.PlannerRejected,
+                    _classifyTypedFailure(evidence).failure
+                );
+            }
+        }
         if (!OrderValidationLib.checkSlippage(order, request.executionPrice)) {
             return _settleNonEngine(
                 host,
@@ -838,7 +858,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             uint256 category = _word(revertData, 4);
             uint256 code = _word(revertData, 36);
             uint256 isClose = _word(revertData, 68);
-            bool knownCode = isClose == 0 ? code > 0 && code <= 10 : isClose == 1 && code > 0 && code <= 6;
+            bool knownCode = isClose == 0 ? code > 0 && code <= 11 : isClose == 1 && code > 0 && code <= 7;
             CfdEnginePlanTypes.ExecutionFailurePolicyCategory expectedCategory =
             CfdEnginePlanTypes.ExecutionFailurePolicyCategory.None;
             if (knownCode) {

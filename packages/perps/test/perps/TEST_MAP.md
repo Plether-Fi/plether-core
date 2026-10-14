@@ -19,6 +19,35 @@ sources remain available in Git history. Review migration reports are validation
 
 ## Critical rules
 
+The bounded order hardening regressions use real contracts with MockPyth/MockUSDC for public lifecycle tests,
+and explicit snapshots for pure numeric boundaries. Numeric bounds preserve the original VPI floor sequence and
+supported domain; they do not redesign maximum-size quoting or cover arbitrary governance configurations.
+Positive settlement floors intentionally support only isolated funded flat opens. Carry ownership remains with LPs
+at collection; an entrant can share earlier accrued carry collected after activation.
+
+- [Numeric arithmetic](accounting/fees/OpenNumericDomain.t.sol)::`testFuzz_CheckedVpiMatchesOriginalDomain`
+  compares checked acceptance and values against the original arithmetic domain, with independent in-domain vectors.
+- [Numeric FIFO liveness](spec/keeper/OrderRouterNumericDomain.t.sol)::`test_StaleOriginalExtremeSize_BatchRejectsSkewAndDrainsFollower`
+  preserves the stale extreme-order reproduction and exact skew code; the exposure-transition companion reaches
+  numeric code 11 without changing pinned configuration, authenticates receipts, and tests rollback.
+- [Terminal NAV numeric limits](spec/keeper/OrderRouterNumericDomain.t.sol)::`test_PublicMarginChangeReachesTerminalCapFailureAndBatchContinues`
+  reaches the uint144 pledge cap through public collateral actions, then verifies exact typed failure and follower
+  execution after a one-atom change. Companion tests cover equality success and commitment rejection; pure tests
+  cover the signed aggregate lot limit and the conservative entry-plus-cap envelope documented in the README.
+- [Live close direction](spec/trader/OrderRouterCloseSideBinding.t.sol)::`test_WrongSidePrecedesSlippageAndDoesNotReachPolicyEvaluator`
+  isolates the Router guard; both directions, confidence, self/external execution, failed queue prefixes, planner and
+  receipt rollback have companion cases.
+- [Funded settlement floor](spec/trader/OrderSettlementFloor.t.sol)::`testFuzz_WithdrawalFloorBothApis`
+  checks both APIs and one-atom boundaries; admission, replay, protection, terminal cleanup and retries are explicit.
+- [Oracle policy preservation](spec/admin/OrderRouterOracleConfiguration.t.sol)::`test_OracleRotation_UsesPolicyFinalizedDuringOracleTimelock`
+  checks all six current settings, rejected/ignored writes, individual readback faults, and old config-pinned orders.
+- [Carry ownership](accounting/carry/CarryLpOwnership.t.sol)::`test_EntryPricesCollectedCarryButSharesHistoricalCarryCollectedAfterActivation`
+  compares entry/exit timing with independent share arithmetic, arrears, escrow ownership, and capped-loss NAV offsets.
+- [Hardening costs](gas/OrderHardeningGas.t.sol)::`test_Gas_HardeningStaleCommit`
+  measures fresh/stale commitment, flat withdrawals with/without a funded floor, and oracle rotation under production
+  code generation; each timer stops before outcome assertions. Existing execution, batch, close and liquidation
+  benchmarks retain their labels and acceptance gates.
+
 Unless a row says otherwise, its execution lane is PR `ci`, post-merge production `ci`, and nightly/pre-audit `audit`.
 Unit/ordinary fuzz cases run once per selected profile; only `invariant_*` entrypoints have invariant depth.
 
@@ -206,6 +235,7 @@ checks; the fixture limits remain part of the evidence.
 | [LP dust and delayed carry coupling](../../ACCOUNTING_SPEC.md#lp-capital-carry) | [PerpMixedLpLifecycle.t.sol](invariant/properties/PerpMixedLpLifecycle.t.sol)::`test_ActiveBorrowSurvivesDelayedFinalDustBeforeNextCarryCheckpoint` | Real active position, partial LP funding, delayed terminal claims/dust and later real carry collection compared with independent clocks and depth | Explicit cash shock; dust changes cash without checkpointing carry or increasing accounted assets | Correctness (PR and deep) |
 | [Terminal VPI charge capping after a cash shock](../../ACCOUNTING_SPEC.md#close-settlement) | [PerpMixedAccountingInvariant.t.sol](invariant/properties/PerpMixedAccountingInvariant.t.sol)::`test_RegressionTinyCarryCashCapsPositiveVpiAfterExternalShock`, `test_RegressionRepeatedDeferredClaimsRetainEconomicHistory` | Persisted generated histories; independently cap terminal cash collection and retain waived charge and subsequent account funding | Full close with extreme VPI caused by independently recorded cash shortage and newly collected carry dust; repeat the history without resetting economic state | Correctness (PR and deep) |
 | [Minimum partial-close commitment admission](../../ACCOUNTING_SPEC.md#order-state-model) | [PerpMixedAccountingInvariant.t.sol](invariant/properties/PerpMixedAccountingInvariant.t.sol)::`test_RegressionClaimBackedDustCloseRejectedBeforeCollection` | Independently classify minimum notional, require exact commitment validation code and unchanged model | One-lot partial close of an actual claim-backed position; rejection precedes carry collection and reservation | Correctness (PR and deep) |
+| [Zero-size close commitment admission](../../ACCOUNTING_SPEC.md#order-state-model) | [PerpMixedAccountingInvariant.t.sol](invariant/properties/PerpMixedAccountingInvariant.t.sol)::`test_RegressionOneLotPledgeCloseRejectsZeroSizeWithoutAllocatingOrder` | Persisted history preserves the generator's positive-size guard, then explicitly submits a zero-size close and checks exact ZeroSize rejection without an identity or reservation | Two queued partial closes leave one lot; the explicit invalid request changes no economics, while a full close of the same position still executes | Correctness (PR and deep) |
 | [Queued exposure cannot satisfy live open minimum](../../ACCOUNTING_SPEC.md#open-projection) | [PerpMixedAccountingInvariant.t.sol](invariant/properties/PerpMixedAccountingInvariant.t.sol)::`test_RegressionQueuedProjectionDoesNotSatisfyLiveMinimumOpenNotional` | A near-cap queued request clips the next open below the live-position minimum; exact commitment rejection preserves the first reservation | Persisted generated history distinguishes the public request minimum from the larger liquidation-fee-supported live-position minimum | Correctness (PR and deep) |
 | [LP maturity across market closure](../../ACCOUNTING_SPEC.md#2-lp-redemption-settlement-view) | [PerpMixedAccountingInvariant.t.sol](invariant/properties/PerpMixedAccountingInvariant.t.sol)::`test_RegressionLpMaturityAcrossWeekendUsesMonotonicLiveCalendar` | Input-derived weekday scheduling preserves elapsed carry and coupon history before settlement and freeze | Pending Friday deposit settles at the next independently selected live time; time never moves backward | Correctness (PR and deep) |
 
@@ -284,10 +314,17 @@ PERPS_SHARD_LIST_ONLY=1 bash scripts/run-perps-package-tests.sh 0 4
 | `audit` | 20,000 | 256 | 1,000 | Nightly and pre-audit |
 
 PR CI uses four physical shards, each running Forge with one thread. Each shard uses production via-IR for
-benchmarks and deployment gates, and non-via-IR for other correctness tests. `pr-selection.json` verifies that
+benchmarks and deployment gates, and non-via-IR for other correctness tests. Unfiltered discovery uses non-via-IR;
+its discovered function names (including inherited tests) identify the entrypoints needed by production gates.
+Other test entrypoints and scripts are excluded from via-IR compilation to bound compiler memory. Filename
+substring collisions are retained conservatively. All shared `.sol` helpers remain available. `pr-selection.json` verifies that
 those two lanes exactly partition unfiltered discovery, with no missing or duplicate tests. The `Package (perps)`
 aggregate check passes only when all four jobs succeed. To replay one PR shard:
 `PERPS_SHARD_MODE=pr FOUNDRY_PROFILE=ci FOUNDRY_FUZZ_SEED=0xdeadbeef bash scripts/run-perps-package-tests.sh 0 4`.
+Either filtered lane may have no tests: the wrapper explicitly permits an empty partition, records zero
+executions and `execution_skipped_reason: empty_partition`, and emits no Forge result file. Unfiltered discovery
+must still be nonempty and include every assigned entrypoint; missing tests, overlap and discovery failures
+remain errors. Standalone recorded runs reject empty execution by default.
 Post-merge and audit shards run production via-IR throughout. PR seed is `0xdeadbeef`; scheduled seeds derive from the
 recorded run ID. The pre-audit target and dispatched deep workflow execute `0xdeadbeef`, `0x1`, and `0x2`.
 No runner silently lowers these budgets. Explicit environment overrides are captured in the effective configuration.

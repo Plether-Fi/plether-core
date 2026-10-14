@@ -21,11 +21,14 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
 
-        // maxProfit = 1.2M tokens * $1 entry = $1.2M > pool's $1M balance
-        CfdTypes.Order memory tooLarge = CfdTypes.Order({
+        // At the $1M skew cap, $20k supplied margin covers the $15k IMR after all costs.
+        // The 25-bps buffer requires $1,002,500, but $1,002,000 cash plus $250 VPI is $250 short.
+        assertEq(pool.totalAssets(), 1_002_000e6, "Include both seed tranches in available cash");
+        assertEq(engine.settlementBufferBps(), 25, "Fixture uses the default protected buffer");
+        CfdTypes.Order memory bufferShortfall = CfdTypes.Order({
             account: account,
-            sizeDelta: 1_200_000 * 1e18,
-            marginDelta: 5000 * 1e6,
+            sizeDelta: 1_000_000 * 1e18,
+            marginDelta: 20_000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -36,7 +39,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
 
         vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 2, 7, false));
         vm.prank(address(router));
-        engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(bufferShortfall, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
 
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
@@ -46,16 +49,20 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
             orderId: 1,
-            side: CfdTypes.Side.LONG,
+            side: CfdTypes.Side.SHORT,
             isClose: false
         });
 
-        // Withdraw LP to reduce pool to $50k — solvency check should fail
+        // Withdrawal leaves about $52k including seeds. At $0.50, the order's $50k skew fits the actual
+        // depth, but its $150k maximum Short profit exceeds cash. Its $2k margin also comfortably covers IMR.
         vm.warp(block.timestamp + 1 hours); // past deposit cooldown
         uint256 withdrawnAssets = _settleJuniorWithdrawal(address(this), 950_000 * 1e6);
+        uint256 remainingDepth = pool.totalAssets();
+        assertGe(remainingDepth, 50_000e6, "The failing order must remain within the supported skew cap");
+        assertLt(remainingDepth, 150_000e6, "The failure must expose a genuine cash shortfall");
         vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 2, 7, false));
         vm.prank(address(router));
-        engine.processOrderTyped(order, 1e8, 0, uint64(block.timestamp));
+        engine.processOrderTyped(order, 0.5e8, remainingDepth, uint64(block.timestamp));
 
         // Re-deposit to allow the trade
         usdc.approve(address(juniorVault), withdrawnAssets);
@@ -106,10 +113,12 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         address account = address(uint160(1));
         _fundTrader(account, 20_000 * 1e6);
 
-        CfdTypes.Order memory tooLarge = CfdTypes.Order({
+        // The skew cap is exactly met and post-cost margin exceeds IMR, isolating the default 25-bps
+        // buffer shortfall: $1,002,500 required versus $1,002,000 initial cash plus $250 VPI.
+        CfdTypes.Order memory bufferShortfall = CfdTypes.Order({
             account: account,
-            sizeDelta: 1_200_000 * 1e18,
-            marginDelta: 5000 * 1e6,
+            sizeDelta: 1_000_000 * 1e18,
+            marginDelta: 20_000 * 1e6,
             targetPrice: 1e8,
             commitTime: uint64(block.timestamp),
             commitBlock: uint64(block.number),
@@ -127,7 +136,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
             )
         );
         vm.prank(address(router));
-        engine.processOrderTyped(tooLarge, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
+        engine.processOrderTyped(bufferShortfall, 1e8, 1_000_000 * 1e6, uint64(block.timestamp));
     }
 
     function test_OpenTradeCost_AccountsPoolInflowCanonically() public {
@@ -387,7 +396,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }
 
-    function test_OpenOrder_IMRPrecedesSkewWhenBothFail() public {
+    function test_OpenOrder_SkewPrecedesIMRWhenBothFail() public {
         uint256 poolDepth = 1_000_000 * 1e6;
         address account = address(uint160(11));
         _fundTrader(account, 5000 * 1e6);
@@ -419,7 +428,14 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
             isClose: false
         });
 
-        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector, 1, 6, false));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
+                CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH),
+                false
+            )
+        );
         vm.prank(address(router));
         engine.processOrderTyped(order, 1e8, poolDepth, uint64(block.timestamp));
     }

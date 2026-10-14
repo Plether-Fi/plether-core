@@ -408,6 +408,11 @@ The protocol terminalizes only exact, typed business-policy failures. Panics, ou
 selectors, malformed typed failures, and malformed success payloads remain retryable. This prevents infrastructure
 faults from being guessed into financial meaning.
 
+Open code `11` (`NUMERIC_DOMAIN_EXCEEDED`) is a typed protocol-state invalidation at execution. Close code `7`
+(`SIDE_MISMATCH`) is user-invalid: the queued direction no longer matches the live position. It is checked before
+slippage without reaching the Engine. Both use ordinary terminal cleanup and authenticated receipts; neither makes
+unknown panic payloads terminal.
+
 `BatchResult` contains:
 
 - `nextOrderId`: the next live FIFO head, or zero after a complete drain;

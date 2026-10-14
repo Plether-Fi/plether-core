@@ -212,6 +212,22 @@ These are three distinct boundaries:
 The cutoff freezes only additions to the imminent epoch. Trading, closes, liquidations, claims, carry, pool
 accounting, governance finalization, oracle state, and cancellations can still change the state used at settlement.
 
+## Funded settlement minimum for a pending flat open
+
+A positive `minPostSettlementBalanceUsdc` is supported only for a flat account's first pending open. The canonical
+pending intent is the sole floor ledger; no account-level floor storage is added. After commitment and reservations,
+settlement custody `B`, minimum `M` and maximum gross debit `G` must satisfy `B >= M && B - M >= G`. Every owner
+withdrawal applies the same predicate after its provisional debit, in addition to ordinary reservation checks. The
+withdrawal estimate is `min(freeSettlement, B - M - G)` when funded, otherwise zero.
+
+No later fresh same-account order may overlap this funded open. Increases and closes cannot request a positive
+minimum, and exact intent replay precedes fresh admission. With the account flat, deposits, claim settlement and keeper
+credits cannot collect live-position carry; they only increase its funded surplus. Execution and terminal bounty
+settlement may consume their allowance while linked. Successful or failed terminal queue removal releases the floor;
+retryable execution and failed receipt finalization roll back to the original pending floor. Zero-minimum orders retain
+ordinary availability. This protection prevents owner withdrawals from manufacturing a settlement-minimum failure; it
+does not freeze market-dependent financial bounds.
+
 ## The Four Core Accounting Views
 
 The engine needs separate views because different actions answer different questions.
@@ -649,7 +665,8 @@ Rules:
   collection from current buckets; stored arrears alone do not prove carry delinquency,
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
-- carry is realized before margin, pool-asset, or risk-parameter mutations change the carry base/rate denominator,
+- side carry indexes advance before borrowing-base, pool-asset, or risk-parameter mutations change their rate or
+  denominator. Account collection remains lazy; an LP deposit or redemption does not collect every trader's debt,
 - a flat-to-open transition advances both side indexes to execution wall-clock time using the old borrowing bases
   and pool depth before inserting new exposure. This also applies to historical-price fills that retain a newer
   cached accounting mark: the new position must not accrue carry for time before it opened,
@@ -670,6 +687,23 @@ Rules:
 
 `CarryRealized` reports collection and retained arrears whenever nonzero carry is due, including zero collection when
 no backing remains. `CarryCheckpointed` remains a deprecated ABI declaration and is no longer emitted.
+
+LP ownership follows collection time. Indexed pending carry and retained `unsettledCarryUsdc` are trader debt, not
+LP NAV receivables. Cash collection becomes pool revenue and the existing tranche waterfall prices it at the next
+reconcile. Shares activated before collection participate even while held in deposit-claim escrow; shares burned to
+fund a redemption stop participating, and the resulting fixed cash claim does not earn later carry. Carry collected
+before deposit activation is already included in the activation price.
+
+This intentionally allows a trader and incoming LP to time collection after LP activation and share carry accrued
+before that activation. There is no account sweep, accrual-cohort allocation, or entry/exit barrier for pending carry.
+The same rule applies when retained arrears are later paid. This is a collection-time ownership policy, not a claim
+that timing cannot transfer part of old carry revenue to a new LP.
+
+Collected cash is not always an equal increase in LP NAV. For a solvent pool at a fixed mark and with no other flows,
+the change in aggregate tranche NAV is `collectedCarryUsdc + changeInTerminalLpPriceDeltaUsdc`. Collecting from pledged
+margin reduces the account's collectible price-loss cap. If that cap binds both before and after collection, the decrease in
+the marked price-loss receivable offsets the carry cash. Reconcile must neither add uncollected carry nor count the
+same pledge once as a price-loss receivable and again as collected revenue.
 
 `MarginClearinghouseAccountingLib.projectCarryLoss` owns the post-carry collateral arithmetic used by trade planners,
 withdrawal estimates, and account-risk views. It reuses the live collector's allocation policy and returns fresh buckets;
@@ -871,6 +905,10 @@ Component authority is deliberately split:
 ### Open-order failure policy
 
 - deterministic live-state open failures may be rejected at commit time,
+- unsupported numeric opens return `NUMERIC_DOMAIN_EXCEEDED` (11), commit-rejectable and execution-time
+  `ProtocolStateInvalidated`; exact typed execution rejection finalizes the order and advances FIFO,
+- stale-price commitment ignores ordinary economic rejections but still rejects code 11; execution repeats the
+  checked planner. A prior valid business rejection, such as excessive skew, keeps its own failure code,
 - ordinary execution-time terminal failures pay the keeper from clearinghouse-reserved bounty value,
 - the persistent administrative risk-off cutoff is the sole terminal-failure exception: it refunds the full remaining
   margin, ordinary execution bounty, and any attached `PendingOpen` protection bounties internally to the trader in
@@ -939,6 +977,13 @@ Required properties:
 
 ### Open projection
 
+- request/resulting lots fit `uint112`, exact entry cost fits `uint144`, and requested margin fits `int256`;
+  aggregate exposure, lifetime VPI, signed equity, settlement credits, and liability additions must be representable,
+- VPI retains the original checked-arithmetic domain and division order: scale skew/depth by `1e12`, square skew,
+  divide by depth, multiply by the factor, divide by `1e18`, then by two, then by `1e12`. Zero skew or depth returns
+  zero. Open planning classifies an unsupported intermediate instead of producing a retryable arithmetic panic,
+- the recovery-aware skew rule precedes VPI construction. Bounty eligibility compares the raw floored
+  notional-based requirement to the minimum, avoiding a minimum-bounty cross-product,
 - carry projection reduces position margin, its locked bucket, the selected side margin total, and settlement custody
   consistently, recomputes the position and side borrowing bases from the reduced pledge, and credits pool assets/cash
   only by the amount actually collected,
@@ -948,6 +993,21 @@ Required properties:
   without making the order side heavier; unchanged or worsening skew and above-cap sign flips remain invalid,
 - open preview and execution must apply the same rebate credit, VPI-reserve funding, liquidation-reserve carve-out,
   and final pledge-plus-claim risk check.
+
+For the supported configuration, lot/entry limits imply that size and scaled entry notional fit `int256`.
+Notional times the capped fee/margin rates fits `uint256`; each checked VPI curve cost is at most
+`uint256.max / 1e18 / 2 / 1e12`, so cost differences plus execution fees fit `int256`.
+These bounds do not promise safe arbitrary future governance parameters or totality of the maximum-size search
+outside its existing domain.
+
+### Close direction at execution
+
+A queued close must match the nonzero live position's side. Earlier queued closes and opens may fail, so admission's
+projected direction is insufficient. After existing lifecycle/MEV checks and before slippage, a mismatch finalizes as
+`PlannerRejected`, `UserInvalid`, `SIDE_MISMATCH` (7), with authenticated typed evidence and
+`priceReachedEngine=false`. The pure close planner repeats the predicate before carry and settlement arithmetic.
+A missing position keeps its existing size rejection. Ordinary failure bounty provenance and pledge restoration
+remain in force, and unknown failures still roll back the item for retry.
 
 ### Treasury fee withdrawals
 

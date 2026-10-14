@@ -30,9 +30,8 @@ library CfdEnginePlanLib {
     // ──────────────────────────────────────────────
 
     /// @notice Replaces one position's post-carry margin inside its aggregate side-margin total.
-    /// @dev Computes `sideTotalMarginAfterCarry + positionMarginAfterOpen - effectivePositionMarginAfterCarry` using
-    ///      signed intermediates. Callers must maintain a nonnegative aggregate result and values representable as
-    ///      signed 256-bit integers; inconsistent inputs can wrap on explicit conversion to `uint256`.
+    /// @dev Subtracts the replaced contribution first, avoiding an artificial signed-intermediate limit. Callers
+    ///      supply a consistent aggregate and check headroom for the new contribution.
     /// @param sideTotalMarginAfterCarry Aggregate selected-side margin after carry realization.
     /// @param effectivePositionMarginAfterCarry The account position's contribution contained in that aggregate.
     /// @param positionMarginAfterOpen Replacement contribution after the open/increase.
@@ -42,10 +41,7 @@ library CfdEnginePlanLib {
         uint256 effectivePositionMarginAfterCarry,
         uint256 positionMarginAfterOpen
     ) internal pure returns (uint256 sideTotalMarginAfterOpen) {
-        return uint256(
-            int256(sideTotalMarginAfterCarry) + int256(positionMarginAfterOpen)
-                - int256(effectivePositionMarginAfterCarry)
-        );
+        return sideTotalMarginAfterCarry - effectivePositionMarginAfterCarry + positionMarginAfterOpen;
     }
 
     /// @notice Returns the exact nonwithdrawable backing required by a signed lifetime-VPI balance.
@@ -92,6 +88,7 @@ library CfdEnginePlanLib {
                 || code == CfdEnginePlanTypes.OpenRevertCode.INVALID_SIZE_QUANTUM
                 || code == CfdEnginePlanTypes.OpenRevertCode.LIQUIDATION_RESERVE_UNFUNDED
                 || code == CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED
+                || code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED
         ) {
             return CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable;
         }
@@ -123,6 +120,7 @@ library CfdEnginePlanLib {
             code == CfdEnginePlanTypes.OpenRevertCode.DEGRADED_MODE
                 || code == CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH
                 || code == CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED
+                || code == CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED
         ) {
             return CfdEnginePlanTypes.ExecutionFailurePolicyCategory.ProtocolStateInvalidated;
         }
@@ -293,12 +291,17 @@ library CfdEnginePlanLib {
         delta.price = price;
         delta.posSide = order.side;
         publishTime;
-        delta.pendingCarryUsdc = _pendingCarryUsdc(effectiveSnap);
 
         if (order.sizeDelta == 0 || order.sizeDelta % CfdTypes.SIZE_QUANTUM != 0) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INVALID_SIZE_QUANTUM;
             return delta;
         }
+        if (
+            order.sizeDelta / CfdTypes.SIZE_QUANTUM > type(uint112).max || order.marginDelta > uint256(type(int256).max)
+        ) {
+            return _numericOpenFailure(delta);
+        }
+        delta.pendingCarryUsdc = _pendingCarryUsdc(effectiveSnap);
 
         if (
             effectiveSnap.position.size > 0
@@ -319,42 +322,24 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        CfdEnginePlanTypes.SideSnapshot memory long = effectiveSnap.longSide;
-        CfdEnginePlanTypes.SideSnapshot memory short = effectiveSnap.shortSide;
-        delta.sideTotalMarginBefore = order.side == CfdTypes.Side.LONG ? long.totalMargin : short.totalMargin;
-
-        uint256 preSkewUsdc = _absSkewUsdc(long, short, price);
-        (uint256 postSkewUsdc, bool orderSideIsPostOpenHeavy) =
-            _postOpenSkewUsdc(long, short, order.side, order.sizeDelta, price);
-
-        OpenAccountingLib.OpenState memory openState = OpenAccountingLib.buildOpenState(
-            OpenAccountingLib.OpenInputs({
-                currentSize: snap.position.size,
-                currentEntryCostUsdcAtoms: snap.positionEntryCostUsdcAtoms,
-                side: order.side,
-                sizeDelta: order.sizeDelta,
-                price: price,
-                capPrice: effectiveSnap.capPrice,
-                preSkewUsdc: preSkewUsdc,
-                postSkewUsdc: postSkewUsdc,
-                poolDepthUsdc: effectiveSnap.poolAssetsUsdc,
-                executionFeeBps: effectiveSnap.executionFeeBps,
-                riskParams: effectiveSnap.riskParams
-            })
-        );
-        delta.openState = openState;
-
-        uint256 resultingNotionalUsdc = (openState.newSize * price) / CfdMath.USDC_TO_TOKEN_SCALE;
-        if (
-            resultingNotionalUsdc * effectiveSnap.riskParams.bountyBps < effectiveSnap.riskParams.minBountyUsdc * 10_000
-        ) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
+        _planOpenState(effectiveSnap, order, delta);
+        if (delta.revertCode != CfdEnginePlanTypes.OpenRevertCode.OK) {
             return delta;
         }
+        OpenAccountingLib.OpenState memory openState = delta.openState;
+        CfdEnginePlanTypes.SideSnapshot memory selected = _selectedSide(effectiveSnap, order.side);
+        delta.sideTotalMarginBefore = selected.totalMargin;
 
         delta.tradeCostUsdc = openState.tradeCostUsdc;
         delta.marginDeltaUsdc = order.marginDelta;
         delta.poolRebatePayoutUsdc = openState.tradeCostUsdc < 0 ? uint256(-openState.tradeCostUsdc) : 0;
+
+        if (
+            !_lifetimeVpiAdditionFits(effectiveSnap.position.vpiAccrued, openState.vpiUsdc)
+                || delta.poolRebatePayoutUsdc > type(uint256).max - effectiveSnap.accountBuckets.settlementBalanceUsdc
+        ) {
+            return _numericOpenFailure(delta);
+        }
 
         delta.vpiRebateReserveBeforeUsdc = effectiveSnap.vpiRebateReserveUsdc;
         if (delta.vpiRebateReserveBeforeUsdc < _negativeVpiReserveTarget(effectiveSnap.position.vpiAccrued)) {
@@ -363,25 +348,40 @@ library CfdEnginePlanLib {
         }
         delta.vpiRebateReserveAfterUsdc =
             _negativeVpiReserveTarget(effectiveSnap.position.vpiAccrued + openState.vpiUsdc);
-        uint256 vpiReserveReleaseUsdc = delta.vpiRebateReserveBeforeUsdc > delta.vpiRebateReserveAfterUsdc
-            ? delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc
-            : 0;
-        IMarginClearinghouse.AccountUsdcBuckets memory openCostBuckets =
-            _accountBucketsAfterVpiReserveRelease(effectiveSnap.accountBuckets, vpiReserveReleaseUsdc);
+        {
+            uint256 vpiReserveReleaseUsdc = delta.vpiRebateReserveBeforeUsdc > delta.vpiRebateReserveAfterUsdc
+                ? delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc
+                : 0;
+            IMarginClearinghouse.AccountUsdcBuckets memory openCostBuckets =
+                _accountBucketsAfterVpiReserveRelease(effectiveSnap.accountBuckets, vpiReserveReleaseUsdc);
 
-        MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan =
-            MarginClearinghouseAccountingLib.planOpenCostApplication(
-                openCostBuckets, delta.marginDeltaUsdc, delta.tradeCostUsdc
-            );
-        if (openCostPlan.insufficientFreeEquity || openCostPlan.insufficientPositionMargin) {
-            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
-            return delta;
+            MarginClearinghouseAccountingLib.OpenCostPlan memory openCostPlan =
+                MarginClearinghouseAccountingLib.planOpenCostApplication(
+                    openCostBuckets, delta.marginDeltaUsdc, delta.tradeCostUsdc
+                );
+            if (openCostPlan.insufficientFreeEquity || openCostPlan.insufficientPositionMargin) {
+                delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES;
+                return delta;
+            }
+
+            _planOpenReserveFunding(effectiveSnap, openCostPlan, delta);
         }
-
-        _planOpenReserveFunding(effectiveSnap, openCostPlan, delta);
         if (delta.revertCode != CfdEnginePlanTypes.OpenRevertCode.OK) {
             return delta;
         }
+        if (
+            effectiveSnap.position.margin > uint256(type(int256).max)
+                || delta.positionMarginAfterOpen > type(uint144).max
+                || effectiveSnap.traderClaimBalanceForAccount > type(uint144).max - delta.positionMarginAfterOpen
+                || delta.positionMarginAfterOpen
+                    > type(uint256).max - (delta.sideTotalMarginBefore - effectiveSnap.position.margin)
+                || openState.newEntryNotional - openState.oldEntryNotional > type(uint256).max - selected.entryNotional
+                || openState.addedMaxProfitUsdc > type(uint256).max - selected.maxProfitUsdc
+        ) {
+            return _numericOpenFailure(delta);
+        }
+        // The terminal book reads P+C into uint144. Public opens execute at the account FIFO head; pledge-funded
+        // close escrow requires an empty queue at creation, so its older close clears it before an open executes.
 
         delta.newPosSize = openState.newSize;
         delta.newPosEntryPrice = openState.newEntryPrice;
@@ -403,13 +403,33 @@ library CfdEnginePlanLib {
             delta.sideTotalMarginBefore, effectiveSnap.position.margin, delta.positionMarginAfterOpen
         );
 
+        {
+            uint256 projectedLiability = selected.maxProfitUsdc + delta.sideMaxProfitIncrease;
+            uint256 oppositeLiability = order.side == CfdTypes.Side.LONG
+                ? effectiveSnap.shortSide.maxProfitUsdc
+                : effectiveSnap.longSide.maxProfitUsdc;
+            if (oppositeLiability > projectedLiability) {
+                projectedLiability = oppositeLiability;
+            }
+            if (
+                projectedLiability > type(uint256).max - effectiveSnap.totalTraderClaimBalanceUsdc
+                    || (openState.vpiUsdc > 0
+                        && uint256(openState.vpiUsdc) > type(uint256).max - effectiveSnap.poolCashUsdc)
+            ) {
+                return _numericOpenFailure(delta);
+            }
+        }
+
         if (!_applyOpenSettlementBufferAfterPlan(effectiveSnap, delta)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
             return delta;
         }
 
-        PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState =
+        (bool riskFits, PositionRiskAccountingLib.PositionRiskState memory postOpenRiskState) =
             _buildPostOpenRiskState(effectiveSnap, delta);
+        if (!riskFits || openState.initialMarginRequirementUsdc > uint256(type(int256).max)) {
+            return _numericOpenFailure(delta);
+        }
         if (
             postOpenRiskState.liquidatable
                 || postOpenRiskState.equityUsdc < int256(openState.initialMarginRequirementUsdc)
@@ -418,16 +438,106 @@ library CfdEnginePlanLib {
             return delta;
         }
 
-        if (effectiveSnap.poolAssetsUsdc > 0) {
-            uint256 maxSkewUsdc =
-                Math.mulDiv(effectiveSnap.poolAssetsUsdc, effectiveSnap.riskParams.maxSkewRatio, CfdMath.WAD);
-            if (postSkewUsdc > maxSkewUsdc && (postSkewUsdc >= preSkewUsdc || orderSideIsPostOpenHeavy)) {
+        delta.valid = true;
+    }
+
+    /// @notice Applies aggregate-domain and skew policy before constructing checked open economics once.
+    function _planOpenState(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Order memory order,
+        CfdEnginePlanTypes.OpenDelta memory delta
+    ) private pure {
+        if (!_openTerminalBookEnvelopeFits(snap, order, delta.price)) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+            return;
+        }
+        uint256 selectedOi = _selectedSide(snap, order.side).openInterest;
+        if (
+            order.sizeDelta > type(uint256).max - selectedOi
+                || snap.longSide.openInterest > type(uint256).max / snap.capPrice
+                || snap.shortSide.openInterest > type(uint256).max / snap.capPrice
+                || selectedOi + order.sizeDelta > type(uint256).max / snap.capPrice
+        ) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+            return;
+        }
+        OpenAccountingLib.OpenInputs memory inputs;
+        inputs.preSkewUsdc = _absSkewUsdc(snap.longSide, snap.shortSide, delta.price);
+        bool orderSideIsPostOpenHeavy;
+        (inputs.postSkewUsdc, orderSideIsPostOpenHeavy) =
+            _postOpenSkewUsdc(snap.longSide, snap.shortSide, order.side, order.sizeDelta, delta.price);
+        if (snap.poolAssetsUsdc > 0) {
+            uint256 maxSkewUsdc = Math.mulDiv(snap.poolAssetsUsdc, snap.riskParams.maxSkewRatio, CfdMath.WAD);
+            if (
+                inputs.postSkewUsdc > maxSkewUsdc
+                    && (inputs.postSkewUsdc >= inputs.preSkewUsdc || orderSideIsPostOpenHeavy)
+            ) {
                 delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
-                return delta;
+                return;
             }
         }
+        inputs.currentSize = snap.position.size;
+        inputs.currentEntryCostUsdcAtoms = snap.positionEntryCostUsdcAtoms;
+        inputs.side = order.side;
+        inputs.sizeDelta = order.sizeDelta;
+        inputs.price = delta.price;
+        inputs.capPrice = snap.capPrice;
+        inputs.poolDepthUsdc = snap.poolAssetsUsdc;
+        inputs.executionFeeBps = snap.executionFeeBps;
+        inputs.riskParams = snap.riskParams;
+        bool valid;
+        uint256 rawLiquidationRequirementUsdc;
+        (valid, delta.openState, rawLiquidationRequirementUsdc) = OpenAccountingLib.tryBuildOpenState(inputs);
+        if (!valid) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+            return;
+        }
+        // floor(notional*bps/10_000) >= minimum is equivalent to the original cross-product comparison.
+        if (rawLiquidationRequirementUsdc < snap.riskParams.minBountyUsdc) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.POSITION_TOO_SMALL;
+        }
+    }
 
-        delta.valid = true;
+    /// @notice Keeps opens inside the terminal book's signed aggregate coefficient budgets without extra snapshot data.
+    /// @dev Gross lots are exact. For the intercept budget, LONG entry+effective-cap <= lots*CAP_PRICE; SHORT
+    ///      entry+effective-cap <= 2*entry. This sufficient envelope is conservative only near astronomical aggregate
+    ///      limits (at the default 2e8 cap, the gross-lot limit already implies it). Existing in-domain rounding is unchanged.
+    function _openTerminalBookEnvelopeFits(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdTypes.Order memory order,
+        uint256 price
+    ) private pure returns (bool) {
+        uint256 maxLots = uint256(int256(type(int112).max));
+        uint256 longLots = snap.longSide.openInterest / CfdTypes.SIZE_QUANTUM;
+        uint256 shortLots = snap.shortSide.openInterest / CfdTypes.SIZE_QUANTUM;
+        uint256 addedLots = order.sizeDelta / CfdTypes.SIZE_QUANTUM;
+        if (longLots > maxLots || shortLots > maxLots - longLots || addedLots > maxLots - longLots - shortLots) {
+            return false;
+        }
+        uint256 shortEntry = snap.shortSide.entryNotional / CfdMath.USDC_TO_TOKEN_SCALE;
+        if (order.side == CfdTypes.Side.LONG) {
+            longLots += addedLots;
+        } else {
+            shortEntry += addedLots * price;
+        }
+        // Canonical entry costs never exceed their lots*cap. The gross-lot check and uint32 cap bound all products
+        // and this sum below uint256, including snapshots at the preexisting terminal-book boundary.
+        return longLots * snap.capPrice + 2 * shortEntry <= uint256(int256(type(int144).max));
+    }
+
+    function _numericOpenFailure(
+        CfdEnginePlanTypes.OpenDelta memory delta
+    ) private pure returns (CfdEnginePlanTypes.OpenDelta memory) {
+        delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
+        return delta;
+    }
+
+    function _lifetimeVpiAdditionFits(
+        int256 previous,
+        int256 change
+    ) private pure returns (bool) {
+        return previous != type(int256).min && (change <= 0 || previous <= type(int256).max - change)
+            && (change >= 0 || previous > type(int256).min - change);
     }
 
     /// @notice Allocates newly required VPI and liquidation reserves from free cash and new position pledge.
@@ -533,11 +643,12 @@ library CfdEnginePlanLib {
     ///      window and maintenance margin otherwise.
     /// @param snap Carry-adjusted snapshot before applying the new open.
     /// @param delta Partially built open delta containing resulting position and trade-cost values.
+    /// @return valid Whether the actual equity operands and sum fit signed accounting.
     /// @return riskState Projected PnL, equity, notional, threshold, and liquidation status.
     function _buildPostOpenRiskState(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
-    ) private pure returns (PositionRiskAccountingLib.PositionRiskState memory riskState) {
+    ) private pure returns (bool valid, PositionRiskAccountingLib.PositionRiskState memory riskState) {
         CfdTypes.Position memory projectedPosition = snap.position;
         projectedPosition.side = delta.posSide;
         projectedPosition.size = delta.newPosSize;
@@ -545,7 +656,20 @@ library CfdEnginePlanLib {
         projectedPosition.entryPrice = delta.newPosEntryPrice;
         projectedPosition.vpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
 
+        if (snap.traderClaimBalanceForAccount > uint256(type(int256).max) - delta.positionMarginAfterOpen) {
+            return (false, riskState);
+        }
         uint256 reachableCollateralUsdc = delta.positionMarginAfterOpen + snap.traderClaimBalanceForAccount;
+        (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(
+            delta.newPosSize / CfdTypes.SIZE_QUANTUM,
+            delta.newPosEntryCostUsdcAtoms,
+            delta.posSide,
+            delta.price,
+            snap.capPrice
+        );
+        if (isProfit && reachableCollateralUsdc > uint256(type(int256).max) - pnlAbs) {
+            return (false, riskState);
+        }
 
         riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             projectedPosition,
@@ -555,6 +679,7 @@ library CfdEnginePlanLib {
             reachableCollateralUsdc,
             snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps
         );
+        return (true, riskState);
     }
 
     /// @notice Applies the effective-asset requirement when a planned open preserves protected settlement headroom.
@@ -616,8 +741,8 @@ library CfdEnginePlanLib {
     // ──────────────────────────────────────────────
 
     /// @notice Plans a full or partial close, including PnL, carry, charges, collection, claims, and solvency.
-    /// @dev Execution price is capped by `snap.capPrice`; the live position side is authoritative and `order.side` is
-    ///      not read. Carry is collected from active margin, then free settlement before close economics are calculated;
+    /// @dev Execution price is capped by `snap.capPrice`; a close direction differing from a nonzero live position is
+    ///      rejected before carry. Carry is collected from active margin, then free settlement before close economics are calculated;
     ///      any unpaid remainder enters the separate action charge. Price losses consume the same-account claim first
     ///      and then eligible PnL pledge, with excess written off. Partial-close pledge consumption and release preserve
     ///      the remaining terminal price curve. Action charges use new price gain, dedicated VPI backing, spendable
@@ -628,7 +753,7 @@ library CfdEnginePlanLib {
     ///      A valid close may project degraded mode; solvency is reported rather than rejected. Rounding follows
     ///      `CloseAccountingLib`; `publishTime` is currently unused.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
-    /// @param order Close order; account and size are consumed, while side is taken from `snap.position`.
+    /// @param order Close order; side must match the nonzero live position before account and size are consumed.
     /// @param executionPrice Oracle execution price before the protocol cap.
     /// @param publishTime Oracle publish timestamp; retained for interface parity and currently unused.
     /// @return delta Complete close mutation and solvency plan or the first typed failure result.
@@ -643,6 +768,10 @@ library CfdEnginePlanLib {
         delta.sizeDelta = order.sizeDelta;
         delta.price = price;
         publishTime;
+        if (snap.position.size != 0 && order.side != snap.position.side) {
+            delta.revertCode = CfdEnginePlanTypes.CloseRevertCode.SIDE_MISMATCH;
+            return delta;
+        }
         delta.pendingCarryUsdc = _pendingCarryUsdc(snap);
         delta.realizedCarryUsdc = _applyPendingCarryRealizationToSnapshot(snap, delta.pendingCarryUsdc);
 
