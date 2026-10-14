@@ -7,13 +7,9 @@ import {CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEngineView} from "@plether/p
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
-import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
-import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
-import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {CloseCommitmentLib} from "@plether/perps/libraries/CloseCommitmentLib.sol";
-import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 
 interface ICloseAdmission {
@@ -30,35 +26,26 @@ interface ICfdClosePreviewRouter {
     function liquidationBatchSidecar() external view returns (address);
 
     function closeOrderExecutionBountyUsdc() external view returns (uint256);
-    function lifecycleBook() external view returns (address);
-    function positionProtectionBook() external view returns (address);
-    function pendingOrderCounts(
-        address account
-    ) external view returns (uint256);
-    function maxExecutionWindowSeconds() external view returns (uint256);
-
-}
-
-interface ICfdClosePreviewProtection {
-
-    function activePositionProtectionId(
-        address account
-    ) external view returns (uint64);
 
 }
 
 /// @title CfdClosePreview
-/// @notice Read-only preview of a prospective close after projecting commitment carry and a new bounty reservation.
+/// @notice Read-only preview of a prospective zero-bounty close after projecting commitment carry.
 /// @dev This schema targets a fresh deployment. Historical engines require their archived preview and planner ABI.
 contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
 
     error CfdClosePreview__NotCloseOrder();
+    // Deprecated grant errors remain declared to avoid unrelated ABI churn.
     error CfdClosePreview__SponsoredDeploymentMismatch();
     error CfdClosePreview__SponsoredIntentInvalid();
     error CfdClosePreview__SponsoredAccountBusy();
     error CfdClosePreview__UncoveredCarry(uint256 unpaidCarryUsdc);
     error CfdClosePreview__SubsidyMismatch(uint256 expectedUsdc, uint256 requiredUsdc);
+    error CfdEngine__InsufficientCloseOrderBountyBacking(
+        uint256 requiredBountyUsdc, uint256 availableBackingUsdc, uint256 unpaidCarryUsdc
+    );
 
+    /// @dev Deprecated compatibility getters; this lens no longer previews or validates USDC grants.
     uint256 public constant MAX_CLOSE_SUBSIDY_USDC = 200_000;
     address public immutable SPONSORED_ENGINE;
 
@@ -66,14 +53,6 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         address sponsoredEngine
     ) {
         SPONSORED_ENGINE = sponsoredEngine;
-    }
-
-    struct SponsoredClosePreview {
-        uint256 subsidyUsdc;
-        uint256 depositCarryUsdc;
-        uint256 commitmentCarryUsdc;
-        uint256 executionBountyUsdc;
-        OrderV3Types.ExecutionAssessment assessment;
     }
 
     struct ClosePreview {
@@ -116,10 +95,10 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
     }
 
     /// @notice Projects commitment now and close execution at the supplied price, using canonical pool depth.
-    /// @dev Always adds a new reservation, even if other orders already reserve bounties for this account. Assessment
-    ///      starts AFTER projected commitment; commitmentCarryUsdc is a separate debit. No future carry, oracle update,
-    ///      router queue admission, deadline or config-hash validation is simulated. Side and dust checks use the live
-    ///      position; pending opens/closes can change the router's queued projection. Re-preview if state changes.
+    /// @dev Includes commitment carry in the assessment and reports it separately in commitmentCarryUsdc. No future
+    ///      carry, oracle update, router queue admission, deadline or config-hash validation is simulated. Side and dust
+    ///      checks use the live position; pending opens/closes can change the router's queued projection. Re-preview
+    ///      if state changes.
     function previewClose(
         address engineAddress,
         CfdTypes.Order calldata order,
@@ -136,138 +115,6 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, IHousePool(engine.pool()).totalAssets());
         return _previewSnapshot(engine, planner, snapshot, order, executor, executionPrice, publishTime, bounds);
-    }
-
-    /// @notice Reviews an exact testnet bounty grant followed by deposit, commitment and execution.
-    /// @dev Does not simulate queue admission or future execution. The account must execute the guard immediately
-    ///      before mint/approve/deposit/commit in a reverting batch. There is deliberately no campaign expiry.
-    function previewSponsoredClose(
-        address engineAddress,
-        address account,
-        OrderV3Types.OrderRequest calldata request,
-        address executor,
-        uint256 executionPrice,
-        uint64 publishTime
-    ) external view returns (SponsoredClosePreview memory result) {
-        _validateSponsoredIntent(engineAddress, account, request, false);
-        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
-        ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
-        CfdEnginePlanTypes.RawSnapshot memory snapshot;
-        (snapshot, result.subsidyUsdc, result.depositCarryUsdc) = _sponsoredSnapshot(engine, planner, account);
-        ClosePreview memory close = _previewSponsoredExecution(
-            engineAddress,
-            snapshot,
-            _requestOrder(account, request),
-            request.bounds,
-            executor,
-            executionPrice,
-            publishTime
-        );
-        result.commitmentCarryUsdc = close.commitmentCarryUsdc;
-        result.executionBountyUsdc = close.executionBountyUsdc;
-        result.assessment = close.assessment;
-    }
-
-    function _previewSponsoredExecution(
-        address engineAddress,
-        CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        CfdTypes.Order memory order,
-        OrderV3Types.ExecutionBounds calldata bounds,
-        address executor,
-        uint256 executionPrice,
-        uint64 publishTime
-    ) private view returns (ClosePreview memory) {
-        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
-        return _previewLegacySnapshot(
-            engine, ICfdEnginePlanner(engine.planner()), snapshot, order, executor, executionPrice, publishTime, bounds
-        );
-    }
-
-    /// @notice First call of the sponsored smart-account batch; a reused intent must never mint another grant.
-    function validateSponsoredClose(
-        address engineAddress,
-        OrderV3Types.OrderRequest calldata request,
-        uint256 expectedSubsidyUsdc
-    ) external view {
-        _validateSponsoredIntent(engineAddress, msg.sender, request, true);
-        ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
-        ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
-        (CfdEnginePlanTypes.RawSnapshot memory snapshot, uint256 requiredUsdc,) =
-            _sponsoredSnapshot(engine, planner, msg.sender);
-        if (requiredUsdc == 0 || requiredUsdc != expectedSubsidyUsdc) {
-            revert CfdClosePreview__SubsidyMismatch(expectedSubsidyUsdc, requiredUsdc);
-        }
-        CfdTypes.Order memory order = _requestOrder(msg.sender, request);
-        _validateRouterCommit(snapshot, order);
-        _validateCommit(snapshot, order.sizeDelta);
-        _validatePartialClose(planner, snapshot, order.sizeDelta);
-    }
-
-    function _sponsoredEngine() internal view virtual returns (address) {
-        return SPONSORED_ENGINE;
-    }
-
-    function _validateSponsoredIntent(
-        address engineAddress,
-        address account,
-        OrderV3Types.OrderRequest calldata request,
-        bool finalRequest
-    ) private view {
-        if (request.bounds.minPostSettlementBalanceUsdc != 0) {
-            revert IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported();
-        }
-        if (block.chainid != 421_614 || engineAddress != _sponsoredEngine()) {
-            revert CfdClosePreview__SponsoredDeploymentMismatch();
-        }
-        ICfdClosePreviewRouter router = ICfdClosePreviewRouter(ICfdOrderPolicyEngineView(engineAddress).orderRouter());
-        IOrderLifecycleBook book = IOrderLifecycleBook(router.lifecycleBook());
-        (OrderV3Types.ClientIntentResolution resolution,,) = book.resolveClientIntent(account, request);
-        uint8 modes = request.bounds.allowedExecutionModes;
-        if (
-            !request.isClose || request.marginDelta != 0 || request.targetPrice == 0
-                || request.clientOrderId == bytes32(0) || bytes8(request.clientOrderId) == hex"504c455448455221"
-                || resolution != OrderV3Types.ClientIntentResolution.Unused || request.bounds.submitBy < block.timestamp
-                || request.bounds.executionWindowSeconds == 0
-                || request.bounds.executionWindowSeconds > router.maxExecutionWindowSeconds()
-                || request.bounds.expectedConfigHash != book.currentExecutionConfigHash()
-                || (modes == 0 || modes > 7 || (finalRequest && modes != 1 && modes != 2 && modes != 4))
-                || request.bounds.maxExecutionBountyUsdc < router.closeOrderExecutionBountyUsdc()
-        ) {
-            revert CfdClosePreview__SponsoredIntentInvalid();
-        }
-        if (
-            router.pendingOrderCounts(account) != 0
-                || ICfdClosePreviewProtection(router.positionProtectionBook()).activePositionProtectionId(account) != 0
-        ) {
-            revert CfdClosePreview__SponsoredAccountBusy();
-        }
-    }
-
-    function _sponsoredSnapshot(
-        ICfdOrderPolicyEngineView engine,
-        ICfdEnginePlanner planner,
-        address account
-    ) private view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot, uint256 subsidy, uint256 depositCarry) {
-        uint256 poolAssets = IHousePool(engine.pool()).totalAssets();
-        snapshot = _buildRawSnapshot(engine, planner, account, poolAssets);
-        CfdEnginePlanLib.projectCloseCommitCarry(snapshot);
-        if (snapshot.unsettledCarryUsdc != 0) {
-            revert CfdClosePreview__UncoveredCarry(snapshot.unsettledCarryUsdc);
-        }
-        uint256 bounty = ICfdClosePreviewRouter(engine.orderRouter()).closeOrderExecutionBountyUsdc();
-        if (bounty > MAX_CLOSE_SUBSIDY_USDC) {
-            revert CfdClosePreview__SubsidyMismatch(MAX_CLOSE_SUBSIDY_USDC, bounty);
-        }
-        subsidy = bounty > snapshot.accountBuckets.freeSettlementUsdc
-            ? bounty - snapshot.accountBuckets.freeSettlementUsdc
-            : 0;
-        // Reload the ORIGINAL snapshot: deposit credits custody before invoking the carry hook.
-        snapshot = _buildRawSnapshot(engine, planner, account, poolAssets);
-        if (subsidy != 0) {
-            snapshot.accountBuckets.settlementBalanceUsdc += subsidy;
-            snapshot.accountBuckets.freeSettlementUsdc += subsidy;
-            depositCarry = CfdEnginePlanLib.projectCloseCommitCarry(snapshot);
-        }
     }
 
     function _requestOrder(
@@ -308,61 +155,6 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         _includeCommitment(preview.assessment, preview.commitment, bounds, preview.executionBountyUsdc);
     }
 
-    function _previewLegacySnapshot(
-        ICfdOrderPolicyEngineView engine,
-        ICfdEnginePlanner planner,
-        CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        CfdTypes.Order memory order,
-        address executor,
-        uint256 executionPrice,
-        uint64 publishTime,
-        OrderV3Types.ExecutionBounds calldata bounds
-    ) private view returns (ClosePreview memory preview) {
-        preview.executionBountyUsdc = ICfdClosePreviewRouter(engine.orderRouter()).closeOrderExecutionBountyUsdc();
-        _validateRouterCommit(snapshot, order);
-
-        // Preserve the legacy paid testnet projection; unpaid closes use canonical carry and admission.
-        if (preview.executionBountyUsdc == 0) {
-            preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta, 0);
-            preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
-        } else {
-            _validateCommit(snapshot, order.sizeDelta);
-            preview.commitmentCarryUsdc = CfdEnginePlanLib.projectCloseCommitCarry(snapshot);
-            uint256 freeUsdc = snapshot.accountBuckets.freeSettlementUsdc;
-            if (freeUsdc < preview.executionBountyUsdc) {
-                revert ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking(
-                    preview.executionBountyUsdc, freeUsdc, snapshot.unsettledCarryUsdc
-                );
-            }
-            _validatePartialClose(planner, snapshot, order.sizeDelta);
-            _reserveBounty(snapshot, preview.executionBountyUsdc);
-        }
-        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice, publishTime);
-        preview.assessment =
-            _evaluateClose(snapshot, delta, bounds, preview.executionBountyUsdc, executor == order.account);
-    }
-
-    function _validatePartialClose(
-        ICfdEnginePlanner planner,
-        CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        uint256 size
-    ) private view {
-        if (size != snapshot.position.size) {
-            uint256 requiredBps =
-                snapshot.isFadWindow ? snapshot.riskParams.fadMarginBps : snapshot.riskParams.maintMarginBps;
-            if (planner.isExactPriceRiskLiquidatable(
-                    snapshot.position,
-                    snapshot.positionEntryCostUsdcAtoms,
-                    snapshot.lastMarkPrice,
-                    snapshot.capPrice,
-                    snapshot.position.margin + snapshot.traderClaimBalanceForAccount,
-                    requiredBps
-                )) {
-                revert ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy();
-            }
-        }
-    }
-
     /// @dev The router checks side and partial-close dust before reserving even a zero bounty. Its queued-position
     ///      projection is deliberately not reproduced here; callers must still simulate the actual commitment.
     function _validateRouterCommit(
@@ -389,47 +181,6 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         if (order.sizeDelta < minCloseSizeDelta) {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(11);
         }
-    }
-
-    function _validateCommit(
-        CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        uint256 size
-    ) private pure {
-        if (snapshot.position.size == 0) {
-            revert ICfdEngineTypes.CfdEngine__NoOpenPosition();
-        }
-        if (size == 0) {
-            revert ICfdEngineTypes.CfdEngine__ZeroAmount();
-        }
-        if (size > snapshot.position.size) {
-            revert ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition();
-        }
-        // Deterministic SIZE_QUANTUM divisibility check; no random selection or payout depends on entropy.
-        // slither-disable-next-line weak-prng
-        if (size % CfdTypes.SIZE_QUANTUM != 0) {
-            revert ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum();
-        }
-        // CloseCommitFallback accepts any stored mark age, but requires both a price and a publish timestamp.
-        if (snapshot.lastMarkPrice == 0 || snapshot.lastMarkTime == 0) {
-            revert ICfdEngineTypes.CfdEngine__MarkPriceStale();
-        }
-    }
-
-    function _reserveBounty(
-        CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        uint256 bounty
-    ) private pure {
-        snapshot.actionReserveUsdc += bounty;
-        snapshot.protectedExecutionBountyUsdc += bounty;
-        snapshot.lockedBuckets.reservedSettlementUsdc += bounty;
-        snapshot.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
-            snapshot.accountBuckets.settlementBalanceUsdc,
-            snapshot.lockedBuckets.positionMarginUsdc,
-            snapshot.liquidationReserveUsdc,
-            snapshot.lockedBuckets.committedOrderMarginUsdc,
-            snapshot.actionReserveUsdc
-        );
-        snapshot.lockedBuckets.totalLockedMarginUsdc = snapshot.accountBuckets.totalLockedMarginUsdc;
     }
 
 }

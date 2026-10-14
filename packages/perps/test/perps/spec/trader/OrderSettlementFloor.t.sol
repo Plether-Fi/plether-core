@@ -354,10 +354,6 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         r.marginDelta = 0;
         vm.expectRevert(IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported.selector);
         preview.previewClose(address(engine), BOUNTY_TRADER, r, BOUNTY_KEEPER, BOUNTY_PRICE, uint64(block.timestamp));
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported.selector);
-        preview.previewSponsoredClose(
-            address(engine), BOUNTY_TRADER, r, BOUNTY_KEEPER, BOUNTY_PRICE, uint64(block.timestamp)
-        );
     }
 
     function test_GasWithdrawWithoutFloor() public {

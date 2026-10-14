@@ -228,11 +228,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "CfdEngine__PositionIsSolvent",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__AccountQueueCorrupt",
     "inputs": []
   },
@@ -1142,6 +1137,11 @@ export const closePreviewV3Abi = [
   },
   {
     "type": "error",
+    "name": "CfdEngine__InvalidRiskParams",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "CfdEngine__MarkPriceStale",
     "inputs": []
   },
@@ -1265,11 +1265,6 @@ export const closePreviewV3Abi = [
         "internalType": "uint8"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__PledgeBountyRequiresEmptyQueue",
-    "inputs": []
   },
   {
     "type": "error",
