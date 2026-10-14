@@ -126,8 +126,8 @@ interface IPositionProtectionAdmin {
 /// @notice Custody-free direct action and lifecycle store for one full-position OCO protection per account.
 /// @dev Trigger calls receive ETH only transiently and forward the full call value to the router's ordinary mark-refresh
 ///      entrypoint. This contract never intentionally custodies tokens or mutates an order queue directly. The immutable
-///      router remains responsible for queue mutation and keeper credits. Public bounty fields read the clearinghouse's
-///      protection namespaces and return zero while the same reserve is attributed to an order attempt.
+///      router remains responsible for queue mutation and keeper credits. The trigger bounty reads its clearinghouse
+///      reservation; close execution bounty fields remain zero throughout the protection lifecycle.
 contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, ReentrancyGuardTransient {
 
     struct StoredProtection {
@@ -199,23 +199,22 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     function createPositionProtection(
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external nonReentrant returns (uint64 protectionId) {
-        (uint256 triggerBountyUsdc, uint256 executionBountyUsdc) = _configuredBounties();
-        _clearinghouse().lockReservedSettlement(msg.sender, triggerBountyUsdc + executionBountyUsdc);
-        return _create(msg.sender, params, triggerBountyUsdc, executionBountyUsdc);
+        uint256 triggerBountyUsdc = _configuredTriggerBounty();
+        _clearinghouse().lockReservedSettlement(msg.sender, triggerBountyUsdc);
+        return _create(msg.sender, params, triggerBountyUsdc);
     }
 
     function _create(
         address account,
         PositionProtectionTypes.PositionProtectionParams memory params,
-        uint256 triggerBountyUsdc,
-        uint256 executionBountyUsdc
+        uint256 triggerBountyUsdc
     ) private returns (uint64 protectionId) {
         _validateProtectionCommitAllowed();
         if (ENGINE.degradedMode()) {
             revert OrderRouter__DegradedMode();
         }
         _requireProtectionAccountAvailable(account, 0);
-        _validateBountySnapshot(triggerBountyUsdc, executionBountyUsdc);
+        _validateBountySnapshot(triggerBountyUsdc);
 
         CfdTypes.Position memory position = _loadPosition(account);
         if (position.size == 0) {
@@ -242,13 +241,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         _activeProtectionIds[account] = protectionId;
 
         emit PositionProtectionCreated(
-            protectionId,
-            account,
-            0,
-            params.takeProfitTriggerPrice,
-            params.stopLossTriggerPrice,
-            triggerBountyUsdc,
-            executionBountyUsdc
+            protectionId, account, 0, params.takeProfitTriggerPrice, params.stopLossTriggerPrice, triggerBountyUsdc, 0
         );
         _emitArmed(protection);
     }
@@ -345,15 +338,12 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert OrderRouter__PendingOrdersExist();
         }
 
-        uint256 executionBountyUsdc = 0;
         if (protection.linkedOrderId == 0 || _attemptProtectionIds[protection.linkedOrderId] != 0) {
             revert PositionProtectionBook__InvalidLinkedOrder();
         }
         uint64 expectedOrderId = router.nextCommitId();
         linkedOrderId = IPositionProtectionCloseAttemptHost(ROUTER)
-            .commitProtectionCloseAttempt(
-                protectionId, protection.account, protection.side, protection.size, executionBountyUsdc
-            );
+            .commitProtectionCloseAttempt(protectionId, protection.account, protection.side, protection.size, 0);
         if (linkedOrderId != expectedOrderId) {
             revert PositionProtectionBook__InvalidHostResponse();
         }
@@ -388,12 +378,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         OrderV3Types.OrderRequest calldata request,
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external nonReentrant returns (uint64 parentOrderId, uint64 protectionId) {
-        (uint256 triggerBountyUsdc, uint256 executionBountyUsdc) = _configuredBounties();
-        _clearinghouse().lockReservedSettlement(msg.sender, triggerBountyUsdc + executionBountyUsdc);
+        uint256 triggerBountyUsdc = _configuredTriggerBounty();
+        _clearinghouse().lockReservedSettlement(msg.sender, triggerBountyUsdc);
         parentOrderId = _commitOpen(msg.sender, request);
-        protectionId = _stageAttached(
-            msg.sender, parentOrderId, request.side, request.sizeDelta, params, triggerBountyUsdc, executionBountyUsdc
-        );
+        protectionId =
+            _stageAttached(msg.sender, parentOrderId, request.side, request.sizeDelta, params, triggerBountyUsdc);
     }
 
     function _stageAttached(
@@ -402,12 +391,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         CfdTypes.Side side,
         uint256 size,
         PositionProtectionTypes.PositionProtectionParams memory params,
-        uint256 triggerBountyUsdc,
-        uint256 executionBountyUsdc
+        uint256 triggerBountyUsdc
     ) private returns (uint64 protectionId) {
         _validateProtectionCommitAllowed();
         _requireProtectionAccountAvailable(account, 1);
-        _validateBountySnapshot(triggerBountyUsdc, executionBountyUsdc);
+        _validateBountySnapshot(triggerBountyUsdc);
         if (parentOrderId == 0 || size == 0 || _parentProtectionIds[parentOrderId] != 0) {
             revert OrderRouter__PositionChanged();
         }
@@ -444,7 +432,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             params.takeProfitTriggerPrice,
             params.stopLossTriggerPrice,
             triggerBountyUsdc,
-            executionBountyUsdc
+            0
         );
     }
 
@@ -735,9 +723,9 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         .amountUsdc;
     }
 
-    function _configuredBounties() private view returns (uint256 triggerBountyUsdc, uint256 executionBountyUsdc) {
+    function _configuredTriggerBounty() private view returns (uint256 triggerBountyUsdc) {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
-        return (router.positionProtectionTriggerBountyUsdc(), 0);
+        return router.positionProtectionTriggerBountyUsdc();
     }
 
     function _clearinghouse() private view returns (IMarginClearinghouse) {
@@ -809,12 +797,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     }
 
     function _validateBountySnapshot(
-        uint256 triggerBountyUsdc,
-        uint256 executionBountyUsdc
+        uint256 triggerBountyUsdc
     ) private view {
         IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
         if (
-            triggerBountyUsdc != router.positionProtectionTriggerBountyUsdc() || executionBountyUsdc != 0
+            triggerBountyUsdc != router.positionProtectionTriggerBountyUsdc()
                 || router.closeOrderExecutionBountyUsdc() != 0
         ) {
             revert PositionProtectionBook__BountyMismatch();

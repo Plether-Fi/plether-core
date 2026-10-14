@@ -164,7 +164,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
 
     /// @notice Queues a fresh short-lived close attempt for an already-latched protection.
     /// @dev The protection Book authenticates and validates durable state before calling this host. The retry receives
-    ///      fresh timing and lifecycle identity, but reuses the clearinghouse-held protection bounty without a new lock.
+    ///      fresh timing and lifecycle identity, with a new authenticated zero-bounty reservation.
     function commitProtectionCloseAttempt(
         uint64 protectionId,
         address account,
@@ -196,7 +196,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(orderId);
         }
         host.lifecycleBook().registerProtectionAttempt(orderId);
-        _queueProtectionAttempt(host, orderId, account, side, size, executionBountyUsdc);
+        _queueProtectionAttempt(host, orderId, account, side, size);
     }
 
     /// @dev Permanent identity is resolved before current-state validation so an exact replay remains unconditional.
@@ -586,7 +586,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             IPositionProtectionBook.TriggerPlan memory plan =
                 protectionBook.activate(protectionId, snapshot.markPrice, snapshot.publishTime, linkedOrderId);
             _registerProtectionTrigger(host, protectionId, linkedOrderId, plan);
-            _queueProtectionAttempt(host, linkedOrderId, plan.account, plan.side, plan.size, plan.executionBountyUsdc);
+            _queueProtectionAttempt(host, linkedOrderId, plan.account, plan.side, plan.size);
             engine.creditBounty(
                 plan.account, refundRecipient, plan.triggerBountyUsdc, snapshot.markPrice, snapshot.publishTime
             );
@@ -654,8 +654,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint64 linkedOrderId,
         address account,
         CfdTypes.Side side,
-        uint256 size,
-        uint256 executionBountyUsdc
+        uint256 size
     ) private {
         bytes memory itemCall = abi.encodeWithSelector(
             IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector,
@@ -663,7 +662,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             account,
             side,
             size,
-            executionBountyUsdc
+            0
         );
         (bool recorded, bytes memory revertData) = address(host).call(itemCall);
         if (!recorded) {

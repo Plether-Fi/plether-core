@@ -778,20 +778,12 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         OrderV3Types.OrderReceipt memory receipt
     ) private returns (OrderV3Types.ExecutionResult memory result) {
         if (receipt.reason != OrderV3Types.TerminalReason.ExpiredReservationMismatch) {
-            if (
-                receipt.bountyDisposition == OrderV3Types.BountyDisposition.Paid
-                    || receipt.bountyDisposition == OrderV3Types.BountyDisposition.PaidAndRefunded
-            ) {
+            if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
                 receipt.bounty.bountyPaidUsdc = receipt.bountyUsdc - receipt.bounty.bountyRefundedUsdc;
-            } else if (
-                receipt.bountyDisposition == OrderV3Types.BountyDisposition.Forfeited
-                    || receipt.bountyDisposition == OrderV3Types.BountyDisposition.ForfeitedAndRefunded
-            ) {
+            } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Forfeited) {
                 receipt.bounty.bountyForfeitedUsdc = receipt.bountyUsdc - receipt.bounty.bountyRefundedUsdc;
             } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RefundedToAccount) {
                 receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
-            } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
-                receipt.bounty.bountyRetainedUsdc = receipt.bountyUsdc;
             }
         }
         bytes32 receiptHash = book.finalize(receipt);
