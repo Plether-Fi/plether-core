@@ -54,7 +54,7 @@ contract OpenNumericDomainTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order
     ) private pure {
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, 1);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8);
         assertFalse(delta.valid);
         assertEq(uint8(delta.revertCode), 11);
     }
@@ -174,7 +174,7 @@ contract OpenNumericDomainTest is Test {
         order.sizeDelta = lots * Q;
         order.marginDelta = 10_000e6;
         order.side = shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(_snapshot(), order, mark, 1);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(_snapshot(), order, mark);
         assertTrue(delta.valid);
         assertEq(delta.newPosEntryCostUsdcAtoms, notional);
         assertEq(delta.posVpiAccruedDelta, int256(vpi));
@@ -211,7 +211,7 @@ contract OpenNumericDomainTest is Test {
                 order.side = CfdTypes.Side(side);
                 order.sizeDelta = Q;
                 order.marginDelta = 10e6;
-                CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, 1);
+                CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8);
                 assertEq(delta.valid, i < 2);
                 assertEq(uint8(delta.revertCode), i < 2 ? 0 : 11);
             }
@@ -240,7 +240,7 @@ contract OpenNumericDomainTest is Test {
             CfdTypes.Order memory order = _order();
             order.side = CfdTypes.Side.SHORT;
             order.sizeDelta = Q;
-            CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, cap, 1);
+            CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, cap);
             assertEq(delta.valid, i < 2);
             assertEq(uint8(delta.revertCode), i < 2 ? 0 : 11);
         }
@@ -275,12 +275,12 @@ contract OpenNumericDomainTest is Test {
         order.sizeDelta = (uint256(type(uint112).max) + 1) * Q;
         _numeric(snap, order);
         order.sizeDelta += 1;
-        assertEq(uint8(CfdEnginePlanLib.planOpen(snap, order, 1e8, 1).revertCode), 8);
+        assertEq(uint8(CfdEnginePlanLib.planOpen(snap, order, 1e8).revertCode), 8);
         order = _order();
         order.marginDelta = uint256(type(int256).max) + 1;
         _numeric(snap, order);
         order.marginDelta = uint256(type(int256).max);
-        assertEq(uint8(CfdEnginePlanLib.planOpen(snap, order, 1e8, 1).revertCode), 5, "in-domain but unfunded");
+        assertEq(uint8(CfdEnginePlanLib.planOpen(snap, order, 1e8).revertCode), 5, "in-domain but unfunded");
     }
 
     function test_AggregateExposureAndVpiBoundsAreTyped() public pure {
@@ -301,7 +301,7 @@ contract OpenNumericDomainTest is Test {
     function test_StaleHugeSizeFixtureRejectsSkewBeforeVpi() public pure {
         CfdTypes.Order memory order = _order();
         order.sizeDelta = 1e39;
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(_snapshot(), order, 1e8, 1);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(_snapshot(), order, 1e8);
         assertFalse(delta.valid);
         assertEq(uint8(delta.revertCode), 4);
     }
@@ -313,7 +313,7 @@ contract OpenNumericDomainTest is Test {
         _numeric(snap, order);
         snap = _snapshot();
         snap.riskParams.minBountyUsdc = type(uint256).max;
-        assertEq(uint8(CfdEnginePlanLib.planOpen(snap, order, 1e8, 1).revertCode), 3);
+        assertEq(uint8(CfdEnginePlanLib.planOpen(snap, order, 1e8).revertCode), 3);
         OpenAccountingLib.OpenInputs memory inputs = _inputs();
         inputs.riskParams.bountyBps = type(uint256).max / (17 * inputs.price);
         (bool valid,,) = OpenAccountingLib.tryBuildOpenState(inputs);
@@ -327,7 +327,7 @@ contract OpenNumericDomainTest is Test {
         for (uint256 i; i < 3; ++i) {
             CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
             snap.riskParams.minBountyUsdc = 10e6 + i - 1;
-            CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, _order(), 1e8, 1);
+            CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, _order(), 1e8);
             assertEq(delta.valid, i < 2);
             assertEq(uint8(delta.revertCode), i < 2 ? 0 : 3);
         }
@@ -336,7 +336,7 @@ contract OpenNumericDomainTest is Test {
     function test_LifetimeVpiSignedEqualityAndAdjacentAtoms() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
         snap.position.vpiAccrued = type(int256).max - 25_000;
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, _order(), 1e8, 1);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, _order(), 1e8);
         assertTrue(delta.valid, "maximum lifetime sum remains representable");
         snap = _snapshot();
         snap.position.vpiAccrued = type(int256).max - 24_999;
@@ -347,7 +347,7 @@ contract OpenNumericDomainTest is Test {
         _numeric(snap, _order()); // -225,000 VPI would produce the unusable int256.min.
         snap.position.vpiAccrued += 1;
         assertEq(
-            uint8(CfdEnginePlanLib.planOpen(snap, _order(), 1e8, 1).revertCode),
+            uint8(CfdEnginePlanLib.planOpen(snap, _order(), 1e8).revertCode),
             10,
             "one atom above min is numeric-safe but still needs reserve backing"
         );
@@ -396,11 +396,11 @@ contract OpenNumericDomainTest is Test {
         CfdTypes.Order memory order = _order();
         snap.shortSide.openInterest = 500 * Q;
         snap.riskParams.maxSkewRatio = 0;
-        assertTrue(CfdEnginePlanLib.planOpen(snap, order, 1e8, 1).valid);
+        assertTrue(CfdEnginePlanLib.planOpen(snap, order, 1e8).valid);
         snap = _snapshot();
         snap.poolAssetsUsdc = 0;
         snap.riskParams.vpiFactor = type(uint256).max;
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, 1);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8);
         assertFalse(delta.valid);
         assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED));
     }
@@ -413,11 +413,11 @@ contract OpenNumericDomainTest is Test {
         snap.position.size = order.sizeDelta;
         snap.positionBorrowBaseUsdc = type(uint256).max;
         snap.longSide.carryIndex = type(uint256).max; // proves mismatch cannot touch even an unusable carry snapshot.
-        CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, order, 1e8, 1);
+        CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, order, 1e8);
         assertEq(uint8(delta.revertCode), 7);
         assertEq(delta.pendingCarryUsdc, 0);
         snap.position.size = 0;
-        assertEq(uint8(CfdEnginePlanLib.planClose(snap, order, 1e8, 1).revertCode), 1);
+        assertEq(uint8(CfdEnginePlanLib.planClose(snap, order, 1e8).revertCode), 1);
     }
 
     function test_InvalidPreviewDoesNotRecomputeOverflowingLifetimeVpi() public {

@@ -71,7 +71,7 @@ contract CarryProjectionTest is BasePerpTest {
         order.account = ACCOUNT;
         order.sizeDelta = CfdTypes.SIZE_QUANTUM;
         order.side = snap.position.side == CfdTypes.Side.LONG ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, uint64(block.timestamp));
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8);
         assertFalse(delta.valid);
         assertEq(
             uint256(delta.revertCode),

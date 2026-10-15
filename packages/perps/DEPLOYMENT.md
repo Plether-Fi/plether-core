@@ -28,54 +28,27 @@ Regenerate integration ABIs: `getOrderReservation` has a new tuple layout, `sync
 clearinghouse exposes typed bounty records and an active margin FIFO. Public order/protection view shapes remain
 unchanged. See [Reservation ledger](RESERVATION_LEDGER.md) for the complete ownership and transition rules.
 
-## Source-bound close-bounty compatibility
+## Zero-close-bounty compatibility
 
-The close-bounty release pays an ordinary failed close's original free-funded amount and returns its original
-pledge-funded amount to the position that supplied it. A close may use pledge only when its account has no pending
-orders; later wholly free-funded orders remain legal. Liquidation restores pledged funding before assessing health
-and losses and forfeits only free funding. A zero-free-funded failure earns no cleaner payment. The protocol keeper
-must support and fund oracle-free expiry for those orders as well as configured zero-bounty orders.
+Ordinary and protection close execution bounties are permanently zero in the current source. The former Router
+`closeOrderExecutionBountyUsdc` configuration field/getter and protection-execution-bounty fields are removed.
+Every close attempt creates an authenticated Active zero Order record; successful execution, recognized
+failure, expiry, and liquidation settle it without paying a close executor or moving PnL pledge. Opening/increase
+bounties, the separate protection trigger reward, and liquidation rewards remain positive under their own policies.
+The protocol keeper must fund unpaid close execution and oracle-free expiry. See
+[Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy) and
+[Zero-close operations](ZERO_CLOSE_OPERATIONS.md).
 
-Refundable pledged funding remains part of the authenticated marked collectible cap until successful execution earns
-the bounty. It is existing reserved custody, not additional pool cash or withdrawable trader value. Reservation and
-failure refund must not change LP pricing by themselves. Successful execution still pays/releases the full committed
-bounty, including self-execution, and recognizes that authorized cost once. See
-[Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy) for exact custody and rollback transitions.
+There is no source-bound pledged-close escrow or collectible escrow mirror. No pledge-specific empty-queue rule
+applies; FIFO, queued exposure, capacity, carry, and risk checks still apply. Public request/receipt compatibility
+fields and historical `uint8` disposition ordinals remain decodable. Normal close receipts use `None` and zero
+bounty components, including a zero recipient. Generate consumer ABIs from the final build and retain archived ABIs
+for historical deployments; do not interpret old positive-bounty receipts through the current accounting policy.
 
-The public `OrderRequest` and `OrderReceipt` field layouts, V3 intent domain and V4 receipt-hash domain are unchanged by
-this change. Disposition remains encoded as `uint8`; prior ordinals stay `None=0`, `Paid=1`, `Forfeited=2`,
-`RefundedToAccount=3`, and `RetainedForProtectionRetry=4`. Append `PaidAndRefunded=5` and
-`ForfeitedAndRefunded=6`. Update any external exhaustive decoder, labels and receipt reconciliation before activation.
-Use the existing numeric paid/refunded/forfeited/retained fields; a pledged refund is position backing and can be
-consumed by liquidation in that transaction. Preserve original entitlement and authenticate the full receipt.
-
-Internal Engine/settlement, Router and Book interfaces plus Clearinghouse/Book storage change. Generate current
-consumer ABIs from the final build with `python3 scripts/generate-close-v3-abi.py --artifacts-dir <build-output>` and
-retain archived ABIs for historical deployments. Measure EIP-170 runtime and EIP-3860 constructor-inclusive initcode
-for the final compatible graph and keep existing production gas gates; old artifact sizes are historical evidence.
-
-The internal compatibility changes are explicit:
-
-| Component | Changed integration surface |
-| --- | --- |
-| Engine | `resolveCloseBounty(account, orderId, freeUsdc, pledgeUsdc, sourcePositionEpoch, quarantine)` replaces `refundCloseBounty` |
-| Settlement sidecar | `executeClose` receives the executing order id to consume only its own escrow |
-| Clearinghouse | `resolveCloseBounty` replaces `refundReservedBounty`; expiry recovery receives expected free/pledge/epoch; collectible escrow getters and success-consumption entrypoint are added |
-| Lifecycle Book | `recordCommitment` receives independent source epoch; `sourcePositionEpoch` and `validateBountyFunding` expose authenticated provenance |
-| Router callbacks | New self-only `executeRestoredLiquidationItem`; terminal input and bounty settlement output include refunded amount |
-
-Generated SDK ABI additions are error entries: Router `CfdEngine__PositionIsSolvent`,
-`OrderRouter__PledgeBountyRequiresEmptyQueue`, and `OrderRouter__RestoredPledgeMadeSolvent`; preview includes the new
-pledge-queue error; Book adds `OrderLifecycleBook__BountyFundingMismatch(uint64)`. Protection ABI also includes the
-two Router errors through its imported interface. No existing exported SDK function/event tuple changes. Keep those
-new error declarations even when a callback marker is normally consumed inside Router orchestration.
-
-Deploy a fresh connected Engine, Router, Clearinghouse, books and sidecars from the same source revision. Immutable
-and one-time bindings do not permit a Router-only hot swap. Do not attach the new cap to populated state with
-zero-initialized escrow mirrors, import live pledged orders, or infer a migration from unchanged public tuples.
-Existing-state migration requires a separate authenticated design. Source rollback before deployment is a normal
-revert; rollback after a populated immutable deployment is an operational migration decision. This implementation
-does not authorize deployment, broadcast, activation or migration.
+Deploy a fresh connected Engine, Router, Clearinghouse, books, and sidecars from the same source revision. Immutable
+and one-time bindings do not permit a Router-only hot swap or import of populated positive-bounty state. Existing-state
+migration requires a separate authenticated design. This implementation does not authorize deployment, broadcast,
+activation, or migration.
 
 ## Scripts
 
@@ -174,7 +147,7 @@ Contract creation is interleaved with the required set-once wiring:
 - `MarginClearinghouse.setEngine(...)`
 
 Vault ordering is deliberate: construct Senior with `0/address(0)`, call `HousePool.setSeniorVault`, snapshot
-`CfdEngine.protocolTreasury()`, construct Junior with `100` bps and that recipient, then call
+`CfdEngine.protocolTreasury()`, construct Junior with `0` bps and that recipient, then call
 `HousePool.setJuniorVault`. Both values and the empty fee-proposal state are verified immediately. This ordering lets
 the Junior constructor enforce the existing forbidden-recipient rules against the already canonical Senior vault.
 
@@ -291,7 +264,7 @@ Important:
   standalone verification also check the separate `IAsyncTrancheVaultClaimableRedeem` extension; adding that extension
   does not change the base custom interface id. Regenerate vault and lens ABIs for frontend, keeper, and indexer use.
 - Deploy verification and the release-default regression fail closed unless Senior reports `0/address(0)` and Junior
-  reports `maintenanceFeeAprBps() == 100` with the deployment-time `CfdEngine.protocolTreasury()` snapshot. Neither
+  reports `maintenanceFeeAprBps() == 0` with the deployment-time `CfdEngine.protocolTreasury()` snapshot. Neither
   vault may have a pending fee proposal or pending fee shares before seeding. Bootstrap enforces the same snapshot and
   does not contain a fee-configuration transaction.
 - `OrderRouter` is non-upgradeable and `CfdEngine.setOrderRouter(...)` is one-time. A release containing position
@@ -356,9 +329,9 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
 | `minOpenNotionalUsdc` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` (unchanged) |
-| `closeOrderExecutionBountyUsdc` | `200_000` (`0.20 USDC`) |
+| Close execution bounty | Always zero; no configuration field or getter |
 | `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
-| `juniorMaintenanceFeeAprBps` | `100` nominal APR |
+| `juniorMaintenanceFeeAprBps` | `0` nominal APR (disabled at deployment) |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
 | `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
 | `maxSeniorShareBps` | `8_000` (release-HousePool constructor initialization) |
@@ -368,11 +341,13 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 
 `frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
 
-The Junior maintenance fee is initialized in the Junior vault constructor at `100` bps with the Engine's current
-protocol treasury. Senior is constructed with `0/address(0)` and registered first so the Junior constructor can reject
-all canonical forbidden recipients. `MaintenanceFeeConfigInitialized` records the rate, recipient, and first hourly
+The release initializes the Junior vault constructor at `0` bps with the Engine's current protocol treasury as
+recipient. Senior is constructed with `0/address(0)` and registered first so the Junior constructor can reject all
+canonical forbidden recipients. `MaintenanceFeeConfigInitialized` records the rate, recipient, and first hourly
 checkpoint boundary. The recipient is a snapshot, not a dynamic pointer; an Engine treasury rotation must be paired
-with a separately timelocked Junior recipient rotation.
+with a separately timelocked Junior recipient rotation if that recipient is to follow the treasury. The generic Junior
+vault constructor also permits a zero rate with a zero recipient; this release retains the treasury snapshot while
+the fee is disabled so a later rate change can retain the same recipient.
 
 After deployment, the current HousePool owner may propose a rate/recipient pair, wait 48 hours, verify the exact pending
 values, and finalize it. Rates are
@@ -514,7 +489,7 @@ including at least:
 - `SettlementMonitorLens` and its internally deployed `SettlementMonitorLensSidecar`
 - `EmergencyPauseCoordinator`
 
-Also record the active V3 execution-config hash, source commit, deployment block, transaction hashes, and
+Also record the active V5 execution-config hash, source commit, deployment block, transaction hashes, and
 verified-bytecode status. `MockUSDC`,
 `HousePool`, `HousePoolRedemptionMathSidecar`, `OrderRouter`, and `EmergencyPauseCoordinator` are consumed directly by
 the bootstrap script. Bootstrap derives the RouterAdmin, policy evaluator, V3 execution sidecar, lifecycle Book,
@@ -605,7 +580,7 @@ The seed and activation phases of the bootstrap script are designed to be partia
 - it never proposes or finalizes initial HousePool or Router configuration
 - it refuses to seed unless the exact constructor-installed HousePool and Router values are active and neither admin
   has an outstanding proposal
-- it refuses to seed unless Junior already has the constructor-initialized `100`-bps fee, the deployment treasury
+- it refuses to seed unless Junior already has the constructor-initialized `0`-bps fee, the deployment treasury
   snapshot, no outstanding fee proposal, and zero pending fee shares before its first supply
 - it rotates the coordinator guardian only when the requested address differs; a matching rerun is a no-op
 - it skips a seed if that side is already initialized
@@ -662,8 +637,8 @@ The protected parent open is a caller-authored bounded V3 request and must pin t
 Router-authenticated triggered or retried close attempts set `expectedConfigHash == bytes32(0)`, which is an unpinned
 internal marker rather than a public wildcard. Deploy, bootstrap, and integration tests must verify both sides of that
 boundary: external zero-hash commits, including Book-forwarded parents, fail; valid bounded parents and authenticated
-attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request and intent domain are V3, with V4 receipt and execution-config domains. Registered protection
-attempts still authenticate `RetainedForProtectionRetry` with a zero bounty recipient.
+attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request and intent domain are V3, with V5 receipt and execution-config domains. Registered protection
+attempts settle authenticated zero bounty records with `None` disposition and no recipient.
 
 The bounded protected-open selector replaces the former scalar selector without a compatibility overload. Ship it
 only as part of a fresh complete perps-stack deployment, regenerate consumer ABIs from the new
@@ -671,7 +646,7 @@ only as part of a fresh complete perps-stack deployment, regenerate consumer ABI
 migration and mixed old/new Router-Book stacks are unsupported.
 
 Release tests verify the existing-position post-reservation gate against boundary tests. The Book locks
-both bounties first, then calls the Engine-configured planner's canonical V2 exact-price predicate with exact entry cost
+the trigger bounty first, then calls the Engine-configured planner's canonical V2 exact-price predicate with exact entry cost
 and price equity composed only of PnL pledge plus the same-account trader claim plus exact capped unrealized PnL. Free
 settlement and generic action/reservation buckets are excluded; uncovered carry and an underfunded negative-VPI reserve
 fail closed; and equality at the stricter of initial or active normal/FAD margin is rejected. Attached opens lock
@@ -688,9 +663,9 @@ retain the one-to-many attempt history. They must also index the lifecycle Book'
 pending marker.
 
 Regenerate frontend, keeper, governance, and indexer bindings from this release. The ABI adds the permissionless retry
-action, lifecycle-Book registration/view surface, and close-attempt events. `PositionProtectionStatus.Latched` and
-`BountyDisposition.RetainedForProtectionRetry` are appended, preserving prior numeric ordinals, but old enum decoders
-will not know the new values. The receipt and execution-config hash domains are V4 and the request/intent ABI is V3; do not compare their
+action, lifecycle-Book registration/view surface, and close-attempt events. `PositionProtectionStatus.Latched` remains
+part of the current lifecycle. The current bounty-disposition enum ends at `RefundedToAccount`; mixed and retained
+variants require archived decoders. The receipt and execution-config hash domains are V5 and the request/intent ABI is V3; do not compare their
 hashes with an earlier stack.
 
 Position protection is available immediately on an unpaused fresh Router; no protection-specific governance proposal
@@ -702,6 +677,15 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
 
 ## Operational Notes
 
+- Regenerate all current Solidity, SDK, keeper, and indexer bindings together. The receipt/config domains are V5,
+  while the public request/intent domain remains V3. Current ABIs omit the old close-bounty config/getter,
+  protection-execution bounty and pledged/source-epoch fields, receipt retained amount and mixed dispositions,
+  reservation-id snapshot data, unused zero fee/debt/queue fields, and sponsored close-preview state. The RouterAdmin
+  ETH-refund claim is `claimBalance()` with no argument. The old `CfdEngineSnapshotsLib` and
+  `CfdEngineSettlementLib` are absent. Preserve archived decoders for earlier deployments.
+- Close commitment uses `reserveCloseOrderExecutionBounty(address,uint256)` on both the Engine and settlement sidecar,
+  and `planCloseCommit(snapshot,size)` on the planner. Their former required-zero bounty argument and old selectors
+  are removed. Regenerate bindings and deploy the matching Router, Engine, sidecar, planner, and close preview together.
 - Perps contracts are non-upgradeable. Synchronized async LP settlement therefore requires a coordinated replacement
   stack; an existing `HousePool` cannot replace its set-once vaults and an existing engine cannot replace its pool.
 - This Terminal NAV V2 rollout is testnet-only and deliberately has no compatibility or migration path. Deploy a fresh
@@ -714,7 +698,7 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
 - Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
   terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, coordinator, and lenses as a single
   versioned unit.
-- Deploy Junior with the approved `100`-bps fee and the exact deployment-time protocol-treasury recipient. Do not add a
+- Deploy Junior with the approved `0`-bps fee and the exact deployment-time protocol-treasury recipient. Do not add a
   bootstrap fee transaction. Any later rate or recipient change is a separate 48-hour governance operation.
 - `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
   price cap, size quantum, and empty initial state were verified by the deploy transaction.
@@ -743,14 +727,14 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
    the distinct stateless helper returned by `liquidationBatchSidecar()`. Confirm the redemption-math sidecar
    implementation id and HousePool constructor input, all four lifecycle-Book bindings, the keeper sidecar's
    `ROUTER()` binding, the protection Book's `ROUTER()` and `ENGINE()` bindings, and that protection creation
-   requires no separate activation flag, with a `200_000` trigger bounty and `200_000` linked-close execution bounty.
+   requires no separate activation flag, with a `200_000` trigger bounty and zero linked-close execution bounty.
    Normal pause, position, margin, and oracle checks still apply. Exercise direct and
    foreign-context rejection for the sidecar-carried Router helpers, including the risk-off-aware batch entrypoint,
    plus the canonical Router success paths for mark refresh, protection-trigger oracle resolution, single liquidation,
    batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
    `SettlementMonitorLens` facade and its internal sidecar are bound to the same Router, Engine, pool, terminal book,
    clearinghouse, vaults, USDC, protocol lens, and planner version. Confirm Junior maintenance-fee rate, recipient,
-   pending shares, and effective supply read back as `100`, the deployment-time protocol-treasury snapshot, `0`, and
+   pending shares, and effective supply read back as `0`, the deployment-time protocol-treasury snapshot, `0`, and
    raw supply respectively. Also verify the constructor-installed HousePool `$40M/80%` and Router `$1,000/2,500`
    values with zero active configuration proposals. Verify the
    `EmergencyPauseCoordinator` is bound to the exact RouterAdmin and HousePool, installed as pauser on both, and starts
@@ -775,7 +759,7 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
 11. Exercise trigger- and retry-worker discovery and dry-run/simulation paths on the fresh stack.
 12. Test attached-open activation, existing-position protection, both trigger directions, cancellation/replacement,
     first-attempt execution, failure-to-latch, repeated retry with fresh oracle windows, frozen-oracle retry/execution,
-    emergency-pause cancellation/trigger/retry liveness, exact bounty recycling, and liquidation from both `Latched`
+    emergency-pause cancellation/trigger/retry liveness, zero-bounty retry records, and liquidation from both `Latched`
     and `Triggered` end to end.
 13. Run a limited-TVL soak for at least seven days before broader use. Monitor armed, latched, and triggered counts;
     time latched without a live attempt; retry count; trigger-to-first-attempt and per-attempt FIFO-to-terminal latency;

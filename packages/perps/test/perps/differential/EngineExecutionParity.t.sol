@@ -22,9 +22,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         _fundTrader(account, 10_000e6);
 
         assertEq(
-            engineLens.previewOpenRevertCode(
-                account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, uint64(block.timestamp)
-            ),
+            engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8),
             uint8(CfdEnginePlanTypes.OpenRevertCode.OK),
             "Preview should accept the healthy open"
         );
@@ -96,7 +94,6 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         assertTrue(preview.valid, "Setup loss close preview should be valid");
         assertEq(preview.immediatePayoutUsdc, 0, "Loss-making close should not create immediate payout");
         assertEq(preview.traderClaimBalanceUsdc, 0, "Loss-making close should not create trader claim");
-        assertEq(preview.badDebtUsdc, 0, "Setup should keep the loss fully collateralized");
 
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         _close(account, CfdTypes.Side.LONG, 10_000e18, 120_000_000);
@@ -208,7 +205,6 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         uint256 priceLossUsdc = uint256(-preview.realizedPnlUsdc);
         assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must exceed the exact price collectible cap");
         assertEq(preview.seizedCollateralUsdc, collectibleCapUsdc, "Preview must collect the exact price cap only");
-        assertEq(preview.badDebtUsdc, 0, "Uncollectible terminal price loss must not become protocol debt");
 
         uint256 writtenOffUsdc = priceLossUsdc - collectibleCapUsdc;
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
@@ -305,7 +301,6 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         assertEq(interfacePreview.seizedCollateralUsdc, contractPreview.seizedCollateralUsdc);
         assertEq(interfacePreview.immediatePayoutUsdc, contractPreview.immediatePayoutUsdc);
         assertEq(interfacePreview.traderClaimBalanceUsdc, contractPreview.traderClaimBalanceUsdc);
-        assertEq(interfacePreview.badDebtUsdc, contractPreview.badDebtUsdc);
         assertEq(interfacePreview.triggersDegradedMode, contractPreview.triggersDegradedMode);
         assertEq(interfacePreview.postOpDegradedMode, contractPreview.postOpDegradedMode);
         assertEq(interfacePreview.effectiveAssetsAfterUsdc, contractPreview.effectiveAssetsAfterUsdc);
@@ -342,7 +337,6 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
             preview.traderClaimBalanceUsdc,
             "Illiquid liquidation preview should match live trader claim balance"
         );
-        assertEq(preview.badDebtUsdc, 0, "Illiquid liquidation must not recreate a protocol debt ledger");
         assertEq(
             terminalNavBook.curveHashOf(account),
             bytes32(0),

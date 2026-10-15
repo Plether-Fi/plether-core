@@ -92,11 +92,6 @@ export const positionProtectionBookAbi = [
             "name": "triggerBountyUsdc",
             "type": "uint256",
             "internalType": "uint256"
-          },
-          {
-            "name": "executionBountyUsdc",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ]
       }
@@ -439,11 +434,6 @@ export const positionProtectionBookAbi = [
             "internalType": "uint256"
           },
           {
-            "name": "executionBountyUsdc",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
             "name": "armedAt",
             "type": "uint64",
             "internalType": "uint64"
@@ -496,11 +486,6 @@ export const positionProtectionBookAbi = [
         "name": "reason",
         "type": "uint8",
         "internalType": "enum OrderV3Types.TerminalReason"
-      },
-      {
-        "name": "executionBountyUsdc",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -861,12 +846,6 @@ export const positionProtectionBookAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
-      },
-      {
-        "name": "executionBountyUsdc",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -1029,16 +1008,6 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__EmptyFeeds",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__EmptyPythUpdateData",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__ExecutionBountyAboveGrossDebit",
     "inputs": [
       {
@@ -1086,16 +1055,6 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InsufficientPythFee",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__InvalidBasePrice",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__InvalidEngineLens",
     "inputs": []
   },
@@ -1131,11 +1090,6 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InvalidOraclePrice",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__InvalidPletherOracle",
     "inputs": []
   },
@@ -1161,37 +1115,12 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InvalidWeights",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__LengthMismatch",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__LiquidationOraclePriceTooStale",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__MarginQueueCorrupt",
     "inputs": []
   },
   {
     "type": "error",
     "name": "OrderRouter__MarkPriceOutOfOrder",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__MevDetected",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__MockOracleUnavailable",
     "inputs": []
   },
   {
@@ -1221,21 +1150,6 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__OracleConfidenceTooWide",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__OraclePriceTooStale",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__OraclePublishTimesDiverged",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__OrderNotExpired",
     "inputs": []
   },
@@ -1261,11 +1175,6 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__PledgeBountyRequiresEmptyQueue",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__PositionChanged",
     "inputs": []
   },
@@ -1277,6 +1186,17 @@ export const positionProtectionBookAbi = [
         "name": "code",
         "type": "uint8",
         "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectedCloseBountyNonzero",
+    "inputs": [
+      {
+        "name": "bountyUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -1313,11 +1233,6 @@ export const positionProtectionBookAbi = [
   {
     "type": "error",
     "name": "OrderRouter__ProtectionTriggerAlreadyMet",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__RestoredPledgeMadeSolvent",
     "inputs": []
   },
   {

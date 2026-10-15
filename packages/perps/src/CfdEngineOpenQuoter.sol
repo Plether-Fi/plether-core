@@ -34,7 +34,6 @@ contract CfdEngineOpenQuoter {
         ICfdEnginePlanner planner;
         CfdTypes.Order order;
         uint256 executionPrice;
-        uint64 publishTime;
     }
 
     struct Context {
@@ -59,7 +58,6 @@ contract CfdEngineOpenQuoter {
     /// @param raw Original snapshot, retained unchanged for every probe.
     /// @param order Account, side and margin budget; its size is replaced for each candidate.
     /// @param executionPrice Hypothetical execution price before capping.
-    /// @param publishTime Hypothetical publish time, passed through to the planner.
     /// @return maxSizeDelta Largest valid size, or zero when the entire feasible domain is empty.
     /// @return delta Canonical plan for the maximum, or the minimum candidate on a zero quote.
     /// @return limitingReason Next-quantum rejection, or the diagnostic plan's rejection on a zero quote.
@@ -67,8 +65,7 @@ contract CfdEngineOpenQuoter {
         ICfdEnginePlanner planner,
         CfdEnginePlanTypes.RawSnapshot calldata raw,
         CfdTypes.Order memory order,
-        uint256 executionPrice,
-        uint64 publishTime
+        uint256 executionPrice
     )
         external
         pure
@@ -78,7 +75,7 @@ contract CfdEngineOpenQuoter {
             CfdEnginePlanTypes.OpenRevertCode limitingReason
         )
     {
-        ProbeContext memory probe = ProbeContext(planner, order, executionPrice, publishTime);
+        ProbeContext memory probe = ProbeContext(planner, order, executionPrice);
         return _quote(raw, probe);
     }
 
@@ -176,7 +173,7 @@ contract CfdEngineOpenQuoter {
         uint256 lots
     ) private pure returns (CfdEnginePlanTypes.OpenDelta memory) {
         probe.order.sizeDelta = lots * CfdTypes.SIZE_QUANTUM;
-        return probe.planner.planOpen(raw, probe.order, probe.executionPrice, probe.publishTime);
+        return probe.planner.planOpen(raw, probe.order, probe.executionPrice);
     }
 
     function _context(
@@ -315,7 +312,7 @@ contract CfdEngineOpenQuoter {
     ) private pure returns (bool affordable, uint256 maxMargin, uint256 totalNotionalFloor) {
         (MarginClearinghouseAccountingLib.OpenCostPlan memory cost, uint256 minVpiReserve) =
             _optimisticCostPlan(ctx, low, minVpi, maxVpi);
-        if (cost.insufficientFreeEquity || cost.insufficientPositionMargin) {
+        if (cost.insufficientFreeEquity) {
             return (false, 0, 0);
         }
 

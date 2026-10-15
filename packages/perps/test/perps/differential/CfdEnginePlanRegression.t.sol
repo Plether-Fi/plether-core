@@ -44,7 +44,7 @@ contract CfdEnginePlanHarness is CfdEngine {
     ) external view returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(order.account, poolDepthUsdc);
         snap.poolCashUsdc = pool.totalAssets();
-        return CfdEnginePlanLib.planOpen(snap, order, executionPrice, 0);
+        return CfdEnginePlanLib.planOpen(snap, order, executionPrice);
     }
 
     function buildRawSnapshotForPlanner(
@@ -224,7 +224,6 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(
             preview.seizedCollateralUsdc, 0, "Price collateral should not be seized when the trader has a price gain"
         );
-        assertEq(preview.badDebtUsdc, 0, "Retained trader profit should not be bad debt");
 
         uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
         uint256 poolAssetsBefore = pool.totalAssets();
@@ -394,7 +393,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdEnginePlanTypes.RawSnapshot memory snap =
             harness.buildRawSnapshotForPlanner(order.account, 1e8, pool.totalAssets());
         CfdEnginePlanTypes.OpenDelta memory libDelta = harness.previewOpenPlan(order, 1e8, pool.totalAssets());
-        CfdEnginePlanTypes.OpenDelta memory plannerDelta = planner.planOpen(snap, order, 1e8, 0);
+        CfdEnginePlanTypes.OpenDelta memory plannerDelta = planner.planOpen(snap, order, 1e8);
 
         assertEq(plannerDelta.valid, libDelta.valid, "Planner open validity should match library");
         assertEq(
@@ -489,9 +488,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
         uint256 freeSettlementBeforeCarry = snap.accountBuckets.freeSettlementUsdc;
         uint256 marginBeforeCarry = snap.position.margin;
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
-            snap, _openOrder(account, CfdTypes.Side.LONG, 5000e18, 0, 1e8), 1e8, uint64(block.timestamp)
-        );
+        CfdEnginePlanTypes.OpenDelta memory delta =
+            CfdEnginePlanLib.planOpen(snap, _openOrder(account, CfdTypes.Side.LONG, 5000e18, 0, 1e8), 1e8);
 
         assertEq(
             uint8(delta.revertCode),
@@ -565,7 +563,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             isClose: false
         });
 
-        CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, 1e8, 0);
+        CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, 1e8);
 
         assertLt(delta.tradeCostUsdc, 0, "Setup must produce a skew-reducing rebate");
         assertEq(delta.vpiRebateReserveAfterUsdc, 1125e6, "Reserve must back the gross negative VPI");
@@ -642,7 +640,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             30 days
         );
         CfdTypes.Order memory order = _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8);
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, uint64(block.timestamp));
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8);
         uint256 freeSettlementAfterCarry = delta.pendingCarryUsdc >= snap.accountBuckets.freeSettlementUsdc
             ? 0
             : snap.accountBuckets.freeSettlementUsdc - delta.pendingCarryUsdc;
@@ -684,7 +682,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             side: pos.side,
             isClose: true
         });
-        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, closeOrder, 1e8, 0);
+        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, closeOrder, 1e8);
         assertGt(delta.pendingCarryUsdc, 0, "Close plan should report observational pending carry");
     }
 
@@ -747,7 +745,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             isClose: true
         });
 
-        CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, closeOrder, 150_000_000, 0);
+        CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, closeOrder, 150_000_000);
 
         assertTrue(delta.valid, "Underwater full close should remain executable");
         assertEq(
@@ -774,7 +772,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));
         CfdEnginePlanTypes.RawSnapshot memory snap =
             harness.buildRawSnapshotForPlanner(account, 150_000_000, pool.totalAssets());
-        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, 150_000_000, 0);
+        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, 150_000_000);
         assertGt(delta.pendingCarryUsdc, 0, "Liquidation plan should report observational pending carry");
     }
 
@@ -852,9 +850,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.capPrice = CAP_PRICE;
         snap.riskParams = params;
         snap.executionFeeBps = engine.executionFeeBps();
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(
-            snap, _openOrder(account, CfdTypes.Side.SHORT, 10_000e18, 0, 1e8), 1e8, uint64(block.timestamp)
-        );
+        CfdEnginePlanTypes.OpenDelta memory delta =
+            CfdEnginePlanLib.planOpen(snap, _openOrder(account, CfdTypes.Side.SHORT, 10_000e18, 0, 1e8), 1e8);
 
         assertEq(
             uint256(delta.tradeCostUsdc),
@@ -924,7 +921,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         _attachFullRateCarry(snap, CfdTypes.Side.LONG, borrowBaseUsdc, 30 days);
 
         CfdEnginePlanTypes.OpenDelta memory delta =
-            engine.planner().planOpen(snap, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8, 0);
+            engine.planner().planOpen(snap, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8);
         CfdEnginePlanTypes.RawSnapshot memory withoutQueuedReservations = snap;
         withoutQueuedReservations.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
             settlementBalanceUsdc: 5000e6,
@@ -940,7 +937,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             totalLockedMarginUsdc: 2000e6
         });
         CfdEnginePlanTypes.OpenDelta memory noQueueDelta = engine.planner()
-            .planOpen(withoutQueuedReservations, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8, 0);
+            .planOpen(withoutQueuedReservations, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8);
 
         assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue indexed carry");
         assertEq(

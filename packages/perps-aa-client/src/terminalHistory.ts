@@ -4,17 +4,17 @@ import {
 } from "viem";
 import { orderLifecycleV5Abi } from "./orderV3Abi.js";
 
-export type OrderReceiptV4 = ContractFunctionArgs<typeof orderLifecycleV5Abi, "view", "verifyReceipt">[0];
+export type OrderReceiptV5 = ContractFunctionArgs<typeof orderLifecycleV5Abi, "view", "verifyReceipt">[0];
 export type TerminalOutcomeV5 = ContractFunctionReturnType<typeof orderLifecycleV5Abi, "view", "terminalOutcome">;
 
 const receiptParameter = orderLifecycleV5Abi.find((item) => item.type === "function" && item.name === "verifyReceipt")!.inputs[0];
 const receiptTypeHash = keccak256(toBytes(
-  "PletherOrderReceiptV4(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,OrderReceipt receipt)",
+  "PletherOrderReceiptV5(uint256 chainId,address book,address router,uint64 terminalBlock,uint64 terminalTime,OrderReceipt receipt)",
 ));
 
-/** The V5 read API retains the V4 hash domain; the merged receipt includes authenticated timing. */
-export function hashOrderReceiptV4(input: {
-  chainId: bigint; book: Address; router: Address; terminalBlock: bigint; terminalTime: bigint; receipt: OrderReceiptV4;
+/** Hashes the current Book receipt under its V5 domain, including authenticated terminal timing. */
+export function hashOrderReceiptV5(input: {
+  chainId: bigint; book: Address; router: Address; terminalBlock: bigint; terminalTime: bigint; receipt: OrderReceiptV5;
 }): Hex {
   return keccak256(encodeAbiParameters([
     { type: "bytes32" }, { type: "uint256" }, { type: "address" }, { type: "address" },
@@ -41,7 +41,7 @@ export function decodeVerifiedOrderFinalized(input: {
     || getAddress(summary.account) !== getAddress(receipt.account)
     || summary.status !== receipt.status || summary.reason !== receipt.reason || summary.terminalBlock !== terminalBlock
     || summary.receiptHash.toLowerCase() !== receiptHash.toLowerCase()
-    || hashOrderReceiptV4({ ...input, terminalBlock, terminalTime, receipt }).toLowerCase() !== receiptHash.toLowerCase()) {
+    || hashOrderReceiptV5({ ...input, terminalBlock, terminalTime, receipt }).toLowerCase() !== receiptHash.toLowerCase()) {
     throw new Error("Terminal receipt does not match authenticated history.");
   }
   return event.args;

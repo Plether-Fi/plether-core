@@ -557,7 +557,6 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             40_000_000,
             "Trader claim should stay close to close preview"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 close price write-off must not create accumulated debt");
         assertEq(observed.remainingSize, preview.remainingSize, "Remaining size should match close preview");
         assertEq(observed.remainingMargin, preview.remainingMargin, "Remaining margin should match close preview");
         assertEq(
@@ -608,8 +607,6 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
         assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
-        assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
-        assertEq(actual.badDebtUsdc, 0, "V2 close preview must not expose accumulated debt");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");
         assertEq(actual.remainingMargin, expected.remainingMargin, "Close remaining margin should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Close degraded trigger should match");
@@ -671,7 +668,6 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             preview.traderClaimBalanceUsdc,
             "Trader claim balance should match liquidation preview"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 liquidation price write-off must not create accumulated debt");
         assertEq(
             observed.keeperSettlementUsdc,
             preview.keeperBountyUsdc,
@@ -734,8 +730,6 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
         assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Trader claim should match");
-        assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Bad debt should match");
-        assertEq(actual.badDebtUsdc, 0, "V2 liquidation preview must not expose accumulated debt");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
         assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");
@@ -845,7 +839,6 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
         config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();

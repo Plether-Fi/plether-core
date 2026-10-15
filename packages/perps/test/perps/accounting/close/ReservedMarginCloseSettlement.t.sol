@@ -66,7 +66,6 @@ contract PartialCloseCommitmentIsolationTest is BasePerpTest {
             pnlPledgeBefore / 2,
             "The retained half-position should keep its proportional dedicated PnL pledge"
         );
-        assertEq(preview.badDebtUsdc, 0, "Any price-loss tail beyond the close slice's cap is a writeoff, not debt");
 
         _close(account, CfdTypes.Side.LONG, 50_000e18, 1.02e8);
 
@@ -164,7 +163,6 @@ contract PriceAndActionReservePriorityCloseTest is BasePerpTest {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
         assertTrue(preview.valid, "Full close should collect charges from released surplus");
         assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action charges from price PnL");
-        assertEq(preview.badDebtUsdc, 0, "Action-charge collection must never create protocol debt");
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 1e8);
 

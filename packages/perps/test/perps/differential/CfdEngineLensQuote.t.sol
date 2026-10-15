@@ -64,11 +64,9 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         _setRiskParams(params);
         _fundTrader(taker, 13_000e6);
         ICfdEngineTypes.OpenPreview memory middle =
-            engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 400_000e18, 13_000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 400_000e18, 13_000e6, 1e8);
         assertEq(uint256(middle.invalidReason), uint256(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED));
-        assertTrue(
-            engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 790_000e18, 13_000e6, 1e8, uint64(block.timestamp)).valid
-        );
+        assertTrue(engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 790_000e18, 13_000e6, 1e8).valid);
         ICfdEngineLens.MaxOpenQuote memory quote = _quote(taker, CfdTypes.Side.SHORT, 13_000e6, 1e8);
         assertGe(quote.maxSizeDelta, 790_000e18, "must include the later valid range");
         _open(taker, CfdTypes.Side.SHORT, quote.maxSizeDelta, 13_000e6, 1e8);
@@ -84,12 +82,8 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         _setRiskParams(params);
         _fundTrader(taker, 10_000e6);
         // Larger healing rebates make the hypothetical pledge affordable; the smallest admissible order cannot.
-        assertFalse(
-            engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 1000e18, 11_000e6, 1e8, uint64(block.timestamp)).valid
-        );
-        assertTrue(
-            engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 100_000e18, 11_000e6, 1e8, uint64(block.timestamp)).valid
-        );
+        assertFalse(engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 1000e18, 11_000e6, 1e8).valid);
+        assertTrue(engineLens.previewOpen(taker, CfdTypes.Side.SHORT, 100_000e18, 11_000e6, 1e8).valid);
         ICfdEngineLens.MaxOpenQuote memory quote = _quote(taker, CfdTypes.Side.SHORT, 11_000e6, 1e8);
         assertGe(quote.maxSizeDelta, 100_000e18);
         _open(taker, CfdTypes.Side.SHORT, quote.maxSizeDelta, 11_000e6, 1e8);
@@ -160,7 +154,7 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
             address(engine.planner()), abi.encodeWithSelector(ICfdEnginePlanner.planOpen.selector), abi.encode(rejected)
         );
         vm.expectRevert(ICfdEngineLens.CfdEngineLens__QuoteSearchLimitExceeded.selector);
-        engineLens.quoteMaxOpen(account, CfdTypes.Side.LONG, 10_000e6, 1e8, uint64(block.timestamp));
+        engineLens.quoteMaxOpen(account, CfdTypes.Side.LONG, 10_000e6, 1e8);
     }
 
     function testFuzz_QuoteMaxOpen_DominatesEveryValidCandidate(
@@ -188,7 +182,7 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         uint256 marginDelta = bound(margin, 0, 40_000e6);
         uint256 candidate = bound(candidateLots, 1, 8000) * CfdTypes.SIZE_QUANTUM;
         ICfdEngineLens.MaxOpenQuote memory quote = _quote(account, side, marginDelta, price);
-        if (engineLens.previewOpen(account, side, candidate, marginDelta, price, uint64(block.timestamp)).valid) {
+        if (engineLens.previewOpen(account, side, candidate, marginDelta, price).valid) {
             assertGe(quote.maxSizeDelta, candidate, "no planner-valid witness may exceed the quote");
         }
         if (quote.maxSizeDelta > 0) {
@@ -234,12 +228,12 @@ contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
         order.account = snap.account;
         order.side = isLong ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
         order.marginDelta = bound(margin, 0, 12e6);
-        (uint256 maximum,,) = quoter.quote(engine.planner(), snap, order, price, 0);
+        (uint256 maximum,,) = quoter.quote(engine.planner(), snap, order, price);
         uint256 exhaustiveMaximum;
         // Opposing OI <= 40 lots and the skew allowance is strictly below 40 lots; no size above 80 can pass.
         for (uint256 lots = 1; lots <= 80; ++lots) {
             order.sizeDelta = lots * CfdTypes.SIZE_QUANTUM;
-            if (engine.planner().planOpen(snap, order, price, 0).valid) {
+            if (engine.planner().planOpen(snap, order, price).valid) {
                 exhaustiveMaximum = order.sizeDelta;
             }
         }

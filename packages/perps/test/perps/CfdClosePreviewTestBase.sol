@@ -22,7 +22,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
 
     function setUp() public virtual override {
         super.setUp();
-        previewer = new CfdClosePreview(address(engine));
+        previewer = new CfdClosePreview();
     }
 
     function _riskParams() internal pure virtual override returns (CfdTypes.RiskParams memory params) {
@@ -81,7 +81,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         address executor
     ) internal view returns (CfdClosePreview.ClosePreview memory) {
         // The optimizer can cache block.timestamp across the fixture's vm.warp calls.
-        return previewer.previewClose(address(engine), o, executor, price, uint64(vm.getBlockTimestamp()), _bounds());
+        return previewer.previewClose(address(engine), o, executor, price, _bounds());
     }
 
     function _commitParity(
@@ -113,7 +113,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         id = router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
         assertEq(settlementBefore - clearinghouse.balanceUsdc(ACCOUNT), p.commitmentCarryUsdc);
         OrderV3Types.ExecutionAssessment memory actual =
-            policyEvaluator.assessCommittedOrder(address(engine), id, executor, price, uint64(vm.getBlockTimestamp()));
+            policyEvaluator.assessCommittedOrder(address(engine), id, executor, price);
         assertEq(
             keccak256(abi.encode(p.assessment)), keccak256(abi.encode(actual)), "preview equals committed assessment"
         );
@@ -139,12 +139,9 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
                 assertEq(
                     receipt.bounty.bountyEntitlementUsdc,
                     receipt.bounty.bountyPaidUsdc + receipt.bounty.bountyRefundedUsdc
-                        + receipt.bounty.bountyRetainedUsdc + receipt.bounty.bountyForfeitedUsdc
+                        + receipt.bounty.bountyForfeitedUsdc
                 );
-                assertEq(
-                    receipt.commitment.bountyFromFreeUsdc + receipt.commitment.bountyFromPledgeUsdc,
-                    receipt.bounty.bountyEntitlementUsdc
-                );
+                assertEq(receipt.commitment.bountyFromFreeUsdc, receipt.bounty.bountyEntitlementUsdc);
                 return;
             }
         }
@@ -175,7 +172,7 @@ abstract contract CfdClosePreviewTestBase is BasePerpTest {
         assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), p.assessment.postPositionMarginUsdc);
         assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
         if (!self) {
-            assertEq(clearinghouse.balanceUsdc(KEEPER) - keeperBefore, p.executionBountyUsdc);
+            assertEq(clearinghouse.balanceUsdc(KEEPER), keeperBefore, "close executor receives no bounty");
         }
     }
 

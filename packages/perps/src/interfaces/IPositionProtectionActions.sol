@@ -9,7 +9,7 @@ interface IPositionProtectionActions {
 
     /// @notice Arms one OCO protection against the caller's existing full position.
     /// @dev At least one trigger must be enabled. The caller must have no other protection or ordinary pending order.
-    ///      Creation reserves both protection bounties and validates trigger geometry against the cached fresh mark.
+    ///      Creation reserves the protection-trigger bounty and validates trigger geometry against the cached fresh mark.
     ///      Router pause blocks creation and replacement; cancellation, triggering, and retry remain available.
     /// @param params Direction-aware take-profit and stop-loss trigger prices.
     /// @return protectionId Newly assigned protection identifier.
@@ -18,9 +18,9 @@ interface IPositionProtectionActions {
     ) external returns (uint64 protectionId);
 
     /// @notice Atomically replaces the trigger prices of the caller's staged or armed protection.
-    /// @dev Replacement retains the protection id and its snapshotted bounty reserve. Triggered and latched protection
-    ///      are binding and cannot be replaced. Parent execution binds pending-open protection to the actual resulting side and
-    ///      full size; threshold crossing at that execution tick does not prevent arming.
+    /// @dev Replacement retains the protection id and its snapshotted trigger-bounty reserve. Triggered and latched
+    ///      protection are binding and cannot be replaced. Parent execution binds pending-open protection to the
+    ///      resulting side and full size; threshold crossing at that execution tick does not prevent arming.
     /// @param protectionId Pending-open or armed protection owned by the caller.
     /// @param params Replacement take-profit and stop-loss trigger prices.
     function replacePositionProtection(
@@ -46,8 +46,8 @@ interface IPositionProtectionActions {
     ) external payable returns (uint64 linkedOrderId);
 
     /// @notice Permissionlessly queues a fresh full-position close for an already-latched protection.
-    /// @dev The original trigger is not re-evaluated. Exactly one retained execution bounty moves to the fresh child,
-    ///      which receives a new order id, commit clock, expiry, and oracle settlement window at the FIFO tail.
+    /// @dev The original trigger is not re-evaluated. The fresh zero-bounty child receives a new order id, commit
+    ///      clock, expiry, and oracle settlement window at the FIFO tail.
     ///      This safety action remains available while new protection commits are paused.
     /// @param protectionId Latched protection whose latest close attempt is already terminal.
     /// @return linkedOrderId Newly committed ordinary close-attempt identifier.
@@ -57,7 +57,7 @@ interface IPositionProtectionActions {
 
     /// @notice Commits an opening order and stages TP/SL protection in the same transaction.
     /// @dev The protection becomes `Armed` atomically if the parent open executes. Parent failure terminally fails the
-    ///      protection and releases its protection bounties. A fill that has crossed a staged threshold still arms the
+    ///      protection and releases its unpaid trigger bounty. A fill that has crossed a staged threshold still arms the
     ///      protection; only a valid later-block publication may trigger it. This is for a flat account with no orders.
     ///      The parent is a fresh public V3 intent and must satisfy the same bounded-request policy as `commitOrder`.
     /// @param request Complete caller-authored opening intent and execution bounds.

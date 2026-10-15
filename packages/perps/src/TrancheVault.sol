@@ -177,8 +177,6 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     error TrancheVault__InvalidMaintenanceFeeRecipient();
     error TrancheVault__MaintenanceFeeTimelockNotReady();
     error TrancheVault__NoMaintenanceFeeProposal();
-    // Compatibility error declarations retained for downstream source references.
-    error TrancheVault__TrancheImpaired();
     /// @dev Prevents a controller from resetting another existing holder's whole-balance cooldown with a share claim.
     error TrancheVault__ThirdPartyDepositForExistingHolder();
 

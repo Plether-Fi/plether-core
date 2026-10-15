@@ -7,7 +7,7 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
-/// @dev Exact differential experiments: only pledge reservation/refund timing changes.
+/// @dev LP entry/exit comparisons with and without a pending unpaid close; no funded close escrow exists.
 contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
 
     struct ExitControl {
@@ -94,18 +94,18 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         uint256 controlPayout = _lpRedeem(vault, controlShares, price);
         assertTrue(vm.revertToState(snapshot));
         (uint256 shares, uint64 order, int256 nav) = _lpEntry(vault, id, side, price, true);
-        assertEq(nav, controlNav, "refundable pledge remains collectible exactly once");
-        assertEq(shares, controlShares, "reservation must not change a real epoch's share price");
+        assertEq(nav, controlNav, "unpaid close record leaves terminal NAV unchanged");
+        assertEq(shares, controlShares, "unpaid close record must not change a real epoch's share price");
         vm.warp(pool.lpEpochStart(id) + 61);
         OrderV3Types.OrderReceipt memory receipt = _bountyExpire(order, BOUNTY_KEEPER);
         assertEq(receipt.bounty.bountyPaidUsdc, 0);
-        assertEq(receipt.bounty.bountyRefundedUsdc, router.closeOrderExecutionBountyUsdc());
+        assertEq(receipt.bounty.bountyRefundedUsdc, 0);
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
 
         assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc, controlNav);
         uint256 payout = _lpRedeem(vault, shares, price);
         // Same state and timing imply identical integer rounding, not an arbitrary tolerance.
-        assertEq(payout, controlPayout, "reserve/refund must produce zero incremental LP payout");
+        assertEq(payout, controlPayout, "unpaid close expiry must produce zero incremental LP payout");
     }
 
     /// @dev regression; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
@@ -180,11 +180,11 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
     /// @dev regression; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
     function test_SuccessRealizesOnlyTheAuthorizedPledgeCostAndSelfMayWithdrawBounty() public {
         uint256 pledge = _bountyPosition(CfdTypes.Side.LONG);
-        uint256 expectedFree = _successfulCloseResidual() + router.closeOrderExecutionBountyUsdc();
+        uint256 expectedFree = _successfulCloseResidual() + 0;
         router.updateMarkPrice(_bountyPriceData(120_000_000));
         uint256 snapshot = vm.snapshotState();
-        // Control funds the same bounty externally, so full position pledge can cover LP losses.
-        uint256 bounty = router.closeOrderExecutionBountyUsdc();
+        // Both branches commit the same unpaid zero-bounty close; compare its pledge and LP cash outcome.
+        uint256 bounty = 0;
         uint64 control = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         OrderV3Types.OrderReceipt memory controlReceipt =
             _bountyExecute(control, 120_000_000, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
@@ -205,7 +205,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         uint256 wallet = usdc.balanceOf(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);
         clearinghouse.withdraw(BOUNTY_TRADER, expectedFree);
-        assertEq(usdc.balanceOf(BOUNTY_TRADER) - wallet, expectedFree, "successful bounty plus unused terminal reserve");
+        assertEq(usdc.balanceOf(BOUNTY_TRADER) - wallet, expectedFree, "unused terminal reserve after unpaid close");
         assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), 0);
     }
 
@@ -213,7 +213,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
     function test_LpExitBeforeCommitAndDuringPendingEscrowHaveIdenticalSuccessEconomics() public {
         ExitControl memory expected;
         _bountyPosition(CfdTypes.Side.LONG);
-        uint256 expectedFree = _successfulCloseResidual() + router.closeOrderExecutionBountyUsdc();
+        uint256 expectedFree = _successfulCloseResidual() + 0;
         vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
         router.updateMarkPrice(_bountyPriceData(120_000_000));
         uint256 shares = juniorVault.balanceOf(address(this)) / 10;

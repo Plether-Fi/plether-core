@@ -15,7 +15,7 @@ import {
 
 contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidationBatchTestFixture {
 
-    function test_Batch_ArmedProtectionTerminalizesAndForfeitsBountiesExactlyOnce() public {
+    function test_Batch_ArmedProtectionTerminalizesAndForfeitsTriggerBountyExactlyOnce() public {
         uint64 protectionId = _openAndProtect(ARMED_ACCOUNT, THIN_MARGIN_USDC);
         _withdrawAllFreeSettlement(ARMED_ACCOUNT);
 
@@ -39,7 +39,6 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
             "successful batch liquidation must terminalize armed protection"
         );
         assertEq(protection.triggerBountyUsdc, 0, "trigger bounty must be consumed");
-        assertEq(protection.executionBountyUsdc, 0, "execution bounty must be consumed");
         assertEq(protectionViews.activePositionProtectionId(ARMED_ACCOUNT), 0, "trade lock must be released");
         assertEq(router.getAccountReservations(ARMED_ACCOUNT).executionBountyUsdc, 0, "reserve must be clear");
         assertEq(
@@ -51,7 +50,7 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
             expectedForfeitureUsdc,
-            "duplicate batch item must not forfeit protection bounties twice"
+            "duplicate batch item must not forfeit the trigger bounty twice"
         );
     }
 
@@ -95,11 +94,11 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
             _totalProtectionBountyUsdc(),
-            "only the successful item's protection bounties may be forfeited"
+            "only the successful item's trigger bounty may be forfeited"
         );
     }
 
-    function test_Batch_TriggeredProtectionCleansLinkedCloseAndForfeitsItsBountyExactlyOnce() public {
+    function test_Batch_TriggeredProtectionCleansLinkedZeroBountyCloseExactlyOnce() public {
         uint64 protectionId = _openAndProtect(TRIGGERED_ACCOUNT, HEALTHY_MARGIN_USDC);
         _withdrawAllFreeSettlement(TRIGGERED_ACCOUNT);
 
@@ -146,7 +145,7 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         assertEq(_positionSize(TRIGGERED_ACCOUNT), 0, "position must be liquidated");
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
-            router.closeOrderExecutionBountyUsdc(),
+            0,
             "duplicate batch item must not forfeit the linked-close bounty twice"
         );
     }

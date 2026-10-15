@@ -170,16 +170,12 @@ contract ArchitectureRegression_QueueEconomics is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(aliceAccount);
-        assertEq(
-            marginAfter,
-            marginBefore - router.closeOrderExecutionBountyUsdc(),
-            "bounty must reclassify exactly its backing"
-        );
+        assertEq(marginAfter, marginBefore - 0, "bounty must reclassify exactly its backing");
         assertEq(router.pendingOrderCounts(aliceAccount), 1, "accepted close enters FIFO");
         assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
         assertEq(
             clearinghouse.getLockedMarginBuckets(aliceAccount).reservedSettlementUsdc,
-            router.closeOrderExecutionBountyUsdc(),
+            0,
             "bounty is protected in action reserve"
         );
     }

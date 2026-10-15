@@ -305,8 +305,8 @@ trader can owe value that has not entered HousePool custody.
 | Free trader settlement | Withdrawable trader cash | MarginClearinghouse account |
 | Position margin | Trader value locked behind a live position | Clearinghouse position bucket plus engine mirror |
 | Order reservation | Margin committed to one queued order | Clearinghouse reservation keyed by order ID |
-| Keeper reserve | Trader-funded order-execution bounty | Clearinghouse reserved-settlement bucket |
-| Refundable pledged-bounty escrow | Source-position pledge temporarily reserved for a close bounty; a contingent collectible cap component, not additional custody | Clearinghouse mirror within the keeper reserve |
+| Keeper reserve | Trader-funded opening execution bounty or protection trigger reward | Clearinghouse reserved-settlement bucket |
+| Zero close Order record | Authenticated close-attempt identity with no bounty cash or collectible escrow | Clearinghouse Order reservation with amount zero |
 | Trader claims \(K\) | Senior pool obligations from deferred payouts | Engine beneficiary balances |
 | Terminal deficit | Negative terminal LP equity at the authenticated mark | Engine/HousePool snapshot; blocks deposit activation |
 | Unrealized trader gain | Exact marked LP obligation before close | Account terminal curve; not yet a cash claim |
@@ -330,9 +330,8 @@ terminally uncollectible action-charge remainder is waived.
 Marked ownership is sign-symmetric even though cash availability is not. An
 unrealized trader gain reduces LP share NAV. An unrealized trader loss increases
 that same NAV only up to value collectible from the losing account's dedicated
-PnL pledge, nettable same-account claim, and refundable pledged-bounty escrow.
-The escrow remains attributable to its original position until a successful
-close earns the bounty. The receivable remains non-cash and
+PnL pledge and nettable same-account claim. Ordinary and protection close
+execution bounties are zero, so no pledged-close escrow contributes to this cap. The receivable remains non-cash and
 cannot fund a redemption until settlement collects it. Senior and junior
 principal allocate the resulting terminal equity through the waterfall. These
 categories must not be collapsed merely because an off-chain dashboard can net
@@ -476,8 +475,7 @@ funding.
 
 For account \(i\), let \(\ell_i\) be its number of 100-token lots, \(E_i\) its
 exact entry cost in USDC atoms, and \(k_i\) its effective collectible cap: the
-smaller of its dedicated PnL pledge plus nettable same-account claim plus
-refundable pledged-bounty escrow \(b_i^{\mathrm{esc}}\), and its
+smaller of its dedicated PnL pledge plus nettable same-account claim, and its
 maximum possible price loss inside \([0,C]\). In this subsection, \(p\) and
 \(C\) denote the encoded eight-decimal price integers, so \(\ell_i p\) is
 in six-decimal USDC atoms. With the protocol's LONG side
@@ -498,16 +496,9 @@ A negative value is marked value owed by LPs to that trader. A positive value
 is a trader loss recognized for LP ownership only to the extent the same
 account can pay it. Carry, VPI, fees, frozen spreads, liquidation reserves,
 order margin, and action reserves are separate realized-settlement quantities
-and are excluded from this curve. The specific exception is
-\(b_i^{\mathrm{esc}}\): it mirrors refundable source-position pledge inside
-the reserved bounty, without adding custody, borrowing exposure, or withdrawable
-cash. The reservation or refund itself preserves the collectible cap and LP
-share price; carry and mark changes remain separate. A successful close removes
-the escrow from the curve
-when the full bounty becomes an authorized execution cost, including when
-self-execution releases the bounty to the trader. Any resulting reduction in
-collectible LP value is recognized at that time; an earlier reservation alone
-cannot move that cost onto exiting LPs. The symbol \(E_i\) continues to mean
+and are excluded from this curve. The zero-amount close Order record neither
+adds a collectible asset nor changes LP share price. Carry and mark changes
+remain separate. The symbol \(E_i\) continues to mean
 exact entry cost.
 
 `TerminalNavBookV2` maintains
@@ -576,7 +567,7 @@ liquidation:
    payout and causes no contemporaneous HousePool cash debit;
 3. claim consumption reduces the same beneficiary liability and offsets only
    that account's exact realized price loss;
-4. price loss above the collectible cap after carry and any earned bounty is
+4. price loss above the collectible cap after carry is
    emitted as a diagnostic write-off and creates no asset, claim, deficit, or
    protocol debt;
 5. every surviving account curve equals its remaining lots, entry cost, and
@@ -593,7 +584,7 @@ liquidation:
 payout or creates an equal claim; it never does both. The price-LOSS branch
 partitions exact realized loss into same-account claim consumption, PnL-pledge
 seizure, and an explicit amount above the cap that was absent from pre-close LP
-NAV after the carry checkpoint and any authorized earned-bounty cost. Carry
+NAV after the carry checkpoint. Carry
 first consumes margin and free settlement.
 The remaining carry, VPI, execution fees, and frozen spread settle separately
 against fresh price gain and permitted action cash, including committed order
@@ -795,9 +786,10 @@ The fee uses completed Unix hours, is capped at a 1,000-basis-point nominal APR,
 and has a 48-hour configuration delay. Each checkpoint charges at most 8,760
 hours and forgives older time. It transfers no USDC and changes neither tranche
 principal nor the Senior high-water mark. The current Arbitrum Sepolia
-deployment script configures a 100-basis-point nominal APR paid to the protocol
-treasury; the rate can also be configured to zero. Neither this dilution
-mechanism nor Senior capacity admission is simulated in the historical replay.
+deployment script initializes a zero-basis-point rate with the protocol treasury
+as the snapshotted recipient; a positive rate requires the governance delay.
+Neither this dilution mechanism nor Senior capacity admission is simulated in
+the historical replay.
 
 ---
 
@@ -1093,29 +1085,20 @@ Administrators may add expected FX-holiday dates.
 ### 6.4 Keeper economics and queue liveness
 
 Keeper rewards are reserved from trader clearinghouse value, not drawn from
-HousePool. Open orders use free settlement. Close commitment first assesses
-carry under the applicable mark policy, collecting from margin and then free
-settlement when collection is due. The close bounty then uses free settlement
-first and may reserve eligible PnL pledge for the remainder, subject to protected
-reserve floors. Write the original bounty funding as \(B=F+P\), where \(F\)
-is free-funded and \(P\) is pledge-funded. The pledged part is bound to the
-original position generation and mirrored by \(b_i^{\mathrm{esc}}\) for
-terminal NAV; it does not leave account custody at commitment.
+HousePool. Open orders reserve a free-funded bounty, and protection triggers
+reserve a separate free-funded reward. Ordinary and protection close execution
+bounties are permanently zero. Close commitment still assesses carry, collecting
+from margin and then free settlement when collection is due, and creates an
+authenticated Active zero Order record. It does not reserve free cash or PnL
+pledge for a close execution reward.
 
-A successful close earns the full \(B\): external execution pays the keeper,
-and self-execution releases it to the trader. An ordinary terminal failure or
-expiry pays only \(F\) and restores \(P\) to the same source position's
-margin. A refund outcome returns \(F\) to free settlement and \(P\) to its
-source margin. Carry is assessed on the old borrowing basis before pledged
-margin is restored, and unpaid arrears remain due. The bounty split is fixed at
-commitment; repeated failures cannot replenish a pledge-funded failure payment.
-
-Any close requiring \(P>0\) must enter an empty account pending queue. Later
-orders funded entirely from free settlement may follow it; they keep their
-FIFO order and are not cancelled when the close fails. If \(F=0\), ordinary
-failure or expiry pays no keeper bounty: the terminal item can still be cleaned
-up, but a keeper must be willing to perform that unpaid work. Retryable failures
-leave the head pending under the normal lifecycle rules.
+Successful close execution, recognized failure, expiry, and liquidation settle
+that zero record without paying a close executor or changing the terminal NAV
+collectible cap. A matching failed protection close latches; retry creates a
+fresh zero record and does not pay its trigger reward again. There is no
+pledge-specific empty-queue rule. FIFO, account capacity, queued exposure,
+timing, and risk checks still apply. Unpaid close cleanup requires a willing
+keeper; retryable failures leave the head pending under normal lifecycle rules.
 
 Binding orders reduce the ability to treat a queue position as a free option,
 but they remove user cancellation after an order has entered the queue. The
@@ -1183,10 +1166,8 @@ For a losing close, after the margin-first carry checkpoint, the exact entry
 cost allocated to the closed lots determines price loss. Settlement nets a
 same-account trader claim first and then consumes the dedicated PnL pledge. It does not treat order margin, liquidation reserve,
 execution-bounty reserve, or generic action reserve as additional price-loss
-backing. The successful close removes refundable pledged-bounty escrow from the
-terminal curve as the bounty is earned; ordinary price-loss settlement still
-cannot seize the reserved bounty. Any price loss beyond the account cap after
-that authorized cost is a diagnostic write-off; after that cost, it is outside
+backing. No pledged-close escrow or close execution bounty enters the terminal
+curve. Any price loss beyond the account cap is a diagnostic write-off; it is outside
 the marked collectible receivable.
 
 A partial close is therefore not blocked merely because uncapped price loss
@@ -1214,13 +1195,12 @@ frozen spread are assessed through their separate action-charge path.
 
 ### 7.3 Liquidation
 
-Before final liquidation assessment, the Router restores every pending close's
-pledge-funded bounty to its original live position and forfeits only its
-free-funded part to treasury. These changes and the liquidation execute in one
-rollback frame. If restoration makes the position healthy, that frame reverts,
-preserving the pledged close and its queue state; valid risk-off refunds already
-completed in the outer frame remain effective. Liquidation therefore cannot
-send refundable pledge to treasury ahead of LP loss recovery.
+Before final liquidation assessment, the Router authenticates and settles pending
+order records in one rollback frame. Unpaid opening bounties may be forfeited to
+treasury; pending close records are zero and move no value. If the position is
+healthy, that frame reverts and leaves its pending orders intact; valid risk-off
+refunds already completed in the outer frame remain effective. Liquidation
+cannot send PnL pledge to treasury as a close-bounty forfeiture.
 
 Liquidation eligibility then uses exact post-carry PnL pledge plus same-account
 claim
@@ -1910,7 +1890,6 @@ when normal settlement assumptions fail.
 | --- | --- |
 | \(A\) | Canonical physical HousePool assets |
 | \(B_{\mathrm{settle}}\) | Liability-scaled settlement headroom, atom-ceiled from \(L_{\max}\) |
-| \(b_i^{\mathrm{esc}}\) | Refundable pledged close-bounty escrow of account \(i\), distinct from entry cost \(E_i\) |
 | \(C\) | Immutable protocol price cap |
 | \(D\) | Pool depth used by VPI |
 | \(E_i\) | Exact entry cost of account \(i\), in USDC atoms |

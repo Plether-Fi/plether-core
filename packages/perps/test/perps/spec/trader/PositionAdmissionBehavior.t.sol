@@ -171,12 +171,9 @@ contract FeeAdjustedAdmissionTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
-        uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
-        );
-        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
-        );
+        uint8 revertCode = engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8);
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
+            engineLens.previewOpenFailurePolicyCategory(account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8);
 
         assertEq(
             revertCode,
@@ -457,9 +454,7 @@ contract VpiCollateralAdmissionTest is BasePerpTest {
 
         _fundTrader(bob, 4000e6);
 
-        uint8 code = engineLens.previewOpenRevertCode(
-            bob, CfdTypes.Side.SHORT, 300_000e18, 4000e6, 1e8, uint64(block.timestamp)
-        );
+        uint8 code = engineLens.previewOpenRevertCode(bob, CfdTypes.Side.SHORT, 300_000e18, 4000e6, 1e8);
         assertEq(
             code,
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),

@@ -1,5 +1,9 @@
 # Zero-close implementation evidence
 
+> Pinned evidence for the 2026-10-14 source revisions below. Tuple and domain statements in this record describe
+> that revision; current source has a further ABI cleanup and V5 receipt/config domains. Do not use this record as
+> the current deployment ABI or as evidence that the later cleanup was validated.
+
 Status on 2026-10-14: implementation committed; remaining local audit and CI validation **cancelled at the user's request**. This is not a full-validation pass or an activation approval. No public-chain transaction was sent and no operator wallet was funded.
 
 ## Source revisions

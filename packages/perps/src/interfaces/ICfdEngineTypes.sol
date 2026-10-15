@@ -27,15 +27,7 @@ interface ICfdEngineTypes {
     error CfdEngine__NoTraderClaim();
     /// @notice HousePool cash cannot presently service the selected trader claim under aggregate claim priority.
     error CfdEngine__InsufficientPoolLiquidity();
-    /// @notice Legacy selector for an open/increase opposing an existing position; current planning uses typed failure.
-    error CfdEngine__MustCloseOpposingPosition();
-    /// @notice Legacy selector for carry exceeding reachable collateral; current planning uses typed failure.
-    error CfdEngine__CarryExceedsMargin();
-    /// @notice Legacy selector for a planned HousePool solvency breach; current planning uses typed failure.
-    error CfdEngine__PoolSolvencyExceeded();
-    /// @notice Legacy selector for fees draining open margin; current planning uses typed failure.
-    error CfdEngine__MarginDrainedByFees();
-    /// @notice Legacy selector for an oversized close; current planning uses typed failure.
+    /// @notice A close commitment requested more than the live position size.
     error CfdEngine__CloseSizeExceedsPosition();
     /// @notice Liquidation was requested for an account without an open position.
     error CfdEngine__NoPositionToLiquidate();
@@ -43,24 +35,12 @@ interface ICfdEngineTypes {
     error CfdEngine__PositionIsSolvent();
     /// @notice A planned terminal operation would leave effective pool assets below maximum position liability.
     error CfdEngine__PostOpSolvencyBreach();
-    /// @notice Legacy selector for insufficient initial margin; current planning uses typed failure.
-    error CfdEngine__InsufficientInitialMargin();
     /// @notice A position or requested change is below the protocol's minimum economic size.
     error CfdEngine__PositionTooSmall();
     /// @notice A clearinghouse withdrawal would leave an open position below its required collateral level.
     error CfdEngine__WithdrawBlockedByOpenPosition();
-    /// @notice Legacy selector for an empty FAD-day update; current timelocked admin uses its own validation errors.
-    error CfdEngine__EmptyDays();
-    /// @notice Legacy selector for zero staleness; current timelocked admin uses its own validation errors.
-    error CfdEngine__ZeroStaleness();
     /// @notice An operation that requires a positive amount received zero.
     error CfdEngine__ZeroAmount();
-    /// @notice Legacy selector for excessive FAD runway; current timelocked admin uses its own validation errors.
-    error CfdEngine__RunwayTooLong();
-    /// @notice Legacy selector for an underwater partial close; current planning uses typed failure.
-    error CfdEngine__PartialCloseUnderwaterCarry();
-    /// @notice Legacy selector for close remainder dust; current planning uses typed failure.
-    error CfdEngine__DustPosition();
     /// @notice A live-market operation requires a fresher cached engine mark.
     error CfdEngine__MarkPriceStale();
     /// @notice An oracle publish timestamp predates the engine's stored mark timestamp.
@@ -71,12 +51,8 @@ interface ICfdEngineTypes {
     error CfdEngine__NotAccountOwner();
     /// @notice An operation requiring an existing position was requested for an account without one.
     error CfdEngine__NoOpenPosition();
-    /// @notice Unused legacy selector retained in the shared ABI; V3 has no accumulated-debt repayment path.
-    error CfdEngine__BadDebtTooLarge();
     /// @notice Risk, fee, spread, price-cap, or liquidation-bounty parameters violate engine bounds.
     error CfdEngine__InvalidRiskParams();
-    /// @notice Legacy selector for excessive side skew; current planning uses typed failure.
-    error CfdEngine__SkewTooHigh();
     /// @notice A risk-increasing or withdrawal action was attempted while degraded mode is latched.
     error CfdEngine__DegradedMode();
     /// @notice Degraded-mode recovery was requested while degraded mode was not latched.
@@ -85,10 +61,6 @@ interface ICfdEngineTypes {
     error CfdEngine__StillInsolvent();
     /// @notice A required dependency, token, account, or recipient address is zero.
     error CfdEngine__ZeroAddress();
-    /// @notice Free settlement and eligible pledge after carry cannot fund the close-order bounty.
-    error CfdEngine__InsufficientCloseOrderBountyBacking(
-        uint256 requiredBountyUsdc, uint256 availableBackingUsdc, uint256 unpaidCarryUsdc
-    );
     /// @notice The requested close size is not divisible by the canonical size quantum.
     error CfdEngine__InvalidCloseSizeQuantum();
     /// @notice A partial-close commitment would start from a position below maintenance health.
@@ -115,11 +87,6 @@ interface ICfdEngineTypes {
         CfdEnginePlanTypes.ExecutionFailurePolicyCategory failureCategory, uint8 failureCode, bool isClose
     );
 
-    /// @notice Legacy carry-index event retained in the ABI; the current engine does not emit it.
-    /// @param longIndex Updated LONG carry index, scaled by 1e18.
-    /// @param shortIndex Updated SHORT carry index, scaled by 1e18.
-    /// @param absSkewUsdc Absolute directional skew used for the update, in USDC.
-    event CarryUpdated(int256 longIndex, int256 shortIndex, uint256 absSkewUsdc);
     /// @notice Emitted after an open or increase is settled.
     /// @param account Account whose position was opened or increased.
     /// @param side Resulting position side.
@@ -149,25 +116,6 @@ interface ICfdEngineTypes {
     /// @param account Position account whose margin increased.
     /// @param amount Added margin in USDC.
     event MarginAdded(address indexed account, uint256 amount);
-    /// @notice Legacy event describing FAD override days added by administrative configuration.
-    /// @param timestamps Input Unix timestamps whose normalized day numbers were added.
-    event FadDaysAdded(uint256[] timestamps);
-    /// @notice Legacy event describing FAD override days removed by administrative configuration.
-    /// @param timestamps Input Unix timestamps whose normalized day numbers were removed.
-    event FadDaysRemoved(uint256[] timestamps);
-    /// @notice Legacy event describing a change to the oracle-frozen staleness limit.
-    /// @param newStaleness New maximum mark age in seconds.
-    event FadMaxStalenessUpdated(uint256 newStaleness);
-    /// @notice Legacy event describing a change to the pre-FAD deleverage runway.
-    /// @param newRunway New runway duration in seconds.
-    event FadRunwayUpdated(uint256 newRunway);
-    /// @notice Legacy event describing a change to the engine's live cached-mark staleness component.
-    /// @param newStaleness New maximum age in seconds.
-    event EngineMarkStalenessLimitUpdated(uint256 newStaleness);
-    /// @notice Unused legacy event retained in the shared ABI; V3 does not emit or maintain accumulated debt.
-    /// @param amount Legacy cleared amount in USDC.
-    /// @param remaining Legacy remaining amount in USDC.
-    event BadDebtCleared(uint256 amount, uint256 remaining);
     /// @notice Emitted when a terminal settlement latches degraded mode because adjusted solvency is negative.
     /// @param effectiveAssets Effective pool assets after senior trader-claim reservation, in USDC.
     /// @param maxLiability Larger side's maximum-profit liability after settlement, in USDC.
@@ -190,12 +138,6 @@ interface ICfdEngineTypes {
     event BountyCredited(address indexed sourceAccount, address indexed beneficiary, uint256 amountUsdc);
     /// @notice Emitted when the immutable-bound terminal NAV book is configured exactly once.
     event TerminalNavBookSet(address indexed terminalNavBook);
-    /// @notice Legacy checkpoint-only carry event retained for ABI compatibility; no longer emitted.
-    /// @dev CarryRealized reports collection and retained arrears, including zero collection when backing is exhausted.
-    /// @param account Position account whose carry was checkpointed.
-    /// @param addedUnsettledCarryUsdc Newly added uncovered carry in USDC.
-    /// @param totalUnsettledCarryUsdc Account's total unsettled carry after the checkpoint, in USDC.
-    event CarryCheckpointed(address indexed account, uint256 addedUnsettledCarryUsdc, uint256 totalUnsettledCarryUsdc);
     /// @notice Emitted when nonzero carry due is evaluated; collected value follows the HousePool claimant path.
     /// @dev Collected value may be zero when no backing is available. Claim and bounty credits occur afterward
     ///      and can cover retained arrears at a later checkpoint.
@@ -211,11 +153,6 @@ interface ICfdEngineTypes {
         uint256 marginConsumedUsdc,
         uint256 remainingUnsettledCarryUsdc
     );
-    /// @notice Legacy token-sweep event retained in the ABI; the current engine does not emit it.
-    /// @param token Swept ERC20 token.
-    /// @param to Recipient of the swept tokens.
-    /// @param amount Amount transferred in the token's native decimals.
-    event TokenSwept(address indexed token, address indexed to, uint256 amount);
 
     /// @notice Detailed clearinghouse custody, liquidation reachability, terminal-price cap, and claim view.
     /// @dev Every monetary field is USDC. Trader claims are senior HousePool liabilities and are not clearinghouse
@@ -229,8 +166,8 @@ interface ICfdEngineTypes {
     /// @param closeReachableUsdc Legacy close reachability value, exactly equal to `freeSettlementUsdc`.
     /// @param liquidationReachableSettlementUsdc Settlement balance available to liquidation after excluding
     ///        router-attributed execution-bounty reserves; this can include value liquidation releases.
-    /// @param terminalPriceCollectibleCapUsdc Live-position terminal price-loss cap: PnL pledge, same-account claim
-    ///        and refundable pledged-close escrow, clipped to maximum endpoint loss; zero without a live position.
+    /// @param terminalPriceCollectibleCapUsdc Live-position terminal price-loss cap: PnL pledge plus same-account
+    ///        claim, clipped to maximum endpoint loss; zero without a live position. Close records add no backing.
     /// @param accountEquityUsdc Clearinghouse-local settlement balance, excluding unrealized PnL and trader claims.
     /// @param freeBuyingPowerUsdc Clearinghouse-local free settlement, excluding engine withdrawal guards.
     /// @param traderClaimBalanceUsdc Separate senior HousePool payout liability owed to the account.
@@ -319,8 +256,6 @@ interface ICfdEngineTypes {
     /// @param immediatePayoutUsdc Portion of the fresh payout paid immediately into clearinghouse settlement.
     /// @param traderClaimBalanceUsdc Projected claim balance after consuming old claims and recording deferred payout.
     /// @param seizedCollateralUsdc PnL pledge collected for price loss; excludes carry and action charges.
-    /// @param badDebtUsdc Inactive compatibility field, zero in current planner previews; excess price loss is reported
-    ///        by the settlement sidecar's `PriceLossWrittenOff` event and never becomes debt or LP NAV.
     /// @param remainingSize Position size after the close.
     /// @param remainingMargin Active position margin after the close.
     /// @param triggersDegradedMode Whether this operation newly reveals adjusted pool insolvency.
@@ -346,14 +281,12 @@ interface ICfdEngineTypes {
         uint256 immediatePayoutUsdc;
         uint256 traderClaimBalanceUsdc;
         uint256 seizedCollateralUsdc;
-        uint256 badDebtUsdc;
         uint256 remainingSize;
         uint256 remainingMargin;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;
         uint256 maxLiabilityAfterUsdc;
-        // Append-only fields preserve every pre-existing ABI tuple offset for legacy clients.
         uint256 frozenSpreadUsdc;
         uint256 frozenSpreadPaidUsdc;
         uint256 frozenSpreadWaivedUsdc;
@@ -423,6 +356,7 @@ interface ICfdEngineTypes {
     /// @notice Read-only projection of liquidation economics and post-settlement solvency.
     /// @dev `oraclePrice` is clamped to the engine cap. Every monetary field is 6-decimal USDC. The simulation
     ///      models forfeiture of the account's pending execution bounties before computing liquidation reachability.
+    ///      An underfunded negative-VPI reserve causes planning to revert before this result is returned.
     /// @param liquidatable Whether exact P+C price risk breaches the active requirement or an independent delinquency
     ///        condition applies.
     /// @param oraclePrice Price used by the simulation, with 8 decimals.
@@ -440,8 +374,6 @@ interface ICfdEngineTypes {
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
     /// @param immediatePayoutUsdc Portion of fresh trader payout paid immediately into clearinghouse settlement.
     /// @param traderClaimBalanceUsdc Projected claim balance after netting and any deferred fresh payout.
-    /// @param badDebtUsdc Inactive compatibility field, zero in current planner previews; excess price loss is reported
-    ///        by the settlement sidecar's `PriceLossWrittenOff` event and never becomes debt or LP NAV.
     /// @param triggersDegradedMode Whether liquidation newly reveals adjusted pool insolvency.
     /// @param postOpDegradedMode Projected degraded-mode latch after liquidation.
     /// @param effectiveAssetsAfterUsdc Projected physical pool assets net of senior trader claims.
@@ -463,7 +395,6 @@ interface ICfdEngineTypes {
         uint256 existingTraderClaimRemainingUsdc;
         uint256 immediatePayoutUsdc;
         uint256 traderClaimBalanceUsdc;
-        uint256 badDebtUsdc;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
         uint256 effectiveAssetsAfterUsdc;

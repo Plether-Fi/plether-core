@@ -46,11 +46,10 @@ interface ICfdEngineSettlementSidecar {
         address account
     ) external;
 
-    /// @notice Realizes carry and reserves one close bounty from free settlement, then eligible pledge.
+    /// @notice Plans close commitment and realizes carry without reserving a bounty.
     function reserveCloseOrderExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 amountUsdc
+        uint256 sizeDelta
     ) external returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Applies an open/increase settlement delta through the host hooks.
@@ -78,8 +77,7 @@ interface ICfdEngineSettlementSidecar {
     function executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
-        uint64 publishTime,
-        uint64 orderId
+        uint64 publishTime
     ) external;
 
     /// @notice Applies a liquidation settlement delta through the host hooks.

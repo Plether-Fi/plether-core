@@ -512,7 +512,6 @@ contract TimelockPauseTest is BasePerpTest {
         config.openOrderExecutionBountyBps = 2;
         config.minOpenOrderExecutionBountyUsdc = 200_000;
         config.maxOpenOrderExecutionBountyUsdc = 300_000;
-        config.closeOrderExecutionBountyUsdc = 0;
         config.positionProtectionTriggerBountyUsdc = 300_000;
         config.maxPendingOrders = 7;
         config.minEngineGas = 700_000;
@@ -530,7 +529,6 @@ contract TimelockPauseTest is BasePerpTest {
         assertEq(router.openOrderExecutionBountyBps(), 2);
         assertEq(router.minOpenOrderExecutionBountyUsdc(), 200_000);
         assertEq(router.maxOpenOrderExecutionBountyUsdc(), 300_000);
-        assertEq(router.closeOrderExecutionBountyUsdc(), 0);
         assertEq(router.positionProtectionTriggerBountyUsdc(), 300_000);
         assertEq(router.maxPendingOrders(), 7);
         assertEq(router.minEngineGas(), 700_000);
@@ -617,9 +615,9 @@ contract TimelockPauseTest is BasePerpTest {
         routerAdmin.proposeOracleConfig(config);
     }
 
-    function test_OrderRouter_InvalidCloseOrderExecutionBounty_Reverts() public {
+    function test_OrderRouter_InvalidOpenBountyRange_Reverts() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.closeOrderExecutionBountyUsdc = 1_000_001;
+        config.minOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc + 1;
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidExecutionBounty.selector);
         routerAdmin.proposeRouterConfig(config);

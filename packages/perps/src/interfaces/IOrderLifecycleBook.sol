@@ -14,24 +14,21 @@ interface IOrderLifecycleBook {
         OrderV3Types.ConstraintKind constraint, uint256 actual, uint256 limit
     );
 
+    /// @notice Records the Router's close-admission or open-bounty commitment for a pending order.
+    /// @param orderId Pending order whose commitment is recorded.
+    /// @param effects Carry and bounty effects returned by the Engine or open-order reservation path.
     function recordCommitment(
         uint64 orderId,
-        CfdEnginePlanTypes.CloseCommitment calldata effects,
-        uint64 sourcePositionEpoch
+        CfdEnginePlanTypes.CloseCommitment calldata effects
     ) external;
 
-    /// @notice Pending funding differs from its independently recorded commitment or position escrow.
+    /// @notice A pending order's bounty reservation differs from its committed funding.
     error OrderLifecycleBook__BountyFundingMismatch(uint64 orderId);
 
-    /// @notice Authenticates custody, original funding and live collectible pledge ownership.
+    /// @notice Authenticates the pending order's clearinghouse bounty reservation and committed funding.
     function validateBountyFunding(
         uint64 orderId
     ) external view;
-
-    /// @notice Original pledge position generation, retained only while the order is pending.
-    function sourcePositionEpoch(
-        uint64 orderId
-    ) external view returns (uint64);
 
     /// @notice A mutation was attempted by an address other than the immutable Router.
     error OrderLifecycleBook__Unauthorized();

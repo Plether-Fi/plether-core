@@ -17,11 +17,10 @@ contract PerpsReadParityTest is BasePerpTest {
         uint256 size = 100_000e18;
         uint256 margin = 9000e6;
         uint256 price = 1e8;
-        uint64 publishTime = uint64(block.timestamp);
         _fundTrader(trader, 9500e6);
 
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(account, CfdTypes.Side.LONG, size, margin, price, publishTime);
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, size, margin, price);
 
         assertTrue(preview.valid, "Open preview should be valid");
         assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "Open reason");
@@ -63,7 +62,7 @@ contract PerpsReadParityTest is BasePerpTest {
         assertTrue(preview.liquidationPrice > price, "Long liquidation should be above entry");
 
         ICfdEngineTypes.OpenPreview memory capped =
-            engineLens.previewOpen(account, CfdTypes.Side.LONG, size, margin, CAP_PRICE + 1, publishTime);
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, size, margin, CAP_PRICE + 1);
         assertEq(capped.executionPrice, CAP_PRICE, "Execution price should cap");
         assertEq(capped.notionalUsdc, 200_000e6, "Capped notional should use cap price");
 
@@ -91,7 +90,7 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
 
         ICfdEngineTypes.OpenPreview memory first =
-            engineLens.previewOpen(account, CfdTypes.Side.SHORT, firstSize, 8000e6, price, uint64(block.timestamp));
+            engineLens.previewOpen(account, CfdTypes.Side.SHORT, firstSize, 8000e6, price);
         assertTrue(first.valid, "Short open should be valid");
         assertEq(first.postSize, firstSize, "Short post size should match");
         assertEq(first.postEntryPrice, price, "Short post entry should match");
@@ -100,9 +99,8 @@ contract PerpsReadParityTest is BasePerpTest {
 
         _open(account, CfdTypes.Side.SHORT, firstSize, 8000e6, price);
 
-        ICfdEngineTypes.OpenPreview memory increase = engineLens.previewOpen(
-            account, CfdTypes.Side.SHORT, secondSize, 2000e6, 120_000_000, uint64(block.timestamp)
-        );
+        ICfdEngineTypes.OpenPreview memory increase =
+            engineLens.previewOpen(account, CfdTypes.Side.SHORT, secondSize, 2000e6, 120_000_000);
         assertTrue(increase.valid, "Same-side increase should be valid");
         assertEq(increase.postSize, firstSize + secondSize, "Increase post size should add");
         assertEq(increase.postEntryPrice, 104_000_000, "Increase post entry should weighted-average");
@@ -123,7 +121,7 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(shortTrader, 20_000e6);
 
         ICfdEngineTypes.OpenPreview memory skewing =
-            engineLens.previewOpen(longTrader, CfdTypes.Side.LONG, size, 10_000e6, price, uint64(block.timestamp));
+            engineLens.previewOpen(longTrader, CfdTypes.Side.LONG, size, 10_000e6, price);
         assertTrue(skewing.valid, "Skewing open should be valid");
         assertTrue(skewing.vpiUsdc > 0, "Skewing open should pay VPI");
         assertEq(skewing.tradeCostUsdc, skewing.vpiUsdc + int256(skewing.executionFeeUsdc), "Charge trade cost");
@@ -131,7 +129,7 @@ contract PerpsReadParityTest is BasePerpTest {
         _open(longTrader, CfdTypes.Side.LONG, size, 10_000e6, price);
 
         ICfdEngineTypes.OpenPreview memory healing =
-            engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, size, 10_000e6, price, uint64(block.timestamp));
+            engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, size, 10_000e6, price);
         assertTrue(healing.valid, "Healing open should be valid");
         assertTrue(healing.vpiUsdc < 0, "Healing open should receive VPI rebate");
         assertEq(healing.tradeCostUsdc, healing.vpiUsdc + int256(healing.executionFeeUsdc), "Rebate trade cost");
@@ -144,12 +142,10 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(trader, 100e6);
 
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8, uint64(block.timestamp));
-        uint8 legacyCode =
-            engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8, uint64(block.timestamp));
-        CfdEnginePlanTypes.OpenFailurePolicyCategory legacyCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8, uint64(block.timestamp)
-        );
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8);
+        uint8 legacyCode = engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8);
+        CfdEnginePlanTypes.OpenFailurePolicyCategory legacyCategory =
+            engineLens.previewOpenFailurePolicyCategory(account, CfdTypes.Side.LONG, 100_000e18, 0, 1e8);
 
         assertFalse(preview.valid, "Preview should be invalid");
         assertEq(uint8(preview.invalidReason), legacyCode, "Invalid reason should match legacy code");
@@ -171,7 +167,7 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(shortTrader, 9500e6);
 
         ICfdEngineTypes.OpenPreview memory longPreview =
-            engineLens.previewOpen(longTrader, CfdTypes.Side.LONG, size, margin, price, uint64(block.timestamp));
+            engineLens.previewOpen(longTrader, CfdTypes.Side.LONG, size, margin, price);
         _open(longTrader, CfdTypes.Side.LONG, size, margin, price);
         assertTrue(longPreview.hasLiquidationPrice, "Long threshold should exist");
         assertFalse(
@@ -184,7 +180,7 @@ contract PerpsReadParityTest is BasePerpTest {
         );
 
         ICfdEngineTypes.OpenPreview memory shortPreview =
-            engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, size, margin, price, uint64(block.timestamp));
+            engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, size, margin, price);
         _open(shortTrader, CfdTypes.Side.SHORT, size, margin, price);
         assertTrue(shortPreview.hasLiquidationPrice, "Short threshold should exist");
         assertTrue(
@@ -204,7 +200,7 @@ contract PerpsReadParityTest is BasePerpTest {
         _fundTrader(trader, 310_000e6);
 
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(trader, CfdTypes.Side.LONG, size, 300_000e6, price, uint64(block.timestamp));
+            engineLens.previewOpen(trader, CfdTypes.Side.LONG, size, 300_000e6, price);
 
         assertTrue(preview.valid, "Overcollateralized open should be valid");
         assertFalse(preview.hasLiquidationPrice, "No in-range liquidation threshold should exist");
@@ -338,7 +334,7 @@ contract PerpsReadParityTest is BasePerpTest {
         PerpsViewTypes.TraderAccountView memory traderView = publicLens.getTraderAccount(account);
         PerpsViewTypes.PositionView memory positionView = publicLens.getPosition(account);
         ICfdEngineTypes.OpenPreview memory carryProjection =
-            engineLens.previewOpen(account, CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 0, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(account, CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM, 0, 1e8);
 
         assertGt(carryProjection.pendingCarryUsdc, 0, "Setup should accrue a nonzero action-side carry charge");
         assertGe(

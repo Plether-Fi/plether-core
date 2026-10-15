@@ -1,10 +1,30 @@
-> Historical/additive-preview documentation. For the fresh-stack V3 intent / V4 receipt implementation, use [Deposit-free close migration](DEPOSIT_FREE_CLOSE.md). Keep this historical integration bound to its archived deployment; the new planner tuples are incompatible with v1.2.3.
+> Historical/additive-preview documentation. Its V3 intent / V4 receipt references describe the earlier candidate.
+> Current source uses V3 request/intent and V5 receipt/config domains; use [current accounting](ACCOUNTING_SPEC.md)
+> and generated ABIs for a fresh stack. Keep this historical integration bound to its archived deployment; current
+> planner tuples are incompatible with v1.2.3. The current `previewClose` overloads omit the old planner-only
+> `publishTime` argument; use the archived ABI when calling a deployed v1.2.3 preview.
 
 > The current zero-bounty source removes `previewSponsoredClose` and `validateSponsoredClose`. The sponsored APIs
 > described below belong to archived releases only. New closes use ordinary `previewClose`; their commitment carry
 > is included in the current assessment and bound checks. Historical recovery continues against the original lens.
 
 # Reservation-aware close review
+
+## Current fresh-stack preview
+
+The current contract has two five-argument overloads:
+
+```text
+previewClose(engineAddress, account, request, executor, executionPrice)
+previewClose(engineAddress, closeOrder, executor, executionPrice, bounds)
+```
+
+The first accepts a prospective `OrderRequest` and checks close admission through the configured Router's batch
+sidecar. The second accepts a `CfdTypes.Order` and explicit execution bounds. Both return `commitment`,
+`commitmentCarryUsdc`, and `assessment`; neither returns a close execution bounty. Use the matching generated ABI
+for a fresh deployment. The archived six-argument call and bounty handling below describe the pinned v1.2.3 lens.
+
+## Historical additive-preview integration
 
 `CfdClosePreview.previewClose` is the pre-commit close-review API. `CfdOrderPolicyEvaluator.assessOrder` remains the execution-state API: its supplied bounty must already have been reserved by commitment.
 

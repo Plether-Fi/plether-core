@@ -125,7 +125,6 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         address executor;
         uint256 currentOraclePrice;
         uint256 poolDepthUsdc;
-        uint64 publishTime;
         uint256 executionBountyUsdc;
     }
 
@@ -153,12 +152,11 @@ abstract contract CfdOrderPolicyEvaluatorBase {
 
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
-                planner.planClose(snapshot, order, context.currentOraclePrice, context.publishTime);
+                planner.planClose(snapshot, order, context.currentOraclePrice);
             return _evaluateClose(snapshot, closeDelta, boundsCopy, context.executionBountyUsdc, bountyReturnsToAccount);
         }
 
-        CfdEnginePlanTypes.OpenDelta memory openDelta =
-            planner.planOpen(snapshot, order, context.currentOraclePrice, context.publishTime);
+        CfdEnginePlanTypes.OpenDelta memory openDelta = planner.planOpen(snapshot, order, context.currentOraclePrice);
         return _evaluateOpen(snapshot, openDelta, boundsCopy, context.executionBountyUsdc, bountyReturnsToAccount);
     }
 

@@ -171,7 +171,7 @@ contract TerminalNavCloseConservationTest is Test {
             side: snap.position.side,
             isClose: true
         });
-        delta = CfdEnginePlanLib.planClose(snap, order, price, 0);
+        delta = CfdEnginePlanLib.planClose(snap, order, price);
     }
 
     function _assertTerminalConservation(

@@ -29,7 +29,7 @@ abstract contract OrderCommitHandler is OrderValidation {
         clearinghouse.recordBountyReservation(
             account, IMarginClearinghouse.BountyKind.Order, orderId, executionBountyUsdc
         );
-        _onOrderCommitted(order, effects, 0);
+        _onOrderCommitted(order, effects);
         _reserveCommittedMargin(account, orderId, order.isClose, order.marginDelta);
 
         _recordCommittedOrder(order);
@@ -38,8 +38,8 @@ abstract contract OrderCommitHandler is OrderValidation {
     // slither-disable-end reentrancy-benign
 
     /// @notice Stores and links an already-validated order.
-    /// @dev Ordinary commit establishes reservations first. A protection retry keeps its bounty protected in the
-    ///      clearinghouse protection namespace until the Book reattributes it after this queue callback returns.
+    /// @dev Ordinary commit establishes reservations first. A protection retry appends a fresh zero-bounty close;
+    ///      the Book records its linkage after this queue callback returns.
     function _recordCommittedOrder(
         CfdTypes.Order memory order
     ) internal {

@@ -7,7 +7,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
 /// @notice Read-only planner and liquidation diagnostics for the CFD engine.
 /// @dev The lens does not ingest Pyth data, validate oracle freshness, or mutate engine state. Callers supply candidate
-///      prices and publish times. USDC amounts use 6 decimals, prices use 8 decimals, and sizes use 18 decimals.
+///      prices. USDC amounts use 6 decimals, prices use 8 decimals, and sizes use 18 decimals.
 interface ICfdEngineLens {
 
     /// @notice The interval budget was exhausted; no approximate or partial maximum is returned.
@@ -43,7 +43,7 @@ interface ICfdEngineLens {
     ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
     /// @notice Previews an open/increase against current pool depth.
-    /// @dev This is read-only and uses the caller-supplied oracle price/publish time; it does not ingest Pyth
+    /// @dev This is read-only and uses the caller-supplied oracle price; it does not ingest Pyth
     ///      updates, fetch Hermes data, validate timing/freshness, or mutate engine mark state. Uses current effective
     ///      `HousePool.totalAssets()` and clamps execution economics to `CAP_PRICE`.
     /// @param account Account that would open or increase the position
@@ -51,15 +51,13 @@ interface ICfdEngineLens {
     /// @param sizeDelta Position size delta (18 decimals)
     /// @param marginDelta Margin supplied with the hypothetical order in USDC
     /// @param oraclePrice Oracle price used for the simulation, clamped to CAP_PRICE for execution economics
-    /// @param publishTime Hypothetical oracle publish timestamp; currently retained for planner parity
     /// @return preview Validity, economics, projected position health, and liquidation boundary
     function previewOpen(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (ICfdEngineTypes.OpenPreview memory preview);
 
     /// @notice Quotes the largest planner-valid open/increase at current pool depth.
@@ -71,14 +69,12 @@ interface ICfdEngineLens {
     /// @param side Position side
     /// @param marginDelta Margin supplied with the hypothetical order in USDC
     /// @param oraclePrice Candidate execution price (8 decimals)
-    /// @param publishTime Hypothetical oracle publish timestamp
     /// @return quote Largest planner-valid increase, its complete preview, and a limiting rejection code
     function quoteMaxOpen(
         address account,
         CfdTypes.Side side,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (MaxOpenQuote memory quote);
 
     /// @notice Previews the open/increase business-rule revert code at current pool depth.
@@ -88,15 +84,13 @@ interface ICfdEngineLens {
     /// @param sizeDelta Position size delta (18 decimals)
     /// @param marginDelta Margin supplied with the hypothetical order in USDC
     /// @param oraclePrice Candidate execution price (8 decimals)
-    /// @param publishTime Hypothetical oracle publish timestamp
     /// @return code Numeric `OpenRevertCode` value
     function previewOpenRevertCode(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (uint8 code);
 
     /// @notice Previews how an open/increase failure would be categorized by router policy.
@@ -107,15 +101,13 @@ interface ICfdEngineLens {
     /// @param sizeDelta Position size delta (18 decimals)
     /// @param marginDelta Margin supplied with the hypothetical order in USDC
     /// @param oraclePrice Candidate execution price (8 decimals)
-    /// @param publishTime Hypothetical oracle publish timestamp
     /// @return category Commit-time open failure policy category
     function previewOpenFailurePolicyCategory(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category);
 
     /// @notice Simulates a close/decrease at caller-supplied pool depth.

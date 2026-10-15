@@ -6,21 +6,21 @@ V3 order timing is a fresh-stack breaking change. See [V3 timing integration](OR
 
 Use `CfdClosePreview.previewClose` to project commitment carry and validate zero-bounty close admission before
 planning. `CfdOrderPolicyEvaluator.assessOrder` expects execution state with that bounty already reserved. See
-[`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) for the API, accounting baseline, error decoding, and additive deployment path.
-The [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) contains the post-deployment configuration packet,
-implementation file map, accounting display rules, and activation checks.
+[current close accounting](ACCOUNTING_SPEC.md#close-order-bounty-policy) and generated ABIs for new integrations.
+[`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) and the [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) document the
+historical additive-preview deployment and its activation checks.
 The [September 14 release record](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md)
 documents the original standalone lens alongside v1.2.3. The
 [September 15 sponsored-close release](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/README.md)
 preserves `previewClose` and adds `previewSponsoredClose` plus `validateSponsoredClose`. These are historical testnet
 release records; the handoff's frontend activation status is not a live deployment check.
 
-The zero-close-bounty source removes those two sponsored-grant methods; use either ordinary `previewClose`
-overload for new orders. Historical grants and pending operations continue to use their archived deployments and
-ABIs. The constructor argument, `SPONSORED_ENGINE` and `MAX_CLOSE_SUBSIDY_USDC` getters, and declared sponsored errors
-remain compatibility-only; they do not enable new grants. Normal gas sponsorship is unaffected.
+The current source exposes the ordinary `previewClose` overloads for new orders. The historical sponsored-grant
+methods, constructor argument, `SPONSORED_ENGINE` and `MAX_CLOSE_SUBSIDY_USDC` getters, and sponsored errors are absent
+from the current ABI. Historical grants and pending operations continue to use their archived deployments and ABIs.
+Normal gas sponsorship is unaffected.
 
-## Next release: unused perps API cleanup
+## Fresh-stack API cleanup
 
 The next deployment removes unused privileged clearinghouse entrypoints: `lockCommittedOrderMargin`,
 `unlockCommittedOrderMargin`, `promoteOrderReservationToPnlPledge`, `consumeOrderReservation`,
@@ -42,10 +42,25 @@ Close commitment still uses the Engine path to assess carry and validate admissi
 bounty reservation. Opening/increase bounties and the positive protection trigger reward are unchanged.
 
 Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
-`OrderOraclePolicyLib`. Maintained planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
+`OrderOraclePolicyLib`. Maintained planner/simulation entrypoints remain available with fresh-stack signatures.
+Tests exercise
 the maintained exact-entry-cost math, carry index, settlement snapshot, claimant inflow, and live close/claim paths.
-These removals require new bindings for a future deployment; this source change does not deploy contracts or migrate
-existing state.
+These removals require new bindings and a complete fresh-stack deployment; this source change does not deploy
+contracts or migrate existing state.
+
+The current cleanup also removes unused close-bounty configuration/getters, pledged-bounty provenance and recovery
+fields, protection-execution bounty fields, reservation-id snapshot data, and legacy zero-value fee/debt/queue fields.
+`OrderRouterAdmin.claimBalance()` takes no argument. `CfdClosePreview` has no sponsored constructor state or errors.
+Receipt and execution-config hashes use V5 domains; the caller-authored request and intent domain remains V3. Rebuild
+ABIs and receipt/config decoders together. Archived release records describe their own deployed runtime, not this ABI.
+
+Pure `planOpen`, `planClose`, and `planLiquidation` take an execution price without a planner-only `publishTime`.
+The same removed argument applies to `CfdOrderPolicyEvaluator.assessCommittedOrder` and `assessOrder`, both current
+`CfdClosePreview.previewClose` overloads, `CfdEngineLens.previewOpen`, `quoteMaxOpen`,
+`previewOpenRevertCode`, `previewOpenFailurePolicyCategory`, and `CfdEngineOpenQuoter.quote`.
+`ICfdEngineTypes.ClosePreview` and `LiquidationPreview` omit their always-zero
+`badDebtUsdc` fields; canonical write-off fields in settlement plans remain. Live oracle execution and receipt
+timestamps retain their existing meaning. Regenerate bindings from this source for a complete fresh-stack release.
 
 The planner also retires `computeOpenMarginAfter` and `isExactPositionLiquidatableWithCarry`, together with their
 exclusive library helpers. These pure selectors had only test callers. Open planning continues through `planOpen`;
@@ -116,9 +131,12 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Each account may have one full-position OCO take-profit/stop-loss protection at a time.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
-- The optional Junior maintenance fee is share dilution, not a performance fee. It deploys disabled at `0 bps` and
-  can be enabled only through the vault's 48-hour governance delay.
-- If the HousePool is short on cash, trader profits can become senior trader claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
+- The optional Junior maintenance fee is share dilution, not a performance fee. The release deploys it disabled at
+  `0 bps` with the deployment-time protocol treasury as recipient; it can be enabled only through the vault's 48-hour
+  governance delay.
+- If the HousePool is short on cash, trader profits can become senior trader claims instead of reverting the state
+  transition. Opening-order and protection-trigger bounties are funded from trader USDC reserved in the clearinghouse;
+  close-order execution bounties are zero.
 
 ### Units and accounts
 
@@ -220,13 +238,13 @@ the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
-Frontends can use `CfdEngineLens.quoteMaxOpen(account, side, marginDelta, oraclePrice, publishTime)` to obtain the
+Frontends can use `CfdEngineLens.quoteMaxOpen(account, side, marginDelta, oraclePrice)` to obtain the
 largest quantum-aligned open or same-side increase accepted by the current engine plan. It returns a `MaxOpenQuote`
 containing `maxSizeDelta`, the complete `preview` for that size, and `limitingReason` (the planner rejection at the
-next quantum). `previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime)` remains available for
+next quantum). `previewOpen(account, side, sizeDelta, marginDelta, oraclePrice)` remains available for
 simulating a user-selected size. If capacity is zero, the quote's invalid preview and reason describe the minimum
 notional-admissible candidate (one quantum at zero price); `preview.sizeDelta` is that attempted size.
-Both calls are read-only: they use the caller-supplied `oraclePrice` and `publishTime`, do not fetch Hermes data, do not
+Both calls are read-only: they use the caller-supplied `oraclePrice`, do not fetch Hermes data, do not
 ingest Pyth updates, and do not mutate engine mark state. Router timing, queue, slippage, and execution-bounty policy
 remain outside these engine-lens quotes, as do terminal-NAV-book execution bounds.
 
@@ -466,7 +484,7 @@ commit open with protection
 - The opening position still appears only when its delayed FIFO order executes. Successful opening execution arms the
   protection atomically against the resulting side and full size, so there is no externally observable unprotected
   position between those two state changes.
-- Parent-open failure or expiry terminally fails the staged protection and releases its two protection bounties. The
+- Parent-open failure or expiry terminally fails the staged protection and releases its unpaid trigger bounty. The
   parent opening execution bounty retains the ordinary terminal-order policy.
 - Cancelling `PendingOpen` protection detaches it but does not cancel the binding parent open. That open may later
   execute without protection.
@@ -475,14 +493,14 @@ commit open with protection
 - `createPositionProtection(...)`, `replacePositionProtection(...)`, and
   `commitOpenOrderWithProtection(...)` are nonpayable trader calls. They validate trigger geometry against the engine's
   cached fresh neutral mark and do not ingest Pyth data.
-- Protection bounties are locked before safety is evaluated. For an existing position, the post-lock gate uses the
+- The protection trigger bounty is locked before safety is evaluated. For an existing position, the post-lock gate uses the
   Engine-configured canonical planner's V2 exact-price predicate rather than duplicating risk math. It supplies exact
   entry basis and price-risk equity of only PnL pledge (`position.margin`) plus the same-account trader claim plus exact
   capped unrealized PnL. Free settlement and generic action, order, liquidation, VPI, and protection reserves are not
   price collateral. Any uncovered carry or underfunded `max(-vpiAccrued, 0)` reserve fails closed, and exact-price equity
   must be strictly above the stricter of initial margin and the active normal/FAD maintenance requirement. An attached
   open locks protection value first, so the ordinary open planner sees the remaining balances when it admits and later
-  executes the parent. Those protection bounty reservations are outside the parent request's
+  executes the parent. That protection trigger reservation is outside the parent request's
   `maxGrossAccountDebitUsdc`; the request's nonzero configuration hash pins their finalized Router configuration.
 - `triggerPositionProtection(...)` is a permissionless payable keeper call. It ingests current Pyth data, requires a
   later block and publish time after arming, and cannot trigger while `oracleFrozen`.
@@ -507,9 +525,9 @@ commit open with protection
   constructed inside the authenticated protection path; only those attempts use
   `expectedConfigHash == bytes32(0)` as an internal unpinned marker. Fresh external commits reject zero, and no external
   caller can opt an ordinary or protected-parent order out of configuration pinning.
-- Relatched failure cleanup does not automatically enqueue the replacement and pays no keeper bounty. Instead, the
-  original close execution bounty is rolled back into Book attribution and recycled into the next attempt without a
-  second trader reservation. The bounty is paid once on eventual execution or forfeited once on liquidation.
+- Relatched failure cleanup does not automatically enqueue the replacement and pays no keeper bounty. The old
+  attempt's explicit zero Order bounty record settles; a permissionless retry creates a fresh zero record without
+  debiting trader funds. The separate protection trigger reward is paid only once, when protection triggers.
 - `PositionProtectionCloseAttemptQueued` identifies the first and every retried attempt and links it to the previous
   attempt id (`0` for the first attempt).
   `PositionProtectionCloseAttemptFailed` records the terminal reason and whether the exact-position check relatched the
@@ -624,10 +642,12 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
   surcharge, while deposit activation is deferred. Requests do not lock a price or fee; settlement fixes both.
 - During `oracleFrozen`, bootstrap admin flows stay blocked: `initializeSeedPosition(...)` and `assignUnassignedAssets(...)` must wait for the oracle to become live again instead of inheriting the stale-window LP fee path.
 
-Junior alone supports a governance-configurable maintenance fee. It starts at `0 bps` with no recipient, is capped at
-`1,000 bps` nominal APR, and can change only after a 48-hour proposal delay. Accrued fees are paid by minting ordinary
-transferable Junior shares to the recipient; no USDC leaves HousePool and no tranche principal, HWM, reserve, or
-waterfall value is rewritten. Pricing and estimates use raw supply plus pending fee shares even before those shares
+Junior alone supports a governance-configurable maintenance fee. The generic Junior constructor accepts an initial
+`0 bps` rate with either a zero or valid nonzero recipient. This release starts at `0 bps` with the deployment-time
+protocol treasury as recipient. The rate is capped at `1,000 bps` nominal APR and can change only after a 48-hour
+proposal delay. Accrued fees are paid by minting ordinary transferable Junior shares to the recipient; no USDC leaves
+HousePool and no tranche principal, HWM, reserve, or waterfall value is rewritten. Pricing and estimates use raw
+supply plus pending fee shares even before those shares
 are minted. Pending deposits begin paying only when activated, while pending redemption shares pay until they are
 funded and burned. Because accrual advances on completed Unix-hour boundaries, a mid-hour activation can receive less
 than one hour of pre-activation fee exposure, while a mid-hour funded redemption can avoid less than one hour of
@@ -1024,7 +1044,8 @@ The Engine exports one signed terminal price-PnL adjustment for both LP entry an
   nonwithdrawable sub-balance of action reserve; generic action charges cannot spend below the combined floor of
   protected execution bounties plus this VPI reserve.
 - VPI does not add to or subtract from P+C price-risk equity. Reserve below the target independently blocks withdrawal
-  and makes the account liquidatable; reserve above the target never adds price collateral.
+  and sets the account lens's liquidation flag. Close planning returns a typed failure and liquidation planning reverts
+  on that reserve mismatch; reserve above the target never adds price collateral.
 - An open/increase that makes lifetime VPI more negative must fully fund the higher target from eligible settlement or
   newly supplied pledge, otherwise it is rejected. A close or liquidation consumes reserve when the clawback is
   realized and releases only value no longer required after equivalent withholding or a lower surviving target.
@@ -1139,10 +1160,9 @@ authorizes settlement.
   the FIFO tail; the ordinary execution keeper then settles that close against its first eligible post-trigger tick.
 - Before Engine mutation, the stateless policy evaluator reconstructs the same authoritative snapshot consumed by
   the configured planner and evaluates every caller bound in canonical `ConstraintKind` order. Equality passes.
-- Free-funded reservation release for execution/terminal classification does not checkpoint carry. Pledged refunds
-  checkpoint old-basis carry without collecting it before restoring source margin. The evaluator and Engine
-  account for carry from the canonical Engine state; if the item is retryable, its rollback frame restores the
-  reservation.
+- Opening-bounty release for execution/terminal classification does not checkpoint carry. Close commitment collects
+  applicable carry with a zero bounty and does not reclassify pledge. The evaluator and Engine account for carry from
+  the canonical Engine state; if the item is retryable, its rollback frame restores the order and zero bounty record.
 - Slippage, expiry, config mismatch, exact-shape typed planner rejection, execution-mode rejection, and financial
   constraint violation finalize the order. Risk-off and account liquidation are separate terminal reasons.
 - Close-only, same-block/MEV, historical-price availability, insufficient-gas, and mark-ordering gates do not consume
@@ -1262,8 +1282,9 @@ This preserves close and liquidation liveness during real market closures withou
 Position protection has a separate retained state machine: `None`, `PendingOpen`, `Armed`, `Triggered`, `Executed`,
 `Failed`, `Cancelled`, `Liquidated`, and `Latched`. `Latched` is appended so existing status ordinals remain stable.
 It means the trigger is irreversible and no close attempt is currently live; `Triggered` means exactly one attempt is
-live. `BountyDisposition.RetainedForProtectionRetry` is likewise appended at ordinal `4`, preserving the existing
-disposition ordinals. Protection state must not be inferred from or folded into the ordinary order status enum.
+live. The current `BountyDisposition` enum ends at `RefundedToAccount`; older retained/mixed dispositions require
+archived decoders. Current zero-bounty close attempts settle with `None`. Protection state must not be inferred
+from or folded into the ordinary order status enum.
 
 ![Order lifecycle](../../assets/diagrams/perps-order-lifecycle.svg)
 
@@ -1308,9 +1329,9 @@ risk or move the system back toward solvency.
 - Voluntary closes seize price loss only from the account's dedicated PnL pledge and nettable claim. Any excess was
   excluded from marked LP receivables and is written off rather than turned into a claim or deficit; an
   uncollectible terminal frozen-close spread is separately waived.
-- Liquidation terminally removes the account's active protection in O(1). An armed protection forfeits both unpaid
-  bounties; a `Triggered` protection forfeits its live attempt's execution bounty; and a `Latched` protection forfeits
-  the recycled Book-attributed execution bounty. Each path consumes the value exactly once.
+- Liquidation terminally removes the account's active protection in O(1). An armed protection may forfeit its unpaid
+  trigger bounty; a `Triggered` protection settles its live attempt's zero Order record; a `Latched` protection has
+  no execution bounty left to forfeit. The trigger reward is paid only once when the protection triggers.
 
 ### Friday Auto-Deleverage (FAD)
 
@@ -1384,7 +1405,7 @@ only one field must repeat the desired active values for the other five.
 increments after successful risk, calendar, or freshness finalization; the Router version increments after successful
 router-policy or oracle-address finalization. These counters are monotonic inputs to the execution-config digest, so a
 finalized change invalidates the pinned configuration of an otherwise pending V3 order. The request and intent domain are V3, with signed submission and execution timing. Receipt and execution-config
-domains are V4. Timing is retained in terminal receipts alongside protection-attempt and bounty disposition evidence.
+domains are V5 in this fresh-stack release. Timing is retained in terminal receipts alongside protection-attempt and bounty disposition evidence.
 
 ### Fresh V3 deployment boundary
 
@@ -1396,10 +1417,11 @@ binding is correct. Do not mix a V3 Router/Book with legacy Router queue state o
 pending orders, client ids, and outcomes are not imported. Recovery from a Book or immutable-binding fault likewise
 requires containment and a new compatible stack rather than storage repair.
 
-Source-bound close-bounty refunds also require the connected fresh stack. Public `OrderRequest` and `OrderReceipt`
-field layouts stay stable; appended mixed disposition values require compatible SDK/indexer decoding, and internal
-interfaces and Clearinghouse/Book storage change. Never combine the new cap with old pending records or zero-initialized
-escrow mirrors on a populated stack. Migration of an existing deployment requires a separate authenticated design.
+The zero-close-bounty lifecycle also requires a connected fresh stack. Ordinary and protection close receipts carry
+zero bounty amounts and `None` disposition. The current receipt tuple omits the legacy retained-bounty field, and
+`BountyDisposition` contains only `None`, `Paid`, `Forfeited`, and `RefundedToAccount`; use archived decoders for older
+mixed dispositions. Never combine the new accounting model with old pending records or escrow mirrors on a populated
+stack. Migration of an existing deployment requires a separate authenticated design.
 
 The latched-retry lifecycle is likewise a fresh-stack boundary. The Router-created stateful protection Book and the
 predeployed lifecycle Book cannot be upgraded or populated from the old stack. Before switching application manifests,
@@ -1460,10 +1482,10 @@ the active deployment before constructing orders; many unit-test fixtures intent
 | `frozenCloseSpreadBps` | 50 (0.50%) | Fixed LP-owned spread on voluntary close/reduce notional during `oracleFrozen` |
 | `settlementBufferBps` | 25 (0.25%) | Liability-scaled admission and LP-withdrawal headroom; governed range 0-1,000 bps |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
-| Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
+| Ordinary/protection close execution bounty | 0 USDC | Permanently zero; nonzero Router configuration is rejected |
 | Position-protection trigger bounty | 0.20 USDC | Timelocked activation-keeper reserve, capped at 1 USDC |
 | Position-protection commits | available | Fresh deployments need no protection-specific activation; Router pause still applies |
-| Full default protection reserve | 0.40 USDC | Snapshotted trigger plus linked-close bounties, funded from free settlement |
+| Full default protection reserve | 0.20 USDC | Snapshotted trigger bounty only, funded from free settlement; linked-close bounty is zero |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
 | Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |

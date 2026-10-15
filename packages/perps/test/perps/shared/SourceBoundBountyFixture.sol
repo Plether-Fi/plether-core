@@ -10,7 +10,8 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {Vm} from "forge-std/Vm.sol";
 
 /// @dev Public V3 setup, exact receipt authentication and independent fixed-price controls.
-///      Carry/VPI are zero here so a reservation/refund is the only changing economic input.
+///      Carry/VPI are zero here. Close requests have unpaid zero-value bounty records;
+///      opening orders retain their ordinary funded bounties.
 abstract contract SourceBoundBountyFixture is BasePerpTest {
 
     address internal constant BOUNTY_TRADER = address(0xB0171);

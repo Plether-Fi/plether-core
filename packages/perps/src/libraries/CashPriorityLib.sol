@@ -12,14 +12,12 @@ library CashPriorityLib {
     /// @param totalSeniorClaimsUsdc Total claims senior to fresh payouts; currently trader claims only.
     /// @param reservedSeniorCashUsdc Senior claim amount notionally reserved; it may exceed physical assets.
     /// @param freeCashUsdc Physical cash left for fresh payouts after the senior reservation.
-    /// @param claimServiceableUsdc Legacy field left zero by the current fresh-payout reservation builder.
     struct SeniorCashReservation {
         uint256 physicalAssetsUsdc;
         uint256 traderClaimBalanceUsdc;
         uint256 totalSeniorClaimsUsdc;
         uint256 reservedSeniorCashUsdc;
         uint256 freeCashUsdc;
-        uint256 claimServiceableUsdc;
     }
 
     /// @notice Reserves aggregate trader claims and reports cash available for a fresh payout.

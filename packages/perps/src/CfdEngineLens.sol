@@ -54,7 +54,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account whose current position is hypothetically reduced.
     /// @param sizeDelta Position size to close, with 18 decimals.
     /// @param oraclePrice Candidate close price, with 8 decimals.
-    /// @return preview Close economics, settlement routing, claim effects, and projected solvency; legacy bad debt is zero.
+    /// @return preview Close economics, settlement routing, claim effects, and projected solvency.
     function previewClose(
         address account,
         uint256 sizeDelta,
@@ -65,26 +65,24 @@ contract CfdEngineLens is ICfdEngineLens {
 
     /// @notice Previews an open or same-side increase using current pool assets and account state.
     /// @dev The oracle price is capped at `CAP_PRICE`. This does not validate oracle freshness, order commitment,
-    ///      target-price, or router authorization. `publishTime` is copied into snapshot context and passed to the pure
-    ///      planner, but current planning calculations do not use it. Invalid results expose the typed code/category and
-    ///      only fields populated before the failing check. Projected health and liquidation price are calculated only
-    ///      after a valid plan; liquidation price is an integer threshold within `[0, CAP_PRICE]` when one exists.
+    ///      target-price, or router authorization. Invalid results expose the typed code/category and only fields
+    ///      populated before the failing check. Projected health and liquidation
+    ///      price are calculated only after a valid plan; liquidation price is an integer threshold within
+    ///      `[0, CAP_PRICE]` when one exists.
     /// @param account Account that would open or increase a position.
     /// @param side Resulting position side; an existing opposite-side position produces a typed failure.
     /// @param sizeDelta Position size increase, with 18 decimals.
     /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
-    /// @param publishTime Candidate oracle publish timestamp in Unix seconds; currently nonbinding in the planner.
     /// @return preview Open economics and projected post-trade position, health, and liquidation threshold.
     function previewOpen(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (ICfdEngineTypes.OpenPreview memory preview) {
-        preview = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime);
+        preview = _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice);
     }
 
     /// @notice Quotes the largest open or same-side increase accepted by the current engine plan.
@@ -96,17 +94,14 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param side Resulting position side.
     /// @param marginDelta Margin supplied by the hypothetical order, in 6-decimal USDC units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
-    /// @param publishTime Candidate oracle publish timestamp in Unix seconds.
     /// @return quote Largest planner-valid increase, its economics, and a limiting rejection code.
     function quoteMaxOpen(
         address account,
         CfdTypes.Side side,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (MaxOpenQuote memory quote) {
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, engineContract.pool().totalAssets());
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: 0,
@@ -120,51 +115,46 @@ contract CfdEngineLens is ICfdEngineLens {
         });
         CfdEnginePlanTypes.OpenDelta memory delta;
         ICfdEnginePlanner planner = engineContract.planner();
-        (quote.maxSizeDelta, delta, quote.limitingReason) =
-            openQuoter.quote(planner, snap, order, oraclePrice, publishTime);
+        (quote.maxSizeDelta, delta, quote.limitingReason) = openQuoter.quote(planner, snap, order, oraclePrice);
         quote.preview = _openPreviewFromPlan(snap, delta, marginDelta, planner);
     }
 
     /// @notice Returns the numeric typed business-rule result for the same plan as `previewOpen`.
-    /// @dev Inputs, capping, nonbinding publish-time behavior, and possible dependency/arithmetic reverts match
+    /// @dev Inputs, capping, and possible dependency/arithmetic reverts match
     ///      `previewOpen`.
     /// @param account Account that would open or increase a position.
     /// @param side Resulting position side.
     /// @param sizeDelta Position size increase, with 18 decimals.
     /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
-    /// @param publishTime Candidate oracle publish timestamp in Unix seconds.
     /// @return code Numeric value of `CfdEnginePlanTypes.OpenRevertCode`; zero is `OK`.
     function previewOpenRevertCode(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (uint8 code) {
-        return uint8(_previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime).invalidReason);
+        return uint8(_previewOpen(account, side, sizeDelta, marginDelta, oraclePrice).invalidReason);
     }
 
     /// @notice Classifies the same open plan for commit-time and execution-only router failure policy.
-    /// @dev Inputs, capping, nonbinding publish-time behavior, and possible dependency/arithmetic reverts match
+    /// @dev Inputs, capping, and possible dependency/arithmetic reverts match
     ///      `previewOpen`. This uses `getOpenFailurePolicyCategory`, not the execution-only classifier.
     /// @param account Account that would open or increase a position.
     /// @param side Resulting position side.
     /// @param sizeDelta Position size increase, with 18 decimals.
     /// @param marginDelta Margin supplied by the order, in 6-decimal USDC units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
-    /// @param publishTime Candidate oracle publish timestamp in Unix seconds.
     /// @return category Commit-time-rejectable, execution-time user/protocol invalidation, or `None`.
     function previewOpenFailurePolicyCategory(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) external view returns (CfdEnginePlanTypes.OpenFailurePolicyCategory category) {
-        return _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime).failureCategory;
+        return _previewOpen(account, side, sizeDelta, marginDelta, oraclePrice).failureCategory;
     }
 
     /// @notice Simulates a close/decrease with caller-supplied hypothetical pool accounting depth and cash.
@@ -174,7 +164,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param sizeDelta Position size to close, with 18 decimals.
     /// @param oraclePrice Candidate close price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
-    /// @return preview Close economics, settlement routing, claim effects, and projected solvency; legacy bad debt is zero.
+    /// @return preview Close economics, settlement routing, claim effects, and projected solvency.
     function simulateClose(
         address account,
         uint256 sizeDelta,
@@ -188,11 +178,11 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @dev The oracle price is capped at `CAP_PRICE`. The lens hypothetically forfeits the account's router execution-
     ///      bounty reserve before planning, matching terminal liquidation reachability. It performs no oracle freshness,
     ///      publish-time, or router authorization validation. An account without a position returns a nonliquidatable
-    ///      preview with only the capped oracle price populated.
+    ///      preview with only the capped oracle price populated. An underfunded negative-VPI reserve makes planning
+    ///      revert instead of returning a liquidatable preview.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, and projected solvency.
-    ///         Legacy `badDebtUsdc` remains zero; price write-offs are reported by the settlement event.
     function previewLiquidation(
         address account,
         uint256 oraclePrice
@@ -207,7 +197,6 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
     /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, and projected solvency.
-    ///         Legacy `badDebtUsdc` remains zero; price write-offs are reported by the settlement event.
     function simulateLiquidation(
         address account,
         uint256 oraclePrice,
@@ -231,20 +220,16 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param sizeDelta Requested size increase, with 18 decimals.
     /// @param marginDelta Requested margin contribution, in 6-decimal USDC units.
     /// @param oraclePrice Candidate execution price, with 8 decimals.
-    /// @param publishTime Candidate mark publish timestamp in Unix seconds.
     /// @return preview Typed open result and projected position/risk fields.
     function _previewOpen(
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) internal view returns (ICfdEngineTypes.OpenPreview memory preview) {
-        CfdEnginePlanTypes.RawSnapshot memory snap =
-            _buildRawSnapshot(account, oraclePrice, engineContract.pool().totalAssets(), publishTime);
-        CfdEnginePlanTypes.OpenDelta memory delta =
-            _planOpen(snap, account, side, sizeDelta, marginDelta, oraclePrice, publishTime);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, engineContract.pool().totalAssets());
+        CfdEnginePlanTypes.OpenDelta memory delta = _planOpen(snap, account, side, sizeDelta, marginDelta, oraclePrice);
 
         return _openPreviewFromPlan(snap, delta, marginDelta, engineContract.planner());
     }
@@ -307,8 +292,7 @@ contract CfdEngineLens is ICfdEngineLens {
         CfdTypes.Side side,
         uint256 sizeDelta,
         uint256 marginDelta,
-        uint256 oraclePrice,
-        uint64 publishTime
+        uint256 oraclePrice
     ) internal view returns (CfdEnginePlanTypes.OpenDelta memory delta) {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
@@ -321,7 +305,7 @@ contract CfdEngineLens is ICfdEngineLens {
             side: side,
             isClose: false
         });
-        return engineContract.planner().planOpen(snap, order, oraclePrice, publishTime);
+        return engineContract.planner().planOpen(snap, order, oraclePrice);
     }
 
     /// @notice Builds a close plan against current account state and supplied hypothetical pool depth.
@@ -351,7 +335,7 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, oraclePrice, poolDepthUsdc, 0);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthUsdc);
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: sizeDelta,
@@ -363,7 +347,7 @@ contract CfdEngineLens is ICfdEngineLens {
             side: pos.side,
             isClose: true
         });
-        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, oraclePrice, 0);
+        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, oraclePrice);
 
         preview.realizedPnlUsdc = delta.realizedPnlUsdc;
         preview.remainingMargin = delta.posMarginAfter;
@@ -566,7 +550,7 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @param account Account whose position is tested.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @param poolDepthUsdc Pool assets and cash used by the plan, in 6-decimal USDC units.
-    /// @return preview Eligibility, settlement routing, claims, and projected solvency; legacy bad debt remains zero.
+    /// @return preview Eligibility, settlement routing, claims, and projected solvency.
     function _previewLiquidation(
         address account,
         uint256 oraclePrice,
@@ -579,9 +563,9 @@ contract CfdEngineLens is ICfdEngineLens {
             return preview;
         }
 
-        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, oraclePrice, poolDepthUsdc, 0);
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthUsdc);
         _applyLiquidationPreviewForfeiture(snap);
-        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, oraclePrice, 0);
+        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, oraclePrice);
 
         preview.liquidatable = delta.liquidatable;
         preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
@@ -601,29 +585,22 @@ contract CfdEngineLens is ICfdEngineLens {
         if (delta.freshPayoutCreatesClaim) {
             preview.traderClaimBalanceUsdc += delta.freshTraderPayoutUsdc;
         }
-        preview.badDebtUsdc = delta.badDebtUsdc;
         preview.triggersDegradedMode = delta.solvency.triggersDegradedMode;
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
     }
 
-    /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical depth and mark context.
-    /// @dev `poolDepthUsdc` populates both asset and cash fields. A nonzero stored mark overrides `oraclePrice` in the
-    ///      snapshot's contextual last-mark field, and a zero `publishTime` keeps the stored mark time. The current planner
-    ///      does not enforce freshness from those context fields. Current carry indexes use actual assets net of claims,
-    ///      rather than hypothetical depth. VPI and skew subtract claims from the gross planning input. Margin reservation
-    ///      IDs are not populated by this lens.
+    /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical pool depth.
+    /// @dev `poolDepthUsdc` populates both asset and cash fields. This lens does not populate the last-mark context
+    ///      used only by close-commitment planning. Current carry indexes use actual assets net of claims rather than
+    ///      hypothetical depth. VPI and skew subtract claims from the gross planning input.
     /// @param account Account whose position, buckets, carry, and claims are loaded.
-    /// @param oraclePrice Candidate mark price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
-    /// @param publishTime Candidate mark publish time, or zero to retain the stored time.
     /// @return snap Raw planner snapshot.
     function _buildRawSnapshot(
         address account,
-        uint256 oraclePrice,
-        uint256 poolDepthUsdc,
-        uint64 publishTime
+        uint256 poolDepthUsdc
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         ICfdEngineTypes.SideState memory long;
         ICfdEngineTypes.SideState memory short;
@@ -631,22 +608,10 @@ contract CfdEngineLens is ICfdEngineLens {
             engineContract.sides(uint8(CfdTypes.Side.LONG));
         (short.maxProfitUsdc, short.openInterest, short.entryNotional, short.totalMargin) =
             engineContract.sides(uint8(CfdTypes.Side.SHORT));
-        uint256 lastMarkPrice = engineContract.lastMarkPrice();
-        uint64 lastMarkTime = engineContract.lastMarkTime();
-        uint256 liveMarkAge = block.timestamp > lastMarkTime ? block.timestamp - lastMarkTime : 0;
-        uint256 maxStaleness = engineContract.isOracleFrozen()
-            ? engineContract.fadMaxStaleness()
-            : engineContract.engineMarkStalenessLimit();
-
         snap.position = _position(account);
         snap.positionEntryCostUsdcAtoms = engineContract.positionEntryCostUsdcAtoms(account);
         snap.account = account;
         snap.currentTimestamp = block.timestamp;
-        snap.lastMarkPrice = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
-        if (lastMarkPrice != 0) {
-            snap.lastMarkPrice = lastMarkPrice;
-        }
-        snap.lastMarkTime = publishTime == 0 ? lastMarkTime : publishTime;
         (snap.positionBorrowBaseUsdc, snap.positionLastCarryIndex,) = engineContract.positionCarryState(account);
         snap.longSide = _sideSnapshot(CfdTypes.Side.LONG, long);
         snap.shortSide = _sideSnapshot(CfdTypes.Side.SHORT, short);
@@ -670,8 +635,6 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.isFadWindow = engineContract.isFadWindow();
         snap.oracleFrozen = engineContract.isOracleFrozen();
         snap.frozenCloseSpreadBps = engineContract.frozenCloseSpreadBps();
-        liveMarkAge;
-        maxStaleness;
     }
 
     /// @notice Adjusts a memory snapshot for execution-bounty value forfeited before liquidation settlement.

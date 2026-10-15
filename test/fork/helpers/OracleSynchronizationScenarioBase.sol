@@ -58,7 +58,7 @@ contract OracleSynchronizationRejectingKeeper {
         OrderRouterAdmin admin
     ) external {
         accepting = true;
-        admin.claimBalance(true);
+        admin.claimBalance();
     }
 
 }

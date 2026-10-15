@@ -202,7 +202,6 @@ contract PriceAndActionReservePriorityLiquidationTest is BasePerpTest {
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1e8);
         assertTrue(preview.liquidatable, "Accrued carry should make the position liquidatable");
         assertEq(preview.pnlUsdc, 0, "Setup must isolate liquidation action charges from price PnL");
-        assertEq(preview.badDebtUsdc, 0, "Liquidation action-charge collection must never create protocol debt");
 
         vm.prank(address(router));
         engine.liquidatePosition(account, 1e8, depth, uint64(block.timestamp), address(this));

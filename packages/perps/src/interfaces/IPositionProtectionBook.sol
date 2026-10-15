@@ -16,10 +16,9 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
         CfdTypes.Side side;
         uint256 size;
         uint256 triggerBountyUsdc;
-        uint256 executionBountyUsdc;
     }
 
-    /// @notice Activates a met OCO leg and transfers both bounty obligations into a router trigger plan.
+    /// @notice Activates a met OCO leg and returns the trigger bounty with a zero-bounty close plan.
     /// @dev Router-only. The router calls this while atomically appending the linked close to its FIFO queue.
     function activate(
         uint64 protectionId,
@@ -36,15 +35,13 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
     ) external;
 
     /// @notice Relatches the current failed close attempt when its protected position still matches exactly.
-    /// @dev Router-only. The Router calls this before finalizing a non-liquidation failed child receipt. Returning
-    ///      `true` transfers accounting attribution for the unchanged reserved bounty from the child back to this
-    ///      Book; returning `false` permits ordinary bounty settlement after a missing or mismatched position resolves
-    ///      the protection as `Failed`. Unknown and stale order ids are harmless no-ops that return `false`.
+    /// @dev Router-only. The Router validates that the close bounty is zero before this call. Returning `true`
+    ///      latches the protection for a fresh retry; returning `false` resolves a missing or mismatched position as
+    ///      `Failed`. Unknown and stale order ids return `false` without mutation.
     function handleFailedProtectionAttempt(
         uint64 orderId,
         address account,
-        OrderV3Types.TerminalReason reason,
-        uint256 executionBountyUsdc
+        OrderV3Types.TerminalReason reason
     ) external returns (bool retained);
 
     /// @notice Fails protection attached to a risk-off-invalidated parent without unlocking its reserve directly.

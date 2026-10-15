@@ -175,7 +175,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         vm.warp(block.timestamp + 500 * 365 days);
         uint256 unpaid = _expectedIndexedCarryUsdc(TRADER) - _margin(TRADER);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
         assertEq(engine.unsettledCarryUsdc(TRADER), unpaid, "full-close commitment retains unpaid carry");
         assertEq(_margin(TRADER), 0);
         _authenticate(TRADER);
@@ -184,28 +184,28 @@ contract MarginFirstCarryTest is BasePerpTest {
     function test_CloseCommitValidationRetainsSpecificFailures() public {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NoOpenPosition.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100e18);
         _fundTrader(TRADER, 20_000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 3000e6, 1e8);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAmount.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 0, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 0);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_100e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_100e18);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 1e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 1e18);
         vm.mockCall(address(engine), abi.encodeWithSelector(engine.lastMarkPrice.selector), abi.encode(uint256(0)));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
         vm.clearMockedCalls();
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 50_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 50_000e18);
         _authenticate(TRADER);
     }
 
@@ -234,7 +234,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         uint256 carry = _expectedIndexedCarryUsdc(TRADER);
         uint256 beforeMargin = _margin(TRADER);
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
         assertTrue(preview.valid);
         _open(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
         assertEq(_margin(TRADER), beforeMargin - carry + 986e6);
@@ -377,8 +377,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         // No gain, a partially covering new gain, and a fully covering new gain.
         for (uint256 i; i < 3; ++i) {
             uint256 price = 1e8 - i * 100_000;
-            CfdEnginePlanTypes.CloseDelta memory delta =
-                engine.planner().planClose(snap, order, price, uint64(block.timestamp));
+            CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, order, price);
             assertTrue(delta.valid);
             assertEq(delta.realizedCarryUsdc, directCarry);
             assertEq(delta.actionChargeAssessedUsdc, 123e6);
@@ -396,8 +395,7 @@ contract MarginFirstCarryTest is BasePerpTest {
             assertEq(delta.actionChargeWaivedUsdc, afterWithholding - fromReleasedReserve);
         }
         // Liquidation retains its separate charge allocation and cannot release its bounty reserve to pay carry.
-        CfdEnginePlanTypes.LiquidationDelta memory liquidation =
-            engine.planner().planLiquidation(snap, 1e8, uint64(block.timestamp));
+        CfdEnginePlanTypes.LiquidationDelta memory liquidation = engine.planner().planLiquidation(snap, 1e8);
         assertTrue(liquidation.liquidatable);
         assertEq(
             liquidation.pendingCarryUsdc,

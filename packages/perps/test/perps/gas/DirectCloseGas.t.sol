@@ -230,7 +230,7 @@ abstract contract DirectCloseGasFixture is Test {
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
         assertEq(uint8(reservation.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
         assertEq(reservation.freeFundedUsdc, 0);
-        assertEq(reservation.pledgeFundedUsdc, router.closeOrderExecutionBountyUsdc());
+        assertEq(reservation.amountUsdc, 0);
         assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
     }
 

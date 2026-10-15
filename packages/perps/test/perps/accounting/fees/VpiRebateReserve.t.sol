@@ -18,7 +18,7 @@ contract VpiRebateReserveTest is Test {
         CfdEnginePlanTypes.RawSnapshot calldata snap,
         uint256 price
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta) {
-        return CfdEnginePlanLib.planLiquidation(snap, price, 1);
+        return CfdEnginePlanLib.planLiquidation(snap, price);
     }
 
     function _riskParams(
@@ -122,7 +122,7 @@ contract VpiRebateReserveTest is Test {
     function test_PartialCloseKeepsExactRemainingReserveTarget() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap = _positionSnapshot(10e6, 0, 0);
         CfdEnginePlanTypes.CloseDelta memory delta =
-            CfdEnginePlanLib.planClose(snap, _closeOrder(snap.account, 500e18), ENTRY_PRICE, 1);
+            CfdEnginePlanLib.planClose(snap, _closeOrder(snap.account, 500e18), ENTRY_PRICE);
 
         assertTrue(delta.valid);
         assertEq(delta.vpiRebateReserveBeforeUsdc, 10e6);
@@ -137,7 +137,7 @@ contract VpiRebateReserveTest is Test {
     function test_PriceGainWithholdingHasPriorityAndReleasesUnusedReserve() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap = _positionSnapshot(10e6, 0, 0);
         CfdEnginePlanTypes.CloseDelta memory delta =
-            CfdEnginePlanLib.planClose(snap, _closeOrder(snap.account, snap.position.size), 99_000_000, 1);
+            CfdEnginePlanLib.planClose(snap, _closeOrder(snap.account, snap.position.size), 99_000_000);
 
         assertTrue(delta.valid);
         assertEq(delta.priceGainUsdc, 10e6);
@@ -216,7 +216,7 @@ contract VpiRebateReserveTest is Test {
             side: CfdTypes.Side.LONG,
             isClose: false
         });
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE, 1);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE);
 
         assertTrue(delta.valid);
         assertEq(delta.openState.vpiUsdc, 5_250_000);
@@ -257,7 +257,7 @@ contract VpiRebateReserveTest is Test {
             side: CfdTypes.Side.SHORT,
             isClose: false
         });
-        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE, 1);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, ENTRY_PRICE);
 
         assertTrue(delta.valid);
         assertEq(delta.openState.vpiUsdc, -int256(1125e6));
@@ -279,13 +279,12 @@ contract VpiRebateReserveTest is Test {
         baseline.lockedBuckets.totalLockedMarginUsdc = 21e6;
 
         CfdEnginePlanTypes.LiquidationDelta memory baselineDelta =
-            CfdEnginePlanLib.planLiquidation(baseline, ENTRY_PRICE, 1);
+            CfdEnginePlanLib.planLiquidation(baseline, ENTRY_PRICE);
         assertFalse(baselineDelta.liquidatable);
         assertEq(baselineDelta.riskState.equityUsdc, 20e6);
 
         CfdEnginePlanTypes.RawSnapshot memory funded = _positionSnapshot(10e6, 0, 0);
-        CfdEnginePlanTypes.LiquidationDelta memory fundedDelta =
-            CfdEnginePlanLib.planLiquidation(funded, ENTRY_PRICE, 1);
+        CfdEnginePlanTypes.LiquidationDelta memory fundedDelta = CfdEnginePlanLib.planLiquidation(funded, ENTRY_PRICE);
         assertFalse(fundedDelta.liquidatable);
         assertEq(
             fundedDelta.riskState.equityUsdc,
@@ -295,7 +294,7 @@ contract VpiRebateReserveTest is Test {
 
         CfdEnginePlanTypes.RawSnapshot memory withCarryAndBounty = _positionSnapshot(10e6, 3e6, 11e6);
         CfdEnginePlanTypes.LiquidationDelta memory liquidation =
-            CfdEnginePlanLib.planLiquidation(withCarryAndBounty, ENTRY_PRICE, 1);
+            CfdEnginePlanLib.planLiquidation(withCarryAndBounty, ENTRY_PRICE);
         assertTrue(liquidation.liquidatable);
         assertEq(
             liquidation.riskState.equityUsdc,
@@ -319,9 +318,9 @@ contract VpiRebateReserveTest is Test {
         CfdEnginePlanTypes.RawSnapshot memory overfunded = _positionSnapshot(100e6, 0, 0);
 
         CfdEnginePlanTypes.LiquidationDelta memory exactDelta =
-            CfdEnginePlanLib.planLiquidation(exactlyFunded, 102_000_000, 1);
+            CfdEnginePlanLib.planLiquidation(exactlyFunded, 102_000_000);
         CfdEnginePlanTypes.LiquidationDelta memory overfundedDelta =
-            CfdEnginePlanLib.planLiquidation(overfunded, 102_000_000, 1);
+            CfdEnginePlanLib.planLiquidation(overfunded, 102_000_000);
 
         assertTrue(exactDelta.liquidatable, "setup must breach exact P+C price health");
         assertTrue(overfundedDelta.liquidatable, "excess VPI reserve must not cure price insolvency");

@@ -48,10 +48,6 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             "Legacy trader claim should remain intact on positive residual"
         );
         assertEq(delta.freshTraderPayoutUsdc, 8e6, "Only physical residual should become a fresh trader payout");
-        assertEq(
-            delta.residualPlan.freshTraderPayoutUsdc, 8e6, "Residual plan should expose only the physical fresh payout"
-        );
-        assertEq(delta.badDebtUsdc, 0, "Positive residual should not create bad debt");
     }
 
     function test_PlanLiquidation_ConsumesExistingTraderClaimBeforeWritingOffTerminalPriceLoss() public {
@@ -72,7 +68,6 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             delta.existingTraderClaimRemainingUsdc, 0, "No trader claim should survive a negative residual wipeout"
         );
         assertEq(delta.priceLossWrittenOffUsdc, 2e6, "Uncollectible terminal price loss should be diagnostic");
-        assertEq(delta.badDebtUsdc, 0, "V2 must not recreate a protocol bad-debt ledger");
     }
 
     function test_LiquidationState_UsesFullReachableCollateralForUnderwaterChargeCap() public {
@@ -150,7 +145,6 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             traderClaimBalanceUsdc,
             "Positive physical residual must preserve the full legacy trader claim"
         );
-        assertEq(delta.badDebtUsdc, 0, "Positive residual must not create bad debt");
     }
 
     function testFuzz_PlanLiquidation_NegativeResidualNetsTraderClaimExactlyOnce(
@@ -189,7 +183,6 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         );
         assertEq(delta.pricePnlPledgeConsumedUsdc, expectedPledgeConsumedUsdc);
         assertEq(delta.priceLossWrittenOffUsdc, expectedWriteOffUsdc);
-        assertEq(delta.badDebtUsdc, 0, "A terminal price write-off must never create protocol debt");
     }
 
     function test_PlanLiquidation_FundedNegativeVpiCancelsInHealthAndIsRecovered() public {
@@ -210,7 +203,6 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         assertEq(withClawback.vpiRebateReserveBeforeUsdc, 7e6);
         assertEq(withClawback.vpiRebateReserveConsumedUsdc, 7e6);
         assertEq(withClawback.vpiRebateReserveAfterUsdc, 0);
-        assertEq(withClawback.badDebtUsdc, 0, "V2 liquidation waives uncollectible charges instead of creating debt");
         assertEq(
             withClawback.keeperBountyUsdc,
             withoutClawback.keeperBountyUsdc,
@@ -255,7 +247,6 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             withClawback.priceGainUsdc < clawbackUsdc ? withClawback.priceGainUsdc : clawbackUsdc;
         assertEq(withClawback.vpiRebateReserveConsumedUsdc, clawbackUsdc - expectedWithheldUsdc);
         assertEq(withClawback.vpiRebateReserveAfterUsdc, 0);
-        assertEq(withClawback.badDebtUsdc, 0);
     }
 
     function test_PlanLiquidation_FundedNegativeVpiDoesNotFlipLiquidatable() public {
@@ -343,7 +334,6 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
             preview.traderClaimBalanceUsdc,
             "Preview should match remaining trader claim after liquidation"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 liquidation must not recreate protocol bad debt");
         assertEq(
             clearinghouse.balanceUsdc(shortAccount),
             preview.settlementRetainedUsdc + preview.immediatePayoutUsdc,

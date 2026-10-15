@@ -35,12 +35,9 @@ contract EngineOpenPreviewTest is CfdEngineTestBase {
 
         vm.warp(block.timestamp + 30 days);
 
-        uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
-        );
-        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8, uint64(block.timestamp)
-        );
+        uint8 revertCode = engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8);
+        CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
+            engineLens.previewOpenFailurePolicyCategory(account, CfdTypes.Side.LONG, sizeDelta, marginDelta, 1e8);
 
         assertEq(
             revertCode,

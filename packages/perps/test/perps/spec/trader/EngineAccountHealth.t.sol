@@ -84,9 +84,8 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(101_800_000, uint64(block.timestamp));
 
-        uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 101_800_000, uint64(block.timestamp)
-        );
+        uint8 revertCode =
+            engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 101_800_000);
         assertEq(
             revertCode,
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
@@ -132,11 +131,10 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         PerpsViewTypes.PositionView memory positionView = _publicPosition(account);
         assertTrue(positionView.liquidatable, "Setup must make the existing position liquidatable before the increase");
 
-        uint8 revertCode = engineLens.previewOpenRevertCode(
-            account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
-        );
+        uint8 revertCode =
+            engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 102_000_000);
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 102_000_000, uint64(block.timestamp)
+            account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 102_000_000
         );
         assertEq(
             revertCode,

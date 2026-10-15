@@ -67,9 +67,8 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         _fundTrader(shortTrader, 20_000e6);
         _open(longTrader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        ICfdEngineTypes.OpenPreview memory preview = engineLens.previewOpen(
-            shortTrader, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp)
-        );
+        ICfdEngineTypes.OpenPreview memory preview =
+            engineLens.previewOpen(shortTrader, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
         assertTrue(preview.valid, "Healing open should be valid");
         assertLt(preview.vpiUsdc, 0, "Healing open should receive a VPI rebate");
 
@@ -99,11 +98,10 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         ICfdEngineTypes.OpenPreview memory preview;
         (marginDelta, preview) =
             _previewReachableOpen(trader, CfdTypes.Side.LONG, sizeDelta, marginDelta, oraclePrice, initialMargin);
-        uint8 revertCode = engineLens.previewOpenRevertCode(
-            trader, CfdTypes.Side.LONG, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
-        );
+        uint8 revertCode =
+            engineLens.previewOpenRevertCode(trader, CfdTypes.Side.LONG, sizeDelta, marginDelta, oraclePrice);
         CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory = engineLens.previewOpenFailurePolicyCategory(
-            trader, CfdTypes.Side.LONG, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp)
+            trader, CfdTypes.Side.LONG, sizeDelta, marginDelta, oraclePrice
         );
 
         assertEq(revertCode, uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "Constructed preview must be valid");
@@ -136,7 +134,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             side: side,
             isClose: false
         });
-        preview = engineLens.previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, uint64(block.timestamp));
+        preview = engineLens.previewOpen(account, side, sizeDelta, marginDelta, oraclePrice);
         if (!preview.valid) {
             // Preserve the original zero/low-margin domain as an asserted rejection, never an assumed-away input.
             _assertRejectedOpenBoundary(order, oraclePrice, preview.invalidReason);
@@ -148,9 +146,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
                 order.marginDelta = 1000e6;
             }
             assertLe(order.marginDelta, _freeSettlementUsdc(account), "Constructed retry must be fundable");
-            preview = engineLens.previewOpen(
-                account, side, sizeDelta, order.marginDelta, oraclePrice, uint64(block.timestamp)
-            );
+            preview = engineLens.previewOpen(account, side, sizeDelta, order.marginDelta, oraclePrice);
         }
         assertTrue(preview.valid, "Every generated case must reach a valid open preview");
         submittedMargin = order.marginDelta;
@@ -451,7 +447,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Close preview trader claim should match live trader claim delta"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 close write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -493,7 +488,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Partial close preview trader claim should match live trader claim delta"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 partial-close write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -604,7 +598,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Liquidation preview trader claim should match live trader claim delta"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 liquidation write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -680,7 +673,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Illiquid liquidation preview trader claim should match live trader claim delta"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 illiquid liquidation write-off must not create accumulated debt");
         assertEq(
             preview.triggersDegradedMode,
             engine.degradedMode(),
@@ -818,7 +810,6 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
             preview.traderClaimBalanceUsdc,
             "Queued-reservation liquidation preview trader claim should match live outcome"
         );
-        assertEq(preview.badDebtUsdc, 0, "V2 queued-reservation liquidation must not create accumulated debt");
         assertEq(
             usdc.balanceOf(address(router)),
             0,

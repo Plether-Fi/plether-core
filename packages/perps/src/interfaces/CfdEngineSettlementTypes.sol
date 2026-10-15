@@ -11,9 +11,8 @@ library CfdEngineSettlementTypes {
     /// @notice Engine-owned position fields produced by a planned settlement.
     /// @dev `size` uses 18 decimals and both entry cost and maximum profit use 6-decimal USDC atoms.
     ///      Active position margin is maintained separately in the clearinghouse. The host derives the position's
-    ///      borrow base and last carry index rather than accepting them in this payload. The current host ignores
-    ///      `deletePosition`; terminal paths call the dedicated position-deletion hook instead.
-    /// @param deletePosition Legacy planning flag ignored by the current settlement-write host.
+    ///      borrow base and last carry index rather than accepting them in this payload. Terminal paths call the
+    ///      dedicated position-deletion hook instead.
     /// @param size Post-settlement position size.
     /// @param entryCostUsdcAtoms Post-settlement exact entry cost.
     /// @param maxProfitUsdc Post-settlement maximum-profit envelope.
@@ -22,7 +21,6 @@ library CfdEngineSettlementTypes {
     /// @param vpiAccrued Net VPI accumulated on the remaining position, in USDC with 6 decimals.
     /// @param side Direction of the post-settlement position.
     struct PositionState {
-        bool deletePosition;
         uint256 size;
         uint256 entryCostUsdcAtoms;
         uint256 maxProfitUsdc;

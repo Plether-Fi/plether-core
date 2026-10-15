@@ -78,8 +78,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 beforeMargin = clearinghouse.pnlPledgeUsdc(TRADER);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(address(router));
-        CfdEnginePlanTypes.CloseCommitment memory effects =
-            engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 0);
+        CfdEnginePlanTypes.CloseCommitment memory effects = engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
         assertEq(effects.carryCollectedUsdc, expectedCarry, "commitment snapshot includes aggregate claims");
         assertEq(effects.carryOutstandingUsdc, 0);
         assertEq(pool.totalAssets(), assets + expectedCarry);
@@ -94,7 +93,7 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 expectedCarry = borrowBase * _indexIncrement(borrowBase, assets - 400_000e6, 1 days) / 1e18;
         vm.warp(vm.getBlockTimestamp() + 1 days);
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8);
         assertTrue(preview.valid);
         assertEq(preview.pendingCarryUsdc, expectedCarry, "preview carry uses actual cash net of claims");
         _open(TRADER, CfdTypes.Side.LONG, 1000e18, 10_000e6, 1e8);
@@ -162,13 +161,13 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         uint256 claim = 400_000e6;
         _seedAuthenticatedTraderClaim(CLAIMANT, claim);
         ICfdEngineTypes.OpenPreview memory beforePreview =
-            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1e8);
         assertTrue(beforePreview.valid);
         // C(S) = k*S*S/(2*D), with exact operands chosen to avoid intermediate rounding differences.
         int256 expectedVpi = int256(uint256(100_000e6) * 100_000e6 / (200 * (assets - claim)));
         assertEq(beforePreview.vpiUsdc, expectedVpi, "VPI uses LP capital net of claims");
         ICfdEngineLens.MaxOpenQuote memory beforeQuote =
-            engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 100_000e6, 1e8, uint64(block.timestamp));
+            engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 100_000e6, 1e8);
         uint256 skewUsdc = (assets - claim) * 4 / 10;
         uint256 expectedSize = skewUsdc / 100e6 * CfdTypes.SIZE_QUANTUM;
         assertEq(beforeQuote.maxSizeDelta, expectedSize, "skew capacity uses net depth and canonical lots");
@@ -177,9 +176,9 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         vm.prank(CLAIMANT);
         engine.settleTraderClaim(CLAIMANT);
         ICfdEngineTypes.OpenPreview memory afterPreview =
-            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 100_000e18, 100_000e6, 1e8);
         ICfdEngineLens.MaxOpenQuote memory afterQuote =
-            engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 100_000e6, 1e8, uint64(block.timestamp));
+            engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 100_000e6, 1e8);
         assertEq(afterPreview.vpiUsdc, beforePreview.vpiUsdc);
         assertEq(afterQuote.maxSizeDelta, beforeQuote.maxSizeDelta);
         assertEq(keccak256(abi.encode(afterQuote.preview)), keccak256(abi.encode(beforeQuote.preview)));
@@ -215,11 +214,10 @@ contract NetEconomicDepthTest is CfdEngineTestBase {
         _fundTrader(TRADER, 100_000e6);
         _seedAuthenticatedTraderClaim(CLAIMANT, pool.totalAssets() + (excess ? 1e6 : 0));
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
         assertFalse(preview.valid);
         assertEq(uint256(preview.invalidReason), uint256(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED));
-        ICfdEngineLens.MaxOpenQuote memory quote =
-            engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 10_000e6, 1e8, uint64(block.timestamp));
+        ICfdEngineLens.MaxOpenQuote memory quote = engineLens.quoteMaxOpen(TRADER, CfdTypes.Side.LONG, 10_000e6, 1e8);
         assertEq(quote.maxSizeDelta, 0);
         assertEq(uint256(quote.limitingReason), uint256(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED));
         uint256 grossDepth = pool.totalAssets();

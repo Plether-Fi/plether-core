@@ -13,7 +13,6 @@ contract CashPriorityLibTest is Test {
         assertEq(reservation.totalSeniorClaimsUsdc, 50e6, "Total senior claims should sum trader claim obligations");
         assertEq(reservation.reservedSeniorCashUsdc, 50e6, "Fresh payouts must reserve all trader claims");
         assertEq(reservation.freeCashUsdc, 50e6, "Fresh payouts may use cash above trader claims");
-        assertEq(reservation.claimServiceableUsdc, 0, "Fresh payout reservations do not service trader claims");
     }
 
 }

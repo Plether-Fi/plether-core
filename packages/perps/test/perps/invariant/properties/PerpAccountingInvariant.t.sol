@@ -382,7 +382,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             assertEq(
                 curve.effectiveCapUsdcAtoms,
                 expectedEffectiveCapUsdcAtoms,
-                "Curve cap must match clipped claims, pledge and source-bound escrow"
+                "Curve cap must match clipped same-account claims and pledge"
             );
             assertEq(uint256(curve.side), uint256(side), "Curve side must match canonical Engine side");
 
@@ -425,16 +425,6 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
                 usdc.balanceOf(actor),
                 handler.ghost().expectedWalletFromSubmittedFlows(actor),
                 "Wallet credits must equal submitted withdrawal flows"
-            );
-        }
-    }
-
-    function _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() internal view {
-        for (uint256 i; i < handler.actorCount(); ++i) {
-            assertEq(
-                handler.ghost().liquidationDebtDiagnosticTotal(handler.actorAt(i)),
-                0,
-                "Every liquidation price tail must remain a diagnostic writeoff, never protocol debt"
             );
         }
     }
@@ -821,7 +811,6 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         _assertInvariant_TerminalNavBookMatchesCanonicalEngineState();
         _assertInvariant_LiquidatedGenerationsHaveNoLiveOrdersOrReserves();
         _assertInvariant_WalletsMatchSubmittedFlows();
-        _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion();
         _assertInvariant_GhostCommittedMarginMatchesAccountReservation();
         _assertInvariant_OrderReservationModuleSummariesMatchAccountReservation();
         _assertInvariant_GhostOrderCommittedMarginStateMachineMatchesRouter();

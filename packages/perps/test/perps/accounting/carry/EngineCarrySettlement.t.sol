@@ -470,7 +470,6 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 100_010_000);
         assertTrue(preview.valid, "Carry-adjusted full close should remain executable");
-        assertEq(preview.badDebtUsdc, 0, "Carry-adjusted close should remain fully covered in this setup");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 100_010_000, true);
@@ -636,7 +635,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
         assertGt(expectedCarry, 0);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(account, 50_000e18);
         assertEq(clearinghouse.pnlPledgeUsdc(account), pledgeBefore - expectedCarry);
         assertEq(clearinghouse.actionReserveUsdc(account), 0);
     }
@@ -655,8 +654,8 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 bountyUsdc = 0;
         uint256 carryTimeDelta = 3_839_405;
 
-        // Leave a distinct free-settlement slice so the historical carry and close bounty are actually collectible;
-        // carry consumes position margin; the bounty remains exclusively free-funded.
+        // Leave a distinct free-settlement slice to show that historical carry consumes position margin
+        // without consuming unrelated free cash; the close's zero-value bounty record adds no action reserve.
         _fundTrader(trader, marginUsdc + 100e6);
         _open(account, CfdTypes.Side.LONG, size, marginUsdc, price);
 
@@ -672,7 +671,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
 
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, size / 2, 0);
+        engine.reserveCloseOrderExecutionBounty(account, size / 2);
 
         assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
         assertEq(
@@ -688,12 +687,12 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         assertEq(
             clearinghouse.pnlPledgeUsdc(account),
             pnlPledgeBefore - expectedCarry,
-            "Only carry consumes position margin; bounty reservation preserves the remaining pledge"
+            "Only carry consumes position margin; zero-value close record leaves remaining pledge unchanged"
         );
         assertEq(
             clearinghouse.actionReserveUsdc(account),
             actionReserveBefore + bountyUsdc,
-            "The close bounty should move only into the isolated action reserve"
+            "Zero-value close record does not increase the isolated action reserve"
         );
     }
 
