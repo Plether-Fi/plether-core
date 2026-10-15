@@ -12,12 +12,8 @@ library CloseCommitmentLib {
 
     function project(
         CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 size,
-        uint256 bounty
+        uint256 size
     ) internal pure returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
-        if (bounty != 0) {
-            revert ICfdEngineTypes.CfdEngine__InvalidRiskParams();
-        }
         if (snap.position.size == 0) {
             revert ICfdEngineTypes.CfdEngine__NoOpenPosition();
         }

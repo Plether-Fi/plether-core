@@ -4,7 +4,6 @@ pragma solidity 0.8.35;
 import {SourceBoundBountyFixture} from "../../shared/SourceBoundBountyFixture.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
-import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 
@@ -31,13 +30,20 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         clearinghouse.validateBountyReservation(BOUNTY_TRADER, IMarginClearinghouse.BountyKind.Order, id, 0);
     }
 
-    function test_NonzeroCloseBountyRejectedAtCanonicalProjection() public {
+    function test_RemovedThreeArgumentCloseReservationSelectorRejectsWithoutBlockingPublicClose() public {
         _bountyPosition(CfdTypes.Side.SHORT);
         bytes32 beforeState = _bountyStateDigest(router.nextCommitId());
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        // Zero would have been a valid bounty on the retired selector, so rejection proves its removal.
+        bytes4 retiredSelector = bytes4(keccak256("reserveCloseOrderExecutionBounty(address,uint256,uint256)"));
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(BOUNTY_TRADER, BOUNTY_SIZE, 1);
+        (bool accepted, bytes memory revertData) =
+            address(engine).call(abi.encodeWithSelector(retiredSelector, BOUNTY_TRADER, BOUNTY_SIZE, 0));
+        assertFalse(accepted, "retired close reservation selector must be unsupported");
+        assertEq(revertData.length, 0, "unknown selector should revert without a protocol error");
         assertEq(_bountyStateDigest(router.nextCommitId()), beforeState);
+
+        uint64 id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.SHORT, true, BOUNTY_SIZE, 0);
+        assertEq(_bountyReservation(id).amountUsdc, 0);
     }
 
     function testFuzz_UnpaidExpiryPreservesPledgeCashAndKeeper(

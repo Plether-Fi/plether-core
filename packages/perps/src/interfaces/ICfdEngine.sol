@@ -58,15 +58,13 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external;
 
     /// @notice Validates a close commitment and realizes collectible carry without reserving a bounty.
-    /// @dev Callable only by the router. The retained bounty argument must be zero; a nonzero value reverts.
+    /// @dev Callable only by the router. Close commitments reserve no execution bounty.
     ///      Carry uses position margin first, then free settlement, and any uncovered amount remains unsettled.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close (18 decimals)
-    /// @param amountUsdc Legacy bounty argument, required to be zero
     function reserveCloseOrderExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 amountUsdc
+        uint256 sizeDelta
     ) external returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Moves forfeited reserved execution-bounty reservation into the protocol treasury account.

@@ -175,7 +175,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         vm.warp(block.timestamp + 500 * 365 days);
         uint256 unpaid = _expectedIndexedCarryUsdc(TRADER) - _margin(TRADER);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
         assertEq(engine.unsettledCarryUsdc(TRADER), unpaid, "full-close commitment retains unpaid carry");
         assertEq(_margin(TRADER), 0);
         _authenticate(TRADER);
@@ -184,28 +184,28 @@ contract MarginFirstCarryTest is BasePerpTest {
     function test_CloseCommitValidationRetainsSpecificFailures() public {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__NoOpenPosition.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100e18);
         _fundTrader(TRADER, 20_000e6);
         _open(TRADER, CfdTypes.Side.LONG, 100_000e18, 3000e6, 1e8);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAmount.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 0, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 0);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__CloseSizeExceedsPosition.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_100e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_100e18);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidCloseSizeQuantum.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 1e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 1e18);
         vm.mockCall(address(engine), abi.encodeWithSelector(engine.lastMarkPrice.selector), abi.encode(uint256(0)));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
         vm.clearMockedCalls();
         vm.prank(address(router));
         engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(TRADER, 50_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(TRADER, 50_000e18);
         _authenticate(TRADER);
     }
 

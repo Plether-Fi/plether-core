@@ -120,6 +120,24 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         _closeAtZeroFree(CfdTypes.Side.LONG, SIZE, KEEPER);
     }
 
+    function test_ClosePreviewsRejectNonzeroRouterBounty() public {
+        _openNormally(CfdTypes.Side.LONG, 0);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
+        vm.mockCall(
+            address(router),
+            abi.encodeWithSelector(router.closeOrderExecutionBountyUsdc.selector),
+            abi.encode(uint256(1))
+        );
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        previewer.previewClose(address(engine), ACCOUNT, request, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector);
+        previewer.previewClose(
+            address(engine), _order(CfdTypes.Side.LONG, SIZE), KEEPER, PRICE, uint64(vm.getBlockTimestamp()), _bounds()
+        );
+        vm.clearMockedCalls();
+    }
+
     function test_AdminZeroCloseBountySupportsStandardPartialClose() public {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.closeOrderExecutionBountyUsdc = 0;
@@ -131,10 +149,8 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         _openNormally(CfdTypes.Side.LONG, 0);
         OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
         address target = address(engine.settlementSidecar());
-        bytes memory callData = abi.encodeCall(
-            ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty,
-            (ACCOUNT, SIZE, router.closeOrderExecutionBountyUsdc())
-        );
+        bytes memory callData =
+            abi.encodeCall(ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty, (ACCOUNT, SIZE));
         bytes32 beforeBuckets = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT)));
         bytes memory failure = hex"abcdef0123456789";
         vm.mockCallRevert(target, callData, failure);

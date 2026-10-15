@@ -47,11 +47,9 @@ interface ICfdEngineSettlementSidecar {
     ) external;
 
     /// @notice Plans close commitment and realizes carry without reserving a bounty.
-    /// @dev The retained bounty argument must be zero; nonzero values revert.
     function reserveCloseOrderExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 amountUsdc
+        uint256 sizeDelta
     ) external returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Applies an open/increase settlement delta through the host hooks.

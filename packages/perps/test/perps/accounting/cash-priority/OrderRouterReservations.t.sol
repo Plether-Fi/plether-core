@@ -206,7 +206,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
 
         vm.prank(address(router));
         vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 25_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(account, 25_000e18);
     }
 
     function test_EligibleSmallRemainderCanReserveBountyFromPledge() public {

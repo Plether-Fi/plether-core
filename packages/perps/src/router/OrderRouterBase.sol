@@ -103,13 +103,11 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @dev Engine validation errors propagate with their original selectors and diagnostics.
     /// @param account Account committing the close.
     /// @param sizeDelta Close size used by engine validation (18 decimals).
-    /// @param executionBountyUsdc Required zero close bounty (6-decimal USDC).
     function _reserveCloseExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 executionBountyUsdc
+        uint256 sizeDelta
     ) internal override returns (CfdEnginePlanTypes.CloseCommitment memory) {
-        return engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc);
+        return engine.reserveCloseOrderExecutionBounty(account, sizeDelta);
     }
 
     function _onOrderCommitted(

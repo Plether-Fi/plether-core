@@ -7,6 +7,7 @@ import {CfdOrderPolicyEvaluatorBase, ICfdOrderPolicyEngineView} from "@plether/p
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CloseCommitmentLib} from "@plether/perps/libraries/CloseCommitmentLib.sol";
@@ -86,7 +87,10 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
             bounty = ICloseAdmission(router.liquidationBatchSidecar()).previewCloseAdmission(account, request);
             ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
             snapshot = _buildRawSnapshot(engine, planner, account, IHousePool(engine.pool()).totalAssets());
-            preview.commitment = CloseCommitmentLib.project(snapshot, request.sizeDelta, bounty);
+            if (bounty != 0) {
+                revert ICfdEngineTypes.CfdEngine__InvalidRiskParams();
+            }
+            preview.commitment = CloseCommitmentLib.project(snapshot, request.sizeDelta);
             preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
             preview.executionBountyUsdc = bounty;
             delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice, publishTime);
@@ -148,7 +152,10 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         preview.executionBountyUsdc = ICfdClosePreviewRouter(engine.orderRouter()).closeOrderExecutionBountyUsdc();
         _validateRouterCommit(snapshot, order);
 
-        preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta, preview.executionBountyUsdc);
+        if (preview.executionBountyUsdc != 0) {
+            revert ICfdEngineTypes.CfdEngine__InvalidRiskParams();
+        }
+        preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta);
         preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice, publishTime);
         preview.assessment =

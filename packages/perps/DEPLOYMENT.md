@@ -678,6 +678,9 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
 
 ## Operational Notes
 
+- Close commitment uses `reserveCloseOrderExecutionBounty(address,uint256)` on both the Engine and settlement sidecar,
+  and `planCloseCommit(snapshot,size)` on the planner. Their former required-zero bounty argument and old selectors
+  are removed. Regenerate bindings and deploy the matching Router, Engine, sidecar, planner, and close preview together.
 - Perps contracts are non-upgradeable. Synchronized async LP settlement therefore requires a coordinated replacement
   stack; an existing `HousePool` cannot replace its set-once vaults and an existing engine cannot replace its pool.
 - This Terminal NAV V2 rollout is testnet-only and deliberately has no compatibility or migration path. Deploy a fresh

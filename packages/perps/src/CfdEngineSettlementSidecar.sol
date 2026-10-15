@@ -321,13 +321,12 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @inheritdoc ICfdEngineSettlementSidecar
     function reserveCloseOrderExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 amountUsdc
+        uint256 sizeDelta
     ) external onlyEngine returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         ICfdEngineAccountActionView engine = ICfdEngineAccountActionView(ENGINE);
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, 0, true);
-        effects = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta, amountUsdc);
+        effects = ICfdEnginePlanner(engine.planner()).planCloseCommit(snap, sizeDelta);
         host.settlementRealizeCarry(account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
         IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets = clearinghouse.getAccountUsdcBuckets(account);

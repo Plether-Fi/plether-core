@@ -11,15 +11,12 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 interface ICfdEnginePlanner {
 
     /// @notice Validates close commitment and projects margin-first carry with a zero execution bounty.
-    /// @dev The bounty argument is retained for ABI compatibility; nonzero values revert.
     /// @param snapshot Canonical account and cached-mark snapshot
     /// @param size Intended close size in canonical size quanta
-    /// @param bounty Legacy bounty argument, required to be zero
     /// @return effects Carry and post-commitment custody projection; bounty fields are zero
     function planCloseCommit(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        uint256 size,
-        uint256 bounty
+        uint256 size
     ) external pure returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Classifies the recurring and governance-override market-calendar regimes.

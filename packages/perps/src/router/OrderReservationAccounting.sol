@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -112,7 +113,10 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         bool isClose
     ) internal returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         if (isClose) {
-            return _reserveCloseExecutionBounty(account, sizeDelta, bounty);
+            if (bounty != 0) {
+                revert ICfdEngineTypes.CfdEngine__InvalidRiskParams();
+            }
+            return _reserveCloseExecutionBounty(account, sizeDelta);
         }
         effects.bountyFromFreeUsdc = bounty;
         if (bounty == 0) {
@@ -219,11 +223,9 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     /// @notice Validates zero-bounty close admission through the concrete engine integration.
     /// @param account Account committing the close.
     /// @param sizeDelta Close size used for engine solvency validation (18 decimals).
-    /// @param executionBountyUsdc Required zero close bounty (6-decimal USDC).
     function _reserveCloseExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 executionBountyUsdc
+        uint256 sizeDelta
     ) internal virtual returns (CfdEnginePlanTypes.CloseCommitment memory);
 
 }

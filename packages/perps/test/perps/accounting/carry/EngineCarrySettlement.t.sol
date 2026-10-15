@@ -636,7 +636,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
         assertGt(expectedCarry, 0);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 50_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(account, 50_000e18);
         assertEq(clearinghouse.pnlPledgeUsdc(account), pledgeBefore - expectedCarry);
         assertEq(clearinghouse.actionReserveUsdc(account), 0);
     }
@@ -672,7 +672,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
 
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, size / 2, 0);
+        engine.reserveCloseOrderExecutionBounty(account, size / 2);
 
         assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
         assertEq(

@@ -587,30 +587,27 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Validates a close commitment and realizes collectible carry without reserving a bounty.
-    /// @dev Callable only by the router. The retained bounty argument must be zero; a nonzero value reverts.
+    /// @dev Callable only by the router. Close commitments reserve no execution bounty.
     ///      Carry uses position margin first, then free settlement, and any uncovered amount remains unsettled.
     ///      The zero-bounty path still validates close admission and checkpoints carry.
     /// @param account Account committing the close order.
     /// @param sizeDelta Intended close size, with 18 decimals; must be nonzero and no greater than position size.
-    /// @param amountUsdc Legacy bounty argument, required to be zero.
     function reserveCloseOrderExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 amountUsdc
+        uint256 sizeDelta
     ) external onlyRouter nonReentrant returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         address target = address(settlementSidecar);
         bytes4 selector = ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty.selector;
         bytes4 invalidResult = ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector;
-        // Reuse one fixed buffer for the three-word call and seven-word response. Do not return from assembly:
+        // Reuse one fixed buffer for the two-word call and seven-word response. Do not return from assembly:
         // borrow/terminal synchronization and the nonReentrant epilogue must still run.
         assembly ("memory-safe") {
             effects := mload(0x40)
             mstore(effects, selector)
             mstore(add(effects, 4), account)
             mstore(add(effects, 36), sizeDelta)
-            mstore(add(effects, 68), amountUsdc)
-            if iszero(call(gas(), target, 0, effects, 100, effects, 224)) {
+            if iszero(call(gas(), target, 0, effects, 68, effects, 224)) {
                 returndatacopy(effects, 0, returndatasize())
                 revert(effects, returndatasize())
             }
