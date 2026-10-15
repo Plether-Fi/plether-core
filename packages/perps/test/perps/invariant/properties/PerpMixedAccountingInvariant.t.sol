@@ -285,14 +285,17 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         handler.assertModel();
     }
 
-    function test_RegressionTinyCarryCashCapsPositiveVpiAfterExternalShock() public {
+    function test_RegressionClaimsReserveTinyCarryCashAfterExternalShock() public {
         handler.openOrIncrease(
             98_649_085_805_498_380_638_313,
             65_334_406_723_469_887_195_895_284_632_339_845_829_231_094_682_571_525,
             271_936_314_260_195_975_302_423_067_331_181_128_781_274_048_493_396_479_409_473_815_292_931_575
         );
+        uint256 zeroDepthClosesBefore = handler.zeroNetDepthCloses();
+        uint256 waivedBefore = handler.waivedActionCharges();
         handler.createDeferredClaimHistory();
-        assertGt(handler.waivedActionCharges(), 0, "uncollectible terminal action charge must be waived");
+        assertGt(handler.zeroNetDepthCloses(), zeroDepthClosesBefore, "claims exhaust cash returned by carry");
+        assertEq(handler.waivedActionCharges(), waivedBefore, "zero fresh VPI avoids an artificial terminal charge");
         handler.assertModel();
     }
 
@@ -307,9 +310,11 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
         handler.createDeferredClaimHistory();
         uint256 priorClaims = handler.expectedClaims();
         uint256 priorFunding = handler.explicitFunding();
+        // Zero-depth closes can retain sufficient existing cash; explicitly exercise a new deposit on reuse.
+        handler.addCollateral(0, 1e6);
         handler.createDeferredClaimHistory();
         assertGe(handler.expectedClaims(), priorClaims);
-        assertGt(handler.explicitFunding(), priorFunding, "explicit fresh deposit funds reused account");
+        assertGe(handler.explicitFunding(), priorFunding + 1e6, "explicit fresh deposit funds reused account");
         handler.assertModel();
     }
 

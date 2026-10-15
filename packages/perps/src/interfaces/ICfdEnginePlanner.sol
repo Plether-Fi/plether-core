@@ -35,6 +35,7 @@ interface ICfdEnginePlanner {
     ) external pure returns (bool fadWindow, bool oracleFrozen);
 
     /// @notice Projects a side carry index from utilization and elapsed time.
+    /// @dev `poolAssetsUsdc` is economic depth after subtracting outstanding trader claims, floored at zero.
     function computeCurrentCarryIndex(
         uint256 storedIndex,
         uint64 previousTimestamp,

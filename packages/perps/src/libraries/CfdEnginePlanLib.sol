@@ -269,8 +269,8 @@ library CfdEnginePlanLib {
     ///      degraded mode, a position too small to support the minimum bounty, insufficient clearinghouse funds,
     ///      post-operation insolvency, insufficient initial margin/equity, or pool-relative skew above the configured
     ///      maximum unless the order strictly reduces an existing imbalance without making its side the heavier side.
-    ///      Zero or non-quantized order sizes and underfunded dedicated reserves are rejected. The skew-cap check is
-    ///      skipped when pool assets are zero. On a business-rule failure `valid` remains false, `revertCode` identifies
+    ///      Zero or non-quantized order sizes and underfunded dedicated reserves are rejected. Zero economic depth
+    ///      rejects all opens. On a business-rule failure `valid` remains false, `revertCode` identifies
     ///      the first failed check, and previously populated fields are diagnostic only. VPI, notional, fee, margin, and skew-cap divisions round down in
     ///      their respective calculations.
     /// @param snap Caller-built position, side, pool, collateral, carry, claim, and risk snapshot.
@@ -443,6 +443,12 @@ library CfdEnginePlanLib {
         CfdTypes.Order memory order,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure {
+        uint256 netDepthUsdc =
+            PositionRiskAccountingLib.computeNetPoolDepthUsdc(snap.poolAssetsUsdc, snap.totalTraderClaimBalanceUsdc);
+        if (netDepthUsdc == 0) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED;
+            return;
+        }
         if (!_openTerminalBookEnvelopeFits(snap, order, delta.price)) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED;
             return;
@@ -462,15 +468,12 @@ library CfdEnginePlanLib {
         bool orderSideIsPostOpenHeavy;
         (inputs.postSkewUsdc, orderSideIsPostOpenHeavy) =
             _postOpenSkewUsdc(snap.longSide, snap.shortSide, order.side, order.sizeDelta, delta.price);
-        if (snap.poolAssetsUsdc > 0) {
-            uint256 maxSkewUsdc = Math.mulDiv(snap.poolAssetsUsdc, snap.riskParams.maxSkewRatio, CfdMath.WAD);
-            if (
-                inputs.postSkewUsdc > maxSkewUsdc
-                    && (inputs.postSkewUsdc >= inputs.preSkewUsdc || orderSideIsPostOpenHeavy)
-            ) {
-                delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
-                return;
-            }
+        uint256 maxSkewUsdc = Math.mulDiv(netDepthUsdc, snap.riskParams.maxSkewRatio, CfdMath.WAD);
+        if (
+            inputs.postSkewUsdc > maxSkewUsdc && (inputs.postSkewUsdc >= inputs.preSkewUsdc || orderSideIsPostOpenHeavy)
+        ) {
+            delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.SKEW_TOO_HIGH;
+            return;
         }
         inputs.currentSize = snap.position.size;
         inputs.currentEntryCostUsdcAtoms = snap.positionEntryCostUsdcAtoms;
@@ -478,7 +481,7 @@ library CfdEnginePlanLib {
         inputs.sizeDelta = order.sizeDelta;
         inputs.price = delta.price;
         inputs.capPrice = snap.capPrice;
-        inputs.poolDepthUsdc = snap.poolAssetsUsdc;
+        inputs.poolDepthUsdc = netDepthUsdc;
         inputs.executionFeeBps = snap.executionFeeBps;
         inputs.riskParams = snap.riskParams;
         bool valid;
@@ -1237,7 +1240,9 @@ library CfdEnginePlanLib {
                 capPrice: snap.capPrice,
                 preSkewUsdc: preSkewUsdc,
                 postSkewUsdc: postSkewUsdc,
-                poolDepthUsdc: snap.poolAssetsUsdc,
+                poolDepthUsdc: PositionRiskAccountingLib.computeNetPoolDepthUsdc(
+                    snap.poolAssetsUsdc, snap.totalTraderClaimBalanceUsdc
+                ),
                 vpiFactor: snap.riskParams.vpiFactor,
                 frozenCloseSpreadBps: snap.frozenCloseSpreadBps,
                 oracleFrozen: snap.oracleFrozen,

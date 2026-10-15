@@ -48,7 +48,9 @@ contract CarryReferenceLedger {
 
     mapping(address => Account) private _accounts;
     Side[2] private _sides;
+    /// @notice Gross canonical pool assets; claim liabilities never rewrite this cash/accounting quantity.
     uint256 public poolDepth;
+    uint256 public totalClaims;
     uint256 public annualBps;
     uint256 public totalNewCarry;
     uint256 public totalCollected;
@@ -65,6 +67,7 @@ contract CarryReferenceLedger {
     error InsufficientProtected();
     error CarryDelinquency();
     error InsufficientClaimLiquidity();
+    error ClaimBalanceMismatch();
     error InvalidArrearsSettlement();
 
     constructor(
@@ -127,7 +130,7 @@ contract CarryReferenceLedger {
         _replace(account, 0, 0, 0, free, protectedFunds, false, timestamp);
     }
 
-    /// @notice Both directional clocks advance against the same old depth and old borrow bases.
+    /// @notice Both directional clocks advance against the same old net depth and old borrow bases.
     function advance(
         uint256 timestamp
     ) public {
@@ -136,7 +139,7 @@ contract CarryReferenceLedger {
             if (timestamp <= state.timestamp) {
                 continue;
             }
-            state.index += indexIncrement(state.borrowBase, poolDepth, annualBps, timestamp - state.timestamp);
+            state.index += indexIncrement(state.borrowBase, economicDepth(), annualBps, timestamp - state.timestamp);
             state.timestamp = timestamp;
         }
     }
@@ -147,6 +150,20 @@ contract CarryReferenceLedger {
     ) external {
         advance(timestamp);
         poolDepth = newDepth;
+    }
+
+    /// @notice Claims remain separate from physical pool assets and reserve capital before any payment occurs.
+    function economicDepth() public view returns (uint256) {
+        return poolDepth > totalClaims ? poolDepth - totalClaims : 0;
+    }
+
+    /// @notice Book independently derived claim creation or netting only after closing the old-depth interval.
+    function changeClaims(
+        uint256 newClaims,
+        uint256 timestamp
+    ) external {
+        advance(timestamp);
+        totalClaims = newClaims;
     }
 
     /// @notice Replace input-derived effective depth for a passive cash change that does not checkpoint either side.
@@ -231,7 +248,7 @@ contract CarryReferenceLedger {
         Side storage side = _sides[state.side];
         uint256 projectedIndex = side.index;
         if (timestamp > side.timestamp) {
-            projectedIndex += indexIncrement(side.borrowBase, poolDepth, annualBps, timestamp - side.timestamp);
+            projectedIndex += indexIncrement(side.borrowBase, economicDepth(), annualBps, timestamp - side.timestamp);
         }
         result.newCarry = amountFromIndex(state.borrowBase, projectedIndex - state.lastIndex);
         result.assessed = state.arrears + result.newCarry;
@@ -279,11 +296,15 @@ contract CarryReferenceLedger {
         uint256 allClaims,
         uint256 timestamp
     ) external returns (Collection memory result) {
+        if (allClaims != totalClaims) {
+            revert ClaimBalanceMismatch();
+        }
         result = checkpoint(account, timestamp);
         if (amount == 0 || poolDepth < allClaims || amount > allClaims) {
             revert InsufficientClaimLiquidity();
         }
         poolDepth -= amount;
+        totalClaims -= amount;
         Account storage state = _accounts[account];
         if (state.active) {
             state.pledge += amount;

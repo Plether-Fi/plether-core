@@ -55,6 +55,8 @@ Use these terms consistently:
 - `accountedAssets`: canonical protocol-owned USDC recognized by pool accounting
 - `excessAssets = max(rawAssets - accountedAssets, 0)`: unsolicited or otherwise unaccounted positive balance
 - `physicalAssets = totalAssets() = min(rawAssets, accountedAssets)`: conservative economic pool backing
+- `economicDepth = max(physicalAssets - totalTraderClaimBalanceUsdc, 0)`: depth for carry utilization, skew capacity,
+  and VPI. Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
 - `protocolTreasuryBalance = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
 - `netPhysicalAssets = max(physicalAssets - protocolTreasuryBalance, 0)`: protocol/lens diagnostic quantity exposed by accounting snapshots when treasury margin should be excluded from protocol-owned pool depth
 
@@ -627,6 +629,23 @@ Rules:
 
 `unassignedAssets` should be exceptional telemetry, not a normal operating bucket.
 
+## Economic Depth For Carry And Risk Pricing
+
+Carry utilization, the opening skew cap, and open/close VPI use `economicDepth`, not gross physical assets. Paying a
+flat account's existing claim reduces assets and liabilities equally and therefore does not change these quantities
+when no other state changes. Physical custody, payout affordability, solvency snapshots, Router depth/receipt fields,
+and hypothetical preview inputs remain gross; each risk-pricing consumer subtracts claims once.
+
+Carry uses actual live economic depth even when a simulation supplies hypothetical gross assets for trade pricing.
+Projected carry collection adds cash before the trade's net-depth calculation. Both directional indexes checkpoint
+against the old depth before claim creation, claim consumption/netting, claim payment, or a physical-asset change.
+
+At zero economic depth, a positive borrow base accrues carry at full utilization. Opens/increases reject with
+`SOLVENCY_EXCEEDED` after projecting carry collection, even if the proposed order would reduce market skew. Maximum-open
+quotes return zero capacity. Protective closes and liquidations remain available under their existing health and
+settlement rules. A zero-depth close creates no fresh VPI charge or rebate, but still recovers any negative lifetime
+VPI allocated to the closed size; fees, frozen spreads, and claim seniority remain enforced.
+
 ## LP-Capital Carry
 
 The protocol uses LP-capital carry instead of a side-to-side rate mechanism.
@@ -635,7 +654,7 @@ Definitions:
 
 - `borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
 - `sideBorrowBaseUsdc`: sum of open-position borrow bases for one side
-- `sideUtilizationBps = min(sideBorrowBaseUsdc / poolAssetsUsdc, 100%)`
+- `sideUtilizationBps = min(sideBorrowBaseUsdc / economicDepth, 100%)`; a positive base at zero depth uses 100%
 - `pendingCarryUsdc = unsettledCarryUsdc + floor(borrowBaseUsdc * (currentSideCarryIndex - positionLastCarryIndex) / 1e18)`
 - `unsettledCarryUsdc[account]`: carry that has been checkpointed at a basis change but not yet physically collected
 
@@ -658,7 +677,7 @@ Rules:
   collection from current buckets; stored arrears alone do not prove carry delinquency,
 - claim service still requires pool cash to cover all outstanding trader claims after carry collection. Collected carry
   may enable that payout; insufficient cash or any later failure reverts the entire collection and credit,
-- side carry indexes advance before borrowing-base, pool-asset, or risk-parameter mutations change their rate or
+- side carry indexes advance before borrowing-base, pool-asset, trader-claim, or risk-parameter mutations change their rate or
   denominator. Account collection remains lazy; an LP deposit or redemption does not collect every trader's debt,
 - a flat-to-open transition advances both side indexes to execution wall-clock time using the old borrowing bases
   and pool depth before inserting new exposure. This also applies to historical-price fills that retain a newer

@@ -34,6 +34,8 @@ contract CarryProjectionTest is BasePerpTest {
     function _claim(
         uint256 amount
     ) private {
+        // Synthetic claims must retain the production ordering: close the old net-depth carry interval first.
+        engine.checkpointCarryIndexes();
         bytes32 oldHash = terminalNavBook.curveHashOf(ACCOUNT);
         stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(ACCOUNT).checked_write(amount);
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(amount);

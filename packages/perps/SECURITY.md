@@ -276,6 +276,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Invariant | Description |
 |-----------|-------------|
 | Canonical asset boundary | Pool depth is based on `min(rawAssets, accountedAssets)`, not raw token balance alone |
+| Economic depth | Carry, skew capacity, and VPI use canonical assets minus outstanding trader claims, floored at zero; physical custody and solvency inputs remain gross |
 | Symmetric terminal NAV | LP entry and exit pricing use the same signed exact terminal price delta and waterfall snapshot |
 | Receivable/cash separation | Positive marked receivables are capped by account PnL pledge and nettable same-account claim, and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
@@ -751,6 +752,8 @@ still latches only at `E < L` and may be cleared at `E >= L`; the full buffer ne
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 
 - carry base: `max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
+- utilization denominator: `max(pool.totalAssets() - totalTraderClaimBalanceUsdc, 0)`; a positive base at zero depth
+  uses full utilization. Claim creation, consumption, and payment checkpoint both side indexes before changing depth
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
 - claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryUsdc`,
@@ -887,6 +890,12 @@ facade; its public `MONITOR()` binding remains readable, dependency bindings sta
 delegatecall path. That
 sidecar is a monitor-bound implementation detail, not another trusted public result surface.
 
+The observable configuration digest commits the canonical Engine admin's nonzero `uint64` active configuration
+version. Every successful Engine configuration finalization changes that version, including calendar-only updates
+and identical reapplications; proposals, cancellations, and reverted finalizations do not. This provides a bounded
+commitment to active calendar changes without enumerating override days. An unavailable or invalid admin/version
+read makes the configuration digest zero and the composite observation incomplete with a zero complete digest.
+
 The monitor reads `lpEpochSettlementPaused` fail-soft. A successful active read is intentional state rather than a
 critical fault: it sets the explicit status flag, `OperationalBlocker.LpEpochSettlementPaused`, and
 `DepositDeferral.LpEpochSettlementPaused`, while preserving cached-versus-atomic route classification for recovery.
@@ -966,8 +975,9 @@ worthless at that instant but share in recovery; this is intentional and must be
 There is no public checkpoint, fee-specific guardian control, performance test, Junior HWM, equalization, cost basis,
 or privileged cash-withdrawal path. The recipient redeems through the same asynchronous LP flow as every holder.
 Settlement Monitor schema/domain V3 introduced the readable active rate and recipient in observable configuration;
-V4 also commits the Engine settlement-buffer policy. A failed or malformed required read makes the configuration
-digest unavailable rather than silently assuming a zero fee or buffer.
+V4 also commits the Engine settlement-buffer policy, and V5 commits the Engine admin's active configuration version
+to detect calendar-only finalizations. A failed or malformed required read makes the configuration digest
+unavailable rather than silently assuming a zero fee, buffer, or version.
 
 ### Senior coupon model
 
@@ -1122,7 +1132,9 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 
 - liquidation does not compute a fresh VPI delta, but the gross negative accrued VPI clawback is settled from its
   dedicated reserve or equivalent withheld trader gain before residual planning,
-- VPI depends on live pool depth,
+- VPI depends on live canonical assets net of outstanding trader claims. Claim payment alone cannot change depth,
+- zero economic depth blocks opens/increases after projected carry collection. Protective closes create no fresh VPI
+  charge or rebate at zero depth, but retain the lifetime clamp and recovery of previously accrued negative VPI,
 - voluntary closes use the same signed VPI curve and lifetime rebate clamp in live, FAD-only, and oracle-frozen regimes,
 - frozen-market stale-price protection is a fixed notional spread that leaves VPI unchanged and replaces, rather than compounds with, the Pyth adverse-confidence price shift for oracle-frozen voluntary closes only,
 - the lifetime clamp intentionally zeroes otherwise extractable rebate-only round trips,

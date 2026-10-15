@@ -42,6 +42,8 @@ contract CarryCreditCheckpointTest is BasePerpTest {
         address account,
         uint256 amount
     ) private {
+        // Synthetic claims must retain the production ordering: close the old net-depth carry interval first.
+        engine.checkpointCarryIndexes();
         bytes32 oldHash = terminalNavBook.curveHashOf(account);
         uint256 total = engine.totalTraderClaimBalanceUsdc() - engine.traderClaimBalanceUsdc(account) + amount;
         stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account).checked_write(amount);

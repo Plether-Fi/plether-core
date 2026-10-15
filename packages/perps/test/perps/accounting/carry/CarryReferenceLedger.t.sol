@@ -98,6 +98,7 @@ contract CarryReferenceArithmeticTest is Test {
         ledger.deposit(account, 5, 365 days);
         assertEq(ledger.accountState(account).free, 0, "deposit can pay arrears immediately");
         assertEq(ledger.accountState(account).arrears, 67);
+        ledger.changeClaims(20, 365 days);
         ledger.creditClaim(account, 20, 20, 365 days);
         assertEq(ledger.accountState(account).pledge, 20, "claim becomes pledge without a second collection pass");
         assertEq(ledger.accountState(account).arrears, 67);
@@ -111,6 +112,7 @@ contract CarryReferenceArithmeticTest is Test {
         CarryReferenceLedger ledger = new CarryReferenceLedger(1000, 0, 500);
         ledger.initializeAccount(address(1), 0, 100, 10, 0, 0, 0);
         ledger.initializeFlatAccount(address(2), 0, 0, 0);
+        ledger.changeClaims(25, 0);
         ledger.deposit(address(2), 20, 365 days);
         assertEq(ledger.sideState(0).timestamp, 0, "flat deposit does not checkpoint global clocks");
         ledger.creditClaim(address(2), 25, 25, 365 days);
@@ -137,6 +139,53 @@ contract CarryReferenceArithmeticTest is Test {
         assertEq(ledger.sideState(1).index, 0.5125e18);
         assertEq(ledger.accountState(address(1)).borrowBase, 95e6);
         assertEq(ledger.accountState(address(2)).borrowBase, 150e6);
+    }
+
+    function test_ClaimCreationAndNettingCloseBothOldDepthIntervals() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(1000e6, 0, 10_000);
+        ledger.initializeAccount(address(1), 0, 300e6, 0, 0, 0, 0);
+        ledger.initializeAccount(address(2), 1, 150e6, 0, 0, 0, 0);
+
+        ledger.changeClaims(400e6, 365 days);
+        assertEq(ledger.poolDepth(), 1000e6, "claim creation does not fabricate a pool transfer");
+        assertEq(ledger.economicDepth(), 600e6);
+        assertEq(ledger.sideState(0).index, 0.3e18, "old claim-free long interval");
+        assertEq(ledger.sideState(1).index, 0.15e18, "old claim-free short interval");
+
+        ledger.changeClaims(250e6, 2 * 365 days);
+        assertEq(ledger.economicDepth(), 750e6, "netting releases claim-reserved capital");
+        assertEq(ledger.sideState(0).index, 0.8e18, "claimed interval uses 50 percent utilization");
+        assertEq(ledger.sideState(1).index, 0.4e18, "claimed interval uses 25 percent utilization");
+        ledger.advance(3 * 365 days);
+        assertEq(ledger.sideState(0).index, 1.2e18);
+        assertEq(ledger.sideState(1).index, 0.6e18);
+    }
+
+    function test_FlatClaimPaymentPreservesEconomicDepthAndFutureCarry() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(1000e6, 0, 10_000);
+        ledger.initializeAccount(address(1), 0, 300e6, 0, 0, 0, 0);
+        ledger.initializeFlatAccount(address(2), 0, 0, 0);
+        ledger.changeClaims(400e6, 0);
+        ledger.creditClaim(address(2), 400e6, 400e6, 365 days);
+        assertEq(ledger.poolDepth(), 600e6);
+        assertEq(ledger.totalClaims(), 0);
+        assertEq(ledger.economicDepth(), 600e6);
+        assertEq(ledger.sideState(0).index, 0.5e18);
+        ledger.advance(2 * 365 days);
+        assertEq(ledger.sideState(0).index, 1e18, "payment cannot change the next interval's utilization");
+    }
+
+    function test_ClaimsAtOrAboveAssetsSaturateCarryWithoutUnderflow() public {
+        CarryReferenceLedger ledger = new CarryReferenceLedger(1000e6, 0, 10_000);
+        ledger.initializeAccount(address(1), 0, 300e6, 0, 0, 0, 0);
+        ledger.changeClaims(1000e6, 0);
+        ledger.changeClaims(1500e6, 365 days);
+        assertEq(ledger.economicDepth(), 0);
+        assertEq(ledger.sideState(0).index, 1e18);
+        ledger.advance(2 * 365 days);
+        assertEq(ledger.sideState(0).index, 2e18);
+        assertEq(ledger.sideState(1).index, 0, "empty side still accrues no carry");
+        assertEq(ledger.poolDepth(), 1000e6, "claims do not overwrite gross assets");
     }
 
     function test_OfflineRecoveryVectorsDistinguishPhysicalCashFromWithheldGain() public {
@@ -179,6 +228,7 @@ contract CarryReferenceArithmeticTest is Test {
         CarryReferenceLedger ledger = new CarryReferenceLedger(90, 0, 10_000);
         ledger.initializeAccount(address(1), 0, 100, 10, 3, 7, 0);
         ledger.checkpoint(address(1), 365 days);
+        ledger.changeClaims(100, 365 days);
         ledger.creditClaim(address(1), 100, 100, 365 days);
         assertEq(ledger.accountState(address(1)).arrears, 77, "claim credit preserves old arrears");
         assertEq(ledger.accountState(address(1)).pledge, 100, "new claim credit remains available");
@@ -200,10 +250,12 @@ contract CarryReferenceArithmeticTest is Test {
         CarryReferenceLedger ledger = new CarryReferenceLedger(90, 0, 10_000);
         ledger.initializeAccount(address(1), 0, 100, 10, 3, 7, 0);
         ledger.checkpoint(address(1), 365 days);
+        ledger.changeClaims(40, 365 days);
         ledger.creditClaim(address(1), 40, 40, 365 days);
         ledger.creditFree(address(1), 9, 365 days);
         // The bounty credit collected the existing pledge before preserving its own newly credited free cash.
         assertEq(ledger.accountState(address(1)).arrears, 37);
+        ledger.changeClaims(20, 365 days);
         ledger.creditClaim(address(1), 20, 20, 365 days);
         assertEq(ledger.accountState(address(1)).arrears, 28);
         assertEq(ledger.accountState(address(1)).pledge, 20);
@@ -344,6 +396,7 @@ contract CarryReferenceArithmeticTest is Test {
                 ledger.sideState(0),
                 ledger.sideState(1),
                 ledger.poolDepth(),
+                ledger.totalClaims(),
                 ledger.totalNewCarry(),
                 ledger.totalCollected(),
                 ledger.totalWithheld(),

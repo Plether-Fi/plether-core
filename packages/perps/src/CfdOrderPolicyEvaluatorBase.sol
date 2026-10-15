@@ -225,18 +225,20 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.riskParams = engine.riskParams();
 
         snapshot.poolCashUsdc = poolCashUsdc;
-        snapshot.longSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, snapshot.poolCashUsdc, snapshot.riskParams.baseCarryBps);
-        snapshot.shortSide = _sideSnapshot(
-            engine, planner, CfdTypes.Side.SHORT, snapshot.poolCashUsdc, snapshot.riskParams.baseCarryBps
+        snapshot.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
+        uint256 carryDepthUsdc = PositionRiskAccountingLib.computeNetPoolDepthUsdc(
+            snapshot.poolCashUsdc, snapshot.totalTraderClaimBalanceUsdc
         );
+        snapshot.longSide =
+            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, carryDepthUsdc, snapshot.riskParams.baseCarryBps);
+        snapshot.shortSide =
+            _sideSnapshot(engine, planner, CfdTypes.Side.SHORT, carryDepthUsdc, snapshot.riskParams.baseCarryBps);
         snapshot.poolAssetsUsdc = poolDepthUsdc;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
         CfdEngineCollateralSnapshotLib.load(snapshot, clearinghouse, account, false);
 
         snapshot.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
-        snapshot.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
         snapshot.traderClaimBalanceForAccount = engine.traderClaimBalanceUsdc(account);
         snapshot.degradedMode = engine.degradedMode();
         snapshot.capPrice = engine.CAP_PRICE();

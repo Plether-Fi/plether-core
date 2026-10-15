@@ -15,6 +15,16 @@ library PositionRiskAccountingLib {
     /// @notice Basis-point scale and maximum modeled pool utilization.
     uint256 internal constant UTILIZATION_BPS = 10_000;
 
+    /// @notice Returns economic pool depth after reserving outstanding trader claims.
+    /// @dev Physical assets remain gross in custody and solvency snapshots. Only carry, skew and VPI use this depth;
+    ///      open-position liabilities and the settlement buffer are not deducted again.
+    function computeNetPoolDepthUsdc(
+        uint256 physicalAssetsUsdc,
+        uint256 traderClaimsUsdc
+    ) internal pure returns (uint256) {
+        return physicalAssetsUsdc > traderClaimsUsdc ? physicalAssetsUsdc - traderClaimsUsdc : 0;
+    }
+
     /// @notice Price-risk state for one position at a supplied collateral and margin policy.
     /// @param unrealizedPnlUsdc Signed capped price PnL; positive values increase trader equity.
     /// @param equityUsdc Signed post-carry PnL pledge plus same-account nettable claim and exact price PnL.
@@ -46,7 +56,7 @@ library PositionRiskAccountingLib {
     /// @dev Returns zero for zero borrow base. A positive borrow base against zero pool assets is treated as 100%
     ///      utilization. Otherwise division rounds down before the 10,000-bps cap is applied.
     /// @param borrowBaseUsdc LP-backed amount using pool capacity.
-    /// @param poolAssetsUsdc Pool asset depth available to support the borrow base.
+    /// @param poolAssetsUsdc Economic pool depth after reserving outstanding trader claims.
     /// @return utilizationBps Utilization in basis points, within `[0, 10_000]`.
     function computeBorrowUtilizationBps(
         uint256 borrowBaseUsdc,
@@ -73,7 +83,7 @@ library PositionRiskAccountingLib {
     /// @param previousTimestamp Timestamp through which `storedIndex` has accrued, in Unix seconds.
     /// @param currentTimestamp Timestamp to accrue through, in Unix seconds.
     /// @param borrowBaseUsdc Aggregate LP-funded borrow base during the interval.
-    /// @param poolAssetsUsdc Pool assets used to compute utilization.
+    /// @param poolAssetsUsdc Economic pool depth after reserving outstanding trader claims.
     /// @param baseCarryBps Annualized rate at full utilization, in basis points.
     /// @return index Current cumulative carry index, scaled by 1e18 and rounded down at the increment.
     function computeCurrentCarryIndex(

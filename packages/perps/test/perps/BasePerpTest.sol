@@ -1075,12 +1075,14 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
     ) internal view returns (uint256 index) {
         uint256 sideIndex = uint256(side);
         (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
+        uint256 grossAssets = pool.totalAssets();
+        uint256 claims = engine.totalTraderClaimBalanceUsdc();
         index = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(sideIndex),
             engine.sideCarryTimestamp(sideIndex),
             vm.getBlockTimestamp(),
             engine.sideBorrowBaseUsdc(sideIndex),
-            pool.totalAssets(),
+            grossAssets > claims ? grossAssets - claims : 0,
             baseCarryBps
         );
     }
