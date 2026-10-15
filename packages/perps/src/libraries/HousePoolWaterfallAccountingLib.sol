@@ -13,7 +13,7 @@ library HousePoolWaterfallAccountingLib {
 
     /// @notice Basis-point denominator.
     uint256 internal constant BPS = 10_000;
-    /// @notice Seconds in the 365-day year used for simple annualized coupon accrual.
+    /// @notice Seconds in the 365-day year used to prorate the nominal annual coupon rate.
     uint256 internal constant SECONDS_PER_YEAR = 31_536_000;
 
     /// @notice Current claimant principal and senior unimpaired entitlement.
@@ -34,11 +34,12 @@ library HousePoolWaterfallAccountingLib {
         uint256 deltaUsdc;
     }
 
-    /// @notice Calculates simple annualized coupon due on current senior principal.
+    /// @notice Calculates coupon due by applying the nominal annual rate linearly over one accrual interval.
     /// @dev Returns zero when elapsed time or principal is zero. The result is
     ///      `floor(seniorPrincipal * seniorRateBps * elapsed / (10_000 * 365 days))`.
+    ///      Paid coupon becomes part of senior principal, so subsequent intervals accrue on the capitalized amount.
     /// @param seniorPrincipal Coupon-bearing senior principal in 6-decimal USDC.
-    /// @param seniorRateBps Annualized coupon rate in basis points.
+    /// @param seniorRateBps Nominal annual coupon rate in basis points.
     /// @param elapsed Accrual interval in seconds.
     /// @return Coupon due in 6-decimal USDC, rounded down.
     function calculateSeniorCoupon(
@@ -57,7 +58,7 @@ library HousePoolWaterfallAccountingLib {
     ///      high-water mark; any excess increases senior principal and its high-water mark equally. If coupon due or
     ///      junior principal is zero, state is unchanged. Arithmetic in coupon calculation rounds down.
     /// @param state Waterfall state before coupon payment.
-    /// @param seniorRateBps Annualized senior coupon rate in basis points.
+    /// @param seniorRateBps Nominal annual senior coupon rate in basis points.
     /// @param elapsed Accrual interval in seconds.
     /// @return nextState Waterfall after the junior-to-senior transfer.
     /// @return couponPaid Actual coupon transferred, capped by junior principal.
