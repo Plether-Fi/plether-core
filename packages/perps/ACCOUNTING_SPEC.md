@@ -28,15 +28,14 @@ The key rules are:
 
 1. Physical USDC and mathematical claims are different objects.
 2. Marked LP equity includes only the portion of an unrealized trader loss collectible from that account's dedicated
-   PnL pledge, nettable same-account trader claim, or source-bound refundable close-bounty escrow. It is not spendable
+   PnL pledge or nettable same-account trader claim. It is not spendable
    withdrawal cash before collection.
 3. LP redemption funding is stricter than protocol solvency.
 4. Risk-increasing admission and LP redemption funding preserve a liability-scaled settlement buffer; the buffer is
    headroom, not a liability, NAV adjustment, yield source, or separately custodied balance.
 5. Pending-order reservations are not free trader collateral.
-6. A trader price loss is collectible only up to the account's PnL pledge plus explicitly nettable claim. Refundable
-   pledged-close escrow contributes to marked backing until an authorized successful execution earns the bounty;
-   failed-close cleanup or liquidation restores it to its original pledge before it can settle price loss. Any excess
+6. A trader price loss is collectible only up to the account's PnL pledge plus explicitly nettable claim. Ordinary
+   and protection close execution bounties are zero, so no refundable close escrow enters marked backing. Any excess
    is a diagnostic write-off, not an LP asset, trader claim, or terminal deficit. An unpaid protocol-side payout
    becomes a trader claim; independently negative terminal equity remains explicit as terminal deficit. A waived
    frozen-close spread is an uncollected charge. V2 has no accumulated-debt ledger or repayment selector.
@@ -710,12 +709,11 @@ context without changing that accrual basis. Snapshot loading and live collectio
 
 For every checkpoint sequence, `starting arrears + newly accrued carry = margin collected + free settlement collected
 + ending arrears`. At a terminal action, reconcile any remaining arrears separately against terminal recovery and waiver.
-A close commitment prepays its bounty from free settlement first, then eligible position PnL pledge after carry
-collection. Insufficient backing reports the required bounty, available post-carry free settlement plus pledge, and
-unpaid carry; unrelated validation errors propagate unchanged. Zero free settlement alone does not prevent a close
-commitment when eligible pledge covers the bounty. Partial commitments also require no unpaid carry and strict
-post-reservation maintenance/FAD health. A zero bounty still checkpoints carry and validates admission. These are the
-current source semantics; editing or redeploying source does not change previously deployed immutable engine stacks.
+A close commitment collects applicable carry without reserving a bounty from free settlement or position pledge.
+Zero free settlement alone does not prevent commitment. Partial commitments still require no unpaid carry and strict
+post-carry maintenance/FAD health; full commitments retain their separate rules. The zero bounty does not bypass
+carry or admission checks. These are the current source semantics; previously deployed immutable engine stacks retain
+their own behavior.
 
 ## Trader Claim Liabilities
 
@@ -751,8 +749,8 @@ The canonical clearinghouse split includes:
 - `pnlPledgeUsdc`: live-position custody immediately reachable by marked price losses,
 - `liquidationReserveUsdc`: keeper/protocol liquidation-charge backing, isolated from price PnL,
 - `orderMarginUsdc`: committed open/increase margin,
-- `actionReserveUsdc`: execution bounties and other action charges, including the dedicated negative lifetime-VPI
-  reserve and dormant position-protection trigger and linked-close bounties.
+- `actionReserveUsdc`: opening execution bounties and other action charges, including the dedicated negative
+  lifetime-VPI reserve and dormant position-protection trigger rewards. Close execution bounties are zero.
 
 For a live position, the gross VPI reserve target is:
 
@@ -844,7 +842,7 @@ Component authority is deliberately split:
 - any uncovered carry or dedicated VPI reserve below `max(-vpiAccrued, 0)` fails closed independently. The exact-price
   equity test rejects equality and requires the account to remain strictly above the larger of initial margin and the
   active normal-maintenance/FAD requirement,
-- an attached-open flow locks protection bounties before committing the parent, so the ordinary canonical open planner
+- an attached-open flow locks the protection trigger bounty before committing the parent, so the ordinary canonical open planner
   admits and executes that parent against the balances that remain after the protection reservation,
 - `PendingOpen` keeps protection separate from the parent's committed opening margin and opening execution bounty,
 - parent-open success arms protection atomically against the actual resulting side and full size without moving its
@@ -966,8 +964,8 @@ A queued close must match the nonzero live position's side. Earlier queued close
 projected direction is insufficient. After existing lifecycle/MEV checks and before slippage, a mismatch finalizes as
 `PlannerRejected`, `UserInvalid`, `SIDE_MISMATCH` (7), with authenticated typed evidence and
 `priceReachedEngine=false`. The pure close planner repeats the predicate before carry and settlement arithmetic.
-A missing position keeps its existing size rejection. Ordinary failure bounty provenance and pledge restoration
-remain in force, and unknown failures still roll back the item for retry.
+A missing position keeps its existing size rejection. Ordinary failure settles its authenticated zero bounty record
+without moving funds, and unknown failures still roll back the item for retry.
 
 ### Treasury fee withdrawals
 
@@ -982,9 +980,8 @@ remain in force, and unknown failures still roll back the item for retry.
 
 Liquidation must:
 
-1. restore source-bound pledged-close escrow, then collect margin-first carry and collect position price loss from
-   the reduced PnL pledge and explicitly nettable
-   claim, matching the cap after carry collection,
+1. collect margin-first carry and position price loss from the reduced PnL pledge and explicitly nettable claim,
+   matching the cap after carry collection,
 2. allocate the capped liquidation charge using the configured `keeperShareBps` and `protocolShareBps`, crediting the
    keeper and protocol-treasury shares through clearinghouse settlement and transferring the exact LP remainder to
    `HousePool` claimant revenue,
@@ -994,10 +991,10 @@ Liquidation must:
 6. re-evaluate degraded-mode containment.
 
 Risk-off refunds and their existing early health check occur first. A separate inner rollback frame then authenticates
-pending reservations, restores pledged-close escrow, forfeits only free-funded order bounties, invokes the existing
-Engine liquidation health/settlement path, and finalizes account-local queue cleanup. If restoration makes the account
-healthy, roll back this entire inner frame: the pledged order and both funding parts remain pending and no liquidation
-bounty is earned. Previously completed outer risk-off refunds persist. Without such outer work, the single-call
+pending reservations, forfeits unpaid opening bounties where applicable, settles zero close records, invokes the
+Engine liquidation health/settlement path, and finalizes account-local queue cleanup. If the account is healthy,
+roll back this entire inner frame: its pending orders remain and no liquidation bounty is earned. Previously completed
+outer risk-off refunds persist. Without such outer work, the single-call
 solvent revert and batch skipped-solvent behavior are preserved. Only the exact direct Engine solvent failure receives
 that classification; unrelated errors do not become healthy outcomes. Other accounts retain their relative FIFO order.
 
@@ -1147,9 +1144,10 @@ Required transition rules:
 - user cancellation is disallowed once pending; the only binding-order exception is a protocol risk-off cutoff that
   terminally invalidates pre-cutoff opens and refunds their remaining committed margin, execution bounty, and any
   attached `PendingOpen` protection bounties to the trader's free internal settlement,
-- expiry resolves through the configured bounty and reservation policy. A registered protection attempt whose exact
-  protected position remains is the exception to ordinary paid cleanup: its bounty is retained for retry and the
-  protection becomes `Latched`; position mismatch instead terminally fails the protection under ordinary paid cleanup,
+- expiry resolves through the configured bounty and reservation policy. An ordinary close expiry settles its zero
+  bounty record without payment. A registered protection attempt whose exact protected position remains settles its
+  zero record and becomes `Latched`; retry creates a fresh zero record. Position mismatch terminally fails protection
+  without a close-bounty payment,
 - risk-off invalidation precedes expiry, requires no oracle and performs no Engine mutation, carry checkpoint, or
   Terminal NAV synchronization, pays no cleanup bounty, and remains effective after governance unpauses,
 - stale or missing oracle data does not destroy a valid pending order,
@@ -1170,8 +1168,8 @@ Position-protection storage persists `None`, `PendingOpen`, `Armed`, `Triggered`
 - `Armed` and `Latched` are off queue. `Triggered` links exactly one live full-size market-style close attempt, using
   the side-dependent nonbinding target sentinel and appended at the global FIFO tail; `linkedOrderId` names the latest
   attempt rather than complete history.
-- A non-liquidation attempt failure removes that order and, only when the exact protected side and size remain, retains
-  its bounty and moves `Triggered -> Latched`. Otherwise it resolves the protection as `Failed`. Retry is permissionless,
+- A non-liquidation attempt failure removes that order and settles its zero bounty record. If the exact protected side
+  and size remain, it moves `Triggered -> Latched`; otherwise it resolves the protection as `Failed`. Retry is permissionless,
   nonpayable, and separate from cleanup; `Latched -> Triggered` appends a new attempt at the current tail with a fresh
   id, commit time, deadline, and live/FAD historical settlement window. Retry also requires that the account has no
   other pending Router order.
@@ -1204,7 +1202,7 @@ The accounting system should preserve the following:
 16. exact position entry cost is conserved across increases and partial closes without reconstructing basis from a
     rounded average price
 17. the terminal book curve for every account equals its live lots, exact entry cost, side, and current
-    `pnlPledge + same-account claim + eligible source-bound close-bounty escrow` collectible cap
+    `pnlPledge + same-account claim` collectible cap
 18. LP deposits and redemptions use the same signed terminal price delta and waterfall snapshot
 19. positive marked receivables do not increase physical cash available to fund redemptions
 20. a current nonzero terminal deficit blocks LP deposit activation
@@ -1217,8 +1215,8 @@ The accounting system should preserve the following:
 25. armed and latched protection is off queue; triggered protection links exactly one live full reduce-only attempt,
     while terminal lifecycle receipts retain the complete one-to-many attempt history
 26. the take-profit and stop-loss legs collectively trigger at most once
-27. every protection bounty unit is recorded in exactly one clearinghouse namespace (protection or order), and
-    ultimately paid, refunded, or forfeited once; retry moves that attribution without locking additional reserve
+27. the protection trigger reward is recorded, then paid, refunded, or forfeited exactly once; each triggered or
+    retried close attempt separately creates an authenticated zero-amount Order record without locking more value
 28. terminal protection owns zero reserve, and liquidation leaves no protection or linked-order residue
 29. existing-position protection cannot arm after its reserve lock unless canonical exact-basis price equity, using
     only PnL pledge plus same-account claim, remains strictly above the stricter initial/active requirement
@@ -1226,12 +1224,12 @@ The accounting system should preserve the following:
 31. every successful open or increase leaves `E >= L + ceil(L * settlementBufferBps / 10_000)`
 32. the LP base withdrawal reserve includes `C + L + B`, while terminal NAV, raw degraded-mode detection, custody,
     and yield exclude `B`
-33. at most one ordinary pledged-close escrow exists per account, owned by that account's pending head and live
-    position epoch; later orders are wholly free-funded
-34. ordinary failure restores pledged bounty to its source before paying the original free-funded part; liquidation
-    restores it before health and loss assessment, and successful close consumes its eligibility exactly once
-35. reserve/refund alone cannot change LP pricing at fixed mark and claims; successful bounty payment remains an
-    authorized cost and cannot be charged twice
+33. ordinary and protection close attempts have a zero bounty and no pledged-close escrow or source-position epoch;
+    no pledge-specific empty-queue restriction applies
+34. successful close, recognized failure, expiry, and liquidation settle each authenticated zero Order record exactly
+    once with no bounty recipient; opening and protection-trigger rewards follow their separate policies
+35. creating or settling a zero close record cannot change LP pricing at fixed mark and claims; actual opening and
+    protection-trigger payments remain accounted costs that cannot be charged twice
 
 ## Architecture Goal
 

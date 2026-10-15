@@ -2,8 +2,7 @@
 
 `MarginClearinghouse` owns reservation amounts and their accounting indexes. The Router owns pending-order
 lifecycle and global/account execution queues. `PositionProtectionBook` owns protection lifecycle, attempt linkage,
-and each protection's immutable execution-bounty snapshot used to authenticate retries. Neither lifecycle owner stores a mutable bounty
-balance or committed-margin queue.
+and the trigger-bounty snapshot. Neither lifecycle owner stores a mutable bounty balance or committed-margin queue.
 
 ## Committed margin
 
@@ -19,64 +18,55 @@ They exclude exhausted records immediately. There is no `syncMarginQueue` operat
 
 ## Bounty records
 
-A record is keyed by `(BountyKind, id)` and contains its account, unpaid amount, lifecycle state, original free/pledge
-funding and source position epoch. Numeric ids may overlap across
-namespaces. `totalBountyReservationsUsdc(account)` sums all three namespaces and is updated with each creation or
-take. A transfer changes attribution without changing this total.
+A record is keyed by `(BountyKind, id)` and contains its account, amount, and lifecycle state. Numeric ids may overlap
+between `Order` and `ProtectionTrigger`. New records are wholly free-funded or zero: `pledgeFundedUsdc` and
+`sourcePositionEpoch` remain zero. `ProtectionExecution` is a retired namespace and rejects new reservations.
+`totalBountyReservationsUsdc(account)` sums active nonzero records and changes on creation or take.
 
 | Transition | Caller | Canonical change | Funding/custody |
 | --- | --- | --- | --- |
-| Ordinary order commit | Router | Create `Order(orderId)` | Existing reserve lock occurs first |
-| Protection creation or attachment | Protection book | Create `ProtectionTrigger(id)` and `ProtectionExecution(id)` | Existing reserve lock occurs first |
-| Protection trigger | Protection book | Take trigger record; move execution record to `Order(attemptId)` | Existing trigger credit; execution reserve stays locked |
-| Retained failed attempt | Protection book | Move `Order(attemptId)` back to `ProtectionExecution(id)` | No unlock, relock, or custody change |
-| Retry | Protection book | Move execution record to the fresh `Order(attemptId)` | No additional funding |
-| Successful order payout | Router | Take authenticated order record | Pay/release full bounty; successful ordinary close consumes only its own collectible eligibility |
-| Ordinary close failure or expiry | Router through Engine | Take authenticated original split | Restore pledged part to source position, then pay/release free-funded part |
-| Liquidation order cleanup | Router through Engine | Take authenticated original split inside isolated liquidation frame | Restore pledged part before health/loss assessment; forfeit only free-funded part |
-| Risk-off open cleanup | Router | Take exact free-funded order record | Refund internally, no cleaner payment or carry checkpoint |
-| Protection refund or forfeiture | Protection book | Take remaining protection records | Existing settlement path completes atomically |
+| Opening/increase commit | Router | Create nonzero `Order(orderId)` | Reserve free settlement first |
+| Ordinary close commit | Router | Create Active zero `Order(orderId)` | No monetary reserve or pledge reclassification |
+| Protection creation or attachment | Protection book | Create `ProtectionTrigger(id)` | Reserve trigger reward from free settlement only |
+| Protection trigger | Protection book and Router | Take and pay trigger record once; create Active zero `Order(attemptId)` | No linked-close execution reward |
+| Matching failed close attempt | Router and protection book | Settle zero Order record; move `Triggered -> Latched` | No cleaner payment or retained execution funds |
+| Protection retry | Protection book and Router | Create a fresh Active zero `Order(attemptId)` | No new trader debit or second trigger payout |
+| Successful/failed ordinary close | Router | Settle authenticated zero Order record | No bounty recipient or cash movement |
+| Liquidation order cleanup | Router | Settle each Order record inside isolated liquidation frame | Unpaid opening bounty may be forfeited; close amount is zero |
+| Risk-off open cleanup | Router | Take exact opening Order record | Refund internally, no cleaner payment or carry checkpoint |
+| Untriggered protection refund/forfeiture | Protection book | Take remaining trigger record | Existing trigger settlement path completes atomically |
 
-Only the Router may create/take ordinary order records; only its immutable protection book may create/take
-protection records. The book alone can transfer between `Order` and `ProtectionExecution`, after authenticating the
-attempt relationship. Transfers reject cross-account attribution, live destinations, other namespace pairs, and
-reuse of any previous order record. A consumed protection-execution record may receive its own retry reserve again.
+Only the Router may create/take Order records; only its immutable protection book may create/take
+`ProtectionTrigger` records. Creation of a nonzero bounty requires existing reserved-settlement backing for the new
+amount plus all existing bounties and the VPI floor. A zero-bounty close still creates an explicit Active record so
+its funding identity can be authenticated. A take returns the classified amount and settles the record; exact
+lifecycle and owner checks prevent another payment or re-creation under a used id.
 
-Creation of a nonzero bounty requires existing reserved-settlement backing for the new amount plus all existing
-bounties and the VPI floor. A configured zero-bounty ordinary close still creates an explicit active record so its
-funding identity can be authenticated. A take returns the full classified amount and zeroes it; exact lifecycle and
-owner checks prevent another payment or re-creation under a used id. A known record cannot be taken for another account.
-
-The lifecycle Book independently records the original funding split and source epoch. An ordinary close may use
-pledge only when its account queue is empty; later fully free-funded peers remain legal. One Clearinghouse collectible
-escrow mirror binds the pledge amount to that pending head and its live source epoch. Reservation decreases physical
-pledge and increases this mirror within the Engine's authenticated curve frame, preserving the marked cap while
-keeping the bounty locked. The mirror is not extra custody, borrow collateral or an additional protected-reserve floor.
+The lifecycle Book independently authenticates the original funding fields. For a close, entitlement, free funding,
+pledge funding, and source epoch are all zero. There is no pledge-specific empty-queue rule or collectible escrow
+mirror. FIFO, account pending limits, queued exposure, carry, and risk admission still apply.
 
 ## Atomicity and accounting
 
-Classification is distinct from custody. `recordBountyReservation` classifies funds already locked by the authorized
-funding path. `takeBountyReservation` removes that classification before the existing payout, refund, or forfeiture.
-These trusted callers must complete both operations in one transaction. Neither record operation nor transfer
-checkpoints carry; the existing funding and settlement paths retain their carry timing. Any later failure rolls back
-records, lifecycle, and funds together. Removing bounty classification alone does not remove collectible escrow.
-Pledged refund checkpoints old-basis carry without collecting it before restoring margin; success consumes eligibility
-inside the close mutation. Liquidation restores pledge before authoritative health/loss assessment. Restored solvency
-rolls back its inner frame, retaining the pledged order while preserving valid preceding outer risk-off refunds.
+Classification is distinct from custody. `recordBountyReservation` classifies value already locked by an authorized
+opening or trigger funding path, or records an Active zero close without locking funds. `takeBountyReservation` settles
+that classification before the payout, refund, or forfeiture. Trusted callers complete both steps atomically; a later
+failure rolls back records, lifecycle, and funds together. Record creation and take do not themselves checkpoint carry.
+Close commitment independently collects applicable carry even though its bounty is zero.
 
-Expired discrepancies must reconcile exact Book-backed funding and live source ownership before any refund. Stale
-pledge never becomes free settlement or a later generation's collateral. Otherwise identifiable backing remains
-locked in quarantine and only matching collectible eligibility is removed inside an Engine curve frame. Failure to
-authenticate that boundary fails closed; no administrator can guess or rewrite a disputed owner.
+Expired discrepancies must reconcile exact Book-backed opening funding before any refund. Missing, settled, or
+foreign records do not authorize a refund. Identifiable inconsistent backing remains locked in quarantine; the
+zero close record still requires matching account, kind, id, and Active state. No administrator can guess or rewrite
+a disputed owner.
 
 Generic action-reserve consumption protects `VPI reserve + totalBountyReservationsUsdc(account)` using only local
 clearinghouse accounting. No Router queue scan or accounting callback supplies that floor. Engine and lens snapshots
 read the same aggregate. Router account views combine it with Router-owned pending counts and clearinghouse margin
 summaries in constant work. Protection views project the canonical bounty records into their existing public shape.
 
-The first trigger transfers the bounty before queuing its close attempt. The retry callback queues the fresh attempt
-before the book transfers its bounty. Both retain the old lifecycle ordering: the same funds remain protected in
-one namespace throughout the handoff. Contract identity reads used for authorization remain in place.
+The first trigger settles its separate reward before queuing a zero-bounty close attempt. A retry queues a fresh
+zero-bounty attempt without transferring value between namespaces or paying the trigger again. Contract identity
+reads used for authorization remain in place.
 
 ## Compatibility
 
@@ -86,12 +76,11 @@ New clearinghouse bounty entrypoints, getters, and `BountyReservationUpdated` ev
 Existing trader order/protection input and view shapes remain unchanged; margin queue views now contain only active
 records. Rebuild clients that consume the internal accounting interface and do not reuse old raw-storage decoders.
 
-The source-bound close extension also changes internal Engine/Book interfaces and Clearinghouse/Book storage. Public
-request/receipt field layouts and their existing hash domains stay stable; `PaidAndRefunded=5` and
-`ForfeitedAndRefunded=6` append mixed dispositions. Its new failed-close payout policy and refundable-escrow marked cap
-are specified in [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy). Deploy a matching fresh
-stack together; there is no Router-only hot swap or live-state migration. See [Deployment](DEPLOYMENT.md) for cutover
-constraints.
+The current zero-close implementation removes the source-bound pledged-close escrow and its internal mutation paths.
+Public request/receipt compatibility fields and historical disposition ordinals remain decodable; normal close
+receipts use `None` with zero amounts. See [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy).
+Deploy a matching fresh stack together; there is no Router-only hot swap or live-state migration. See
+[Deployment](DEPLOYMENT.md) for cutover constraints.
 
 ## Stateful conservation test
 
@@ -101,7 +90,7 @@ protocol return values supply record identities. Every step compares all current
 totals, reserve backing, keeper credits, and protection/order/position lifecycle against that model.
 
 Each fuzz case first exercises cross-account namespace collisions, cancellation of armed and pending-open protection,
-parent execution and expiry, repeated retained retries, successful close payout, risk-off refunds, and liquidation of
+parent execution and expiry, repeated zero-bounty retries, successful close settlement, risk-off refunds, and liquidation of
 armed, triggered, and latched protection. A forced transfer failure checks atomic rollback. It then mixes 32 actions
 across three accounts and drains every remaining bounty. Unexpected action reverts fail the case. Carry and VPI are
 zero in this focused fixture; their interactions remain covered by the package's separate accounting tests.

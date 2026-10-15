@@ -156,7 +156,8 @@ Use the smallest canonical surface that answers the decision:
 - `OrderRouter.pletherOracle()` and the deployed `PletherOracle` configuration for the exact FX-basket market bound
   to the Router.
 - `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for Engine-level trade-ticket simulation; use
-  `CfdClosePreview.previewClose(...)` for a prospective ordinary close that must first reserve its execution bounty.
+  `CfdClosePreview.previewClose(...)` for a prospective ordinary close that projects commitment carry and its zero
+  bounty commitment effects.
 - `IOrderLifecycleBook` for order identity, pinned policy, lifecycle, and outcome.
 - `PerpsPublicLens.getActivePositionProtection(...)` and `getPositionProtection(...)`, or direct
   `IPositionProtectionViews`, for retained protection thresholds, status, trigger evidence, and order linkage.
@@ -198,22 +199,17 @@ remain subject to ordinary Router, evaluator, Engine, and protection-state check
 order bounty to the account's free settlement on success; an external keeper receives a clearinghouse credit instead.
 For a nonzero bounty, receipts encode self-execution as `Paid` to `executor == account`; ordinary zero-bounty execution
 uses `None`. `RefundedToAccount` applies to risk-off cleanup and recoverable backing returned by
-`ExpiredReservationMismatch`. An ordinary
-failed close pays/releases only original free funding and restores original pledged funding to its source position.
-A pledge-funded close requires an empty account queue; later free-funded orders remain supported. An actual pledge
-requirement with a pending order returns `OrderRouter__PledgeBountyRequiresEmptyQueue` and rolls commitment back.
-Wait for pending orders to finish or fund the entire bounty from free USDC; do not repeatedly submit the same rejected
-request expecting a different source lifetime. A failed registered protection attempt records
-`RetainedForProtectionRetry`, pays no cleaner, and rolls the same reserved amount back to the latched protection only
-while the exact protected position still matches, including an explicitly active zero reservation. A missing or
-mismatched position instead uses ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally
-resolves the protection as `Failed`.
+`ExpiredReservationMismatch`. An ordinary failed close settles an authenticated zero Order record, pays no cleaner,
+and does not restore pledged bounty. No pledge-specific empty-queue rule applies; FIFO, queued-exposure, capacity,
+carry, and risk checks still do. A failed registered protection attempt likewise settles its zero record and pays no
+cleaner. It latches only while the exact protected position still matches; retry creates a fresh zero record. A
+missing or mismatched position terminally resolves the protection as `Failed` with zero close-bounty movement.
 
-Ordinary failed-close cleanup with zero original free funding is unpaid. The protocol keeper still monitors it and
+Ordinary failed-close cleanup is unpaid. The protocol keeper still monitors it and
 may expire it permissionlessly, without oracle data, after its execution deadline. Terminal cleanup removes only that
-order; retryable failure preserves it. Liquidation restores pledged funding before its health/loss assessment and
-forfeits only free funding. If restoration makes liquidation healthy, its inner attempt rolls back and the pledged
-order remains pending, while preceding valid risk-off refunds remain effective.
+order; retryable failure preserves it. Liquidation may forfeit unpaid opening bounties, while close zero records
+move no value. A healthy liquidation attempt rolls back its inner frame while preceding valid risk-off refunds remain
+effective.
 
 The Router delegates to two separately deployed stateless modules. Its exactly Router-bound keeper sidecar performs
 commit validation and orchestrates mark refresh, LP settlement, protection triggers, and liquidation; its bounded-order
@@ -360,8 +356,9 @@ domains contribute their finalized active configuration versions; pending timelo
 policy and therefore are not committed.
 
 The bounded request ABI and intent-hash domain are V3, including `submitBy` and `executionWindowSeconds`.
-Execution-config and receipt domains are V4. Source-bound close-bounty refunds preserve these domains and public
-request/receipt field layouts, while adding disposition ordinals 5 and 6. Use the matching request, receipt, and
+Execution-config and receipt domains are V4. The zero-close implementation retains public request/receipt
+compatibility fields and historical disposition ordinals 5 and 6; normal close receipts use `None` and zero bounty
+amounts. Use the matching request, receipt, and
 lifecycle interfaces for this release; historical V2 request or V3 receipt/config encodings are not interchangeable
 with the current domains. Always verify receipts against their actual chain, Book and Router; never reinterpret a
 historical deployment through the current source ABI or assume equal domain labels imply interchangeable bindings.
@@ -475,10 +472,9 @@ For TP/SL, also reconcile the retained protection record and `PositionProtection
 thresholds, protection status, triggered leg, trigger mark and publish time, and
 `parentOrderId`/latest-`linkedOrderId` association that an order receipt does not contain. Retry events and lifecycle
 receipts form the complete one-to-many attempt history; never treat the mutable latest id as the whole history. The
-receipt bounty fields cover only that attempt's entitlement and actual settlement. Protection trigger bounties and protection reserves
-that are separately retained, refunded, or forfeited require the protection and Clearinghouse/Engine evidence. A
-failed attempt with `RetainedForProtectionRetry` has a zero recipient because the value moves from Router attribution
-back to Book attribution rather than being paid.
+receipt bounty fields cover only that attempt's zero entitlement and settlement. The separate protection trigger
+reward and its refund or forfeiture require protection and Clearinghouse/Engine evidence. A matching failed close
+attempt settles with `None` and a zero recipient, then latches; retry creates a fresh zero Order record.
 
 The Router deletes terminal live-order records. This is intentional: use the Book's permanent compact outcome and
 receipt hash for durable state, and the canonical event for the full receipt.
@@ -494,19 +490,19 @@ Disposition ordinals are stable and append-only for this release:
 | 0 | `None` | Zero bounty movement and zero recipient |
 | 1 | `Paid` | Paid/released amount, including successful self-execution |
 | 2 | `Forfeited` | Free-funded amount credited to treasury |
-| 3 | `RefundedToAccount` | Pure refund; pledged funds return to original position backing |
-| 4 | `RetainedForProtectionRetry` | Reserved for a new protected attempt; no recipient |
-| 5 | `PaidAndRefunded` | Failed ordinary close pays original free funding and restores original pledge |
-| 6 | `ForfeitedAndRefunded` | Liquidation forfeits original free funding and restores original pledge before loss recovery |
+| 3 | `RefundedToAccount` | Pure refund to the account, including risk-off opening cleanup |
+| 4 | `RetainedForProtectionRetry` | Historical compatibility ordinal; current matching failed close attempts settle zero and latch |
+| 5 | `PaidAndRefunded` | Historical mixed close-bounty outcome; not emitted for normal current closes |
+| 6 | `ForfeitedAndRefunded` | Historical mixed liquidation outcome; not emitted for normal current closes |
 
 Read the numeric components rather than treating every nonzero disposition as full payment. The single recipient is
-the executor for a nonzero paid part, treasury for a nonzero forfeited part, or source account for a pure refund. A
-pledged refund is never an extra wallet entitlement; it may pay liquidation loss immediately. Successful full-bounty
-self-release remains intentional. The SDK decoder authenticates these values as `uint8` through the unchanged full
+the executor for a nonzero paid part, treasury for a nonzero forfeited part, or source account for a pure refund.
+Opening-bounty self-release remains intentional. Current ordinary and protection closes have no bounty recipient.
+The SDK decoder authenticates these values as `uint8` through the unchanged full
 receipt hash; it does not independently prove that the contract's accounting policy was correct.
 
 This is a fresh connected-stack release: internal interfaces and Clearinghouse/Book storage change despite stable
-public tuples. Never point a new Router at an already-wired Engine, initialize new escrow mirrors over old pending
+public tuples. Never point a new Router at an already-wired Engine or mix old pending
 orders, or hot-swap books/sidecars. A populated deployment requires its own reviewed migration. Bind SDK/indexer/keeper
 manifests and generated ABIs to the complete verified new graph before activation.
 

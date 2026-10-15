@@ -19,7 +19,8 @@ The resolved deadline is commitment time plus the requested duration. `orderTimi
 both pending and terminal orders, or zeros for an unknown order. `IntentRegistered` appends the timing tuple after the
 request. Pending intents and full receipts append `timing`; the Book authenticates receipt timing
 against its pending record. The two-slot `terminalOutcome` summary remains unchanged, with terminal timing retained
-separately in one packed slot for `orderTiming`. All closes use the configured close bounty. The intent domain is V3;
+separately in one packed slot for `orderTiming`. Current ordinary and protection closes use an authenticated zero
+bounty record; nonzero close-bounty configuration is rejected. The intent domain is V3;
 receipt and execution-config domains are V4. Event tuples and selectors differ from the earlier close-only schema;
 consumers must use interfaces generated from the merged schema.
 

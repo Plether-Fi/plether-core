@@ -466,7 +466,7 @@ commit open with protection
 - The opening position still appears only when its delayed FIFO order executes. Successful opening execution arms the
   protection atomically against the resulting side and full size, so there is no externally observable unprotected
   position between those two state changes.
-- Parent-open failure or expiry terminally fails the staged protection and releases its two protection bounties. The
+- Parent-open failure or expiry terminally fails the staged protection and releases its unpaid trigger bounty. The
   parent opening execution bounty retains the ordinary terminal-order policy.
 - Cancelling `PendingOpen` protection detaches it but does not cancel the binding parent open. That open may later
   execute without protection.
@@ -475,14 +475,14 @@ commit open with protection
 - `createPositionProtection(...)`, `replacePositionProtection(...)`, and
   `commitOpenOrderWithProtection(...)` are nonpayable trader calls. They validate trigger geometry against the engine's
   cached fresh neutral mark and do not ingest Pyth data.
-- Protection bounties are locked before safety is evaluated. For an existing position, the post-lock gate uses the
+- The protection trigger bounty is locked before safety is evaluated. For an existing position, the post-lock gate uses the
   Engine-configured canonical planner's V2 exact-price predicate rather than duplicating risk math. It supplies exact
   entry basis and price-risk equity of only PnL pledge (`position.margin`) plus the same-account trader claim plus exact
   capped unrealized PnL. Free settlement and generic action, order, liquidation, VPI, and protection reserves are not
   price collateral. Any uncovered carry or underfunded `max(-vpiAccrued, 0)` reserve fails closed, and exact-price equity
   must be strictly above the stricter of initial margin and the active normal/FAD maintenance requirement. An attached
   open locks protection value first, so the ordinary open planner sees the remaining balances when it admits and later
-  executes the parent. Those protection bounty reservations are outside the parent request's
+  executes the parent. That protection trigger reservation is outside the parent request's
   `maxGrossAccountDebitUsdc`; the request's nonzero configuration hash pins their finalized Router configuration.
 - `triggerPositionProtection(...)` is a permissionless payable keeper call. It ingests current Pyth data, requires a
   later block and publish time after arming, and cannot trigger while `oracleFrozen`.
@@ -507,9 +507,9 @@ commit open with protection
   constructed inside the authenticated protection path; only those attempts use
   `expectedConfigHash == bytes32(0)` as an internal unpinned marker. Fresh external commits reject zero, and no external
   caller can opt an ordinary or protected-parent order out of configuration pinning.
-- Relatched failure cleanup does not automatically enqueue the replacement and pays no keeper bounty. Instead, the
-  original close execution bounty is rolled back into Book attribution and recycled into the next attempt without a
-  second trader reservation. The bounty is paid once on eventual execution or forfeited once on liquidation.
+- Relatched failure cleanup does not automatically enqueue the replacement and pays no keeper bounty. The old
+  attempt's explicit zero Order bounty record settles; a permissionless retry creates a fresh zero record without
+  debiting trader funds. The separate protection trigger reward is paid only once, when protection triggers.
 - `PositionProtectionCloseAttemptQueued` identifies the first and every retried attempt and links it to the previous
   attempt id (`0` for the first attempt).
   `PositionProtectionCloseAttemptFailed` records the terminal reason and whether the exact-position check relatched the
@@ -1128,10 +1128,9 @@ authorizes settlement.
   the FIFO tail; the ordinary execution keeper then settles that close against its first eligible post-trigger tick.
 - Before Engine mutation, the stateless policy evaluator reconstructs the same authoritative snapshot consumed by
   the configured planner and evaluates every caller bound in canonical `ConstraintKind` order. Equality passes.
-- Free-funded reservation release for execution/terminal classification does not checkpoint carry. Pledged refunds
-  checkpoint old-basis carry without collecting it before restoring source margin. The evaluator and Engine
-  account for carry from the canonical Engine state; if the item is retryable, its rollback frame restores the
-  reservation.
+- Opening-bounty release for execution/terminal classification does not checkpoint carry. Close commitment collects
+  applicable carry with a zero bounty and does not reclassify pledge. The evaluator and Engine account for carry from
+  the canonical Engine state; if the item is retryable, its rollback frame restores the order and zero bounty record.
 - Slippage, expiry, config mismatch, exact-shape typed planner rejection, execution-mode rejection, and financial
   constraint violation finalize the order. Risk-off and account liquidation are separate terminal reasons.
 - Close-only, same-block/MEV, historical-price availability, insufficient-gas, and mark-ordering gates do not consume
@@ -1251,8 +1250,9 @@ This preserves close and liquidation liveness during real market closures withou
 Position protection has a separate retained state machine: `None`, `PendingOpen`, `Armed`, `Triggered`, `Executed`,
 `Failed`, `Cancelled`, `Liquidated`, and `Latched`. `Latched` is appended so existing status ordinals remain stable.
 It means the trigger is irreversible and no close attempt is currently live; `Triggered` means exactly one attempt is
-live. `BountyDisposition.RetainedForProtectionRetry` is likewise appended at ordinal `4`, preserving the existing
-disposition ordinals. Protection state must not be inferred from or folded into the ordinary order status enum.
+live. `BountyDisposition.RetainedForProtectionRetry` remains decodable at ordinal `4`, preserving the existing
+disposition ordinals; current zero-bounty close attempts settle with `None`. Protection state must not be inferred
+from or folded into the ordinary order status enum.
 
 ![Order lifecycle](../../assets/diagrams/perps-order-lifecycle.svg)
 
@@ -1297,9 +1297,9 @@ risk or move the system back toward solvency.
 - Voluntary closes seize price loss only from the account's dedicated PnL pledge and nettable claim. Any excess was
   excluded from marked LP receivables and is written off rather than turned into a claim or deficit; an
   uncollectible terminal frozen-close spread is separately waived.
-- Liquidation terminally removes the account's active protection in O(1). An armed protection forfeits both unpaid
-  bounties; a `Triggered` protection forfeits its live attempt's execution bounty; and a `Latched` protection forfeits
-  the recycled Book-attributed execution bounty. Each path consumes the value exactly once.
+- Liquidation terminally removes the account's active protection in O(1). An armed protection may forfeit its unpaid
+  trigger bounty; a `Triggered` protection settles its live attempt's zero Order record; a `Latched` protection has
+  no execution bounty left to forfeit. The trigger reward is paid only once when the protection triggers.
 
 ### Friday Auto-Deleverage (FAD)
 
@@ -1385,10 +1385,11 @@ binding is correct. Do not mix a V3 Router/Book with legacy Router queue state o
 pending orders, client ids, and outcomes are not imported. Recovery from a Book or immutable-binding fault likewise
 requires containment and a new compatible stack rather than storage repair.
 
-Source-bound close-bounty refunds also require the connected fresh stack. Public `OrderRequest` and `OrderReceipt`
-field layouts stay stable; appended mixed disposition values require compatible SDK/indexer decoding, and internal
-interfaces and Clearinghouse/Book storage change. Never combine the new cap with old pending records or zero-initialized
-escrow mirrors on a populated stack. Migration of an existing deployment requires a separate authenticated design.
+The zero-close-bounty lifecycle also requires a connected fresh stack. Public `OrderRequest` and `OrderReceipt`
+field layouts retain their compatibility fields, but ordinary and protection close receipts carry zero bounty
+amounts and `None` disposition. Historical mixed disposition ordinals remain decodable; they are not emitted for
+normal closes by this implementation. Never combine the new accounting model with old pending records or escrow
+mirrors on a populated stack. Migration of an existing deployment requires a separate authenticated design.
 
 The latched-retry lifecycle is likewise a fresh-stack boundary. The Router-created stateful protection Book and the
 predeployed lifecycle Book cannot be upgraded or populated from the old stack. Before switching application manifests,
@@ -1449,10 +1450,10 @@ the active deployment before constructing orders; many unit-test fixtures intent
 | `frozenCloseSpreadBps` | 50 (0.50%) | Fixed LP-owned spread on voluntary close/reduce notional during `oracleFrozen` |
 | `settlementBufferBps` | 25 (0.25%) | Liability-scaled admission and LP-withdrawal headroom; governed range 0-1,000 bps |
 | Open execution bounty | 0.01 to 0.20 USDC | Timelocked router reserve bounds |
-| Close execution bounty | 0.20 USDC | Timelocked router reserve amount |
+| Ordinary/protection close execution bounty | 0 USDC | Permanently zero; nonzero Router configuration is rejected |
 | Position-protection trigger bounty | 0.20 USDC | Timelocked activation-keeper reserve, capped at 1 USDC |
 | Position-protection commits | available | Fresh deployments need no protection-specific activation; Router pause still applies |
-| Full default protection reserve | 0.40 USDC | Snapshotted trigger plus linked-close bounties, funded from free settlement |
+| Full default protection reserve | 0.20 USDC | Snapshotted trigger bounty only, funded from free settlement; linked-close bounty is zero |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
 | Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
