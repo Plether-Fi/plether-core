@@ -38,8 +38,8 @@ interface ISettlementMonitorSidecarVaultView {
 ///      Bindings are constructor-only storage: this non-proxy contract exposes no setter or delegatecall path.
 contract SettlementMonitorLensSidecar {
 
-    uint256 internal constant CONFIG_SCHEMA_VERSION = 4;
-    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V4");
+    uint256 internal constant CONFIG_SCHEMA_VERSION = 5;
+    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V5");
     uint256 internal constant STATIC_READ_GAS = 500_000;
     uint256 internal constant MAX_STATIC_WORDS = 16;
 
@@ -960,7 +960,7 @@ contract SettlementMonitorLensSidecar {
 
     function _wiringConfigDigest() internal view returns (bool available, bytes32 digest) {
         (uint256 bindingFaults, uint256 bindingFailures) = _validateRuntimeBindings();
-        if (bindingFaults != 0 || bindingFailures != 0) {
+        if ((bindingFaults | bindingFailures) != 0) {
             return (false, bytes32(0));
         }
         address oracle = address(ROUTER.pletherOracle());
@@ -976,17 +976,30 @@ contract SettlementMonitorLensSidecar {
         ) {
             return (false, bytes32(0));
         }
-        bytes32 engineDigest = keccak256(
-            abi.encode(
-                address(ENGINE),
-                address(ENGINE_PROTOCOL_LENS),
-                address(CLEARINGHOUSE),
-                address(TERMINAL_NAV_BOOK),
-                address(ENGINE.planner()),
-                address(ENGINE.settlementSidecar()),
-                ENGINE.admin()
-            )
-        );
+        bytes32 engineDigest;
+        {
+            address engineAdmin = ENGINE.admin();
+            // The active version commits finalized calendar overrides without enumerating their unbounded day set.
+            (, uint256 activeConfigVersion) = _readUint(engineAdmin, bytes4(keccak256("activeConfigVersion()")));
+            // Failed reads return zero. Accept exactly [1, uint64.max], with zero wrapping outside that range.
+            unchecked {
+                if (activeConfigVersion - 1 >= type(uint64).max) {
+                    return (false, bytes32(0));
+                }
+            }
+            engineDigest = keccak256(
+                abi.encode(
+                    address(ENGINE),
+                    address(ENGINE_PROTOCOL_LENS),
+                    address(CLEARINGHOUSE),
+                    address(TERMINAL_NAV_BOOK),
+                    address(ENGINE.planner()),
+                    address(ENGINE.settlementSidecar()),
+                    engineAdmin,
+                    activeConfigVersion
+                )
+            );
+        }
         bytes32 poolDigest =
             keccak256(abi.encode(address(HOUSE_POOL), address(SENIOR_VAULT), address(JUNIOR_VAULT), address(USDC)));
         bytes32 oracleDigest = keccak256(abi.encode(oracle, oracle.codehash, pyth, pyth.codehash));

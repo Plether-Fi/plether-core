@@ -762,8 +762,11 @@ post-recovery planning. A failed hold read instead marks the Pool dependency unk
 The included `LpEpochKeeper` aborts on an active hold before decoding a payload, quoting a Pyth fee, or broadcasting.
 The settlement hold previously bumped the monitor configuration schema and observation domain to V2. Including the
 active Junior maintenance-fee rate and recipient in observable configuration bumped both to V3. Including
-`settlementBufferBps` in the observable Engine-policy digest now bumps both to V4; off-chain consumers must not
-compare V1, V2, V3, and V4 digests as if they shared a domain.
+`settlementBufferBps` in the observable Engine-policy digest bumped both to V4. Including the Engine admin's active
+configuration version now bumps both to V5, so calendar-only finalizations change the fingerprint even when the
+runway stays the same. Pending and cancelled proposals do not change it; every successful Engine configuration
+finalization does, including an identical reapplication. Off-chain consumers must read `schemaVersion` and must not
+compare digests across versions as if they shared a domain.
 
 Use `getSettlementStatus(observedEpoch)` as the lighter high-frequency polling surface. The composite
 `getSettlementObservation(observedEpoch)` is intentionally a checkpoint and alert-investigation read: its ABI return
@@ -799,8 +802,10 @@ The bounded monitoring API is:
   dependency read to succeed even for cached-mark or no-work routing; current feed-policy validity is required only
   when the selected route is atomic refresh.
 - `observableConfigDigest()`: domain-separated digest of the observable active configuration, including
-  `settlementBufferBps` in the Engine policy section and the active Junior maintenance-fee APR and recipient in the
-  pool-policy section.
+  `settlementBufferBps` in the Engine policy section, the admin's active configuration version alongside its Engine
+  binding, and the active Junior maintenance-fee APR and recipient in the pool-policy section. Calendar overrides are
+  committed through that version without enumerating the full day set. An unavailable or invalid required read
+  returns a zero digest and makes the composite observation incomplete.
 
 All digests are unauthenticated advisory comparison aids, not trusted batch commitments, and none is consumed by the
 Router.

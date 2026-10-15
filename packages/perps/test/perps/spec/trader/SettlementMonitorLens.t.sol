@@ -63,9 +63,9 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(health.poolAccountedAssetsUsdc, pool.accountedAssets());
         assertEq(health.poolCustodyDeficitUsdc, 0);
         assertEq(health.seniorImpairmentUsdc, 0);
-        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 4);
-        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V4"));
-        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V3"));
+        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 5);
+        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V5"));
+        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V4"));
         assertTrue(monitorLens.observableConfigDigest() != bytes32(0));
     }
 

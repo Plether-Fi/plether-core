@@ -28,7 +28,8 @@ interface ISettlementMonitorLens {
     ) external view returns (SettlementMonitorViewTypes.SettlementObservation memory observation);
 
     /// @notice Hashes accessible active settlement configuration and bound dependency identities.
-    /// @dev This is not a monotonic version and cannot enumerate the Engine's full override-day set or Oracle basket.
+    /// @dev Commits finalized Engine calendar changes through the active admin configuration version, without
+    ///      enumerating override days. This digest is not a monotonic version and does not enumerate the Oracle basket.
     ///      Returns zero when a required configuration or binding read is unavailable or invalid.
     function observableConfigDigest() external view returns (bytes32 digest);
 

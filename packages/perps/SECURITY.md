@@ -896,6 +896,12 @@ facade; its public `MONITOR()` binding remains readable, dependency bindings sta
 delegatecall path. That
 sidecar is a monitor-bound implementation detail, not another trusted public result surface.
 
+The observable configuration digest commits the canonical Engine admin's nonzero `uint64` active configuration
+version. Every successful Engine configuration finalization changes that version, including calendar-only updates
+and identical reapplications; proposals, cancellations, and reverted finalizations do not. This provides a bounded
+commitment to active calendar changes without enumerating override days. An unavailable or invalid admin/version
+read makes the configuration digest zero and the composite observation incomplete with a zero complete digest.
+
 The monitor reads `lpEpochSettlementPaused` fail-soft. A successful active read is intentional state rather than a
 critical fault: it sets the explicit status flag, `OperationalBlocker.LpEpochSettlementPaused`, and
 `DepositDeferral.LpEpochSettlementPaused`, while preserving cached-versus-atomic route classification for recovery.
@@ -974,8 +980,9 @@ worthless at that instant but share in recovery; this is intentional and must be
 There is no public checkpoint, fee-specific guardian control, performance test, Junior HWM, equalization, cost basis,
 or privileged cash-withdrawal path. The recipient redeems through the same asynchronous LP flow as every holder.
 Settlement Monitor schema/domain V3 introduced the readable active rate and recipient in observable configuration;
-V4 also commits the Engine settlement-buffer policy. A failed or malformed required read makes the configuration
-digest unavailable rather than silently assuming a zero fee or buffer.
+V4 also commits the Engine settlement-buffer policy, and V5 commits the Engine admin's active configuration version
+to detect calendar-only finalizations. A failed or malformed required read makes the configuration digest
+unavailable rather than silently assuming a zero fee, buffer, or version.
 
 ### Senior coupon model
 
