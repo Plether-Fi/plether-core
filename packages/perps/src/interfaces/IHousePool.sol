@@ -53,7 +53,10 @@ interface IHousePool {
     }
 
     /// @notice Governed senior coupon, live-mark, frozen-oracle LP fee, and senior-capacity configuration.
-    /// @param seniorRateBps Annualized simple senior target coupon rate in basis points.
+    /// @param seniorRateBps Nominal annual senior target coupon rate in basis points, applied linearly to current
+    ///        senior principal over each checkpoint interval. Paid coupon is capitalized into senior principal and
+    ///        compounds at subsequent checkpoints; effective yield depends on checkpoint frequency and available
+    ///        junior NAV.
     /// @param markStalenessLimit HousePool component of the live cached-mark age limit, in seconds.
     /// @param seniorFrozenLpFeeBps Senior vault exit fee while the oracle is frozen, in basis points.
     /// @param juniorFrozenLpFeeBps Junior vault exit fee while the oracle is frozen, in basis points.
