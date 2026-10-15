@@ -207,6 +207,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     uint256 public partialCloses;
     uint256 public fullCloses;
     uint256 public frozenCloses;
+    uint256 public zeroNetDepthCloses;
     uint256 public positiveVpiActions;
     uint256 public negativeVpiActions;
     uint256 public deferredClaims;
@@ -1117,6 +1118,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         traders[i].claim = 0;
         expectedClaims -= amount;
+        carry.changeClaims(expectedClaims, vm.getBlockTimestamp());
         expectedPoolCash -= amount;
         expectedAccounted -= amount;
         carry.changeDepth(_depth(), vm.getBlockTimestamp());
@@ -1539,6 +1541,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         expectedAccounted = expectedAccounted + physicalRevenue - values.immediate;
         expectedKeeper += values.keeper;
         expectedClaims = values.allClaimsAfter;
+        carry.changeClaims(expectedClaims, vm.getBlockTimestamp());
         carry.settleActionArrears(actorAt(i), values.carryCash, values.carryWithheld, values.carryWaived);
         carryCollected += values.carryCash + values.carryWithheld;
         liquidationCarryWaived += values.carryWaived;
@@ -1707,6 +1710,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
 
     function _depth() internal view returns (uint256) {
         return expectedPoolCash < expectedAccounted ? expectedPoolCash : expectedAccounted;
+    }
+
+    function _netDepth(
+        uint256 grossAssets
+    ) internal view returns (uint256) {
+        return grossAssets > expectedClaims ? grossAssets - expectedClaims : 0;
     }
 
     function _apply(
@@ -2830,7 +2839,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 lots,
         bool closing
     ) internal view returns (int256) {
-        return _vpiAtDepth(i, lots, closing, _depth());
+        return _vpiAtDepth(i, lots, closing, _netDepth(_depth()));
     }
 
     function _vpiAtDepth(
@@ -2881,6 +2890,26 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint256 initial;
     }
 
+    function _openDepthAdmission(
+        uint256 i,
+        uint256 lots,
+        uint256 netDepth
+    ) internal view returns (uint8) {
+        if (netDepth == 0) {
+            return 7;
+        }
+        uint256 ownLots = sideLots[i % 2];
+        uint256 otherLots = sideLots[1 - i % 2];
+        uint256 oldSkew = ownLots > otherLots ? ownLots - otherLots : otherLots - ownLots;
+        uint256 nextOwnLots = ownLots + lots;
+        uint256 newSkew = nextOwnLots > otherLots ? nextOwnLots - otherLots : otherLots - nextOwnLots;
+        // The fixture's 40% skew ceiling admits only strictly healing opens that remain on the lighter side.
+        if (newSkew * currentPrice > netDepth * 2 / 5 && (newSkew >= oldSkew || nextOwnLots > otherLots)) {
+            return 4;
+        }
+        return 0;
+    }
+
     function _projectOpen(
         uint256 i,
         uint256 lots,
@@ -2893,6 +2922,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             v.revertCode = 5;
             return v;
         }
+        x.depth = _netDepth(_depth() + c.fromMargin + c.fromFree);
+        v.revertCode = _openDepthAdmission(i, lots, x.depth);
+        if (v.revertCode != 0) {
+            return v;
+        }
         // The minimum supports the $1 liquidation charge at 10 bps on the live resulting position.
         // Earlier queued opens are still reservations and cannot satisfy this admission threshold.
         if ((t.lots + lots) * currentPrice < 1000e6) {
@@ -2901,7 +2935,6 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         t.margin -= c.fromMargin;
         t.cash -= c.fromMargin + c.fromFree;
-        x.depth = _depth() + c.fromMargin + c.fromFree;
         v.vpi = _vpiAtDepth(i, lots, false, x.depth);
         v.fee = lots * currentPrice / 2500;
         x.cost = v.vpi + int256(v.fee);
@@ -2968,7 +3001,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     ) internal view returns (CloseReferenceMath.Values memory) {
         Trader memory t = traders[i];
         uint256 paid = c.fromMargin + c.fromFree;
-        uint256 depth = _depth() + paid;
+        uint256 depth = _netDepth(_depth() + paid);
         CloseReferenceMath.Input memory input;
         input.isLong = i % 2 == 0;
         input.lots = t.lots;
@@ -3027,8 +3060,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
     function _bookClose(
         uint256 i,
         uint256 lots,
-        int256
+        int256 freshVpi
     ) internal {
+        if (_netDepth(_depth()) == 0) {
+            assertEq(freshVpi, 0, "zero net depth charges no fresh VPI before the lifetime clamp");
+            ++zeroNetDepthCloses;
+        }
         CarryReferenceLedger.Collection memory noAdditionalCarry;
         noAdditionalCarry.unpaid = carry.accountState(actorAt(i)).arrears;
         CloseReferenceMath.Values memory v = _projectClose(i, lots, noAdditionalCarry);
@@ -3049,6 +3086,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         expectedPoolCash = v.poolCashAfter;
         expectedAccounted = v.poolAccountedAfter;
         expectedClaims = v.allClaimsAfter;
+        carry.changeClaims(expectedClaims, vm.getBlockTimestamp());
         expectedTreasury += v.treasuryCredit;
         waivedActionCharges += v.actionWaived;
         sideLots[i % 2] -= lots;
@@ -3459,7 +3497,9 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             assertEq(engine.lastMarkPrice(), currentPrice, "mixed input-derived cached mark");
             assertEq(engine.lastMarkTime(), currentMarkTime, "mixed input-derived cached mark time");
         }
-        assertEq(carry.poolDepth(), _depth(), "independent carry denominator matches complete pool ledger");
+        assertEq(carry.poolDepth(), _depth(), "independent gross assets match complete pool ledger");
+        assertEq(carry.totalClaims(), expectedClaims, "independent carry claims match complete claim ledger");
+        assertEq(carry.economicDepth(), _netDepth(_depth()), "independent carry denominator excludes claims");
         uint256 custody = expectedTreasury + expectedKeeper;
         uint256 arrears;
         uint256 wallets;

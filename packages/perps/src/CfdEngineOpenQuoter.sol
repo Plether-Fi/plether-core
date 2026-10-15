@@ -11,6 +11,7 @@ import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
+import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @title CfdEngineOpenQuoter
@@ -46,6 +47,7 @@ contract CfdEngineOpenQuoter {
         uint256 selectedLiability;
         uint256 opposingLiability;
         uint256 profitPerLot;
+        uint256 netDepthUsdc;
         int256 pricePnl;
         int256 preSkewCost;
     }
@@ -104,7 +106,9 @@ contract CfdEngineOpenQuoter {
         bool carryCollectible = CfdEnginePlanLib.projectOpenCarry(projected);
         if (
             price == 0 || !carryCollectible || projected.degradedMode
-                || (projected.position.size > 0 && projected.position.side != probe.order.side)
+                || PositionRiskAccountingLib.computeNetPoolDepthUsdc(
+                        projected.poolAssetsUsdc, projected.totalTraderClaimBalanceUsdc
+                    ) == 0 || (projected.position.size > 0 && projected.position.side != probe.order.side)
                 || projected.vpiRebateReserveUsdc < _negativeReserve(projected.position.vpiAccrued)
         ) {
             delta = _probe(raw, probe, low);
@@ -181,6 +185,8 @@ contract CfdEngineOpenQuoter {
         uint256 price
     ) private pure returns (Context memory ctx) {
         ctx.snap = snap;
+        ctx.netDepthUsdc =
+            PositionRiskAccountingLib.computeNetPoolDepthUsdc(snap.poolAssetsUsdc, snap.totalTraderClaimBalanceUsdc);
         ctx.price = price;
         ctx.marginDelta = order.marginDelta;
         ctx.currentLots = snap.position.size / CfdTypes.SIZE_QUANTUM;
@@ -218,14 +224,12 @@ contract CfdEngineOpenQuoter {
             return 0;
         }
         high = Math.min(maxTotalLots - ctx.currentLots, type(uint256).max / CfdTypes.SIZE_QUANTUM - ctx.currentLots);
-        if (ctx.snap.poolAssetsUsdc > 0) {
-            uint256 maxSkew = Math.mulDiv(ctx.snap.poolAssetsUsdc, ctx.snap.riskParams.maxSkewRatio, 1e18);
-            uint256 maxSelectedLots = ctx.opposingLots + maxSkew / ctx.price;
-            if (maxSelectedLots <= ctx.selectedLots) {
-                return 0;
-            }
-            high = Math.min(high, maxSelectedLots - ctx.selectedLots);
+        uint256 maxSkew = Math.mulDiv(ctx.netDepthUsdc, ctx.snap.riskParams.maxSkewRatio, 1e18);
+        uint256 maxSelectedLots = ctx.opposingLots + maxSkew / ctx.price;
+        if (maxSelectedLots <= ctx.selectedLots) {
+            return 0;
         }
+        high = Math.min(high, maxSelectedLots - ctx.selectedLots);
     }
 
     /// @dev Conservative interval arithmetic, NOT a monotonicity assumption about planOpen.valid:
@@ -361,7 +365,7 @@ contract CfdEngineOpenQuoter {
         Context memory ctx,
         uint256 skew
     ) private pure returns (uint256) {
-        return CfdMath.getSkewCost(skew, ctx.snap.poolAssetsUsdc, ctx.snap.riskParams.vpiFactor);
+        return CfdMath.getSkewCost(skew, ctx.netDepthUsdc, ctx.snap.riskParams.vpiFactor);
     }
 
     function _negativeReserve(

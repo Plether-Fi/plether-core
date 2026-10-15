@@ -204,7 +204,7 @@ contract OpenNumericDomainTest is Test {
                 snap.shortSide.entryNotional = shortLots * 1e8 * Q;
                 snap.longSide.maxProfitUsdc = longLots * 1e8;
                 snap.shortSide.maxProfitUsdc = shortLots * 1e8;
-                snap.poolAssetsUsdc = 0; // isolate aggregate representation from the stricter VPI domain.
+                snap.poolAssetsUsdc = 1e44; // balanced sides keep VPI in-domain at the aggregate lot boundary.
                 snap.poolCashUsdc = 1e44;
                 snap.riskParams.minBountyUsdc = 1;
                 CfdTypes.Order memory order = _order();
@@ -221,19 +221,20 @@ contract OpenNumericDomainTest is Test {
     function test_TerminalBookConservativeInterceptEnvelopeBoundary() public pure {
         uint256 maxIntercept = uint256(int256(type(int144).max));
         uint256 cap = type(uint32).max;
-        uint256 shortEntryAtBoundary = (maxIntercept - cap) / 2;
+        uint256 longLots = maxIntercept / (3 * cap) + 1;
+        uint256 shortEntryAtBoundary = (maxIntercept - longLots * cap) / 2;
         for (uint256 i; i < 3; ++i) {
             CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
             snap.capPrice = cap;
-            snap.longSide.openInterest = Q;
-            snap.longSide.entryNotional = cap * Q;
-            snap.longSide.maxProfitUsdc = cap;
+            snap.longSide.openInterest = longLots * Q;
+            snap.longSide.entryNotional = longLots * cap * Q;
+            snap.longSide.maxProfitUsdc = longLots * cap;
             uint256 oldShortEntry = shortEntryAtBoundary - cap + i - 1;
-            uint256 oldShortLots = oldShortEntry / cap + 1;
+            uint256 oldShortLots = longLots; // balanced OI isolates the intercept bound from VPI's square bound.
             snap.shortSide.openInterest = oldShortLots * Q;
             snap.shortSide.entryNotional = oldShortEntry * Q;
             snap.shortSide.maxProfitUsdc = oldShortLots * cap - oldShortEntry;
-            snap.poolAssetsUsdc = 0;
+            snap.poolAssetsUsdc = 1e44;
             snap.poolCashUsdc = 1e44;
             snap.riskParams.minBountyUsdc = 1;
             CfdTypes.Order memory order = _order();
@@ -375,20 +376,22 @@ contract OpenNumericDomainTest is Test {
         snap.longSide.maxProfitUsdc = type(uint256).max;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.totalTraderClaimBalanceUsdc = type(uint256).max;
+        snap.poolAssetsUsdc = type(uint256).max;
+        snap.totalTraderClaimBalanceUsdc = type(uint256).max - 1_000_000e6;
+        snap.longSide.maxProfitUsdc = 1_000_000e6;
         _numeric(snap, order);
         snap = _snapshot();
         snap.longSide.totalMargin = type(uint256).max;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.poolAssetsUsdc = 0; // isolate signed equity from the independently bounded VPI depth.
         snap.poolCashUsdc = type(uint256).max;
         snap.traderClaimBalanceForAccount = uint256(type(int256).max);
         snap.totalTraderClaimBalanceUsdc = snap.traderClaimBalanceForAccount;
+        snap.poolAssetsUsdc = snap.totalTraderClaimBalanceUsdc + 1_000_000e6;
         _numeric(snap, order);
     }
 
-    function test_HealingExceptionAndZeroDepthRemainAvailable() public pure {
+    function test_HealingExceptionRequiresPositiveEconomicDepth() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
         CfdTypes.Order memory order = _order();
         snap.shortSide.openInterest = 500 * Q;
@@ -397,7 +400,9 @@ contract OpenNumericDomainTest is Test {
         snap = _snapshot();
         snap.poolAssetsUsdc = 0;
         snap.riskParams.vpiFactor = type(uint256).max;
-        assertTrue(CfdEnginePlanLib.planOpen(snap, order, 1e8, 1).valid);
+        CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8, 1);
+        assertFalse(delta.valid);
+        assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED));
     }
 
     function test_CloseSideMismatchPrecedesCarryAndMissingPositionKeepsSizeCode() public pure {

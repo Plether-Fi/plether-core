@@ -96,7 +96,7 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         assertEq(
             engine.sideCarryIndex(sideIndex),
             expectedCarryIndex,
-            "Claim payout should checkpoint carry with the pre-payout pool denominator"
+            "Claim payout should checkpoint carry with the pre-payout net denominator"
         );
         assertEq(engine.sideCarryTimestamp(sideIndex), block.timestamp, "Claim payout should advance carry timestamp");
         assertEq(
@@ -117,9 +117,8 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 expectedCarry = _expectedIndexedCarry(account);
-
         usdc.mint(address(pool), 5000e6);
+        uint256 expectedCarry = _expectedIndexedCarry(account);
         uint256 poolRawBefore = pool.rawAssets();
         uint256 poolAccountedBefore = pool.accountedAssets();
 
@@ -154,9 +153,8 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
         uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 expectedCarry = _expectedIndexedCarry(account);
-
         usdc.mint(address(pool), 5000e6);
+        uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.prank(trader);
         engine.settleTraderClaim(account);

@@ -611,8 +611,9 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical depth and mark context.
     /// @dev `poolDepthUsdc` populates both asset and cash fields. A nonzero stored mark overrides `oraclePrice` in the
     ///      snapshot's contextual last-mark field, and a zero `publishTime` keeps the stored mark time. The current planner
-    ///      does not enforce freshness from those context fields. Current carry indexes use actual pool assets rather than
-    ///      the hypothetical depth. Margin reservation IDs are not populated by this lens.
+    ///      does not enforce freshness from those context fields. Current carry indexes use actual assets net of claims,
+    ///      rather than hypothetical depth. VPI and skew subtract claims from the gross planning input. Margin reservation
+    ///      IDs are not populated by this lens.
     /// @param account Account whose position, buckets, carry, and claims are loaded.
     /// @param oraclePrice Candidate mark price, with 8 decimals.
     /// @param poolDepthUsdc Hypothetical pool assets and cash, in 6-decimal USDC units.
@@ -740,7 +741,7 @@ contract CfdEngineLens is ICfdEngineLens {
     }
 
     /// @notice Projects a side's cumulative carry index through the current block timestamp.
-    /// @dev Utilization uses the live pool's current `totalAssets`, including during hypothetical-depth simulations.
+    /// @dev Utilization uses live assets net of trader claims, including during hypothetical-depth simulations.
     /// @param side Side whose index is projected.
     /// @return Current cumulative carry index, scaled by 1e18.
     function _currentSideCarryIndex(
@@ -753,7 +754,9 @@ contract CfdEngineLens is ICfdEngineLens {
             engineContract.sideCarryTimestamp(sideIndex),
             block.timestamp,
             engineContract.sideBorrowBaseUsdc(sideIndex),
-            engineContract.pool().totalAssets(),
+            PositionRiskAccountingLib.computeNetPoolDepthUsdc(
+                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceUsdc()
+            ),
             baseCarryBps
         );
     }

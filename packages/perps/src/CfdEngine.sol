@@ -821,6 +821,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (_canPayFreshPoolPayout(amountUsdc)) {
             _payTraderClaim(account, amountUsdc, positionRemainsOpen);
         } else {
+            _advanceAllCarryIndexes(block.timestamp);
             traderClaimBalanceUsdc[account] += amountUsdc;
             totalTraderClaimBalanceUsdc += amountUsdc;
             emit TraderClaimRecorded(account, amountUsdc);
@@ -1060,7 +1061,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
     /// @notice Permissionlessly advances both side carry indexes to the current wall-clock timestamp.
     /// @dev Accrual uses each side's current borrow base, current HousePool effective assets
-    ///      (`min(raw balance, accountedAssets)`), and `baseCarryBps`.
+    ///      (`min(raw balance, accountedAssets)`) net of outstanding trader claims, and `baseCarryBps`.
     ///      This does not checkpoint a position, collect carry from an account, or update the oracle mark.
     function checkpointCarryIndexes() external {
         _advanceAllCarryIndexes(block.timestamp);
@@ -1099,7 +1100,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     function _poolAssetsForCarry() internal view returns (uint256) {
-        return address(pool) == address(0) ? 0 : pool.totalAssets();
+        return address(pool) == address(0)
+            ? 0
+            : PositionRiskAccountingLib.computeNetPoolDepthUsdc(pool.totalAssets(), totalTraderClaimBalanceUsdc);
     }
 
     /// @notice Advances side carry indexes and caches a strictly newer planned mark from the settlement sidecar.
@@ -1412,6 +1415,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             return;
         }
 
+        _advanceAllCarryIndexes(block.timestamp);
         traderClaimBalanceUsdc[account] -= amountUsdc;
         totalTraderClaimBalanceUsdc -= amountUsdc;
     }

@@ -84,7 +84,7 @@ library CfdEnginePlanTypes {
     /// @param positionLastCarryIndex Side carry index last checkpointed for the position, scaled by 1e18.
     /// @param longSide Aggregate LONG-side state.
     /// @param shortSide Aggregate SHORT-side state.
-    /// @param poolAssetsUsdc Planner pool-depth/physical-asset input used for VPI, skew, and close/liquidation solvency.
+    /// @param poolAssetsUsdc Gross physical assets used for planning; VPI and skew subtract aggregate trader claims.
     /// @param poolCashUsdc Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
     /// @param accountBuckets Aggregate clearinghouse custody buckets for `account`.
     /// @param lockedBuckets Typed clearinghouse margin buckets for `account`.

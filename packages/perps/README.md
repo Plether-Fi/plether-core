@@ -951,11 +951,17 @@ mechanism.
 
 ```text
 borrowBaseUsdc = max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)
-sideUtilizationBps = min(floor(sideBorrowBaseUsdc * 10_000 / poolAssetsUsdc), 10_000)
+economicDepthUsdc = max(pool.totalAssets() - totalTraderClaimBalanceUsdc, 0)
+sideUtilizationBps = min(floor(sideBorrowBaseUsdc * 10_000 / economicDepthUsdc), 10_000)
 positionCarryUsdc = unsettledCarryUsdc + floor(borrowBaseUsdc * (sideCarryIndex - positionLastCarryIndex) / 1e18)
 ```
 
-Zero borrow base has zero utilization; a nonzero borrow base with zero pool assets uses `10_000` bps.
+Zero borrow base has zero utilization; a nonzero borrow base with zero economic depth uses `10_000` bps. The skew cap
+and VPI use this same net depth. Paying a flat trader claim changes neither depth nor utilization. Claim creation and
+netting checkpoint both carry indexes before changing the denominator. Gross asset inputs remain unchanged for
+custody, solvency and hypothetical previews; those previews deduct claims for pricing only and use live net depth for
+historical carry. Zero depth rejects opens, while closes retain normal settlement and lifetime-VPI recovery without
+creating fresh VPI charges or rebates. See [the economic-depth policy](ACCOUNTING_SPEC.md#economic-depth-for-carry-and-risk-pricing).
 
 Carry behavior:
 

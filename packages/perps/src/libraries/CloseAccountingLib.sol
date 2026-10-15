@@ -102,8 +102,12 @@ library CloseAccountingLib {
 
         state.proportionalAccrualUsdc =
             (inputs.position.vpiAccrued * int256(inputs.sizeDelta)) / int256(inputs.position.size);
-        state.vpiDeltaUsdc =
-            CfdMath.calculateVPI(inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.vpiFactor);
+        // With no economic depth, keep protective exits live without creating a fresh charge or rebate.
+        // The lifetime clamp below still recovers any previously received negative VPI.
+        if (inputs.poolDepthUsdc != 0) {
+            state.vpiDeltaUsdc =
+                CfdMath.calculateVPI(inputs.preSkewUsdc, inputs.postSkewUsdc, inputs.poolDepthUsdc, inputs.vpiFactor);
+        }
         // Clamp so lifetime VPI (accrued + delta) never goes negative. Prevents LP sandwich attacks
         // where an attacker opens at high depth, reduces pool depth, then closes to extract a
         // net-negative lifetime VPI rebate. This rule is identical in live and oracle-frozen markets; frozen-market
