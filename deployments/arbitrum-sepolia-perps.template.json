@@ -79,7 +79,7 @@
     "adverseConfidenceMultiplierBps": 2500,
     "minimumOpenNotionalUsdc": "1000000000",
     "maxPendingOrders": 5,
-    "closeOrderExecutionBountyUsdc": "200000",
+    "closeOrderExecutionBountyUsdc": "0",
     "positionProtectionTriggerBountyUsdc": "200000",
     "maxSeniorExposureUsdc": "40000000000000",
     "maxSeniorShareBps": 8000,

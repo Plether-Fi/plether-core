@@ -174,7 +174,6 @@ abstract contract SourceBoundBountyFixture is BasePerpTest {
                 clearinghouse.balanceUsdc(BOUNTY_TRADER),
                 clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER),
                 clearinghouse.actionReserveUsdc(BOUNTY_TRADER),
-                clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER),
                 _bountyReservation(id),
                 engine.positionEpoch(BOUNTY_TRADER)
             )

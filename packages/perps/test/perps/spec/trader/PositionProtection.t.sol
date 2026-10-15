@@ -486,7 +486,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired), "receipt expiry reason");
         assertEq(
             uint8(outcome.bountyDisposition),
-            uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry),
+            uint8(OrderV3Types.BountyDisposition.None),
             "receipt should authenticate retained retry funding"
         );
         assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt should preserve the bounty amount");
@@ -732,8 +732,8 @@ contract PositionProtectionTest is BasePerpTest {
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Executed), "successful retry receipt");
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid), "paid disposition");
-        assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "receipt bounty recipient");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "paid disposition");
+        assertEq(outcome.bountyRecipient, address(0), "receipt bounty recipient");
         assertEq(outcome.bountyUsdc, executionBountyUsdc, "receipt bounty amount");
         assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "success should clear attempt marker");
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
@@ -786,8 +786,8 @@ contract PositionProtectionTest is BasePerpTest {
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired), "mismatch receipt reason");
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid), "paid receipt");
-        assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "cleaner receipt recipient");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "paid receipt");
+        assertEq(outcome.bountyRecipient, address(0), "cleaner receipt recipient");
         assertEq(outcome.bountyUsdc, executionBountyUsdc, "cleaner receipt bounty");
         assertFalse(router.lifecycleBook().isProtectionAttempt(linkedOrderId), "mismatch should clear attempt marker");
     }
@@ -805,9 +805,9 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(_freeSettlementUsdc(ALICE), 0, "fixture should leave no fresh retry funding");
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-        config.closeOrderExecutionBountyUsdc = originalBountyUsdc + 100_000;
+        config.positionProtectionTriggerBountyUsdc += 100_000;
         _setRouterConfig(config);
-        assertNotEq(router.closeOrderExecutionBountyUsdc(), originalBountyUsdc, "fixture should change live config");
+        assertEq(router.closeOrderExecutionBountyUsdc(), 0, "close bounty stays permanently zero");
 
         vm.prank(CAROL);
         uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
@@ -871,7 +871,7 @@ contract PositionProtectionTest is BasePerpTest {
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(
             uint8(protectionOutcome.bountyDisposition),
-            uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry),
+            uint8(OrderV3Types.BountyDisposition.None),
             "batch head receipt should retain bounty"
         );
         assertEq(
@@ -970,8 +970,8 @@ contract PositionProtectionTest is BasePerpTest {
         OrderV3Types.CompactOutcome memory outcome =
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), retryOrderId);
         assertEq(uint8(outcome.executionMode), uint8(OrderV3Types.ExecutionMode.Frozen), "frozen execution mode");
-        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid), "frozen payout");
-        assertEq(outcome.bountyRecipient, EXECUTION_KEEPER, "frozen executor should receive bounty");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "frozen payout");
+        assertEq(outcome.bountyRecipient, address(0), "frozen executor should receive bounty");
         assertEq(
             clearinghouse.balanceUsdc(EXECUTION_KEEPER) - executorBalanceBefore,
             executionBountyUsdc,
@@ -1573,7 +1573,7 @@ contract PositionProtectionTest is BasePerpTest {
             _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
         assertEq(
             uint8(expiredOutcome.bountyDisposition),
-            uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry),
+            uint8(OrderV3Types.BountyDisposition.None),
             "liquidation must not rewrite the prior attempt receipt"
         );
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
@@ -1632,10 +1632,10 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(
             uint8(retryOutcome.bountyDisposition),
-            uint8(OrderV3Types.BountyDisposition.Forfeited),
+            uint8(OrderV3Types.BountyDisposition.None),
             "latest child receipt should authenticate forfeiture"
         );
-        assertEq(retryOutcome.bountyRecipient, engine.protocolTreasury(), "forfeiture recipient");
+        assertEq(retryOutcome.bountyRecipient, address(0), "unpaid liquidation has no bounty recipient");
         assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "liquidation should clear attempt marker");
     }
 

@@ -228,7 +228,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         assertEq(usdc.balanceOf(actor), 0, "claim settlement credits custody rather than the wallet");
         handler.restoreSolvencyAndClearDegradedMode();
         // $44,999.80 residual - $4 open fee - two $0.20 bounties + $4,998 net claim.
-        uint256 settlement = 49_993_400_000;
+        uint256 settlement = 49_993_600_000;
         assertEq(clearinghouse.balanceUsdc(actor), settlement, "independent profit and claim entitlement");
         handler.withdrawCollateral(0, settlement);
         assertEq(usdc.balanceOf(actor), settlement);
@@ -242,7 +242,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         handler.liquidate(0, 1.69e8);
         handler.createTraderClaim(0);
         assertEq(engine.traderClaimBalanceUsdc(actor), 4998e6);
-        assertEq(clearinghouse.balanceUsdc(actor), 44_995_400_000);
+        assertEq(clearinghouse.balanceUsdc(actor), 44_995_600_000);
         // Replenish the mock pool without settling this account's outstanding claim.
         handler.restoreSolvencyAndClearDegradedMode();
         handler.setPoolAssets(1_000_000_000e6);
@@ -256,12 +256,12 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         handler.liquidate(0, 1.242e8);
         assertEq(handler.ghostSuccessfulLiquidations(), 2);
         assertEq(engine.traderClaimBalanceUsdc(actor), 798e6, "claim remainder survives liquidation");
-        assertEq(clearinghouse.balanceUsdc(actor), 44_839_200_000, "free cash plus surviving pledge entitlement");
+        assertEq(clearinghouse.balanceUsdc(actor), 44_839_400_000, "free cash plus surviving pledge entitlement");
         handler.settleTraderClaim(0);
         assertEq(engine.traderClaimBalanceUsdc(actor), 0);
-        assertEq(clearinghouse.balanceUsdc(actor), 45_637_200_000);
-        handler.withdrawCollateral(0, 45_637_200_000);
-        assertEq(usdc.balanceOf(actor), 45_637_200_000);
+        assertEq(clearinghouse.balanceUsdc(actor), 45_637_400_000);
+        handler.withdrawCollateral(0, 45_637_400_000);
+        assertEq(usdc.balanceOf(actor), 45_637_400_000);
         vm.prank(actor);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__InsufficientBalance.selector);
         clearinghouse.withdraw(actor, 1);
@@ -367,8 +367,8 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             uint256 maximumCollectibleUsdcAtoms = side == CfdTypes.Side.LONG
                 ? expectedLots * uint256(book.CAP_PRICE()) - expectedEntryCostUsdcAtoms
                 : expectedEntryCostUsdcAtoms;
-            uint256 candidateCapUsdcAtoms = clearinghouse.pnlPledgeUsdc(account)
-                + engine.traderClaimBalanceUsdc(account) + clearinghouse.collectibleCloseEscrowUsdc(account);
+            uint256 candidateCapUsdcAtoms =
+                clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
             uint256 expectedEffectiveCapUsdcAtoms = candidateCapUsdcAtoms < maximumCollectibleUsdcAtoms
                 ? candidateCapUsdcAtoms
                 : maximumCollectibleUsdcAtoms;

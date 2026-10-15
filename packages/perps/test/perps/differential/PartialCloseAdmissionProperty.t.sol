@@ -141,9 +141,7 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
             );
         } else {
             vm.expectRevert(
-                abi.encodeWithSelector(
-                    ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector, 200_000, 0, 187_320_000
-                )
+                abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 187_320_000)
             );
         }
         vm.prank(ACCOUNT);

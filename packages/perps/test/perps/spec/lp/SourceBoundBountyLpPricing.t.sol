@@ -101,7 +101,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         assertEq(receipt.bounty.bountyPaidUsdc, 0);
         assertEq(receipt.bounty.bountyRefundedUsdc, router.closeOrderExecutionBountyUsdc());
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), 0);
+
         assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc, controlNav);
         uint256 payout = _lpRedeem(vault, shares, price);
         // Same state and timing imply identical integer rounding, not an arbitrary tolerance.
@@ -185,7 +185,6 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         uint256 snapshot = vm.snapshotState();
         // Control funds the same bounty externally, so full position pledge can cover LP losses.
         uint256 bounty = router.closeOrderExecutionBountyUsdc();
-        _fundTrader(BOUNTY_TRADER, bounty);
         uint64 control = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         OrderV3Types.OrderReceipt memory controlReceipt =
             _bountyExecute(control, 120_000_000, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
@@ -201,7 +200,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         assertEq(receipt.bounty.bountyRefundedUsdc, 0);
         assertEq(receipt.economics.close.pricePnlPledgeConsumedUsdc, pledge - bounty);
         assertEq(controlPoolCash - usdc.balanceOf(address(pool)), bounty, "successful pledge cost is counted once");
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), 0);
+
         assertEq(clearinghouse.getFreeBuyingPowerUsdc(BOUNTY_TRADER), expectedFree);
         uint256 wallet = usdc.balanceOf(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);

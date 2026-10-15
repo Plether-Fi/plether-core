@@ -8,20 +8,6 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {OrderValidation} from "@plether/perps/router/OrderValidation.sol";
 
-/// @dev A separate self-call retains outer risk-off refunds when pledged backing prevents liquidation.
-interface IRestoredLiquidationHost {
-
-    function executeRestoredLiquidationItem(
-        address account,
-        uint256 executionPrice,
-        uint256 neutralMarkPrice,
-        uint256 housePoolDepth,
-        uint64 publishTime,
-        address keeper
-    ) external returns (uint256);
-
-}
-
 /// @title OrderLiquidationHandler
 /// @notice Executes priced account liquidations, forfeits order/protection bounties, and clears live orders.
 abstract contract OrderLiquidationHandler is OrderValidation {
@@ -71,68 +57,11 @@ abstract contract OrderLiquidationHandler is OrderValidation {
         if (refundedOrders != 0 && !engineLens.isLiquidatableAt(account, executionPrice, housePoolDepth)) {
             return type(uint256).max;
         }
-        try IRestoredLiquidationHost(address(this))
-            .executeRestoredLiquidationItem(
-                account, executionPrice, neutralMarkPrice, housePoolDepth, publishTime, keeper
-            ) returns (
-            uint256 bounty
-        ) {
-            return bounty;
-        } catch (bytes memory reason) {
-            if (reason.length == 4 && bytes4(reason) == OrderRouter__RestoredPledgeMadeSolvent.selector) {
-                if (refundedOrders != 0) {
-                    return type(uint256).max;
-                }
-                revert ICfdEngineTypes.CfdEngine__PositionIsSolvent();
-            }
-            assembly ("memory-safe") { revert(add(reason, 32), mload(reason)) }
-        }
-    }
-
-    /// @notice Restores source pledge, forfeits free bounty and liquidates in one independently revertible frame.
-    /// @dev Only a direct Engine solvent rejection after pledged restoration is translated into the private marker.
-    function executeRestoredLiquidationItem(
-        address account,
-        uint256 executionPrice,
-        uint256 neutralMarkPrice,
-        uint256 housePoolDepth,
-        uint64 publishTime,
-        address keeper
-    ) external returns (uint256 outcome) {
-        if (msg.sender != address(this)) {
-            revert OrderRouter__Unauthorized();
-        }
-        (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc, uint256[] memory pledgeRefundsUsdc) =
+        (uint64[] memory orderIds, uint256[] memory orderBountiesUsdc) =
             _forfeitReservedOrderBountiesOnLiquidation(account);
-        bool restoredPledge;
-        for (uint256 i; i < pledgeRefundsUsdc.length; ++i) {
-            if (pledgeRefundsUsdc[i] != 0) {
-                restoredPledge = true;
-            }
-        }
-        try engine.liquidatePosition(account, executionPrice, housePoolDepth, publishTime, keeper) returns (
-            uint256 bounty
-        ) {
-            outcome = bounty;
-        } catch (bytes memory reason) {
-            if (
-                restoredPledge && reason.length == 4
-                    && bytes4(reason) == ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector
-            ) {
-                revert OrderRouter__RestoredPledgeMadeSolvent();
-            }
-            assembly ("memory-safe") { revert(add(reason, 32), mload(reason)) }
-        }
+        outcome = engine.liquidatePosition(account, executionPrice, housePoolDepth, publishTime, keeper);
         _clearLiquidatedAccountOrders(
-            account,
-            orderIds,
-            orderBountiesUsdc,
-            pledgeRefundsUsdc,
-            executionPrice,
-            neutralMarkPrice,
-            housePoolDepth,
-            publishTime,
-            keeper
+            account, orderIds, orderBountiesUsdc, executionPrice, neutralMarkPrice, housePoolDepth, publishTime, keeper
         );
     }
 
@@ -165,7 +94,6 @@ abstract contract OrderLiquidationHandler is OrderValidation {
         address account,
         uint64[] memory orderIds,
         uint256[] memory orderBountiesUsdc,
-        uint256[] memory pledgeRefundsUsdc,
         uint256 executionPrice,
         uint256 neutralMarkPrice,
         uint256 housePoolDepthUsdc,
@@ -198,29 +126,20 @@ abstract contract OrderLiquidationHandler is OrderValidation {
             receiptInput.poolDepthUsdc = housePoolDepthUsdc;
             receiptInput.oraclePublishTime = publishTime;
             receiptInput.priceReachedEngine = false;
-            _setLiquidationBountyReceipt(receiptInput, orderBountiesUsdc[i], pledgeRefundsUsdc[i], order.account);
+            _setLiquidationBountyReceipt(receiptInput, orderBountiesUsdc[i]);
             _recordSettledTerminalReceipt(receiptInput);
         }
     }
 
     function _setLiquidationBountyReceipt(
         IOrderRouterExecutionHost.SettledTerminalInput memory receiptInput,
-        uint256 bountyUsdc,
-        uint256 refundedUsdc,
-        address account
+        uint256 bountyUsdc
     ) private view {
         receiptInput.bountyUsdc = bountyUsdc;
-        receiptInput.bountyRefundedUsdc = refundedUsdc;
-        if (bountyUsdc == 0) {
-            return;
+        if (bountyUsdc != 0) {
+            receiptInput.bountyRecipient = engine.protocolTreasury();
+            receiptInput.bountyDisposition = OrderV3Types.BountyDisposition.Forfeited;
         }
-        bool fullyRefunded = refundedUsdc == bountyUsdc;
-        receiptInput.bountyRecipient = fullyRefunded ? account : engine.protocolTreasury();
-        receiptInput.bountyDisposition = fullyRefunded
-            ? OrderV3Types.BountyDisposition.RefundedToAccount
-            : (refundedUsdc == 0
-                    ? OrderV3Types.BountyDisposition.Forfeited
-                    : OrderV3Types.BountyDisposition.ForfeitedAndRefunded);
     }
 
 }

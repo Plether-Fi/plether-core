@@ -4,7 +4,7 @@ V3 order timing is a fresh-stack breaking change. See [V3 timing integration](OR
 
 ## Close review before commitment
 
-Use `CfdClosePreview.previewClose` to project commitment carry and reserve the prospective close bounty before
+Use `CfdClosePreview.previewClose` to project commitment carry and validate zero-bounty close admission before
 planning. `CfdOrderPolicyEvaluator.assessOrder` expects execution state with that bounty already reserved. See
 [`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) for the API, accounting baseline, error decoding, and additive deployment path.
 The [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) contains the post-deployment configuration packet,
@@ -14,6 +14,11 @@ documents the original standalone lens alongside v1.2.3. The
 [September 15 sponsored-close release](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/README.md)
 preserves `previewClose` and adds `previewSponsoredClose` plus `validateSponsoredClose`. These are historical testnet
 release records; the handoff's frontend activation status is not a live deployment check.
+
+The zero-close-bounty source removes those two sponsored-grant methods; use either ordinary `previewClose`
+overload for new orders. Historical grants and pending operations continue to use their archived deployments and
+ABIs. The constructor argument, `SPONSORED_ENGINE` and `MAX_CLOSE_SUBSIDY_USDC` getters, and declared sponsored errors
+remain compatibility-only; they do not enable new grants. Normal gas sponsorship is unaffected.
 
 ## Next release: unused perps API cleanup
 
@@ -31,8 +36,10 @@ The follow-up cleanup also removes `HousePool.recordProtocolInflow`, its unused 
 and the retired clearinghouse selectors `reserveCloseExecutionBountyFromPositionMargin` and
 `reserveStaleCloseExecutionBountyFromPositionMargin`. Engine and sidecar inflows continue through
 `recordClaimantInflow`; owner-admitted raw donations use `accountExcess`. The two retired bounty selectors previously
-always reverted. Current close-bounty funding uses the Engine commitment path, taking post-carry free settlement
-first and eligible position pledge second.
+always reverted. The zero-close-bounty cleanup also removes the unused clearinghouse selectors
+`reserveCloseExecutionBountyFromSettlement` and `reserveStaleCloseExecutionBountyFromSettlement`.
+Close commitment still uses the Engine path to assess carry and validate admission, with an authenticated zero
+bounty reservation. Opening/increase bounties and the positive protection trigger reward are unchanged.
 
 Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
 `OrderOraclePolicyLib`. Maintained planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
@@ -414,9 +421,8 @@ Important details:
   can never execute, even after governance unpauses. Permissionless cleanup returns their remaining committed margin
   and complete execution bounty to the trader's free internal settlement without an oracle or Engine checkpoint;
   the protocol incident keeper pays cleanup gas and receives no bounty.
-- Ordinary failed opens pay their snapshotted bounty. Ordinary failed closes pay only original free funding and
-  restore original pledged funding to the source position. Zero-bounty and wholly pledge-funded failures pay no
-  reward; the protocol order keeper funds expiry gas to preserve FIFO liveness. See
+- Ordinary failed opens pay their snapshotted bounty. All close attempts have zero bounty; failure and expiry
+  leave pledge untouched by bounty accounting. The protocol order keeper funds execution and cleanup gas. See
   [unpaid cleanup](DEPOSIT_FREE_CLOSE.md#abandoned-zero-bounty-orders-keeper-responsibility).
 - Close orders can still execute during genuine frozen-oracle windows using the last valid mark subject to the relaxed frozen-market rules and the fixed LP-owned frozen-close spread.
 - Close-intent queue validation is account-local and bounded by the per-account pending-order queue.
@@ -579,34 +585,21 @@ Profitable closes and some liquidation residuals can create a trader claim balan
 
 Order and liquidation bounties are margin transfers inside `MarginClearinghouse`.
 
-- Open execution bounties are locked from free settlement as action reserve at commit time. Close execution bounties
-  use post-carry free settlement first, then reclassify eligible PnL pledge as action reserve without moving tokens.
-  Pledge-funded reservation reduces position margin and updates its borrowing basis immediately. Its source-bound
-  refundable escrow stays in the terminal collectible cap until successful execution earns the bounty.
-- Live-position custody is split between a price-PnL pledge and a dedicated liquidation-charge reserve. Pending-order
-  and action reserves are separate again. Only physical PnL pledge, same-account claim and the eligible refundable
-  pledged-close escrow enter the marked price-loss cap; other reserves remain excluded.
-- Position protection snapshots and reserves a trigger bounty plus a linked-close execution bounty at creation. The
-  default reserve is `0.20 + 0.20 = 0.40 USDC`, funded from free settlement only.
-- Cancellation before trigger refunds the unpaid protection reserve. Triggering pays the trigger portion exactly once
-  and transfers attribution of the remaining portion to the generated close without reserving it again.
-- A non-liquidation failure for which the exact protected position remains marks that attempt receipt
-  `RetainedForProtectionRetry`, names no bounty recipient, and returns the same execution-bounty attribution to the
-  latched protection. That relatching cleanup is intentionally unpaid; retry moves the retained amount into the fresh
-  attempt without reserving or charging the trader again. Position mismatch instead uses ordinary paid cleanup.
-- Successful execution credits the keeper's clearinghouse settlement balance from the reservation.
-- Ordinary close failure or expiry restores original pledged funding to its source position and pays only original
-  free-funded value. Liquidation restores pledged funding before health/loss assessment and forfeits only free funding
-  to treasury. A wholly pledge-funded failure is unpaid cleanup; successful self-execution still releases the whole
-  committed bounty under the existing success policy.
+- Open/increase execution bounties are locked from free settlement at commitment. Close execution bounties are
+  permanently zero; their explicit Active records authenticate identity without reserving cash.
+- Only position PnL pledge and same-account claim enter the terminal price-loss cap. No close-bounty escrow exists.
+- Protection reserves only its trigger reward (default 0.20 USDC) from free settlement. Cancellation before trigger
+  releases that unpaid reward; triggering pays it once and creates a fresh unpaid close.
+- Matching failed protection attempts settle their old zero records and latch the lifecycle. Retry creates a new
+  zero record and deadline, with no retained execution funds. Position mismatch terminally fails protection.
+- Ordinary/protected close success, failure, expiry and liquidation have no bounty payment or recipient carry.
 - The configured liquidation charge is capped by the dedicated liquidation reserve, then allocated using timelocked
   `keeperShareBps` and `protocolShareBps` values whose sum cannot exceed `10_000`.
 - The rounded-down keeper and protocol shares are credited directly inside `MarginClearinghouse`; the protocol share
   goes to `protocolTreasury`, while the exact remainder, including division dust, is transferred to `HousePool` as
   claimant-owned LP revenue.
 - Liquidation forfeits any unpaid protection bounty to the treasury under the same exact-once reservation accounting.
-  A `Triggered` protection's remaining bounty is owned by its live ordinary attempt, while a `Latched` protection owns
-  the recycled bounty directly; neither is counted twice.
+  Triggered/Latched protections hold no execution-bounty funds.
 
 Protocol fees settle into the treasury clearinghouse account only when they are cash-collected from trader settlement or when remaining free `HousePool` cash can fund a top-up after senior trader claims and immediate trader payouts. The simplified custody model does not create protocol-fee receivables; uncredited fee portions stay in pool backing rather than becoming withdrawable treasury margin.
 
@@ -681,11 +674,10 @@ in the same request window aggregate into the controller's current redemption po
 
 LP share pricing uses one exact signed terminal-NAV snapshot for both deposits and redemptions. Each position stores
 whole 100-token lots and exact entry cost. `TerminalNavBookV2` evaluates its marked LP-side price PnL and caps a
-positive LP receivable by that trader's dedicated PnL pledge, nettable same-account claim and authenticated refundable
-close-bounty escrow bound to its live position generation. Marked trader profits
+positive LP receivable by that trader's dedicated PnL pledge and nettable same-account claim. Marked trader profits
 reduce NAV; only collectible marked trader losses increase NAV. Carry, VPI, fees, frozen spreads, order margin,
-liquidation reserves, and other action reserves are excluded from this pre-close price-PnL book. Reservation and failure
-refund preserve the cap at fixed mark and claims; successful execution recognizes the pledged bounty cost once.
+liquidation reserves, and other action reserves are excluded from this pre-close price-PnL book. Unpaid commitment and
+expiry do not reclassify this price-loss backing.
 
 Pending indexed carry and retained arrears are trader debt, excluded from LP NAV until cash is collected. Activated
 shares, including unclaimed deposit shares in escrow, share that collection; funded redemption claims do not. A trader
@@ -1011,8 +1003,7 @@ The system can complete terminal transitions even when immediate pool cash is in
 The Engine exports one signed terminal price-PnL adjustment for both LP entry and exit share pricing.
 
 - Unrealized trader profits are exact marked LP liabilities.
-- Unrealized trader losses count only up to that account's PnL pledge, nettable claim and source-bound refundable
-  close-bounty escrow. The escrow is marked backing, not physical pool cash or borrow collateral.
+- Unrealized trader losses count only up to that account's PnL pledge and nettable same-account claim.
 - Price basis comes from exact entry-cost atoms, not a rounded average entry price.
 - The resulting marked receivable affects NAV but is not physical withdrawal cash before collection.
 - A negative terminal equity is exposed as an explicit deficit and blocks deposit activation.
@@ -1117,22 +1108,14 @@ authorizes settlement.
 
 ### Queue and bounty economics
 
-- Execution always starts from the global queue head.
-- Risk-increasing orders reserve an execution bounty quoted from the engine mark and bounded to `[0.01 USDC, 0.20 USDC]`.
-- Close intents reserve a flat governance-configured bounty capped at `1 USDC` (default `0.20 USDC`).
-- Position protection reserves a governance-configured trigger bounty capped at `1 USDC` plus the snapshotted close
-  bounty. Both come from free settlement; a generated close attempt receives that existing reservation.
-- Partial close size is floored by the engine `minBountyUsdc / bountyBps` notional threshold at the commit reference price, preventing dust closes from occupying the FIFO queue for a flat bounty.
-- Open bounties come from free settlement.
-- Close bounties use free settlement first, then eligible position pledge after carry collection. Partial commitments
-  require no unpaid carry and strict post-reservation maintenance/FAD health; zero-bounty commitments still validate
-  admission. Claims and other protected reserves cannot fund the bounty. Funding provenance and position-generation
-  refund rules are specified in [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy).
-- A pledge-funded close requires an empty account queue; later wholly free-funded orders remain legal. Commitment
-  needing pledge with a pending account order fails atomically with `PledgeBountyRequiresEmptyQueue`.
-- Ordinary failed-close cleanup pays only original free funding and returns pledge to its source position. It removes
-  just that order, preserving peers. The protocol keeper must fund unpaid cleanup when original free funding is zero.
-- Failed-order rewards stay independent from pool liquidity because they are paid from clearinghouse-reserved trader value rather than LP cash.
+- Execution starts from the global FIFO head; ordinary account capacity and queued exposure rules remain.
+- Opens/increases reserve a free-funded bounty bounded to `[0.01 USDC, 0.20 USDC]` under default configuration.
+- Ordinary and protection closes have permanently zero execution bounty. No prepaid credit or pledge escrow exists.
+- Optional protection reserves a separate trigger reward, capped at 1 USDC. Creation still requires free settlement.
+- Close commitment still collects carry and validates minimum partial size and strict partial-position health.
+- There is no pledge-specific empty-queue rule. Valid close/open/close histories remain supported.
+- Operators fund native gas/oracle costs, including failed attempts and cleanup. An explicit user-paid same-account
+  fallback handles keeper/sponsor outages. See [operations and activation gates](ZERO_CLOSE_OPERATIONS.md).
 
 ### Execute rules
 
@@ -1188,22 +1171,17 @@ time, whether the price reached the Engine, exact bounty recipient/disposition, 
 economics fields. Full receipt data remains in the event; compact state remains queryable on chain after the Router
 fully deletes its terminal order record. A liquidation-driven queued-order receipt uses the state observed after
 liquidation in both state-summary slots; the position's liquidation economics remain canonical in the Engine's
-liquidation events, while the order receipt separately records exact forfeited free funding and refunded pledge.
+liquidation events, while the order receipt separately records paid opening forfeitures and zero close-bounty movement.
 
 Pre-oracle expiry and config-mismatch receipts use `PriceSource.None`, zero execution price and oracle time, and
 `priceReachedEngine == false`; the cached neutral mark and pool depth may still be reported as accounting context.
 Risk-off receipts likewise use `RiskOff`, execution mode and price source `None`, and the permissionless cleaner as
 executor. A nonzero reserved bounty is returned to the account with `RefundedToAccount`; the cleaner receives
-nothing. Ordinary close failure reports original free funding as paid and pledged funding as refunded; a mixed result
-uses `PaidAndRefunded`. Liquidation cleanup records `AccountLiquidated`, retains the original keeper as executor, and
-forfeits free funding to the Engine's protocol treasury while restoring pledged funding; a mixed result uses
-`ForfeitedAndRefunded`. A pledged refund is position backing and may settle liquidation loss immediately. On every
-terminal path, a zero bounty uses `BountyDisposition.None` and the zero recipient. An authenticated protection
-attempt may instead retain an explicitly active zero reservation for retry. A failed registered protection attempt
-records its retained bounty, including an active zero reservation, as
-`BountyDisposition.RetainedForProtectionRetry` with a zero recipient only while the exact protected position still
-matches, because custody remains reserved for the next attempt. A missing or mismatched position instead records
-ordinary cleanup (`Paid` for a nonzero bounty, `None` for zero) and terminally resolves the protection as `Failed`.
+nothing. Ordinary and protected close receipts always use `BountyDisposition.None`, zero bounty amounts and no
+recipient. A matching protected failure settles the old record while the protection remains Latched; its retry gets
+fresh identity and timing, not retained cash. A mismatched position resolves protection as Failed. Liquidation
+forfeits paid opening/unpaid-trigger funds and clears unpaid close records. Historical mixed/retained enum values
+remain decodable but are not generated by normal new-stack closes.
 
 ### Basket oracle and publish-time checks
 

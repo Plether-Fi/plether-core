@@ -34,7 +34,6 @@ contract PendingOrderReferenceLedger {
         uint256 bountyPledge;
         uint256 bountyUsdc;
         uint256 remainingBounty;
-        uint256 collectiblePledge;
         uint256 sourceGeneration;
         uint256 originalMargin;
         uint256 remainingMargin;
@@ -63,9 +62,6 @@ contract PendingOrderReferenceLedger {
     error BountyStillReserved();
     error InsufficientReservedMargin();
     error InvalidReceipt();
-    error PledgeRequiresEmptyQueue();
-    error SourceGenerationMismatch();
-    error CollectiblePledgeStillReserved();
 
     /// @notice Archives an admitted public request and its independently computed reservation sources.
     /// @dev Exact client-id replay returns the original id even after terminalization or generation changes. Replay
@@ -99,8 +95,8 @@ contract PendingOrderReferenceLedger {
         if (_counts[actorIndex] == MAX_ACCOUNT_ORDERS || _liveCount == MAX_LIVE_ORDERS) {
             revert CapacityExceeded();
         }
-        if (bountyPledge != 0 && (!request.isClose || generation == 0 || _counts[actorIndex] != 0)) {
-            revert PledgeRequiresEmptyQueue();
+        if (bountyPledge != 0 || (request.isClose && bountyFree != 0)) {
+            revert InvalidRequest();
         }
         id = _nextId++;
         Order storage pending = _orders[id];
@@ -115,7 +111,6 @@ contract PendingOrderReferenceLedger {
         pending.bountyPledge = bountyPledge;
         pending.bountyUsdc = bountyFree + bountyPledge;
         pending.remainingBounty = pending.bountyUsdc;
-        pending.collectiblePledge = bountyPledge;
         pending.sourceGeneration = bountyPledge == 0 ? 0 : generation;
         pending.originalMargin = request.isClose ? 0 : request.marginDelta;
         pending.remainingMargin = pending.originalMargin;
@@ -220,41 +215,6 @@ contract PendingOrderReferenceLedger {
                 lots += pending.request.sizeDelta / CfdTypes.SIZE_QUANTUM;
             }
         }
-    }
-
-    /// @notice Refundable position backing, independently reconstructed from admitted funding actions.
-    function collectibleEscrow(
-        uint256 actorIndex
-    ) external view returns (uint256 amount, uint64 ownerId, uint256 sourceGeneration) {
-        _requireActor(actorIndex);
-        for (uint256 i; i < _liveCount; ++i) {
-            Order storage pending = _orders[_live[i]];
-            if (pending.actorIndex == actorIndex && pending.collectiblePledge != 0) {
-                if (amount != 0) {
-                    revert PledgeRequiresEmptyQueue();
-                }
-                amount = pending.collectiblePledge;
-                ownerId = pending.id;
-                sourceGeneration = pending.sourceGeneration;
-            }
-        }
-    }
-
-    /// @notice Removes contingent NAV backing on an independently authorized success or source-position refund.
-    /// @dev Taking bounty classification alone never consumes this backing.
-    function resolveCollectiblePledge(
-        uint64 id,
-        uint256 liveGeneration
-    ) external returns (uint256 amount) {
-        Order storage pending = _orders[id];
-        if (pending.id == 0 || pending.status != OrderV3Types.LifecycleStatus.Pending) {
-            revert OrderNotPending();
-        }
-        amount = pending.collectiblePledge;
-        if (amount != 0 && liveGeneration != pending.sourceGeneration) {
-            revert SourceGenerationMismatch();
-        }
-        pending.collectiblePledge = 0;
     }
 
     /// @notice Convenience projection for the campaign's fixed actor sides (even Long, odd Short).
@@ -395,9 +355,6 @@ contract PendingOrderReferenceLedger {
         }
         if (pending.remainingBounty != 0) {
             revert BountyStillReserved();
-        }
-        if (pending.collectiblePledge != 0) {
-            revert CollectiblePledgeStillReserved();
         }
         pending.status = status;
         pending.reason = reason;

@@ -62,12 +62,12 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         request.bounds.maxExecutionBountyUsdc = type(uint96).max;
         request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
         request.bounds.maxActionChargeUsdc = type(uint256).max;
-        book.registerPending(ACCOUNT, 1, request, type(uint96).max);
+        book.registerPending(ACCOUNT, 1, request, freeBounty);
         CfdEnginePlanTypes.CloseCommitment memory effects;
         effects.carryCollectedUsdc = carry;
         effects.carryOutstandingUsdc = outstanding;
         effects.bountyFromFreeUsdc = freeBounty;
-        effects.bountyFromPledgeUsdc = type(uint96).max - freeBounty;
+        effects.bountyFromPledgeUsdc = 0;
         effects.settlementAfterUsdc = (uint256(1) << 200) + cash;
         effects.settlementBeforeUsdc = effects.settlementAfterUsdc + carry;
         effects.freeSettlementAfterUsdc = cash;
@@ -102,170 +102,110 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         effects.bountyFromPledgeUsdc = 1;
         vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
         book.recordCommitment(1, effects, 0);
+        vm.expectRevert(IOrderLifecycleBook.OrderLifecycleBook__InvalidCommitmentEffects.selector);
         book.recordCommitment(1, effects, type(uint64).max);
-        assertEq(book.sourcePositionEpoch(1), type(uint64).max);
+        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        effects.bountyFromPledgeUsdc = 0;
+        book.recordCommitment(1, effects, 0);
+        assertEq(book.sourcePositionEpoch(1), 0);
     }
 
-    function testFuzz_FailedCloseAuthenticatesExactFundingComponents(
-        uint96 rawPledge,
-        bool liquidation,
-        bool selfExecution
-    ) public {
-        _startRecordingLogs();
-        uint256 pledge = bound(rawPledge, 1, EXECUTION_BOUNTY_USDC);
-        uint256 free = EXECUTION_BOUNTY_USDC - pledge;
-        OrderV3Types.OrderRequest memory request = _request(bytes32("split-failure"));
-        request.isClose = true;
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
-        CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromFreeUsdc = free;
-        effects.bountyFromPledgeUsdc = pledge;
-        book.recordCommitment(1, effects, 9);
-        vm.mockCall(ENGINE, abi.encodeWithSignature("protocolTreasury()"), abi.encode(PROTOCOL_TREASURY));
-        OrderV3Types.OrderReceipt memory receipt = liquidation
-            ? _accountLiquidatedReceipt(1, request, intentHash)
-            : _failedReceipt(1, ACCOUNT, request, intentHash);
-        receipt.commitment = effects;
-        receipt.executor = selfExecution ? ACCOUNT : EXECUTOR;
-        receipt.bounty.bountyPaidUsdc = liquidation ? 0 : free;
-        receipt.bounty.bountyForfeitedUsdc = liquidation ? free : 0;
-        receipt.bounty.bountyRefundedUsdc = pledge;
-        receipt.bountyRecipient = free == 0 ? ACCOUNT : liquidation ? PROTOCOL_TREASURY : receipt.executor;
-        receipt.bountyDisposition = free == 0
-            ? OrderV3Types.BountyDisposition.RefundedToAccount
-            : liquidation
-                ? OrderV3Types.BountyDisposition.ForfeitedAndRefunded
-                : OrderV3Types.BountyDisposition.PaidAndRefunded;
-
-        // Preserve the total B while stealing one pledge atom for the keeper or treasury.
-        receipt.bounty.bountyRefundedUsdc -= 1;
-        if (liquidation) {
-            receipt.bounty.bountyForfeitedUsdc += 1;
-        } else {
-            receipt.bounty.bountyPaidUsdc += 1;
-        }
-        _expectInvalidTerminal(receipt);
-        receipt.bounty.bountyRefundedUsdc += 1;
-        if (liquidation) {
-            receipt.bounty.bountyForfeitedUsdc -= 1;
-        } else {
-            receipt.bounty.bountyPaidUsdc -= 1;
-        }
-        book.finalize(receipt);
-        assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
-        assertEq(book.sourcePositionEpoch(1), 0, "terminal order clears pending provenance");
-    }
-
-    function test_SuccessStillAuthenticatesFullBountyWithoutPledgeRefund() public {
-        _startRecordingLogs();
-        OrderV3Types.OrderRequest memory request = _request(bytes32("split-success"));
-        request.isClose = true;
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
-        CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromPledgeUsdc = EXECUTION_BOUNTY_USDC;
-        book.recordCommitment(1, effects, 7);
-        OrderV3Types.OrderReceipt memory receipt = _executedReceipt(1, ACCOUNT, request, intentHash);
-        receipt.commitment = effects;
-        receipt.bounty.bountyPaidUsdc -= 1;
-        receipt.bounty.bountyRefundedUsdc = 1;
-        receipt.bountyDisposition = OrderV3Types.BountyDisposition.PaidAndRefunded;
-        _expectInvalidTerminal(receipt);
-        receipt.bounty.bountyPaidUsdc += 1;
-        receipt.bounty.bountyRefundedUsdc = 0;
-        receipt.bountyDisposition = OrderV3Types.BountyDisposition.Paid;
-        book.finalize(receipt);
-        assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
-    }
-
-    function test_FundingValidatorRejectsSelfConsistentWrongSplitEpochAndEscrow() public {
-        OrderV3Types.OrderRequest memory request = _request(bytes32("funding-provenance"));
-        book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
-        CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromFreeUsdc = 400_000;
-        effects.bountyFromPledgeUsdc = 600_000;
-        book.recordCommitment(1, effects, 7);
-        IMarginClearinghouse.BountyReservation memory reservation = IMarginClearinghouse.BountyReservation({
-            account: ACCOUNT,
-            amountUsdc: uint96(EXECUTION_BOUNTY_USDC),
-            state: IMarginClearinghouse.BountyReservationState.Active,
-            freeFundedUsdc: 400_000,
-            pledgeFundedUsdc: 600_000,
-            sourcePositionEpoch: 7
-        });
-        vm.mockCall(
-            CLEARINGHOUSE, abi.encodeWithSelector(IMarginClearinghouse.validateBountyReservation.selector), bytes("")
-        );
-        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
-        book.validateBountyFunding(1);
-        reservation.freeFundedUsdc += 1;
-        reservation.pledgeFundedUsdc -= 1;
-        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
-        _expectFundingMismatch();
-        reservation.freeFundedUsdc -= 1;
-        reservation.pledgeFundedUsdc += 1;
-        reservation.sourcePositionEpoch = 8;
-        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
-        _expectFundingMismatch();
-        reservation.sourcePositionEpoch = 7;
-        _mockFunding(reservation, 599_999, 1, 7, 1e18, 7);
-        _expectFundingMismatch();
-        _mockFunding(reservation, 600_000, 2, 7, 1e18, 7);
-        _expectFundingMismatch();
-        _mockFunding(reservation, 600_000, 1, 8, 1e18, 7);
-        _expectFundingMismatch();
-        _mockFunding(reservation, 600_000, 1, 7, 0, 7);
-        _expectFundingMismatch();
-        _mockFunding(reservation, 600_000, 1, 7, 1e18, 8);
-        _expectFundingMismatch();
-    }
-
-    function test_FundingValidatorAllowsLaterFreeFundedOrderWithDifferentEscrowOwner() public {
-        OrderV3Types.OrderRequest memory request = _request(bytes32("free-after-pledge"));
+    function test_FundingValidatorRejectsInventedPledgeEpochAndWrongFreeAmount() public {
+        OrderV3Types.OrderRequest memory request = _request(bytes32("free-funding"));
         book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
         CfdEnginePlanTypes.CloseCommitment memory effects;
         effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
         book.recordCommitment(1, effects, 0);
-        IMarginClearinghouse.BountyReservation memory reservation = IMarginClearinghouse.BountyReservation({
-            account: ACCOUNT,
-            amountUsdc: uint96(EXECUTION_BOUNTY_USDC),
-            state: IMarginClearinghouse.BountyReservationState.Active,
-            freeFundedUsdc: uint96(EXECUTION_BOUNTY_USDC),
-            pledgeFundedUsdc: 0,
-            sourcePositionEpoch: 0
-        });
+        IMarginClearinghouse.BountyReservation memory reservation = IMarginClearinghouse.BountyReservation(
+            ACCOUNT,
+            uint96(EXECUTION_BOUNTY_USDC),
+            IMarginClearinghouse.BountyReservationState.Active,
+            uint96(EXECUTION_BOUNTY_USDC),
+            0,
+            0
+        );
         vm.mockCall(
             CLEARINGHOUSE, abi.encodeWithSelector(IMarginClearinghouse.validateBountyReservation.selector), bytes("")
         );
-        _mockFunding(reservation, 600_000, 2, 7, 1e18, 7);
+        _mockReservation(reservation);
         book.validateBountyFunding(1);
-        _mockFunding(reservation, 600_000, 1, 7, 1e18, 7);
+        reservation.freeFundedUsdc -= 1;
+        reservation.pledgeFundedUsdc = 1;
+        _mockReservation(reservation);
+        _expectFundingMismatch();
+        reservation.freeFundedUsdc += 1;
+        reservation.pledgeFundedUsdc = 0;
+        reservation.sourcePositionEpoch = 1;
+        _mockReservation(reservation);
+        _expectFundingMismatch();
+        reservation.sourcePositionEpoch = 0;
+        reservation.freeFundedUsdc -= 1;
+        _mockReservation(reservation);
         _expectFundingMismatch();
     }
 
-    function _mockFunding(
-        IMarginClearinghouse.BountyReservation memory reservation,
-        uint96 escrow,
-        uint64 escrowOrderId,
-        uint64 escrowEpoch,
-        uint256 size,
-        uint64 liveEpoch
+    function _mockReservation(
+        IMarginClearinghouse.BountyReservation memory reservation
     ) private {
         vm.mockCall(
             CLEARINGHOUSE,
             abi.encodeWithSelector(IMarginClearinghouse.getBountyReservation.selector),
             abi.encode(reservation)
         );
-        vm.mockCall(
-            CLEARINGHOUSE,
-            abi.encodeWithSignature("collectibleCloseEscrow(address)", ACCOUNT),
-            abi.encode(escrow, escrowOrderId, escrowEpoch)
-        );
-        vm.mockCall(ENGINE, abi.encodeWithSignature("positionEpoch(address)", ACCOUNT), abi.encode(liveEpoch));
-        vm.mockCall(
-            ENGINE,
-            abi.encodeWithSignature("positions(address)", ACCOUNT),
-            abi.encode(size, uint256(0), uint256(0), uint256(0), CfdTypes.Side.LONG, uint64(0), int256(0))
-        );
+    }
+
+    function testFuzz_ZeroCloseReceiptRejectsEveryInventedBountyDisposition(
+        uint8 disposition,
+        bool failed
+    ) public {
+        _startRecordingLogs();
+        OrderV3Types.OrderRequest memory request = _request(bytes32("zero-close"));
+        request.isClose = true;
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, 0);
+        OrderV3Types.OrderReceipt memory receipt = failed
+            ? _failedReceipt(1, ACCOUNT, request, intentHash)
+            : _executedReceipt(1, ACCOUNT, request, intentHash);
+        _zeroBounty(receipt);
+        receipt.bountyDisposition = OrderV3Types.BountyDisposition(bound(disposition, 1, 6));
+        _expectInvalidTerminal(receipt);
+        receipt.bountyDisposition = OrderV3Types.BountyDisposition.None;
+        receipt.bountyRecipient = EXECUTOR;
+        _expectInvalidTerminal(receipt);
+        receipt.bountyRecipient = address(0);
+        receipt.bounty.bountyPaidUsdc = 1;
+        _expectInvalidTerminal(receipt);
+        receipt.bounty.bountyPaidUsdc = 0;
+        book.finalize(receipt);
+        assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
+    }
+
+    function test_ProtectionMarkerSurvivesInvalidRetentionAndClearsWithUnpaidTerminalReceipt() public {
+        _startRecordingLogs();
+        OrderV3Types.OrderRequest memory request =
+            _request(OrderV3Types.protocolClientOrderId(keccak256("unpaid-protection")));
+        request.isClose = true;
+        request.bounds.expectedConfigHash = bytes32(0);
+        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 73, request, 0);
+        book.registerProtectionAttempt(73);
+        OrderV3Types.OrderReceipt memory receipt = _failedReceipt(73, ACCOUNT, request, intentHash);
+        receipt.observedConfigHash = keccak256("observed");
+        _zeroBounty(receipt);
+        receipt.bountyDisposition = OrderV3Types.BountyDisposition.RetainedForProtectionRetry;
+        _expectInvalidTerminal(receipt);
+        assertTrue(book.isProtectionAttempt(73));
+        receipt.bountyDisposition = OrderV3Types.BountyDisposition.None;
+        book.finalize(receipt);
+        assertFalse(book.isProtectionAttempt(73));
+        assertTrue(book.verifyReceipt(receipt, uint64(block.timestamp)));
+    }
+
+    function _zeroBounty(
+        OrderV3Types.OrderReceipt memory receipt
+    ) private pure {
+        receipt.bountyUsdc = 0;
+        delete receipt.bounty;
+        receipt.bountyRecipient = address(0);
+        receipt.bountyDisposition = OrderV3Types.BountyDisposition.None;
     }
 
     function _expectFundingMismatch() private {
@@ -280,9 +220,8 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         OrderV3Types.OrderRequest memory request = _request(bytes32("corrupt-reported-entitlement"));
         (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 1, request, EXECUTION_BOUNTY_USDC);
         CfdEnginePlanTypes.CloseCommitment memory effects;
-        effects.bountyFromFreeUsdc = 400_000;
-        effects.bountyFromPledgeUsdc = 600_000;
-        book.recordCommitment(1, effects, 7);
+        effects.bountyFromFreeUsdc = EXECUTION_BOUNTY_USDC;
+        book.recordCommitment(1, effects, 0);
         vm.record();
         book.pendingIntent(1);
         (bytes32[] memory reads,) = vm.accesses(address(book));
@@ -290,7 +229,11 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         for (uint256 i; i < reads.length; ++i) {
             if (vm.load(address(book), reads[i]) == bytes32(EXECUTION_BOUNTY_USDC)) {
                 vm.store(address(book), reads[i], bytes32(EXECUTION_BOUNTY_USDC + 1));
-                ++corrupted;
+                if (book.pendingIntent(1).executionBountyUsdc == EXECUTION_BOUNTY_USDC + 1) {
+                    ++corrupted;
+                    break;
+                }
+                vm.store(address(book), reads[i], bytes32(EXECUTION_BOUNTY_USDC));
             }
         }
         assertEq(corrupted, 1, "fault changes only the standalone reported entitlement word");
@@ -896,76 +839,6 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
         assertEq(uint8(terminalOutcome.failedConstraint), uint8(OrderV3Types.ConstraintKind.GrossAccountDebit));
         assertEq(terminalOutcome.revertDataHash, keccak256("typed failure data"));
         assertEq(terminalOutcome.receiptHash, receiptHash);
-    }
-
-    function test_FinalizeRetainedProtectionRetryRequiresMarkerAndClearsIt() public {
-        _startRecordingLogs();
-        OrderV3Types.OrderRequest memory request =
-            _request(OrderV3Types.protocolClientOrderId(keccak256("retained-protection-attempt")));
-        request.bounds.expectedConfigHash = bytes32(0);
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 73, request, EXECUTION_BOUNTY_USDC);
-
-        OrderV3Types.OrderReceipt memory receipt = _failedReceipt(73, ACCOUNT, request, intentHash);
-        receipt.observedConfigHash = keccak256("observed-config");
-        receipt.bountyDisposition = OrderV3Types.BountyDisposition.RetainedForProtectionRetry;
-        receipt.bounty.bountyPaidUsdc = 0;
-        receipt.bounty.bountyRetainedUsdc = receipt.bountyUsdc;
-        receipt.bountyRecipient = address(0);
-
-        _expectInvalidTerminal(receipt);
-        assertFalse(book.isProtectionAttempt(73));
-
-        book.registerProtectionAttempt(73);
-        book.finalize(receipt);
-
-        OrderV3Types.CompactOutcome memory terminalOutcome = _verifiedOutcome(IOrderLifecycleBook(address(book)), 73);
-        assertEq(
-            uint8(terminalOutcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RetainedForProtectionRetry)
-        );
-        assertEq(terminalOutcome.bountyRecipient, address(0));
-        assertEq(terminalOutcome.bountyUsdc, EXECUTION_BOUNTY_USDC);
-        assertFalse(book.isProtectionAttempt(73));
-    }
-
-    function test_FinalizeRejectsInvalidRetainedProtectionRetryVariantsWithoutConsumingMarker() public {
-        _startRecordingLogs();
-        OrderV3Types.OrderRequest memory request =
-            _request(OrderV3Types.protocolClientOrderId(keccak256("invalid-retained-protection-attempt")));
-        request.bounds.expectedConfigHash = bytes32(0);
-        (, bytes32 intentHash,) = book.registerPending(ACCOUNT, 74, request, EXECUTION_BOUNTY_USDC);
-        book.registerProtectionAttempt(74);
-
-        OrderV3Types.OrderReceipt memory receipt = _failedReceipt(74, ACCOUNT, request, intentHash);
-        receipt.observedConfigHash = keccak256("observed-config");
-        receipt.bountyDisposition = OrderV3Types.BountyDisposition.RetainedForProtectionRetry;
-        receipt.bounty.bountyPaidUsdc = 0;
-        receipt.bounty.bountyRetainedUsdc = receipt.bountyUsdc;
-        receipt.bountyRecipient = EXECUTOR;
-        _expectInvalidTerminal(receipt);
-        assertTrue(book.isProtectionAttempt(74));
-
-        receipt.bountyRecipient = address(0);
-        receipt.reason = OrderV3Types.TerminalReason.RiskOff;
-        receipt.executionMode = OrderV3Types.ExecutionMode.None;
-        receipt.priceSource = OrderV3Types.PriceSource.None;
-        receipt.executionPrice = 0;
-        receipt.oraclePublishTime = 0;
-        delete receipt.failure;
-        _expectInvalidTerminal(receipt);
-        assertTrue(book.isProtectionAttempt(74));
-
-        receipt.reason = OrderV3Types.TerminalReason.AccountLiquidated;
-        receipt.priceSource = OrderV3Types.PriceSource.Liquidation;
-        receipt.executionPrice = 1e8;
-        receipt.neutralMarkPrice = 1e8;
-        receipt.oraclePublishTime = 1_700_000_001;
-        _expectInvalidTerminal(receipt);
-        assertTrue(book.isProtectionAttempt(74));
-
-        OrderV3Types.OrderReceipt memory executed = _executedReceipt(74, ACCOUNT, request, intentHash);
-        executed.observedConfigHash = keccak256("observed-config");
-        book.finalize(executed);
-        assertFalse(book.isProtectionAttempt(74));
     }
 
     function test_RiskOffReceiptRefundsExactStoredBountyToAccount() public {

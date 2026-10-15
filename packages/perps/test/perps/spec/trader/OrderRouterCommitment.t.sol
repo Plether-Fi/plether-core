@@ -151,10 +151,10 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         assertEq(clearinghouse.pnlPledgeUsdc(account), marginBefore - expectedCarry);
-        assertEq(_executionBountyReserve(2), 200_000, "Stale close commit should still reservation the full bounty");
+        assertEq(_executionBountyReserve(2), 0, "Stale close commit should still reservation the full bounty");
         assertEq(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
-            1_100_000,
+            1_300_000,
             "Stale close fallback should realize indexed carry before reserving from free settlement"
         );
     }
@@ -196,15 +196,15 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
         uint256 marginConsumed = marginBefore - marginAfter;
-        assertEq(_executionBountyReserve(2), 200_000, "Fresh carry checkpoint should still reservation the full bounty");
+        assertEq(_executionBountyReserve(2), 0, "Fresh carry checkpoint should still reservation the full bounty");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc - reservedSettlementBefore,
-            200_000,
+            0,
             "Close commit should reserve exactly 0.20 USDC of bounty value"
         );
         assertApproxEqAbs(
             clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc,
-            freeSettlementBefore - 200_000,
+            freeSettlementBefore,
             32,
             "Carry-aware reservation should only consume the reduced close-order bounty from post-carry free settlement"
         );

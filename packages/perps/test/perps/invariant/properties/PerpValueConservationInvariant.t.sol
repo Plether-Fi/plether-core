@@ -141,8 +141,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         OrderV3Types.OrderReceipt memory receipt = _verifiedReceipt(router.lifecycleBook(), orderId);
         uint256 expectedPaid = failed ? 0 : reservation.amountUsdc;
         uint256 expectedRefunded = failed ? reservation.amountUsdc : 0;
-        OrderV3Types.BountyDisposition expectedDisposition =
-            failed ? OrderV3Types.BountyDisposition.RefundedToAccount : OrderV3Types.BountyDisposition.Paid;
+        OrderV3Types.BountyDisposition expectedDisposition = OrderV3Types.BountyDisposition.None;
         // This fixture submits no free collateral beyond the original open's margin. A failed close must return
         // its entire pledge-funded bounty to the same position; a successful close still pays the full bounty.
         return reservation.account != FULL_CLOSE_TRADER
@@ -151,8 +150,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
             || keeperGain != expectedPaid || receipt.bountyDisposition != expectedDisposition
             || receipt.bounty.bountyPaidUsdc != expectedPaid || receipt.bounty.bountyRefundedUsdc != expectedRefunded
             || receipt.bounty.bountyForfeitedUsdc != 0 || receipt.bounty.bountyRetainedUsdc != 0
-            || receipt.bountyRecipient != (failed ? FULL_CLOSE_TRADER : FAILED_CLOSE_KEEPER)
-            || clearinghouse.collectibleCloseEscrowUsdc(FULL_CLOSE_TRADER) != 0
+            || receipt.bountyRecipient != address(0)
             || (failed
                     ? sizeAfter != 100_000e18 || marginAfter != marginAfterCommit + reservation.amountUsdc
                     : sizeAfter != 0);

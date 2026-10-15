@@ -41,10 +41,6 @@ interface ITerminalNavBruteForceClearinghouse {
         address account
     ) external view returns (uint256);
 
-    function collectibleCloseEscrowUsdc(
-        address account
-    ) external view returns (uint256);
-
 }
 
 /// @title Independent brute-force terminal NAV reference model
@@ -57,7 +53,6 @@ library TerminalNavBruteForceModel {
     error TerminalNavBruteForceModel__InvalidPositionSize(address account, uint256 size);
     error TerminalNavBruteForceModel__InvalidEntryCost(address account, uint256 entryCost, uint256 maximumEntryCost);
     error TerminalNavBruteForceModel__OrphanPnlPledge(address account, uint256 pnlPledgeUsdc);
-    error TerminalNavBruteForceModel__OrphanCollectibleEscrow(address account, uint256 escrowUsdc);
     error TerminalNavBruteForceModel__MarkPriceAboveCap(uint256 markPrice, uint256 capPrice);
     error TerminalNavBruteForceModel__SignedValueOverflow(uint256 magnitude);
 
@@ -226,7 +221,6 @@ library TerminalNavBruteForceModel {
         uint256 pnlPledgeUsdc = clearinghouse.pnlPledgeUsdc(account);
         uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
         uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-        uint256 collectibleEscrow = clearinghouse.collectibleCloseEscrowUsdc(account);
 
         state.account = account;
         state.size = size;
@@ -243,9 +237,6 @@ library TerminalNavBruteForceModel {
             if (pnlPledgeUsdc != 0) {
                 revert TerminalNavBruteForceModel__OrphanPnlPledge(account, pnlPledgeUsdc);
             }
-            if (collectibleEscrow != 0) {
-                revert TerminalNavBruteForceModel__OrphanCollectibleEscrow(account, collectibleEscrow);
-            }
             return state;
         }
         if (size % CfdTypes.SIZE_QUANTUM != 0) {
@@ -258,7 +249,7 @@ library TerminalNavBruteForceModel {
             revert TerminalNavBruteForceModel__InvalidEntryCost(account, entryCostUsdcAtoms, maximumEntryCost);
         }
 
-        state.collectibleCapUsdcAtoms = pnlPledgeUsdc + traderClaimBalanceUsdc + collectibleEscrow;
+        state.collectibleCapUsdcAtoms = pnlPledgeUsdc + traderClaimBalanceUsdc;
         uint256 maximumCollectible =
             side == CfdTypes.Side.LONG ? maximumEntryCost - entryCostUsdcAtoms : entryCostUsdcAtoms;
         state.effectiveCapUsdcAtoms =

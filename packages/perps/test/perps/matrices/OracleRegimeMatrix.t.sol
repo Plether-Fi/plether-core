@@ -205,8 +205,11 @@ contract OracleRegimeMatrixTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0);
         assertEq(clearinghouse.balanceUsdc(KEEPER), before_.keeper + before_.bounty);
         OrderV3Types.CompactOutcome memory receipt = _verifiedOutcome(router.lifecycleBook(), 1);
-        assertEq(receipt.bountyRecipient, KEEPER);
-        assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
+        assertEq(receipt.bountyRecipient, receipt.bountyUsdc == 0 ? address(0) : KEEPER);
+        assertEq(
+            uint8(receipt.bountyDisposition),
+            uint8(receipt.bountyUsdc == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
+        );
         assertEq(receipt.bountyUsdc, before_.bounty);
         assertEq(uint8(receipt.executionMode), regime + 1, "Receipt records the actual calendar mode");
         (uint256 size,,,,,,) = engine.positions(ACCOUNT);

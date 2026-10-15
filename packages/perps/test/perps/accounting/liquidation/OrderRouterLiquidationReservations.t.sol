@@ -215,7 +215,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         );
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
-            400_000,
+            0,
             "Clearinghouse should reserve prefunded close-order bounty reservation"
         );
 
@@ -229,11 +229,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         router.executeLiquidation(account, priceData);
 
-        assertEq(
-            snapshotBefore.executionBountyReserveUsdc,
-            400_000,
-            "Setup must report queued close-order execution reservation outside trader settlement"
-        );
+        assertEq(snapshotBefore.executionBountyReserveUsdc, 0, "Unpaid close orders do not reserve settlement");
         assertEq(router.pendingOrderCounts(account), 0, "Liquidation should clear queued close orders");
         assertEq(_executionBountyReserve(1), 0, "Liquidation should forfeit the first close-order bounty reservation");
         assertEq(_executionBountyReserve(2), 0, "Liquidation should forfeit the second close-order bounty reservation");
@@ -247,7 +243,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         );
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            400_000,
+            0,
             "Forfeited close-order bounty reservation should transfer into treasury margin"
         );
         assertGe(

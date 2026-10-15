@@ -178,7 +178,7 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         vm.startPrank(trader);
         uint256 queuedOrderCount = 5;
         for (uint256 i = 0; i < queuedOrderCount; i++) {
-            router.commitOrder(CfdTypes.Side.LONG, 1000e18, 0, type(uint256).max, true);
+            router.commitOrder(CfdTypes.Side.LONG, 100e18, 3e6, type(uint256).max, false);
         }
         clearinghouse.withdraw(account, 70e6);
         vm.stopPrank();

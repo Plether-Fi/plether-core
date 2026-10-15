@@ -1,122 +1,76 @@
 # New-stack deposit-free close implementation
 
-This change is for a fresh deployment. It is not an upgrade or recovery of the existing v1.2.3 stack. Historical bindings, decoders, subsidy servicing, and reconciliation of previously authorized sponsored operations remain in place. Nothing in this package authorizes broadcast, production activation, or migration of existing positions.
-
 ## Commitment and execution
 
-`CloseCommitmentLib.project` is the shared commitment calculator used by the engine planner and prospective preview. It validates even a zero bounty, checkpoints carry, and reserves the snapshotted bounty from free settlement followed by eligible position pledge. Reservation changes classification, not custody. It immediately changes side margin and borrow base. The pledge-funded portion remains in an authenticated, order-bound collectible escrow mirror, so reservation alone does not reduce LP marked backing. Partial commitments require fully collected carry and strict maintenance/FAD health of the entire exposed position after reservation. Claims, unrealized gains, liquidation reserve, VPI backing, and other orders' reservations do not fund the bounty.
+Ordinary full/partial closes and protection close execution have a permanently zero keeper bounty. A user does not
+need free settlement or additional USDC for that bounty. Carry, trading fees, VPI, frozen spread, partial-close
+health, minimum size, oracle, timing and financial bounds remain binding. This is not a promise that every partial
+reduction is healthy or that a close executes in one transaction.
 
-Execution preserves price-PnL collection, gain withholding, negative-VPI clawback, spendable action reserve, and free-settlement priority. For full closes, liquidation-reserve surplus is released into free settlement before pledge attribution. Terminal-safe pledge release then funds charges before terminal-only committed-order margin. The clearinghouse verifies the released-pledge attribution against its current buckets. Receipt fields satisfy:
-
-```
-netReleasedMarginUsdc = safeMarginReleaseUsdc - actionChargeFromReleasedMarginUsdc
-```
-
-Partial reductions retain enough pledge to leave exact residual price equity strictly above the active maintenance/FAD requirement. At the boundary, one atomic USDC remains above the requirement. Retaining extra pledge is allowed; partial charge waivers are not. Claims count toward price equity but cannot pay fees. A realized net price gain counts once, as pledge when immediately paid or as a claim when deferred. A free-settlement action rebate is excluded from residual health. Exact entry-cost basis, terminal cap conservation, size quantum, minimum reduction, liquidation-reserve excess release, and rate schedules remain unchanged.
+Canonical commitment collects carry even when the bounty is zero, synchronizes borrowing and the terminal curve,
+and records a real Active zero Order reservation. It does not reclassify pledge. Opening/increase bounties,
+protection trigger rewards and liquidation rewards remain independent.
 
 ## Close lifecycle
 
-All full and partial closes use the same request and the configured close bounty. A trader cannot opt out of that bounty. Commitment must reserve its full amount from free settlement and eligible position pledge after carry collection; insufficient backing returns a funding error. Unrealized gains and claims cannot cover that cash shortfall. The transaction sender pays native gas and oracle-update costs.
+Commit and execution remain two stages. FIFO and queued exposure rules still apply, including overlapping
+close/open/close histories. There is no pledge-specific empty-queue rule or prepaid balance.
 
-The router owner may set `RouterConfig.closeOrderExecutionBountyUsdc` to zero through `OrderRouterAdmin.proposeRouterConfig`, followed by `finalizeRouterConfig` after the existing 48-hour timelock. Full and eligible partial closes then use explicit zero-valued bounty reservations. Carry, execution fees and admission checks still apply. The owner can restore a positive bounty through the same process. Configuration changes do not rewrite stored order entitlement, and normal configuration-pinning and expiry rules still apply. This setting does not change open-order or liquidation bounties, or the separate protection-trigger reward.
-
-Exact client-ID replay is idempotent. Ordinary queued-exposure, protection, deposit and margin-action checks remain in force. Global execution FIFO, oracle, delay, authorization, configuration, and execution bounds remain binding.
-
-A close may use pledge only when the account has no pending orders. If its actual post-carry funding needs even one
-pledge atom while an earlier account order exists, `PledgeBountyRequiresEmptyQueue` reverts the complete commitment,
-including carry collection and identifiers. Later orders remain supported when their bounty is entirely free-funded.
-No peer cancellation or reordering occurs. This binds refundable pledge to the position generation that supplied it.
-
-For original bounty `B = F + P`, ordinary failure or expiry restores `P` to that position and pays only `F` to the
-executor. Self-execution releases `F` to free settlement after restoring `P`; it does not transfer custody. The split
-is the original funding amount, not a percentage or later balance calculation. Successful execution pays/releases all
-`B`, consuming collectible escrow eligibility inside the successful close mutation. That success-contingent cost is
-recognized once at execution. Successful self-execution retains its full entitlement, including a possible bounded
-residual after an underwater close.
-
-Liquidation restores `P` before the existing Engine health and loss assessment and forfeits only `F` to treasury.
-If restoration makes the position healthy, its isolated liquidation frame rolls back: the pledged order stays pending
-and neither part is paid. Valid preceding risk-off refunds remain effective. On success, liquidation clears only the
-liquidated account; other accounts keep their relative queue order. A returned pledge may immediately fund liquidation
-loss and is not a new withdrawable entitlement.
-
-PendingOpen protection can be explicitly cancelled without cancelling its parent order. Triggered protection executes its linked close. Latched protection retries its original reservation, including an explicitly active zero reservation. Protection bounty ownership remains associated with that protection.
+Success, recognized failure, expiry and liquidation settle the attempt's zero record exactly once. Normal close
+receipts use None and all-zero bounty components with no recipient. Unknown/transient failures remain pending.
+Protection trigger pays its separate reward once. A matching failed attempt settles its old record and latches
+protection; permissionless retry creates a new zero record and deadline. Armed protection can be cancelled through
+its existing owner-authorized action; triggered protection must execute/expire, and latched protection must retry.
 
 ## Reservation authority and recovery
 
-The clearinghouse owns backing, provenance and the single source-bound collectible escrow mirror; the lifecycle book independently records original funding and source epoch beside intent and frozen entitlement. Bounty records have explicit None/Active/Settled/Moved/Quarantined state, account association through authenticated namespaces and IDs, free/pledge funding, and source position epoch. `positionEpoch` increments only on flat-to-open transitions.
+Missing and zero reservations are different. Book and clearinghouse independently authenticate account, ID, kind,
+Active state, entitlement and funding. Legacy pledge/source fields are zero. The retired ProtectionExecution
+namespace cannot acquire a new record. Paid opening funds keep existing protected-floor and custody checks.
 
-Execution validates reservation identity, active state, entitlement, provenance totals, protected-reserve floor, and custody. A mismatch is retryable and leaves the whole item unchanged. `expireOrder(orderId)` is permissionless after `block.timestamp > orderTiming(orderId).executionDeadline`, requires no oracle update, and can unlink an expired later entry without executing it ahead of FIFO. The submission deadline `submitBy` does not shorten a committed order's execution window.
-
-| Expired record | Disposition |
-| --- | --- |
-| Consistent ordinary close | Pay original free-funded part; restore pledged part to its original live position |
-| Consistent protection attempt | Existing protection retention/cleanup policy |
-| Authenticated, fully backed and exactly reconcilable against Book provenance | No keeper payment; refund free funding to free settlement and pledged funding to the original live position |
-| Missing or settled | No movement |
-| Wrong owner | Leave the foreign record untouched |
-| Invalid provenance, custody, or aggregate accounting | Quarantine identifiable backing, preserve disputed classifications, emit `LedgerInvariantViolation` |
-
-Mismatch cleanup emits `ExpiredReservationMismatch`. Its receipt reports the actual refund and discrepancy; the difference from entitlement is not a receivable. Pledge never becomes free settlement or attaches to a later position generation. Unreconcilable identified backing is quarantined and stays locked; only its matching collectible eligibility is removed inside an authenticated Engine curve mutation. Quarantining a later free-funded record cannot clear an earlier pledged order's eligibility. Before refund changes the borrow base, accrued carry is checkpointed without collection or an oracle update, preserving arrears. An anomalous protection attempt terminates as Failed.
-
-Automatic queue recovery assumes authenticated identities and valid aggregate accounting. A self-consistent clearinghouse split that disagrees with independent Book provenance is insufficient authority. If the curve or escrow ownership cannot be authenticated, resolution fails closed without movement. Arbitrary synthetic custody/ownership corruption is not automatically repaired. There is no administrative balance-repair endpoint.
+After strict expiry, exactly reconcilable independent opening funding may return to free settlement without a new
+carry collection. Missing/settled/foreign records move no funds. Inconsistent identified backing is quarantined;
+discrepancy receipts preserve evidence. No escrow/NAV mirror or source-position refund exists in the new stack.
 
 ## Abandoned zero-bounty orders: keeper responsibility
 
-The protocol-operated order keeper owns FIFO liveness, including unpaid cleanup when the configured close bounty is zero or an ordinary failed close was entirely pledge-funded. Its operator must fund native gas for `expireOrder`; a zero-free-funded failure pays no executor bounty and the protocol does not mint a cleanup subsidy. Any account may perform the same cleanup as a fallback. Keeper cleanup must not depend on the submitting user returning.
+Operators service unpaid closes and cleanup from native-currency operating wallets. There is no new on-chain pool,
+reimbursement distributor, or charge against LP loss backing. Replenishment comes from protocol-owned collected
+revenue. A depleted operator wallet delays service; it is not an on-chain close-admission condition.
 
-The external keeper must implement this policy before activation:
+Read canonical head, nextCommit bound, status and immutable deadline. Empty initial head=nextCommit=1 is not a real
+order. Simulate oracle-independent terminal cleanup separately before fetching live historical data, so an oracle
+failure cannot undo completed cleanup. Expiry requires timestamp strictly greater than deadline and no oracle.
+Live/FAD uses the admissible historical tick, never arbitrary latest data. Frozen follows its prescribed rules.
+Confirm authenticated terminal results and bounded batch progress; a transaction success is not all-orders success.
+Monitor Triggered and Latched protections until completion. Retain expiry-only automatic retry, queue arrival
+budget and operator escalation for other reasons. Do not drop zero-reward heads or silently rewrite trader bounds.
 
-1. Monitor `nextExecuteId()` and read the head's stored `pendingIntent` / `orderTiming`, including its bounty entitlement, original funding split and committed execution deadline. A zero bounty or zero free-funded part must not remove the head from monitoring.
-2. While the head is live, preserve FIFO. Do not attempt to skip it or expire it at deadline equality. A user may execute it; operator-funded execution is an explicit operational choice, not a promised keeper reward.
-3. Once a fresh chain timestamp is strictly greater than `executionDeadline`, submit permissionless `expireOrder(head)` without oracle data or an oracle fee. Do not wait for an oracle service to recover. The transaction sender pays native gas.
-4. Confirm the terminal receipt and queue advancement before moving on. If another actor executed, expired or liquidated the order first, reread state and continue; do not repeatedly retry a stale ID. Verify reservation cleanup from canonical state/events.
-5. `executeOrder(laterId, updateData)` can also prune expired heads before executing the next eligible order, subject to the existing cleanup/gas limits. Recheck progress and continue in bounded transactions if cleanup stops early. Explicit expiry remains the oracle-independent fallback.
-
-Monitor overdue head age, queue progress, failed cleanup transactions, and the cleanup wallet's native balance. Escalate persistent lack of progress or ledger-invariant evidence to the protocol incident operator. Do not depend solely on economically motivated third-party keepers for unpaid work. This repository supplies the contract entrypoints and regression tests; the separately deployed keeper service must implement and fund this responsibility.
-
-An account may submit another attempt after expiry, and multiple accounts can create additional heads. Queue admission checks and bounded deadlines therefore provide recoverability, not a global spam-prevention guarantee. The regressions deliberately abandon three successive orders, with another account's rewarded order behind each, and verify explicit expiry and automatic pruning. They do not claim a bound on aggregate delay without a functioning cleanup operator.
+The app's explicit native-gas fallback commits through the verified existing SimpleAccount owner route, without
+sponsor or bundler. Execution/expiry of its existing ID is permissionless. Public RPC and independent Hermes provide
+chain/oracle reads. Native gas and exact oracle value remain payable; preceding FIFO entries may need separate
+execution/cleanup. Network or historical-data unavailability remains visible. Existing protection uses legitimate
+cancel/retry paths. No owner-EOA direct commitment substitutes a different trader.
 
 ## ABI and consumer migration
 
-Intent domain is V3. Receipt and execution-configuration domains are V4. The `OrderV3Types` schema includes `submitBy` and `executionWindowSeconds`; receipts append authenticated timing. Requests, pending intents and receipts contain no close-mode field. Regenerate all tuple consumers together. Archived release ABIs remain the historical decoders.
-
-Source-bound bounty resolution preserves the public `OrderRequest` and `OrderReceipt` field layouts. It appends
-`PaidAndRefunded` and `ForfeitedAndRefunded` without renumbering earlier dispositions. Existing paid/refunded/forfeited/
-retained numeric fields report the authenticated components and sum to committed entitlement for ordinary terminal
-outcomes. Discrepancy recovery preserves original entitlement separately from the actual recovered movement. A refund denotes
-original position backing when pledge-funded, not wallet cash. SDK/indexer enum handling, internal Engine/Clearinghouse/
-Book interfaces, and storage change and must ship together; this is not a universal ABI/storage-compatible patch.
-
-Use the new request-taking overload:
-
-```
-previewClose(engine, account, request, executor, executionPrice, publishTime)
-assessCommittedOrder(engine, orderId, executor, executionPrice, publishTime)
-expireOrder(orderId)
-```
-
-The prospective preview validates router admission, projects commitment, then assesses execution. Simulation-only `assessOrder` and pure evaluators accept caller inputs and are not commitment authority. Committed assessment resolves the engine's router, lifecycle entitlement, exact reservation, and canonical pool depth; it projects any outstanding order-margin release that execution will perform.
-
-Commitment effects include carry collected/outstanding, free/pledge bounty funding, and custody/free-settlement projections. Stored commitment effects are authenticated in terminal receipts. Close gross debit includes commitment carry collected, execution carry collected, price-loss custody/claim consumption, action cash collection, and snapshotted bounty once. A self-paid bounty is still gross debit, with zero net custody transfer. Action bounds include commitment carry once; explicit-fee bounds cover assessed execution fee and frozen spread. Absolute settlement bounds refer to total custody.
-
-The AA client exports `orderRouterV3Abi`, `closePreviewV3Abi`, `committedOrderV3Abi`, `orderLifecycleV5Abi`, `buildCloseOrderV3`, and `buildExpireOrderV3`. The close builder emits one router call with no approval, deposit, or assistance. Existing historical exports remain unchanged. `closeFailureMessages` keeps bounty funding, cash-charge funding, residual health, and retryable reservation failures distinct. These helpers must be integrated in the separately deployed app/keeper before activation; this repository does not contain that application's production rollout.
-
-Do not point the new preview/planner ABI at v1.2.3 contracts. Their planner return tuples differ. Keep the archived September preview and sponsored-close deployments bound to the old stack until its separate recovery task is resolved.
+Public request/config/receipt/protection tuples and enum ordinals remain stable; compatibility close execution
+amounts and legacy pledge fields are zero. Internal Engine/Clearinghouse APIs and storage changed. This targets a
+fresh coherent stack, not an in-place upgrade. SDK keeper builders, owner-account close wrapping, native fee quoting,
+queue classification and verified terminal history accompany the app/keeper implementation.
 
 ## Deployment compatibility
 
-The execution sidecar constructor creates an immutable, storage-free `OrderRecoverySidecar`, delegated only through the router execution path. The fresh manifest includes it; deployment logs expose the address and the verifier checks its code and binding using `PERPS_ORDER_RECOVERY_SIDECAR`. Its constructor does not consume the deployer's CREATE nonce used for the router/lifecycle-book address calculation.
+Do not swap a Router into a live bound stack or reinterpret legacy paid reservations. Keep old-stack keepers and
+archived decoders until its orders/protections drain or a separately reviewed migration completes. Current templates
+use zero; historical manifests remain unchanged. Activation requires coherent new bindings, funded primary/standby
+signers, measured spending/latency limits, and a same-account outage drill. No deployment or operating-wallet funding
+is performed by this source change. See ZERO_CLOSE_OPERATIONS.md for commands and release gates.
 
-This feature PR does not define a release candidate. Release versioning, artifact generation and activation belong to the broader release containing this change. Generate consumer interfaces from that release's finalized source and verify constructor-inclusive initcode, deployed runtime hashes and component bindings together.
+# Historical implementation and measurements
 
-The Engine, Router, Clearinghouse and their authenticated books must be deployed as one compatible fresh stack.
-One-time or immutable bindings prevent a Router-only hot swap. Never apply the new marked cap to an already populated
-deployment with zero-initialized escrow mirrors. Migrating existing orders or positions needs a separate authenticated
-migration design; no deployment or migration is authorized by this source change. A predeployment rollback is a source
-revert; recovery after a populated deployment is an operational migration decision.
-
-Activation requires the full regression/invariant suites, production size checks, historical evidence, and a fresh-stack smoke test with assistance disabled: deposit, open Max, execute, and ordinary full and partial zero-free closes. Retire new subsidy issuance only for that verified new stack. Preserve old-stack servicing and authorized reconciliation. Deployment and activation remain separate operator actions.
+The following sections are retained evidence from before the zero-close-bounty change. Their source revisions,
+measurements and optimization proposals do not establish validation of the current source.
 
 ## Verification status and provenance
 

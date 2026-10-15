@@ -35,7 +35,7 @@ contract ReservedBountyEquityTest is BasePerpTest {
             liquidationReserveBefore,
             "Close execution bounty must not be carved from the liquidation reserve"
         );
-        assertEq(_executionBountyReserve(1), 200_000, "Close execution bounty must remain separately reserved");
+        assertEq(_executionBountyReserve(1), 0, "Close execution bounty must remain separately reserved");
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_530_000);
         assertFalse(preview.liquidatable, "Separately reserved close bounty must not make price risk liquidatable");

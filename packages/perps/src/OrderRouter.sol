@@ -102,8 +102,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
 
     /// @notice Queues a fresh close attempt for an already-latched position protection.
     /// @dev Only the immutable protection Book may call this entrypoint. The Book tracks the durable trigger and its
-    ///      clearinghouse-held execution bounty; delegated logic creates fresh lifecycle evidence and appends an ordinary
-    ///      short-lived close without reserving the bounty a second time. Parameters are intentionally unnamed because
+    ///      attempt history; delegated logic creates fresh lifecycle evidence and appends an ordinary
+    ///      short-lived close with an explicit zero bounty reservation. Parameters are intentionally unnamed because
     ///      the delegated implementation consumes the Router's unchanged original calldata.
     function commitProtectionCloseAttempt(
         uint64,
@@ -196,10 +196,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 pledgeUsdc = pending.commitment.bountyFromPledgeUsdc;
         uint64 epoch = lifecycleBook.sourcePositionEpoch(orderId);
         recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeUsdc, pledgeUsdc, epoch);
-        if (recovery.freeUsdc != 0 || recovery.pledgeUsdc != 0) {
-            engine.resolveCloseBounty(order.account, orderId, recovery.freeUsdc, recovery.pledgeUsdc, epoch, false);
-        } else if (recovery.discrepancy != 3) {
-            engine.resolveCloseBounty(order.account, orderId, freeUsdc, pledgeUsdc, epoch, true);
+        if (recovery.freeUsdc != 0) {
+            clearinghouse.releaseReservedExecutionBountyToSource(order.account, recovery.freeUsdc);
         }
         // An invalid margin ledger is left protected; expiry must not invent a release.
         try clearinghouse.releaseOrderReservationForTerminalCleanup(orderId) {} catch {}
@@ -260,13 +258,11 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return abi.decode(_delegateExecutionSidecar(), (OrderV3Types.ExecutionResult));
     }
 
-    /// @notice Releases order margin, settles or retains its bounty, and deletes its ephemeral Router record.
-    /// @dev The recipient is explicit because the item rollback boundary changes `msg.sender` to the Router. When the
-    ///      source account executes its own order, paid bounty is released without beneficiary carry collection.
-    ///      An ordinary failed close first returns pledge to its original position with a checkpoint-only refund,
-    ///      then pays only its original free-funded portion. Other recipients use the Engine bounty-credit path. A failed protection
-    ///      attempt may instead reattribute the bounty to its protection namespace without unlocking settlement,
-    ///      allowing a later attempt to reuse the same reserve.
+    /// @notice Releases order margin, settles its bounty record, and deletes its ephemeral Router record.
+    /// @dev The recipient is explicit because the item rollback boundary changes msg.sender to the Router.
+    ///      Paid opening bounties use the Engine credit path, or release to the source on self-execution.
+    ///      Ordinary and protected closes settle their zero record without cash movement or recipient carry.
+    ///      A protected failure may latch the protection while its own order record still settles exactly once.
     function settleOrderFromSidecar(
         uint64 orderId,
         bool success,
@@ -297,46 +293,21 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 accountingPrice,
         uint64 accountingPublishTime
     ) private returns (IOrderRouterExecutionHost.BountySettlement memory settlement) {
-        IMarginClearinghouse.BountyReservation memory reservation =
-            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, order.orderId);
-        uint256 bountyUsdc = reservation.amountUsdc;
-
-        bool protectionAttempt = lifecycleBook.isProtectionAttempt(order.orderId);
-        bool retained = !success && protectionAttempt
-            && positionProtectionBook.handleFailedProtectionAttempt(order.orderId, order.account, reason, bountyUsdc);
-
+        uint256 bountyUsdc =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, order.orderId).amountUsdc;
+        if (!success && lifecycleBook.isProtectionAttempt(order.orderId)) {
+            positionProtectionBook.handleFailedProtectionAttempt(order.orderId, order.account, reason, bountyUsdc);
+        }
+        // Even an unpaid attempt has an authenticated Active record that must terminalize.
+        clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, order.orderId);
         settlement.bountyUsdc = bountyUsdc;
-        if (retained) {
-            settlement.bountyDisposition = OrderV3Types.BountyDisposition.RetainedForProtectionRetry;
-        } else {
-            clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, order.orderId);
-            uint256 paidUsdc = bountyUsdc;
-            if (!success && order.isClose && !protectionAttempt && reservation.pledgeFundedUsdc != 0) {
-                settlement.bountyRefundedUsdc = reservation.pledgeFundedUsdc;
-                paidUsdc = reservation.freeFundedUsdc;
-                engine.resolveCloseBounty(
-                    order.account,
-                    order.orderId,
-                    0,
-                    reservation.pledgeFundedUsdc,
-                    reservation.sourcePositionEpoch,
-                    false
-                );
-                settlement.bountyRecipient = order.account;
-                settlement.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
-            }
-            if (paidUsdc != 0) {
-                settlement.bountyRecipient = bountyRecipient;
-                settlement.bountyDisposition = settlement.bountyRefundedUsdc == 0
-                    ? OrderV3Types.BountyDisposition.Paid
-                    : OrderV3Types.BountyDisposition.PaidAndRefunded;
-            }
-            if (paidUsdc == 0) {
-                // Explicit zero entitlement is settled without custody movement.
-            } else if (bountyRecipient == order.account) {
-                clearinghouse.releaseReservedExecutionBountyToSource(order.account, paidUsdc);
+        if (bountyUsdc != 0) {
+            settlement.bountyRecipient = bountyRecipient;
+            settlement.bountyDisposition = OrderV3Types.BountyDisposition.Paid;
+            if (bountyRecipient == order.account) {
+                clearinghouse.releaseReservedExecutionBountyToSource(order.account, bountyUsdc);
             } else {
-                engine.creditBounty(order.account, bountyRecipient, paidUsdc, accountingPrice, accountingPublishTime);
+                engine.creditBounty(order.account, bountyRecipient, bountyUsdc, accountingPrice, accountingPublishTime);
             }
         }
     }
@@ -453,6 +424,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
             revert OrderRouter__Unauthorized();
         }
         nextCommitId = linkedOrderId + 1;
+        clearinghouse.recordBountyReservation(account, IMarginClearinghouse.BountyKind.Order, linkedOrderId, 0);
         _recordCommittedOrder(
             CfdTypes.Order({
                 account: account,

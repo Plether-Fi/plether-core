@@ -115,13 +115,8 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.bountyDisposition = settled.bountyDisposition;
         receipt.bountyRecipient = settled.bountyRecipient;
         receipt.bounty.bountyRefundedUsdc = settled.bountyRefundedUsdc;
-        if (
-            settled.bountyDisposition == OrderV3Types.BountyDisposition.Paid
-                || settled.bountyDisposition == OrderV3Types.BountyDisposition.PaidAndRefunded
-        ) {
+        if (settled.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
             receipt.bounty.bountyPaidUsdc = settled.bountyUsdc - settled.bountyRefundedUsdc;
-        } else if (settled.bountyDisposition == OrderV3Types.BountyDisposition.RetainedForProtectionRetry) {
-            receipt.bounty.bountyRetainedUsdc = settled.bountyUsdc;
         }
         _state(host, receipt, false);
         return _finalize(book, receipt);
@@ -196,6 +191,10 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         uint256 refund = input.reason == OrderV3Types.TerminalReason.RiskOff
             ? input.bountyUsdc
             : pending.commitment.bountyFromPledgeUsdc;
+        // The lifecycle book rejects mixed refunds; keep that impossible outcome out of receipt construction.
+        if (refund != 0 && refund != input.bountyUsdc) {
+            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+        }
         OrderV3Types.BountyDisposition disposition;
         address recipient;
         if (input.bountyUsdc != 0) {
@@ -203,9 +202,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
             recipient = forfeited == 0 ? pending.account : ICfdEngineCore(host.engine()).protocolTreasury();
             disposition = refund == 0
                 ? OrderV3Types.BountyDisposition.Forfeited
-                : forfeited == 0
-                    ? OrderV3Types.BountyDisposition.RefundedToAccount
-                    : OrderV3Types.BountyDisposition.ForfeitedAndRefunded;
+                : OrderV3Types.BountyDisposition.RefundedToAccount;
         }
         if (
             input.bountyRefundedUsdc != refund || input.bountyDisposition != disposition

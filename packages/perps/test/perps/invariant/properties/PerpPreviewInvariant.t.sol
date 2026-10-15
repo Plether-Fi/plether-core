@@ -121,7 +121,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             );
             assertLe(
                 snapshot.terminalPriceCollectibleCapUsdc,
-                priceRiskCollateralUsdc + clearinghouse.collectibleCloseEscrowUsdc(account),
+                priceRiskCollateralUsdc,
                 "Endpoint-clipped collectible cap must not exceed pledge plus claims plus source-bound escrow"
             );
         }

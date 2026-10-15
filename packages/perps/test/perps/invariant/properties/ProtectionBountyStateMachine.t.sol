@@ -23,7 +23,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
 
     uint256 internal constant OPEN_BOUNTY = 250_000;
     uint256 internal constant TRIGGER_BOUNTY = 350_000;
-    uint256 internal constant CLOSE_BOUNTY = 650_000;
+    uint256 internal constant CLOSE_BOUNTY = 0;
     uint256 internal constant SIZE = 10_000e18;
     uint256 internal constant MARGIN = 2000e6;
     uint256 internal constant ENTRY_PRICE = 1e8;
@@ -160,7 +160,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         stdstore.target(address(clearinghouse)).sig("totalBountyReservationsUsdc(address)").with_key(account)
             .checked_write(expectedReserve + 1);
         assertEq(accounts[account].funded, expectedReserve, "Subject corruption must not resynchronize the model");
-        vm.expectRevert(bytes("canonical total: 1000001 != 1000000"));
+        vm.expectRevert(bytes("canonical total: 350001 != 350000"));
         this.assertIndependentBountyModel();
 
         assertTrue(vm.revertToState(healthyState));
@@ -169,7 +169,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
 
     /// @dev Sensitivity: complete a real trigger and close, then remove one atom from the keeper's actual credit.
     ///      Expected payouts come from configured successful actions, so the normal ledger detects underpayment.
-    function test_BountyLedgerDetectsOneAtomExecutionKeeperUnderpayment() public {
+    function test_BountyLedgerDetectsUnauthorizedExecutionKeeperCredit() public {
         address account = actors[0];
         _createExisting(account);
         uint64 protectionId = accounts[account].protectionId;
@@ -181,10 +181,9 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), CLOSE_BOUNTY);
         uint256 healthyState = vm.snapshotState();
 
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(EXECUTION_KEEPER)
-            .checked_write(CLOSE_BOUNTY - 1);
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(EXECUTION_KEEPER).checked_write(1);
         assertEq(executionPaid, CLOSE_BOUNTY, "Subject corruption must not resynchronize the payout model");
-        vm.expectRevert(bytes("execution paid once: 649999 != 650000"));
+        vm.expectRevert(bytes("execution paid once: 1 != 0"));
         this.assertIndependentBountyModel();
 
         assertTrue(vm.revertToState(healthyState));
@@ -316,7 +315,7 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
         bytes[] memory data = _freshData(STOP_PRICE, 0);
         vm.mockCallRevert(
             address(clearinghouse),
-            abi.encodeWithSelector(IMarginClearinghouse.moveBountyReservation.selector),
+            abi.encodeWithSelector(IMarginClearinghouse.recordBountyReservation.selector),
             "forced transfer failure"
         );
         vm.expectRevert(bytes("forced transfer failure"));
@@ -521,7 +520,10 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
             uint64 id = protectionIds[i];
             ModelProtection storage p = protections[id];
             _assertReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, id, p.account, p.trigger);
-            _assertReservation(IMarginClearinghouse.BountyKind.ProtectionExecution, id, p.account, p.execution);
+            IMarginClearinghouse.BountyReservation memory retired =
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionExecution, id);
+            assertEq(uint8(retired.state), uint8(IMarginClearinghouse.BountyReservationState.None));
+            assertEq(retired.account, address(0));
             Protection.PositionProtectionView memory actual = views.getPositionProtection(id);
             assertEq(uint8(actual.status), uint8(p.status), "protection lifecycle");
             assertEq(actual.parentOrderId, p.parent, "parent linkage");

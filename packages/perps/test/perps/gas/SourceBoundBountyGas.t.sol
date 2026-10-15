@@ -53,9 +53,9 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         assertEq(reserved.amountUsdc, before.bounty);
         assertEq(reserved.freeFundedUsdc, 0);
         assertEq(reserved.pledgeFundedUsdc, before.bounty);
-        assertEq(reserved.sourcePositionEpoch, 1);
+        assertEq(reserved.sourcePositionEpoch, 0);
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), before.pledge - before.bounty);
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), before.bounty);
+
         assertEq(clearinghouse.actionReserveUsdc(BOUNTY_TRADER), before.bounty);
         assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), before.custody);
         assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), before.keeper);
@@ -70,7 +70,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         BeforeState memory before = _positionState();
         before.free = before.bounty / 3;
         before.pledged = before.bounty - before.free;
-        _fundTrader(BOUNTY_TRADER, before.free);
+
         before.custody += before.free;
         OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         request.targetPrice = 1;
@@ -136,7 +136,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         uint64[] memory ids = new uint64[](3);
         ids[0] = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
         ids[1] = _bountyCommit(BOUNTY_OTHER, CfdTypes.Side.SHORT, false, 1000e18, 50e6);
-        _fundTrader(BOUNTY_TRADER, before.bounty);
+
         ids[2] = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
         uint256 totalBounty;
         for (uint256 i; i < ids.length; ++i) {
@@ -163,7 +163,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
             assertEq(uint8(receipt.reason), uint8(OrderV3Types.TerminalReason.Executed));
             assertEq(receipt.bounty.bountyPaidUsdc, receipt.bounty.bountyEntitlementUsdc);
             assertEq(receipt.bounty.bountyRefundedUsdc, 0);
-            assertEq(receipt.bountyRecipient, BOUNTY_KEEPER);
+            assertEq(receipt.bountyRecipient, receipt.bountyUsdc == 0 ? address(0) : BOUNTY_KEEPER);
             _assertBountyResolved(ids[i]);
         }
         assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), before.keeper + totalBounty);
@@ -174,7 +174,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         assertEq(engine.traderClaimBalanceUsdc(BOUNTY_OTHER), 0);
         assertEq(clearinghouse.actionReserveUsdc(BOUNTY_TRADER), 0);
         assertEq(clearinghouse.actionReserveUsdc(BOUNTY_OTHER), 0);
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), 0);
+
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
         assertEq(router.pendingOrderCounts(BOUNTY_OTHER), 0);
         (uint256 traderSize,,,,,,) = engine.positions(BOUNTY_TRADER);
@@ -212,7 +212,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         assertEq(receipt.bounty.bountyRefundedUsdc, before.pledged);
         assertEq(receipt.bounty.bountyForfeitedUsdc, 0);
         assertEq(receipt.bounty.bountyRetainedUsdc, 0);
-        assertEq(receipt.bountyRecipient, before.free == 0 ? BOUNTY_TRADER : BOUNTY_KEEPER);
+        assertEq(receipt.bountyRecipient, address(0));
         assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), before.keeper + before.free);
         assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), before.custody - before.free);
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), before.pledge);
@@ -245,7 +245,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         assertEq(receipt.bounty.bountyPaidUsdc, before.bounty);
         assertEq(receipt.bounty.bountyRefundedUsdc, 0);
         assertEq(receipt.bounty.bountyForfeitedUsdc, 0);
-        assertEq(receipt.bountyRecipient, BOUNTY_KEEPER);
+        assertEq(receipt.bountyRecipient, receipt.bountyUsdc == 0 ? address(0) : BOUNTY_KEEPER);
         assertEq(receipt.economics.executionFeeUsdc, fee);
         assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), before.custody - before.bounty - fee);
         assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), before.keeper + before.bounty);
@@ -265,7 +265,6 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
     function _assertTraderTerminal(
         uint64 id
     ) private view {
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), 0);
         assertEq(clearinghouse.actionReserveUsdc(BOUNTY_TRADER), 0);
         assertEq(engine.traderClaimBalanceUsdc(BOUNTY_TRADER), 0);
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
@@ -291,7 +290,6 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         setup.ids[0] = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, 100e18, 0);
         assertEq(_bountyReservation(setup.ids[0]).pledgeFundedUsdc, setup.state.bounty);
         if (count > 1) {
-            _fundTrader(BOUNTY_TRADER, (count - 1) * setup.state.bounty);
             _fundTrader(BOUNTY_OTHER, 100e6);
             setup.firstOther = _bountyCommit(BOUNTY_OTHER, CfdTypes.Side.LONG, false, 100e18, 10e6);
             for (uint256 i = 1; i < count; ++i) {
@@ -305,7 +303,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
             setup.otherReserve = clearinghouse.actionReserveUsdc(BOUNTY_OTHER);
         }
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), count);
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), setup.state.bounty);
+
         assertEq(router.minEngineGas(), 600_000, "retain configured production Engine allowance");
     }
 
@@ -335,7 +333,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
             assertEq(receipt.bounty.bountyPaidUsdc, 0);
             assertEq(receipt.bounty.bountyRefundedUsdc, i == 0 ? setup.state.bounty : 0);
             assertEq(receipt.bounty.bountyForfeitedUsdc, i == 0 ? 0 : setup.state.bounty);
-            assertEq(receipt.bountyRecipient, i == 0 ? BOUNTY_TRADER : PROTOCOL_TREASURY_ACCOUNT);
+            assertEq(receipt.bountyRecipient, address(0));
             _assertBountyResolved(setup.ids[i]);
         }
         assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), 0);
@@ -348,7 +346,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), 0);
         assertEq(clearinghouse.liquidationReserveUsdc(BOUNTY_TRADER), 0);
         assertEq(clearinghouse.actionReserveUsdc(BOUNTY_TRADER), 0);
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(BOUNTY_TRADER), 0);
+
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
         (uint256 size,,,,,,) = engine.positions(BOUNTY_TRADER);

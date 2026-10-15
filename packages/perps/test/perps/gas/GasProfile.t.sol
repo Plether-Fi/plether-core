@@ -880,7 +880,11 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(pending.marginDelta, marginDelta);
         assertEq(pending.isClose, isClose);
         assertEq(uint256(pending.side), uint256(intendedSide));
-        assertGt(pending.executionBountyUsdc, 0, "commit must reserve a bounty");
+        if (isClose) {
+            assertEq(pending.executionBountyUsdc, 0, "close is unpaid");
+        } else {
+            assertGt(pending.executionBountyUsdc, 0, "open must reserve a bounty");
+        }
         IMarginClearinghouse.BountyReservation memory reservation =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
         assertEq(reservation.account, account);
@@ -920,8 +924,11 @@ contract GasProfileTest is RecordedOrderReceipts {
         }
         assertEq(outcome.account, expected.account);
         assertEq(outcome.executor, keeper);
-        assertEq(outcome.bountyRecipient, keeper);
-        assertEq(uint256(outcome.bountyDisposition), uint256(OrderV3Types.BountyDisposition.Paid));
+        assertEq(outcome.bountyRecipient, expected.bounty == 0 ? address(0) : keeper);
+        assertEq(
+            uint256(outcome.bountyDisposition),
+            uint256(expected.bounty == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
+        );
         assertEq(outcome.bountyUsdc, expected.bounty, "receipt must consume the exact committed bounty");
         _assertExecutedPositionAndReservation(orderId);
         if (tradeAccountingBefore[orderId].recorded) {
@@ -1097,8 +1104,13 @@ contract GasProfileTest is RecordedOrderReceipts {
             ExpectedOrder memory expected = expectedOrders[receipt.orderId];
             assertEq(receipt.account, expected.account);
             assertEq(receipt.executor, keeper);
-            assertEq(receipt.bountyRecipient, keeper);
-            assertEq(uint256(receipt.bountyDisposition), uint256(OrderV3Types.BountyDisposition.Paid));
+            assertEq(receipt.bountyRecipient, expected.bounty == 0 ? address(0) : keeper);
+            assertEq(
+                uint256(receipt.bountyDisposition),
+                uint256(
+                    expected.bounty == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid
+                )
+            );
             assertEq(receipt.bountyUsdc, expected.bounty);
             _assertExecutedPositionAndReservation(receipt.orderId);
             assertTrue(

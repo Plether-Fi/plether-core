@@ -440,15 +440,15 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         assertEq(clearinghouse.orderMarginUsdc(ALICE), 1000e6);
     }
 
-    function test_PledgeRefundCheckpointsOldBasisWithoutCollectingAndChangesOnlyFutureCarry() public {
+    function test_UnpaidExpiryPreservesCarryBasisForLaterCollection() public {
         _assertRefundCarryHistory(0, 30 days);
     }
 
-    function test_MixedRefundPrecedesExecutorCarryCollectionAndPreservesGrossNewCredit() public {
+    function test_UnpaidExpiryPreservesFreeCashWithoutExecutorCredit() public {
         _assertRefundCarryHistory(100_000, 30 days);
     }
 
-    function test_PledgeRefundRetainsUnpayableArrearsUntilSubsequentCollection() public {
+    function test_UnpaidExpiryPreservesAccruedCarryUntilSubsequentCollection() public {
         _assertRefundCarryHistory(0, 500 * 365 days);
     }
 
@@ -465,35 +465,26 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         vm.prank(ALICE);
         clearinghouse.withdraw(ALICE, 30_000e6 - freeFunding);
         referenceLedger.withdraw(ALICE, 30_000e6 - freeFunding, vm.getBlockTimestamp());
-        uint256 pledgeFunding = 200_000 - freeFunding;
         vm.prank(ALICE);
         uint64 id = router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, type(uint256).max, true);
         referenceLedger.checkpoint(ALICE, vm.getBlockTimestamp());
-        referenceLedger.reserveBountyWithoutCheckpoint(ALICE, freeFunding, pledgeFunding);
+
         _assertSystem();
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ALICE), pledgeFunding);
+
         uint256 custodyBeforeRefund = clearinghouse.balanceUsdc(ALICE);
         uint256 poolBeforeRefund = referenceLedger.poolDepth();
         vm.warp(vm.getBlockTimestamp() + interval);
-        referenceLedger.assessWithoutCollection(ALICE, vm.getBlockTimestamp());
-        referenceLedger.releaseToPledgeWithoutCheckpoint(ALICE, pledgeFunding);
+
         uint256 retained = referenceLedger.accountState(ALICE).arrears;
-        assertGt(retained, 0, "refund must reach an actual carry checkpoint");
-        referenceLedger.consumeProtectedWithoutCheckpoint(ALICE, freeFunding);
-        referenceLedger.creditFree(BOB, freeFunding, vm.getBlockTimestamp());
+
         vm.prank(BOB);
         OrderV3Types.ExecutionResult memory result = router.expireOrder(id);
         assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
         _assertSystem();
-        assertEq(clearinghouse.balanceUsdc(ALICE), custodyBeforeRefund - freeFunding);
+        assertEq(clearinghouse.balanceUsdc(ALICE), custodyBeforeRefund);
         assertEq(engine.unsettledCarryUsdc(ALICE), retained, "restoring pledge does not pay or erase carry");
-        assertEq(clearinghouse.collectibleCloseEscrowUsdc(ALICE), 0);
-        if (freeFunding == 0) {
-            assertEq(pool.totalAssets(), poolBeforeRefund, "neither source nor unpaid executor pays at refund");
-        } else {
-            assertEq(_freeSettlementUsdc(BOB), referenceLedger.accountState(BOB).free);
-            assertGe(_freeSettlementUsdc(BOB), freeFunding, "gross bounty is credited after recipient collection");
-        }
+
+        assertEq(pool.totalAssets(), poolBeforeRefund, "unpaid expiry performs no carry collection or credit");
         vm.warp(vm.getBlockTimestamp() + 7 days);
         _collect(ALICE);
         uint256 collected = referenceLedger.totalCollected();

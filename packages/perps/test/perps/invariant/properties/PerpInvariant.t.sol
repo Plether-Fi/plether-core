@@ -1569,7 +1569,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         _assertAllInvariants();
     }
 
-    function test_AdversarialHandlerClassifiesPledgeCloseBehindPendingOrder() public {
+    function test_AdversarialHandlerAdmitsZeroFreeCloseBehindPendingOrder() public {
         handler.openPosition(0, 0, 250, 5000e6);
         handler.openPosition(1, 0, 250, 5000e6);
         handler.queueBadClose(1);
@@ -1588,13 +1588,9 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         uint256 expectedRejectionsBefore = handler.ghost_expectedCommitRejections();
         handler.queueBadClose(0);
 
-        assertEq(handler.ghost_expectedCommitRejections(), expectedRejectionsBefore + 1);
-        assertEq(
-            handler.ghost_rejectionsBySelector(IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue.selector),
-            1
-        );
-        assertEq(router.nextCommitId(), nextCommitIdBefore);
-        assertEq(router.pendingOrderCounts(actor), accountPendingBefore);
+        assertEq(handler.ghost_expectedCommitRejections(), expectedRejectionsBefore);
+        assertEq(router.nextCommitId(), nextCommitIdBefore + 1);
+        assertEq(router.pendingOrderCounts(actor), accountPendingBefore + 1);
         assertEq(clearinghouse.totalBountyReservationsUsdc(actor), bountyBefore);
         _assertAllInvariants();
     }

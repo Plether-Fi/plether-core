@@ -5,6 +5,7 @@ import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
+import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
@@ -67,7 +68,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         CfdClosePreview.ClosePreview memory p = _preview(o, adversePrice, KEEPER);
         assertEq(p.assessment.preSettlementBalanceUsdc, 10_000_200_000);
         assertEq(p.assessment.postSettlementBalanceUsdc, 0);
-        assertEq(p.assessment.actionChargeCollectedUsdc, 0);
+        assertEq(p.assessment.actionChargeCollectedUsdc, 200_000);
         assertEq(p.commitmentCarryUsdc, 0);
     }
 
@@ -99,7 +100,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         _openNormally(CfdTypes.Side.SHORT, 200_000);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
         OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
-            address(engine), o, KEEPER, 95_000_000, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
+            address(engine), o, KEEPER, 95_000_000, pool.totalAssets(), uint64(block.timestamp), _bounds(), 0
         );
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(o, 95_000_000, KEEPER);
         assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, 95_000_000));
@@ -110,8 +111,8 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
     function test_OneAtomicUnitShortUsesPledgeAndMatchesCommit() public {
         _openNormally(CfdTypes.Side.LONG, 199_999);
         (, CfdClosePreview.ClosePreview memory p) = _commitParity(_order(CfdTypes.Side.LONG, SIZE), PRICE, KEEPER);
-        assertEq(p.commitment.bountyFromFreeUsdc, 199_999);
-        assertEq(p.commitment.bountyFromPledgeUsdc, 1);
+        assertEq(p.commitment.bountyFromFreeUsdc, 0);
+        assertEq(p.commitment.bountyFromPledgeUsdc, 0);
     }
 
     function test_OtherOrderBountyIsNotTheProspectiveBounty() public {
@@ -119,10 +120,10 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE / 2);
         vm.prank(ACCOUNT);
         router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 200_000);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
         _commitParity(o, PRICE, KEEPER);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 400_000);
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 2e6);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 2_400_000);
     }
 
     function test_StaleStoredMarkStillAllowsCommit() public {
@@ -173,7 +174,7 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
         clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionTrigger, 99, 3e6);
         uint256 reserveBefore = clearinghouse.actionReserveUsdc(ACCOUNT);
         _commitParity(_order(CfdTypes.Side.LONG, SIZE / 2), PRICE, KEEPER);
-        assertEq(clearinghouse.actionReserveUsdc(ACCOUNT), reserveBefore + 200_000);
+        assertEq(clearinghouse.actionReserveUsdc(ACCOUNT), reserveBefore);
         assertEq(clearinghouse.vpiRebateReserveUsdc(ACCOUNT), 5e6);
         assertEq(
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, 99).amountUsdc, 3e6
@@ -320,7 +321,7 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         uint256 adversePrice = 1025e5;
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE);
         OrderV3Types.ExecutionAssessment memory unreserved = policyEvaluator.assessOrder(
-            address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 200_000
+            address(engine), o, KEEPER, adversePrice, pool.totalAssets(), uint64(block.timestamp), _bounds(), 0
         );
         assertEq(unreserved.actionChargeCollectedUsdc, _engineExecutionFeeUsdc(SIZE, adversePrice));
         (uint64 closeId, CfdClosePreview.ClosePreview memory p) = _commitParity(o, adversePrice, KEEPER);
@@ -348,23 +349,216 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
         assertEq(p.assessment.carryUsdc, p.commitmentCarryUsdc);
     }
 
-    function test_CarryExhaustingFreeSettlementMatchesFundingFailure() public {
+    function test_CarryExhaustingFreeSettlementStillAllowsFullClose() public {
         _openNormally(CfdTypes.Side.SHORT, 200_000);
         vm.warp(block.timestamp + 200 * 365 days);
         assertGt(_expectedIndexedCarryUsdc(ACCOUNT), clearinghouse.pnlPledgeUsdc(ACCOUNT) + 200_000);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
-        (bool previewOk, bytes memory previewError) = address(previewer)
-            .staticcall(
-                abi.encodeCall(
-                    ILegacyClosePreview(address(previewer)).previewClose,
-                    (address(engine), o, KEEPER, PRICE, uint64(block.timestamp), _bounds())
-                )
-            );
-        assertFalse(previewOk);
-        assertEq(bytes4(previewError), ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
-        vm.expectRevert(previewError);
+        (, CfdClosePreview.ClosePreview memory p) = _commitParity(o, PRICE, KEEPER);
+        assertGt(p.commitment.carryOutstandingUsdc, 0);
+        assertEq(p.executionBountyUsdc, 0);
+        assertEq(clearinghouse.getFreeBuyingPowerUsdc(ACCOUNT), 0);
+    }
+
+}
+
+/// @dev Regressions migrated from the retired USDC-grant preview: use the canonical V3 request all the way through
+///      preview, commitment and execution. No grant, deposit or account funding occurs while closing.
+contract CfdClosePreviewRequestTest is CfdClosePreviewTestBase {
+
+    function _request(
+        CfdTypes.Side side,
+        uint256 size
+    ) internal view returns (OrderV3Types.OrderRequest memory r) {
+        r.clientOrderId = keccak256("zero-bounty-close-preview");
+        r.side = side;
+        r.sizeDelta = size;
+        r.targetPrice = side == CfdTypes.Side.LONG ? type(uint256).max : 1;
+        r.isClose = true;
+        r.bounds = _bounds();
+        r.bounds.submitBy = uint64(vm.getBlockTimestamp() + router.maxExecutionWindowSeconds());
+        r.bounds.executionWindowSeconds = uint32(router.maxExecutionWindowSeconds());
+        r.bounds.expectedConfigHash = router.lifecycleBook().currentExecutionConfigHash();
+    }
+
+    function _requestPreview(
+        OrderV3Types.OrderRequest memory r,
+        uint256 price
+    ) internal view returns (CfdClosePreview.ClosePreview memory) {
+        return previewer.previewClose(address(engine), ACCOUNT, r, KEEPER, price, uint64(vm.getBlockTimestamp()));
+    }
+
+    function _requestCommitParity(
+        OrderV3Types.OrderRequest memory r,
+        uint256 price
+    ) internal returns (uint64 id, CfdClosePreview.ClosePreview memory p) {
+        p = _requestPreview(r, price);
+        CfdClosePreview.ClosePreview memory orderPreview = previewer.previewClose(
+            address(engine), _order(r.side, r.sizeDelta), KEEPER, price, uint64(vm.getBlockTimestamp()), r.bounds
+        );
+        assertEq(keccak256(abi.encode(p)), keccak256(abi.encode(orderPreview)), "both preview overloads agree");
+        uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
         vm.prank(ACCOUNT);
-        router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
+        id = router.commitOrder(r);
+        assertEq(settlementBefore - clearinghouse.balanceUsdc(ACCOUNT), p.commitmentCarryUsdc);
+        OrderV3Types.ExecutionAssessment memory actual =
+            policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, price, uint64(vm.getBlockTimestamp()));
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(p.assessment)));
+        assertEq(p.executionBountyUsdc, 0);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+    }
+
+    function _executeRequest(
+        uint64 id,
+        uint256 price,
+        uint256 expectedRemaining
+    ) internal {
+        uint256 supply = usdc.totalSupply();
+        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+        bytes[] memory update = _mockPythUpdateData(price);
+        // The oracle fixture advances a second. Assess that exact execution timestamp, including any new carry.
+        OrderV3Types.ExecutionAssessment memory expected =
+            policyEvaluator.assessCommittedOrder(address(engine), id, KEEPER, price, uint64(vm.getBlockTimestamp()));
+        vm.recordLogs();
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, update);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        _assertReceipt(vm.getRecordedLogs(), id, expected);
+        (uint256 remaining,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(remaining, expectedRemaining);
+        assertEq(clearinghouse.balanceUsdc(ACCOUNT), expected.postSettlementBalanceUsdc);
+        assertEq(usdc.totalSupply(), supply, "close requires no USDC grant");
+        assertEq(clearinghouse.balanceUsdc(KEEPER), keeperBefore);
+        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+    }
+
+    function _requestLifecycle(
+        CfdTypes.Side side,
+        uint256 size,
+        uint256 free
+    ) internal {
+        _openNormally(side, free);
+        uint256 price = size == SIZE ? PRICE : (side == CfdTypes.Side.LONG ? PRICE - 1_000_000 : PRICE + 1_000_000);
+        (uint64 id,) = _requestCommitParity(_request(side, size), price);
+        _executeRequest(id, price, SIZE - size);
+    }
+
+    function test_RequestFullCloseFromZeroFreeSettlement() public {
+        _requestLifecycle(CfdTypes.Side.LONG, SIZE, 0);
+    }
+
+    function test_RequestPartialCloseFromZeroFreeSettlement() public {
+        _requestLifecycle(CfdTypes.Side.LONG, SIZE / 2, 0);
+    }
+
+    function test_RequestShortFullCloseWithSmallFreeSettlement() public {
+        _requestLifecycle(CfdTypes.Side.SHORT, SIZE, 2000);
+    }
+
+    function test_RequestShortPartialCloseWithOneAtomFreeSettlement() public {
+        _requestLifecycle(CfdTypes.Side.SHORT, SIZE / 2, 1);
+    }
+
+    function test_RequestPartialCloseFundsChargesFromSafeRelease() public {
+        _openNormally(CfdTypes.Side.LONG, 0);
+        OrderV3Types.OrderRequest memory r = _request(CfdTypes.Side.LONG, SIZE / 2);
+        (uint64 id, CfdClosePreview.ClosePreview memory p) = _requestCommitParity(r, PRICE);
+        assertGt(p.assessment.close.actionChargeFromReleasedMarginUsdc, 0);
+        assertEq(p.assessment.close.actionChargeWaivedUsdc, 0);
+        _executeRequest(id, PRICE, SIZE / 2);
+    }
+
+    function test_MaxOpenThenFullCloseWithoutTopUp() public {
+        _maxOpenThenClose(false);
+    }
+
+    function test_MaxOpenThenPartialCloseWithoutTopUp() public {
+        _maxOpenThenClose(true);
+    }
+
+    function _maxOpenThenClose(
+        bool isPartial
+    ) private {
+        _fundTrader(ACCOUNT, 1000e6);
+        uint256 margin = 1000e6 - router.maxOpenOrderExecutionBountyUsdc();
+        ICfdEngineLens.MaxOpenQuote memory quote =
+            engineLens.quoteMaxOpen(ACCOUNT, CfdTypes.Side.LONG, margin, PRICE, uint64(vm.getBlockTimestamp()));
+        assertGt(quote.maxSizeDelta, 0);
+        vm.prank(ACCOUNT);
+        uint64 openId = router.commitOrder(CfdTypes.Side.LONG, quote.maxSizeDelta, margin, PRICE, false);
+        bytes[] memory update = _mockPythUpdateData(PRICE);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory opened = router.executeOrder(openId, update);
+        assertEq(uint8(opened.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        (uint256 size,,,,,,) = engine.positions(ACCOUNT);
+        assertEq(size, quote.maxSizeDelta);
+        assertLt(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 200_000);
+        uint256 closeSize = isPartial ? (size / 2 / CfdTypes.SIZE_QUANTUM) * CfdTypes.SIZE_QUANTUM : size;
+        uint256 price = isPartial ? PRICE - 1_000_000 : PRICE;
+        (uint64 id,) = _requestCommitParity(_request(CfdTypes.Side.LONG, closeSize), price);
+        _executeRequest(id, price, size - closeSize);
+    }
+
+}
+
+contract CfdClosePreviewRequestCarryTest is CfdClosePreviewRequestTest {
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
+        params = super._riskParams();
+        params.baseCarryBps = 500;
+    }
+
+    function test_RequestCommitmentCarryIsCollectedExactlyOnce() public {
+        _openNormally(CfdTypes.Side.LONG, 0);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        (uint64 id, CfdClosePreview.ClosePreview memory p) =
+            _requestCommitParity(_request(CfdTypes.Side.LONG, SIZE), PRICE);
+        assertGt(p.commitmentCarryUsdc, 0);
+        assertEq(p.assessment.carryUsdc, p.commitmentCarryUsdc);
+        _executeRequest(id, PRICE, 0);
+    }
+
+    function test_RequestCarryIncludedInActionChargeBound() public {
+        _openNormally(CfdTypes.Side.LONG, 0);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        OrderV3Types.OrderRequest memory r = _request(CfdTypes.Side.LONG, SIZE);
+        CfdClosePreview.ClosePreview memory p = _requestPreview(r, PRICE);
+        assertGt(p.commitmentCarryUsdc, 0);
+        r.bounds.maxActionChargeUsdc = p.assessment.actionChargeAssessedUsdc;
+        _requestPreview(r, PRICE);
+        r.bounds.maxActionChargeUsdc -= 1;
+        bytes memory err = abi.encodeWithSelector(
+            ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
+            OrderV3Types.ConstraintKind.ActionCharge,
+            p.assessment.actionChargeAssessedUsdc,
+            r.bounds.maxActionChargeUsdc
+        );
+        vm.expectRevert(err);
+        previewer.previewClose(address(engine), ACCOUNT, r, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
+        vm.expectRevert(err);
+        previewer.previewClose(
+            address(engine), _order(r.side, r.sizeDelta), KEEPER, PRICE, uint64(vm.getBlockTimestamp()), r.bounds
+        );
+    }
+
+    function test_RequestUnpaidCarryAllowsFullCloseButRejectsPartialClose() public {
+        _openNormally(CfdTypes.Side.SHORT, 0);
+        vm.warp(vm.getBlockTimestamp() + 200 * 365 days);
+        OrderV3Types.OrderRequest memory r = _request(CfdTypes.Side.SHORT, SIZE);
+        CfdClosePreview.ClosePreview memory p = _requestPreview(r, PRICE);
+        assertGt(p.commitment.carryOutstandingUsdc, 0);
+        r.sizeDelta = SIZE / 2;
+        bytes memory err = abi.encodeWithSelector(
+            ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, p.commitment.carryOutstandingUsdc
+        );
+        vm.expectRevert(err);
+        previewer.previewClose(address(engine), ACCOUNT, r, KEEPER, PRICE, uint64(vm.getBlockTimestamp()));
+        vm.expectRevert(err);
+        vm.prank(ACCOUNT);
+        router.commitOrder(r);
+        r.sizeDelta = SIZE;
+        _requestCommitParity(r, PRICE);
     }
 
 }

@@ -12,6 +12,7 @@ while IFS= read -r path; do
     case "${path##*/}" in
         CfdSponsoredCloseFork.t.sol) variable=SPONSORED_CLOSE_FORK_RPC_URL ;;
         HistoricalCloseRegression.t.sol) variable=CLOSE_REGRESSION_ARCHIVE_RPC_URL ;;
+        NativeCloseFallback.t.sol) variable=NATIVE_CLOSE_FORK_RPC_URL ;;
         *) echo "Unclassified fork prerequisite: ${path}" >&2; exit 2 ;;
     esac
     if [ -z "${!variable:-}" ]; then

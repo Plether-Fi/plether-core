@@ -26,21 +26,10 @@ abstract contract OrderCommitHandler is OrderValidation {
         address account = order.account;
         CfdEnginePlanTypes.CloseCommitment memory effects =
             _reserveExecutionBounty(account, order.sizeDelta, executionBountyUsdc, order.isClose);
-        if (effects.bountyFromPledgeUsdc != 0 && pendingOrderCounts[account] != 0) {
-            revert OrderRouter__PledgeBountyRequiresEmptyQueue();
-        }
-        uint64 sourcePositionEpoch = effects.bountyFromPledgeUsdc == 0 ? 0 : engine.positionEpoch(account);
-        // Zero pledge funding has no position provenance; a funded pledge records its exact live epoch.
-        // slither-disable-next-line incorrect-equality
-        clearinghouse.recordFundedBountyReservation(
-            account,
-            IMarginClearinghouse.BountyKind.Order,
-            orderId,
-            executionBountyUsdc,
-            effects.bountyFromPledgeUsdc,
-            sourcePositionEpoch
+        clearinghouse.recordBountyReservation(
+            account, IMarginClearinghouse.BountyKind.Order, orderId, executionBountyUsdc
         );
-        _onOrderCommitted(order, effects, sourcePositionEpoch);
+        _onOrderCommitted(order, effects, 0);
         _reserveCommittedMargin(account, orderId, order.isClose, order.marginDelta);
 
         _recordCommittedOrder(order);
