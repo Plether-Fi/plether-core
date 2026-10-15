@@ -62,8 +62,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         uint256 currentPoolDepthUsdc = pool.totalAssets();
         vm.prank(address(engine));
         CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(account, currentPoolDepthUsdc);
-        CfdEnginePlanTypes.CloseDelta memory delta =
-            engine.planner().planClose(snap, closeOrder, 103_000_000, uint64(block.timestamp));
+        CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, closeOrder, 103_000_000);
 
         uint256 committedBefore = clearinghouse.getLockedMarginBuckets(account).committedOrderMarginUsdc;
         assertTrue(delta.valid, "Terminal close plan should remain executable");
@@ -156,7 +155,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         vm.warp(block.timestamp + 31);
         uint256 reserveBeforeFresh = clearinghouse.actionReserveUsdc(account);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
         assertEq(
             clearinghouse.actionReserveUsdc(account) - reserveBeforeFresh,
             0,
@@ -166,7 +165,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         vm.warp(block.timestamp + 30 days);
         uint256 reserveBeforeStale = clearinghouse.actionReserveUsdc(account);
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
         assertEq(
             clearinghouse.actionReserveUsdc(account) - reserveBeforeStale,
             0,
@@ -189,7 +188,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         engine.updateMarkPrice(0, uint64(block.timestamp));
         vm.prank(address(router));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
     }
 
     function test_ReserveCloseOrderExecutionBounty_ExcludesQueuedReservationsFromGenericReachability() public {
@@ -219,7 +218,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         );
 
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, 10_000e18, 0);
+        engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
         assertEq(clearinghouse.getAccountUsdcBuckets(account).otherLockedMarginUsdc, buckets.otherLockedMarginUsdc);
     }
 
@@ -343,7 +342,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
         vm.prank(address(router));
-        engine.reserveCloseOrderExecutionBounty(account, size, 0);
+        engine.reserveCloseOrderExecutionBounty(account, size);
         assertEq(clearinghouse.actionReserveUsdc(account), 0);
     }
 
@@ -364,7 +363,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
 
         vm.prank(address(router));
         vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
-        engine.reserveCloseOrderExecutionBounty(account, size / 2, 0);
+        engine.reserveCloseOrderExecutionBounty(account, size / 2);
     }
 
 }

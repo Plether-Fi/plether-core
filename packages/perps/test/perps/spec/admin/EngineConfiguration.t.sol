@@ -28,7 +28,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         CfdTypes.Position memory position;
 
         vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
-        sidecar.executeClose(delta, position, uint64(block.timestamp), 0);
+        sidecar.executeClose(delta, position, uint64(block.timestamp));
     }
 
     function test_SettlementSidecar_RejectsCanonicalPostOpenSolvencyBreach() public {
@@ -97,7 +97,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         sidecar.executeOpen(openDelta, position, uint64(block.timestamp));
 
         vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
-        sidecar.executeClose(closeDelta, position, uint64(block.timestamp), 0);
+        sidecar.executeClose(closeDelta, position, uint64(block.timestamp));
 
         vm.expectRevert(CfdEngineSettlementSidecar.CfdEngineSettlementSidecar__Unauthorized.selector);
         sidecar.executeLiquidation(liquidationDelta, uint64(block.timestamp), address(this));

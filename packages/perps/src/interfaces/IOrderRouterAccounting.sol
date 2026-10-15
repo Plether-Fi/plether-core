@@ -26,7 +26,7 @@ interface IOrderRouterAccounting {
     ///      `executionBountyUsdc` is the clearinghouse aggregate across order and protection bounty namespaces.
     ///      The router owns lifecycle counts and holds no settlement cash. Monetary fields use 6-decimal USDC.
     /// @param committedMarginUsdc Remaining committed margin across active clearinghouse reservations.
-    /// @param executionBountyUsdc Unpaid order, protection-trigger, and protection-execution bounties.
+    /// @param executionBountyUsdc Unpaid open-order and protection-trigger bounties; close bounties are zero.
     /// @param pendingOrderCount Number of linked pending orders for the account.
     struct AccountReservationView {
         uint256 committedMarginUsdc;

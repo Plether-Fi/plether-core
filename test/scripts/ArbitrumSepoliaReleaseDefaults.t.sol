@@ -273,7 +273,6 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "basket confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
         assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000, "position protection trigger bounty");
-        assertEq(router.closeOrderExecutionBountyUsdc(), 0, "ordinary/protection close execution bounty");
     }
 
     function test_DeploymentGuardsAcceptDistinctCanonicalPositionProtectionBookAndBoundSidecar() public {
@@ -480,12 +479,12 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertFalse(pool.lpEpochSettlementPaused(), "LP epoch settlement starts paused");
     }
 
-    function test_AsyncVaultReleaseDefaults_InitializeJuniorMaintenanceFeeAtProtocolTreasury() public {
+    function test_AsyncVaultReleaseDefaults_DisableJuniorMaintenanceFeeWithTreasuryRecipient() public {
         (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
 
         assertEq(seniorVault.maintenanceFeeAprBps(), 0, "Senior maintenance fee APR");
         assertEq(seniorVault.maintenanceFeeRecipient(), address(0), "Senior maintenance fee recipient");
-        assertEq(juniorVault.maintenanceFeeAprBps(), 100, "Junior maintenance fee APR");
+        assertEq(juniorVault.maintenanceFeeAprBps(), 0, "Junior maintenance fee APR");
         assertEq(
             juniorVault.maintenanceFeeRecipient(),
             CfdEngine(address(pool.ENGINE())).protocolTreasury(),
@@ -502,7 +501,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
     function test_DeploymentAndBootstrapRejectUnexpectedMaintenanceFeeRecipient() public {
         (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
-        juniorVault.proposeMaintenanceFeeConfig(100, address(0xFEE));
+        juniorVault.proposeMaintenanceFeeConfig(0, address(0xFEE));
         vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
         juniorVault.finalizeMaintenanceFeeConfig();
 
@@ -512,6 +511,21 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
         vm.expectRevert(bytes("TrancheVault maintenance fee recipient mismatch"));
+        bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+    }
+
+    function test_DeploymentAndBootstrapRejectNonzeroJuniorMaintenanceFeeApr() public {
+        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+        juniorVault.proposeMaintenanceFeeConfig(100, CfdEngine(address(pool.ENGINE())).protocolTreasury());
+        vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
+        juniorVault.finalizeMaintenanceFeeConfig();
+
+        DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
+        vm.expectRevert(bytes("TrancheVault maintenance fee APR mismatch"));
+        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
+
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        vm.expectRevert(bytes("TrancheVault maintenance fee APR mismatch"));
         bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
     }
 
@@ -730,7 +744,6 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
         config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
@@ -752,7 +765,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "senior", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Junior", "junior", 100, engine.protocolTreasury()
+            IERC20(address(usdc)), address(pool), false, "Junior", "junior", 0, engine.protocolTreasury()
         );
         pool.setJuniorVault(address(juniorVault));
     }

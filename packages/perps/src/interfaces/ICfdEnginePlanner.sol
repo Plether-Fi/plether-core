@@ -10,10 +10,13 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 ///      8 decimals, position sizes use 18 decimals, and timestamps are Unix seconds.
 interface ICfdEnginePlanner {
 
+    /// @notice Validates close commitment and projects margin-first carry with a zero execution bounty.
+    /// @param snapshot Canonical account and cached-mark snapshot
+    /// @param size Intended close size in canonical size quanta
+    /// @return effects Carry and post-commitment custody projection; bounty fields are zero
     function planCloseCommit(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        uint256 size,
-        uint256 bounty
+        uint256 size
     ) external pure returns (CfdEnginePlanTypes.CloseCommitment memory effects);
 
     /// @notice Classifies the recurring and governance-override market-calendar regimes.
@@ -47,7 +50,7 @@ interface ICfdEnginePlanner {
         uint256 carryIndexDelta
     ) external pure returns (uint256 carryUsdc);
 
-    /// @notice Returns the exact lot-based price-risk liquidation test used for close-bounty reservations.
+    /// @notice Returns the exact lot-based price-risk test used by withdrawal and protection health checks.
     function isExactPriceRiskLiquidatable(
         CfdTypes.Position memory pos,
         uint256 entryCostUsdcAtoms,
@@ -59,46 +62,40 @@ interface ICfdEnginePlanner {
 
     /// @notice Plans an open or increase order from a raw engine snapshot.
     /// @dev Caps the execution price at `snap.capPrice`. Expected business failures are encoded in the returned delta;
-    ///      arithmetic violations or inconsistent inputs can still revert. `publishTime` is currently unused.
+    ///      arithmetic violations or inconsistent inputs can still revert.
     /// @param snap Trusted account, side, pool, collateral, claim, carry, and risk snapshot
     /// @param order Open/increase order; the planner does not authenticate router-level flags or timing
     /// @param executionPrice Candidate execution price used for notional and PnL math (8 decimals)
-    /// @param publishTime Oracle publish timestamp retained for interface parity; currently unused
     /// @return delta Complete open settlement plan or a partially populated typed failure result
     function planOpen(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
-        uint256 executionPrice,
-        uint64 publishTime
+        uint256 executionPrice
     ) external pure returns (CfdEnginePlanTypes.OpenDelta memory delta);
 
     /// @notice Plans a close or decrease order from a raw engine snapshot.
-    /// @dev Caps the execution price at `snap.capPrice`. A zero close size against a live position can produce a valid
-    ///      no-op plan, which entrypoint policy must reject when required. A zero-size snapshot position paired with a
-    ///      zero close size can divide by zero, and other malformed inputs can also revert. `publishTime` is unused.
+    /// @dev Caps the execution price at `snap.capPrice`. A side mismatch with a live position returns `SIDE_MISMATCH`
+    ///      before carry; zero and non-quantized close sizes return `INVALID_SIZE_QUANTUM`. A size exceeding the
+    ///      snapshot position returns `CLOSE_SIZE_EXCEEDS`. Inconsistent snapshots or arithmetic can still revert.
     /// @param snap Trusted account, side, pool, collateral, claim, carry, and risk snapshot
     /// @param order Close/decrease order; the planner does not authenticate router-level flags or timing
     /// @param executionPrice Candidate execution price used for realized PnL math (8 decimals)
-    /// @param publishTime Oracle publish timestamp retained for interface parity; currently unused
     /// @return delta Complete close settlement plan or a partially populated typed failure result
     function planClose(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Order memory order,
-        uint256 executionPrice,
-        uint64 publishTime
+        uint256 executionPrice
     ) external pure returns (CfdEnginePlanTypes.CloseDelta memory delta);
 
     /// @notice Plans liquidation from a raw engine snapshot.
     /// @dev Caps the execution price at `snap.capPrice`. A snapshot without a position returns a nonliquidatable
-    ///      zero/partial delta. `publishTime` is currently unused.
+    ///      zero/partial delta. An underfunded negative-VPI reserve reverts before eligibility is tested.
     /// @param snap Trusted account, position, pool, collateral, claim, carry, and risk snapshot
     /// @param executionPrice Candidate liquidation execution price (8 decimals)
-    /// @param publishTime Oracle publish timestamp retained for interface parity; currently unused
     /// @return delta Liquidation test and, when liquidatable, the complete settlement plan
     function planLiquidation(
         CfdEnginePlanTypes.RawSnapshot memory snap,
-        uint256 executionPrice,
-        uint64 publishTime
+        uint256 executionPrice
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta);
 
     /// @notice Maps an open planning revert code to its commit-time failure category.

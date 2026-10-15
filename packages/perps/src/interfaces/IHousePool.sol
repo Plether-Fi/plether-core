@@ -111,8 +111,6 @@ interface IHousePool {
     error HousePool__NotAVault();
     /// @notice A senior-only accounting hook was called by an address other than the configured senior vault.
     error HousePool__NotSeniorVault();
-    /// @notice Legacy one-time router configuration was attempted after a router had already been set.
-    error HousePool__RouterAlreadySet();
     /// @notice The owner attempted to replace the configured senior vault.
     error HousePool__SeniorVaultAlreadySet();
     /// @notice The owner attempted to replace the configured junior vault.
@@ -183,11 +181,6 @@ interface IHousePool {
     /// @notice Governance attempted to release an LP epoch settlement hold that is not active.
     error HousePool__LpEpochSettlementNotPaused();
 
-    /// @notice Legacy event describing a mark-dependent waterfall reconciliation.
-    /// @param seniorPrincipal Resulting senior principal in USDC.
-    /// @param juniorPrincipal Resulting junior principal in USDC.
-    /// @param delta Signed value reconciled: positive for revenue and negative for loss, in USDC.
-    event Reconciled(uint256 seniorPrincipal, uint256 juniorPrincipal, int256 delta);
     /// @notice Emitted when finalized governance changes the annual senior target coupon.
     /// @param newRateBps New annual rate in basis points.
     event SeniorRateUpdated(uint256 newRateBps);

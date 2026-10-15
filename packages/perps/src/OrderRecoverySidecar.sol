@@ -74,7 +74,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         receipt.reason = OrderV3Types.TerminalReason.ExpiredReservationMismatch;
         _state(host, receipt, true);
         IMarginClearinghouse.BountyRecovery memory recovery = host.expireMismatchedOrderFromSidecar(orderId);
-        receipt.bountyUsdc = recovery.freeUsdc + recovery.pledgeUsdc;
+        receipt.bountyUsdc = recovery.freeUsdc;
         receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
         receipt.bounty.discrepancy = OrderV3Types.ReservationDiscrepancy(recovery.discrepancy);
         if (receipt.bountyUsdc != 0) {
@@ -188,13 +188,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         if (!failureIsEmpty) {
             revert OrderRouterExecutionSidecar__InvalidSettledReason();
         }
-        uint256 refund = input.reason == OrderV3Types.TerminalReason.RiskOff
-            ? input.bountyUsdc
-            : pending.commitment.bountyFromPledgeUsdc;
-        // The lifecycle book rejects mixed refunds; keep that impossible outcome out of receipt construction.
-        if (refund != 0 && refund != input.bountyUsdc) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
-        }
+        uint256 refund = input.reason == OrderV3Types.TerminalReason.RiskOff ? input.bountyUsdc : 0;
         OrderV3Types.BountyDisposition disposition;
         address recipient;
         if (input.bountyUsdc != 0) {

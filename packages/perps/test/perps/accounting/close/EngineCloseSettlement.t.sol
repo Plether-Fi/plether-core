@@ -78,7 +78,6 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
             priceLossUsdc,
             "Price loss above the PnL pledge should remain a diagnostic writeoff"
         );
-        assertEq(withoutClaim.badDebtUsdc, 0, "Uncollectible price loss must not create protocol debt");
         assertEq(withoutClaim.executionFeeUsdc, 0, "No physical value should collect the execution fee");
         assertEq(withoutClaim.frozenSpreadPaidUsdc, 0, "No physical value should collect the spread");
         assertEq(
@@ -104,7 +103,6 @@ contract EngineCloseSettlementTest is CfdEngineTestBase {
         );
         assertEq(preview.seizedCollateralUsdc, 0, "Claim-first price netting should preserve the isolated PnL pledge");
         assertEq(preview.executionFeeUsdc, 0, "Execution fee must be waived without eligible action collateral");
-        assertEq(preview.badDebtUsdc, 0, "Price-loss netting must not create protocol debt");
         assertEq(preview.frozenSpreadPaidUsdc, 0, "Frozen spread must not consume same-account claim value");
         assertEq(
             preview.frozenSpreadWaivedUsdc,

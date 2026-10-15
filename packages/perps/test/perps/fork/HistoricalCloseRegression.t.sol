@@ -70,7 +70,10 @@ contract HistoricalCloseRegressionTest is Test {
         request.bounds.maxExplicitFeesUsdc = type(uint256).max;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
-        vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector);
+        // The forked V2 engine predates the current ABI and still raises this retired selector.
+        vm.expectPartialRevert(
+            bytes4(keccak256("CfdEngine__InsufficientCloseOrderBountyBacking(uint256,uint256,uint256)"))
+        );
         vm.prank(account);
         ILegacyCloseRouter(address(ROUTER)).commitOrder(request);
     }

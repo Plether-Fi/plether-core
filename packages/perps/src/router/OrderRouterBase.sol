@@ -31,14 +31,12 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     uint256 public minOpenOrderExecutionBountyUsdc;
     /// @notice Maximum open-order keeper bounty (6-decimal USDC).
     uint256 public maxOpenOrderExecutionBountyUsdc;
-    /// @notice Fixed close-order keeper bounty (6-decimal USDC).
-    uint256 public closeOrderExecutionBountyUsdc;
     /// @notice Fixed keeper bounty paid when an armed protection is validly triggered (6-decimal USDC).
     uint256 public positionProtectionTriggerBountyUsdc;
 
     /// @notice Initializes oracle/accounting integrations, deploys the admin, and installs router defaults.
     /// @dev Defaults are: $100 minimum open notional, 1 bp open bounty with $0.01/$0.20 floor/cap,
-    ///      $0.20 close and protection-trigger bounties, 600,000 minimum engine gas,
+    ///      zero close bounty and $0.20 protection-trigger bounty, 600,000 minimum engine gas,
     ///      and 64 expiry/config-mismatch prunes per call.
     /// @param _engine CfdEngine that processes trades and liquidations.
     /// @param _engineLens CfdEngineLens used for open-order commit preflight.
@@ -74,7 +72,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         openOrderExecutionBountyBps = 1;
         minOpenOrderExecutionBountyUsdc = 10_000;
         maxOpenOrderExecutionBountyUsdc = 200_000;
-        closeOrderExecutionBountyUsdc = 0;
         positionProtectionTriggerBountyUsdc = 200_000;
         minEngineGas = 600_000;
         maxPruneOrdersPerCall = 64;
@@ -99,25 +96,22 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         return OrderRouterAdmin(admin).riskOffOrderCutoff();
     }
 
-    /// @notice Delegates close-bounty reservation and solvency checks to the engine.
-    /// @dev Engine validation and funding errors propagate with their original selectors and diagnostics.
-    /// @param account Account funding the close bounty.
+    /// @notice Delegates zero-bounty close admission and carry checkpointing to the engine.
+    /// @dev Engine validation errors propagate with their original selectors and diagnostics.
+    /// @param account Account committing the close.
     /// @param sizeDelta Close size used by engine validation (18 decimals).
-    /// @param executionBountyUsdc Fixed bounty to reserve (6-decimal USDC).
     function _reserveCloseExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 executionBountyUsdc
+        uint256 sizeDelta
     ) internal override returns (CfdEnginePlanTypes.CloseCommitment memory) {
-        return engine.reserveCloseOrderExecutionBounty(account, sizeDelta, executionBountyUsdc);
+        return engine.reserveCloseOrderExecutionBounty(account, sizeDelta);
     }
 
     function _onOrderCommitted(
         CfdTypes.Order memory order,
-        CfdEnginePlanTypes.CloseCommitment memory effects,
-        uint64 sourcePositionEpoch
+        CfdEnginePlanTypes.CloseCommitment memory effects
     ) internal override {
-        lifecycleBook.recordCommitment(order.orderId, effects, sourcePositionEpoch);
+        lifecycleBook.recordCommitment(order.orderId, effects);
     }
 
     /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.

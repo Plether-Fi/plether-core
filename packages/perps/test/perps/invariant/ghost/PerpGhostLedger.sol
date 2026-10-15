@@ -6,7 +6,6 @@ contract PerpGhostLedger {
     struct LiquidationSnapshot {
         bool liquidated;
         uint256 generation;
-        uint256 legacyDebtDiagnosticUsdc;
     }
 
     address public immutable handler;
@@ -19,7 +18,6 @@ contract PerpGhostLedger {
 
     mapping(address => LiquidationSnapshot) internal liquidationSnapshots;
     mapping(address => uint256) public accountGeneration;
-    mapping(address => uint256) public liquidationDebtDiagnosticTotal;
     mapping(address => WalletFlows) internal walletFlows;
     mapping(address => uint256) internal committedMarginUsdc;
     uint256 internal totalTrackedCommittedMarginUsdc;
@@ -33,17 +31,13 @@ contract PerpGhostLedger {
     }
 
     function recordLiquidation(
-        address account,
-        uint256 legacyDebtDiagnosticUsdc
+        address account
     ) external {
         if (msg.sender != handler) {
             revert PerpGhostLedger__Unauthorized();
         }
 
-        liquidationSnapshots[account] = LiquidationSnapshot({
-            liquidated: true, generation: accountGeneration[account], legacyDebtDiagnosticUsdc: legacyDebtDiagnosticUsdc
-        });
-        liquidationDebtDiagnosticTotal[account] += legacyDebtDiagnosticUsdc;
+        liquidationSnapshots[account] = LiquidationSnapshot({liquidated: true, generation: accountGeneration[account]});
         accountGeneration[account]++;
     }
 

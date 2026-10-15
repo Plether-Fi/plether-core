@@ -5,7 +5,6 @@ import {BasePerpTest} from "../BasePerpTest.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 
 /// @notice Real-state admission classifications derived from explicit price equity, never preview.valid.
 /// VPI is disabled; the mandatory 4-bps fee is included. Carry and real deferred claims have separate fixtures.
@@ -110,21 +109,10 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
     }
 
     function test_UnfundedCarryRejectsPublicPartialCommitAndRollsBack() public {
-        _checkUnfundedCarryCommit(false);
+        _checkUnfundedCarryCommit();
     }
 
-    function test_UnfundedCarryRejectsEvenWhenCloseBountyIsZero() public {
-        _checkUnfundedCarryCommit(true);
-    }
-
-    function _checkUnfundedCarryCommit(
-        bool zeroBounty
-    ) private {
-        if (zeroBounty) {
-            IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
-            config.closeOrderExecutionBountyUsdc = 0;
-            _setRouterConfig(config);
-        }
+    function _checkUnfundedCarryCommit() private {
         _enableCarry();
         _fundTrader(ACCOUNT, 131_200_000);
         _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 131_200_000, 80_000_000);
@@ -135,15 +123,9 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
         engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
         bytes32 beforeState = _state();
         uint64 nextId = router.nextCommitId();
-        if (zeroBounty) {
-            vm.expectRevert(
-                abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 187_320_000)
-            );
-        } else {
-            vm.expectRevert(
-                abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 187_320_000)
-            );
-        }
+        vm.expectRevert(
+            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 187_320_000)
+        );
         vm.prank(ACCOUNT);
         router.commitOrder(CfdTypes.Side.LONG, 50 * CfdTypes.SIZE_QUANTUM, 0, 80_000_000, true);
         assertEq(_state(), beforeState, "Commit rejection rolls back assessed carry and bounty reservation");

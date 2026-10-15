@@ -34,7 +34,6 @@ library OrderV3Types {
         uint256 bountyEntitlementUsdc;
         uint256 bountyPaidUsdc;
         uint256 bountyRefundedUsdc;
-        uint256 bountyRetainedUsdc;
         uint256 bountyForfeitedUsdc;
         ReservationDiscrepancy discrepancy;
     }
@@ -79,13 +78,7 @@ library OrderV3Types {
         None,
         Paid,
         Forfeited,
-        RefundedToAccount,
-        /// @notice The bounty remains reserved for a fresh attempt of the same latched position protection.
-        RetainedForProtectionRetry,
-        /// @notice The original free-funded part was paid; the original pledge was restored to its position.
-        PaidAndRefunded,
-        /// @notice The free-funded part was forfeited; the pledge was restored before liquidation loss recovery.
-        ForfeitedAndRefunded
+        RefundedToAccount
     }
 
     /// @notice Canonical reason for a terminal order transition.

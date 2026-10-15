@@ -92,44 +92,56 @@ export function captureCompatibility(client) {
   })
 }
 
-export async function assertCompatibility(client, fixture) {
+export async function assertCompatibility(client, fixture, currentSchema) {
   const current = captureCompatibility(client)
-  // Reviewed source-candidate extension: preserve the immutable app fixture and prove the exact error-only delta.
-  const additions = [
-    { type: 'error', name: 'OrderRouter__PledgeBountyRequiresEmptyQueue', inputs: [] },
-    { type: 'error', name: 'OrderRouter__RestoredPledgeMadeSolvent', inputs: [] },
-    { type: 'error', name: 'OrderRouter__SettlementFloorFunding', inputs: [
-      { name: 'orderId', type: 'uint64', internalType: 'uint64' },
-      { name: 'balanceUsdc', type: 'uint256', internalType: 'uint256' },
-      { name: 'minimumUsdc', type: 'uint256', internalType: 'uint256' },
-      { name: 'maxGrossDebitUsdc', type: 'uint256', internalType: 'uint256' },
-    ] },
-    { type: 'error', name: 'OrderRouter__SettlementFloorOrderPending', inputs: [
-      { name: 'orderId', type: 'uint64', internalType: 'uint64' },
-    ] },
-    { type: 'error', name: 'OrderRouter__SettlementFloorUnsupported', inputs: [] },
-    { type: 'error', name: 'OrderRouter__SettlementFloorWithdrawal', inputs: [
-      { name: 'orderId', type: 'uint64', internalType: 'uint64' },
-      { name: 'balanceUsdc', type: 'uint256', internalType: 'uint256' },
-      { name: 'minimumUsdc', type: 'uint256', internalType: 'uint256' },
-      { name: 'maxGrossDebitUsdc', type: 'uint256', internalType: 'uint256' },
-    ] },
-  ]
-  const removed = []
-  const historicalAbi = client.positionProtectionBookAbi.filter(item => {
-    if (item.type === 'error' && additions.some(addition => addition.name === item.name)) {
-      removed.push(item)
-      return false
-    }
-    return true
-  })
-  assert.deepEqual(removed, additions, 'Compatibility permits exactly the reviewed source-bound bounty and settlement-floor errors')
-  assert.equal(current.protectionAbiHash, '0x04a062fcc4bf7b94828d9064e7ca95f9f6990d59e35f83a4abcb2ba884095deb',
-    'Complete protection ABI differs from the reviewed candidate')
-  const historicalHash = keccak256(new TextEncoder().encode(JSON.stringify(historicalAbi)))
-  assert.equal(historicalHash, fixture.protectionAbiHash, 'Removing exactly the reviewed errors must restore the complete historical ABI')
-  assert.deepEqual({ ...current, protectionAbiHash: historicalHash }, fixture,
-    'Published package changed the baseline encoding, hashes, ABI, or exports')
+  assert.equal(currentSchema.schema, 'current-v5', 'Wrong current schema golden')
+  assert.equal(fixture.protectionAbiHash, currentSchema.historicalProtectionAbiHash,
+    'Immutable historical protection ABI baseline changed')
+  // The immutable 0.2 baseline still guards action calldata, sponsorship and UserOperation hashes.
+  // The V5 receipt and protection view are a reviewed 0.3 schema break with their own fixed golden hashes.
+  const expectedExports = fixture.exports.filter(name => name !== 'hashOrderReceiptV4')
+    .concat('hashOrderReceiptV5').sort()
+  assert.deepEqual(current.exports, expectedExports, 'Only the reviewed current-receipt export may change')
+  assert.deepEqual(current.envelope, fixture.envelope, 'Native sponsorship envelope changed')
+  assert.deepEqual(current.actions, fixture.actions, 'Retained action calldata or sponsorship hashes changed')
+  assert.equal(current.protectionAbiHash, currentSchema.protectionAbiHash, 'Current protection ABI changed')
+  for (const [name, abi] of Object.entries({
+    closePreviewV3Abi: client.closePreviewV3Abi,
+    committedOrderV3Abi: client.committedOrderV3Abi,
+    orderLifecycleV5Abi: client.orderLifecycleV5Abi,
+    orderRouterV3Abi: client.orderRouterV3Abi,
+  })) {
+    assert.equal(keccak256(new TextEncoder().encode(JSON.stringify(abi))), currentSchema.abiHashes[name],
+      `${name} differs from the reviewed V5 schema`)
+  }
+  assert.equal(keccak256(new TextEncoder().encode(JSON.stringify(client.orderLifecycleV4Abi))),
+    currentSchema.historicalOrderLifecycleV4AbiHash, 'Archived V4 Book ABI changed')
+  const preview = client.closePreviewV3Abi.find(item => item.type === 'function' && item.name === 'previewClose')
+  assert(preview, 'Current close preview is missing')
+  assert.equal(preview.inputs.some(item => item.name === 'publishTime'), false,
+    'Current close preview retains an unused publish-time argument')
+  assert.equal(preview.outputs[0].components.some(item => item.name === 'executionBountyUsdc'), false,
+    'Current close preview must not expose a zero-only bounty output')
+  const protectionCreated = client.positionProtectionBookAbi.find(item => item.type === 'event' && item.name === 'PositionProtectionCreated')
+  assert(protectionCreated, 'Current protection-created event is missing')
+  assert.deepEqual(protectionCreated.inputs.map(item => item.name),
+    ['protectionId', 'account', 'parentOrderId', 'takeProfitTriggerPrice', 'stopLossTriggerPrice', 'triggerBountyUsdc'],
+    'Current protection-created event still includes the zero-only execution bounty')
+  const protectionCreatedSignature = `${protectionCreated.name}(${protectionCreated.inputs.map(item => item.type).join(',')})`
+  assert.equal(keccak256(new TextEncoder().encode(protectionCreatedSignature)),
+    currentSchema.positionProtectionCreatedTopic0, 'Protection-created topic0 changed')
+  const committedAssessment = client.committedOrderV3Abi.find(item => item.type === 'function' && item.name === 'assessCommittedOrder')
+  assert(committedAssessment, 'Committed-order evaluator is missing')
+  assert.equal(committedAssessment.inputs.some(item => item.name === 'publishTime'), false,
+    'Current committed-order evaluator retains an unused publish-time argument')
+  const finalized = client.orderLifecycleV5Abi.find(item => item.type === 'event' && item.name === 'OrderFinalized')
+  assert(finalized, 'Current terminal event is missing')
+  const receipt = finalized.inputs.find(item => item.name === 'receipt')
+  assert(receipt, 'Current receipt is missing')
+  for (const retired of ['bountyFromPledgeUsdc', 'bountyRetainedUsdc', 'sourcePositionEpoch']) {
+    assert.equal(JSON.stringify(receipt).includes(`"${retired}"`), false,
+      `Current receipt retains retired field ${retired}`)
+  }
   const finalEnvelope = client.normalizePaymasterResponse(response())
   const stubEnvelope = client.normalizePaymasterResponse(response('00'))
   // Every protection action traverses the hardened native-sponsorship path.

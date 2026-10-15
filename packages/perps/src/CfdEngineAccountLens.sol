@@ -65,8 +65,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             ? buckets.settlementBalanceUsdc - executionBountyReserveUsdc
             : 0;
         viewData.terminalPriceCollectibleCapUsdc = _terminalPriceCollectibleCapUsdc(account, _position(account));
-        viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(account);
-        viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(account);
+        viewData.accountEquityUsdc = buckets.settlementBalanceUsdc;
+        viewData.freeBuyingPowerUsdc = buckets.freeSettlementUsdc;
         viewData.traderClaimBalanceUsdc = engineContract.traderClaimBalanceUsdc(account);
     }
 
@@ -192,9 +192,10 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @dev Requires a configured ABI-compatible order router. For an open position, risk uses the cached mark without
     ///      freshness validation, exact lot-based entry cost, PnL pledge plus same-account claim, exact price PnL, and the
     ///      active FAD or maintenance requirement. Pending carry consumes projected margin first, then free settlement.
-    ///      Price health uses the reduced pledge; any carry uncovered by both sources independently makes the
-    ///      account liquidatable and cannot consume claims or other reserves. Negative VPI is independently required to have full
-    ///      dedicated-reserve backing; underfunding makes the account liquidatable, while excess reserve never adds price
+    ///      Price health uses the reduced pledge; any carry uncovered by both sources independently sets the
+    ///      diagnostic liquidatable flag and cannot consume claims or other reserves. Negative VPI independently
+    ///      requires full dedicated-reserve backing; underfunding also sets that flag, but the liquidation planner
+    ///      rejects an underfunded snapshot before returning a settlement plan. Excess reserve never adds price
     ///      collateral. The separate terminal-price cap excludes action reserves and clips price collateral to the
     ///      reachable endpoint. A flat account still returns raw ledger values but leaves every position and risk field,
     ///      including net equity, at its zero default. Projecting nonzero borrow-base carry additionally requires a
@@ -245,8 +246,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.liquidationReachableSettlementUsdc =
             MarginClearinghouseAccountingLib.getTerminalReachableUsdc(terminalBuckets);
         snapshot.terminalPriceCollectibleCapUsdc = _terminalPriceCollectibleCapUsdc(account, pos);
-        snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(account);
-        snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(account);
+        snapshot.accountEquityUsdc = buckets.settlementBalanceUsdc;
+        snapshot.freeBuyingPowerUsdc = buckets.freeSettlementUsdc;
 
         if (pos.size == 0) {
             return snapshot;
@@ -268,8 +269,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     /// @param account Account whose exact position basis, dedicated price collateral, and isolated carry are included.
     /// @param pos Current position.
     /// @param buckets Already-loaded canonical custody snapshot; kept unchanged for ledger diagnostics.
-    /// @return state Exact price PnL, P+C price equity, notional, active requirement, and a liquidation flag that
-    ///         independently includes any uncovered carry or underfunded negative-VPI reserve.
+    /// @return state Exact price PnL, P+C price equity, notional, active requirement, and a diagnostic liquidation
+    ///         flag that includes uncovered carry or underfunded negative-VPI reserve. The liquidation planner
+    ///         rejects an underfunded VPI reserve rather than executing it.
     function _buildSnapshotRiskState(
         address account,
         CfdTypes.Position memory pos,
@@ -323,8 +325,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     /// @notice Returns the exact account-local cap committed to the terminal price-PnL book.
-    /// @dev Claims and refundable close escrow are included only for a live position. The cap is clipped at the
-    ///      side endpoint; the escrow remains excluded from physical margin and liquidation health until restored.
+    /// @dev Only the PnL pledge and same-account claim contribute for a live position. The cap is clipped at the
+    ///      side endpoint; action reserves and zero-bounty close records do not add price-loss backing.
     function _terminalPriceCollectibleCapUsdc(
         address account,
         CfdTypes.Position memory pos

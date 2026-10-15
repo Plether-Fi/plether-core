@@ -101,9 +101,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         _fundTrader(account, 10_000e6);
 
         assertEq(
-            engineLens.previewOpenRevertCode(
-                account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8, uint64(block.timestamp)
-            ),
+            engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8),
             uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
             "Planner should use the explicit init margin config"
         );

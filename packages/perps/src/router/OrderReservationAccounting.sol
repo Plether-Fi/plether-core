@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -16,8 +17,7 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
 
     function _onOrderCommitted(
         CfdTypes.Order memory order,
-        CfdEnginePlanTypes.CloseCommitment memory effects,
-        uint64 sourcePositionEpoch
+        CfdEnginePlanTypes.CloseCommitment memory effects
     ) internal virtual;
 
     /// @notice Ephemeral metadata and linked-list pointers for one pending order.
@@ -40,7 +40,7 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         bool inAccountQueue;
     }
 
-    /// @notice Engine that processes orders, reserves close bounties, and credits keeper bounties.
+    /// @notice Engine that processes orders, validates zero-bounty closes, and credits keeper bounties.
     ICfdEngineCore public immutable engine;
     /// @notice Clearinghouse that owns settlement and committed-margin reservation balances.
     IMarginClearinghouse internal immutable clearinghouse;
@@ -68,7 +68,8 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     }
 
     /// @notice Combines Router-owned lifecycle counts with clearinghouse-owned reservation balances.
-    /// @dev The bounty total includes live order reserves and unpaid protection reserves, including latched retries.
+    /// @dev The bounty total includes live open-order reserves and unpaid protection-trigger reserves. Latched
+    ///      protections and their zero-bounty close attempts add no reserved value.
     function getAccountReservations(
         address account
     ) public view override returns (IOrderRouterAccounting.AccountReservationView memory reservation) {
@@ -98,12 +99,12 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
     }
 
     /// @notice Reserves the keeper bounty for a newly assigned order id.
-    /// @dev Zero close bounties still validate admission and checkpoint carry. Open-order bounties are locked from
-    ///      free settlement; close-order bounties use the engine hook implemented by the router base.
-    /// @param account Account funding the bounty.
-    /// @param sizeDelta Order size used by close-bounty reservation (18 decimals).
-    /// @param bounty Bounty to reserve (6-decimal USDC).
-    /// @param isClose Whether to use the close-order reservation path.
+    /// @dev Zero-bounty closes still validate admission and checkpoint carry through the engine hook implemented by
+    ///      the router base. Open-order bounties are locked from free settlement.
+    /// @param account Account committing the order and funding any open-order bounty.
+    /// @param sizeDelta Order size used by close admission (18 decimals).
+    /// @param bounty Bounty to reserve for an open, or zero for a close (6-decimal USDC).
+    /// @param isClose Whether to use the zero-bounty close admission path.
     function _reserveExecutionBounty(
         address account,
         uint256 sizeDelta,
@@ -111,7 +112,10 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         bool isClose
     ) internal returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         if (isClose) {
-            return _reserveCloseExecutionBounty(account, sizeDelta, bounty);
+            if (bounty != 0) {
+                revert ICfdEngineTypes.CfdEngine__InvalidRiskParams();
+            }
+            return _reserveCloseExecutionBounty(account, sizeDelta);
         }
         effects.bountyFromFreeUsdc = bounty;
         if (bounty == 0) {
@@ -215,14 +219,12 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
         return orderRecords[orderId];
     }
 
-    /// @notice Reserves a close-order execution bounty through the concrete engine integration.
-    /// @param account Account funding the close bounty.
+    /// @notice Validates zero-bounty close admission through the concrete engine integration.
+    /// @param account Account committing the close.
     /// @param sizeDelta Close size used for engine solvency validation (18 decimals).
-    /// @param executionBountyUsdc Bounty to reserve (6-decimal USDC).
     function _reserveCloseExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 executionBountyUsdc
+        uint256 sizeDelta
     ) internal virtual returns (CfdEnginePlanTypes.CloseCommitment memory);
 
 }

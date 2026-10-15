@@ -248,14 +248,11 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
         uint256 healingSize
     ) internal {
         CfdEngineLens previewLens = new CfdEngineLens(address(engine));
-        ICfdEngineTypes.OpenPreview memory preview = previewLens.previewOpen(
-            crossingShortTrader, CfdTypes.Side.SHORT, 580_000e18, 20_000e6, 1e8, uint64(block.timestamp)
-        );
+        ICfdEngineTypes.OpenPreview memory preview =
+            previewLens.previewOpen(crossingShortTrader, CfdTypes.Side.SHORT, 580_000e18, 20_000e6, 1e8);
         assertTrue(preview.valid, "Crossing balance may end exactly at the cap");
 
-        preview = previewLens.previewOpen(
-            crossingShortTrader, CfdTypes.Side.SHORT, 590_000e18, 20_000e6, 1e8, uint64(block.timestamp)
-        );
+        preview = previewLens.previewOpen(crossingShortTrader, CfdTypes.Side.SHORT, 590_000e18, 20_000e6, 1e8);
         assertFalse(
             preview.valid,
             "A smaller absolute skew must still be rejected after crossing into a new above-cap imbalance"
@@ -266,9 +263,7 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
             "The order-side cap should reject an above-cap crossing overshoot"
         );
 
-        preview = previewLens.previewOpen(
-            crossingShortTrader, CfdTypes.Side.SHORT, 600_000e18, 20_000e6, 1e8, uint64(block.timestamp)
-        );
+        preview = previewLens.previewOpen(crossingShortTrader, CfdTypes.Side.SHORT, 600_000e18, 20_000e6, 1e8);
         assertFalse(preview.valid, "An above-cap order with unchanged absolute skew should remain invalid");
         assertEq(
             uint8(preview.invalidReason),
@@ -276,9 +271,7 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
             "The strict reduction boundary should reject equal absolute skew"
         );
 
-        preview = previewLens.previewOpen(
-            healingShortTrader, CfdTypes.Side.SHORT, healingSize, 1000e6, 1e8, uint64(block.timestamp)
-        );
+        preview = previewLens.previewOpen(healingShortTrader, CfdTypes.Side.SHORT, healingSize, 1000e6, 1e8);
         assertTrue(preview.valid, "Preview should admit an incremental skew reduction above the cap");
     }
 

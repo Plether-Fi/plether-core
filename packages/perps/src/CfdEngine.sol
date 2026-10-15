@@ -586,39 +586,36 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit TraderClaimSettled(account, claimAmountUsdc);
     }
 
-    /// @notice Reserves a close bounty from free settlement, then eligible position pledge.
-    /// @dev Callable only by the router. Carry collection is attempted first, with any uncovered amount left unsettled.
-    ///      Carry uses margin first. Reservation reclassifies custody and protects other backing.
-    ///      Zero bounties still validate admission and checkpoint carry.
+    /// @notice Validates a close commitment and realizes collectible carry without reserving a bounty.
+    /// @dev Callable only by the router. Close commitments reserve no execution bounty.
+    ///      Carry uses position margin first, then free settlement, and any uncovered amount remains unsettled.
+    ///      The zero-bounty path still validates close admission and checkpoints carry.
     /// @param account Account committing the close order.
     /// @param sizeDelta Intended close size, with 18 decimals; must be nonzero and no greater than position size.
-    /// @param amountUsdc Execution bounty to reserve, in 6-decimal USDC units.
     function reserveCloseOrderExecutionBounty(
         address account,
-        uint256 sizeDelta,
-        uint256 amountUsdc
+        uint256 sizeDelta
     ) external onlyRouter nonReentrant returns (CfdEnginePlanTypes.CloseCommitment memory effects) {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(account);
         address target = address(settlementSidecar);
         bytes4 selector = ICfdEngineSettlementSidecar.reserveCloseOrderExecutionBounty.selector;
         bytes4 invalidResult = ICfdEngineTypes.CfdEngine__InvalidRiskParams.selector;
-        // Reuse one fixed buffer for the three-word call and seven-word response. Do not return from assembly:
+        // Reuse one fixed buffer for the two-word call and six-word response. Do not return from assembly:
         // borrow/terminal synchronization and the nonReentrant epilogue must still run.
         assembly ("memory-safe") {
             effects := mload(0x40)
             mstore(effects, selector)
             mstore(add(effects, 4), account)
             mstore(add(effects, 36), sizeDelta)
-            mstore(add(effects, 68), amountUsdc)
-            if iszero(call(gas(), target, 0, effects, 100, effects, 224)) {
+            if iszero(call(gas(), target, 0, effects, 68, effects, 192)) {
                 returndatacopy(effects, 0, returndatasize())
                 revert(effects, returndatasize())
             }
-            if iszero(eq(returndatasize(), 224)) {
+            if iszero(eq(returndatasize(), 192)) {
                 mstore(effects, invalidResult)
                 revert(effects, 4)
             }
-            mstore(0x40, add(effects, 224))
+            mstore(0x40, add(effects, 192))
         }
         _syncPositionBorrowBase(account, _positions[account]);
         _endTerminalCurveMutation(account, expectedOldHash);
@@ -749,11 +746,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(order.account, poolDepthUsdc);
 
         if (order.isClose) {
-            CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice, publishTime);
+            CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, currentOraclePrice);
             _revertIfCloseInvalidTyped(delta.revertCode);
-            _applyClose(delta, publishTime, order.orderId);
+            _applyClose(delta, publishTime);
         } else {
-            CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, currentOraclePrice, publishTime);
+            CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, currentOraclePrice);
             _revertIfOpenInvalidTyped(delta.revertCode);
             _applyOpen(delta, publishTime);
         }
@@ -1003,8 +1000,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(account, poolDepthUsdc);
-        CfdEnginePlanTypes.LiquidationDelta memory delta =
-            planner.planLiquidation(snap, currentOraclePrice, publishTime);
+        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, currentOraclePrice);
 
         if (!delta.liquidatable) {
             revert CfdEngine__PositionIsSolvent();
@@ -1202,7 +1198,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @dev Callable only by the configured settlement sidecar. Removes the prior side borrow-base contribution,
     ///      copies engine-owned fields, recomputes borrow base from the current clearinghouse position-margin bucket,
     ///      stores the current side carry index, and adds the new side contribution. Margin itself is not stored here,
-    ///      and `position.deletePosition` is ignored; deletion uses `settlementDeletePosition`.
+    ///      and deletion uses `settlementDeletePosition`.
     /// @param account Position account to overwrite.
     /// @param position New engine-owned position fields supplied by the settlement sidecar.
     function settlementWritePosition(
@@ -1268,15 +1264,14 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
 
     function _applyClose(
         CfdEnginePlanTypes.CloseDelta memory delta,
-        uint64 publishTime,
-        uint64 orderId
+        uint64 publishTime
     ) internal {
         bytes32 expectedOldHash = _beginTerminalCurveMutation(delta.account);
         StoredPosition storage pos = _positions[delta.account];
         CfdTypes.Side marginSide = pos.side;
         _realizeCarryFromSettlement(delta.account, pos);
         CfdTypes.Position memory currentPosition = _loadPosition(delta.account);
-        settlementSidecar.executeClose(delta, currentPosition, publishTime, orderId);
+        settlementSidecar.executeClose(delta, currentPosition, publishTime);
         emit PositionClosed(delta.account, marginSide, delta.sizeDelta, delta.price, delta.realizedPnlUsdc);
 
         unsettledCarryUsdc[delta.account] = 0;
@@ -1381,7 +1376,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             expectedOldHash = _beginTerminalCurveMutation(account);
         }
         (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc) =
-            clearinghouse.consumeSettlementLoss(account, marginBefore, carryDueUsdc, address(this));
+            clearinghouse.consumeSettlementLoss(account, carryDueUsdc, address(this));
         realizedCarryUsdc = carryDueUsdc - uncoveredUsdc;
         unsettledCarryUsdc[account] = uncoveredUsdc;
 

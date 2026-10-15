@@ -34,7 +34,6 @@ contract TerminalEconomicStateWriteoffTest is BasePerpTest {
         uint256 collectibleCapUsdc =
             engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
         assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain an uncollectible terminal price tail");
-        assertEq(preview.badDebtUsdc, 0, "V2 price tails are diagnostic writeoffs, not protocol debt");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -70,7 +69,6 @@ contract ReachableLiquidationWriteoffTest is BasePerpTest {
         uint256 priceLossUsdc = uint256(-preview.pnlUsdc);
         uint256 collectibleCapUsdc = engineAccountLens.getAccountLedgerSnapshot(account).terminalPriceCollectibleCapUsdc;
         assertLe(priceLossUsdc, collectibleCapUsdc, "Setup price loss must remain fully collectible");
-        assertEq(preview.badDebtUsdc, 0, "A collectible price loss must not produce a debt diagnostic");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -108,7 +106,6 @@ contract TerminalPriceTailAccountingTest is BasePerpTest {
         uint256 collectibleCapUsdc =
             engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
         assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain an uncollectible terminal price tail");
-        assertEq(preview.badDebtUsdc, 0, "V2 price tails are diagnostic writeoffs, not protocol debt");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));
@@ -171,7 +168,6 @@ contract AccountPriceCollateralWriteoffTest is BasePerpTest {
         uint256 collectibleCapUsdc =
             engineAccountLens.getAccountLedgerSnapshot(loserAccount).terminalPriceCollectibleCapUsdc;
         assertGt(priceLossUsdc, collectibleCapUsdc, "Setup must contain a diagnostic price-loss writeoff");
-        assertEq(preview.badDebtUsdc, 0, "Written-off price tails must not become protocol debt");
 
         uint256 depth = pool.totalAssets();
         vm.prank(address(router));

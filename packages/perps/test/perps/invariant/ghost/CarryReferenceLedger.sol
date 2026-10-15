@@ -358,8 +358,9 @@ contract CarryReferenceLedger {
         state.protectedFunds += amount;
     }
 
-    /// @notice Reserve an independently split close bounty after its commitment checkpoint.
-    /// @dev Moving pledge into a bounty increases borrow base immediately; neither accrued carry nor clocks reset.
+    /// @notice Model a hypothetical split close bounty after its commitment checkpoint.
+    /// @dev Public close commitment currently requires zero bounty. This reference-only transition shows
+    ///      how moving pledge would affect borrow base without resetting accrued carry or clocks.
     function reserveBountyWithoutCheckpoint(
         address account,
         uint256 freePart,
@@ -388,7 +389,7 @@ contract CarryReferenceLedger {
         state.free += amount;
     }
 
-    /// @notice Restore a pledge-funded refund to the same active position generation, as classified by the caller.
+    /// @notice Restore a model-only pledge-funded refund to the caller-classified active position generation.
     function releaseToPledgeWithoutCheckpoint(
         address account,
         uint256 amount

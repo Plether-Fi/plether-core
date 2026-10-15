@@ -447,7 +447,6 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
         assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
-        assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Close bad debt should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");
         assertEq(actual.remainingMargin, expected.remainingMargin, "Close remaining margin should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Close degraded trigger should match");

@@ -8,7 +8,6 @@ import {
     LegacyCloseTypes as OrderV3Types
 } from "../../fixtures/LegacyCloseV2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {CfdClosePreview} from "@plether/perps/CfdClosePreview.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
@@ -131,7 +130,7 @@ contract CfdSponsoredCloseForkTest is Test {
             abi.encodeWithSignature(
                 "ExecuteError(uint256,bytes)",
                 0,
-                abi.encodeWithSelector(CfdClosePreview.CfdClosePreview__SponsoredIntentInvalid.selector)
+                abi.encodeWithSelector(bytes4(keccak256("CfdClosePreview__SponsoredIntentInvalid()")))
             )
         );
         vm.prank(owner);

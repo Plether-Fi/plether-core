@@ -16,10 +16,9 @@ abstract contract CfdEngineLensQuoteTestFixture is BasePerpTest {
         uint256 marginDelta,
         uint256 price
     ) internal view returns (ICfdEngineLens.MaxOpenQuote memory quote) {
-        quote = ICfdEngineLens(address(engineLens))
-            .quoteMaxOpen(account, side, marginDelta, price, uint64(block.timestamp));
+        quote = ICfdEngineLens(address(engineLens)).quoteMaxOpen(account, side, marginDelta, price);
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(account, side, quote.preview.sizeDelta, marginDelta, price, uint64(block.timestamp));
+            engineLens.previewOpen(account, side, quote.preview.sizeDelta, marginDelta, price);
         assertEq(keccak256(abi.encode(quote.preview)), keccak256(abi.encode(preview)), "complete preview parity");
         assertEq(quote.maxSizeDelta % CfdTypes.SIZE_QUANTUM, 0, "quantum alignment");
         if (quote.maxSizeDelta == 0) {
@@ -28,9 +27,8 @@ abstract contract CfdEngineLensQuoteTestFixture is BasePerpTest {
         } else {
             assertTrue(quote.preview.valid, "maximum is valid");
             assertEq(quote.preview.sizeDelta, quote.maxSizeDelta);
-            ICfdEngineTypes.OpenPreview memory next = engineLens.previewOpen(
-                account, side, quote.maxSizeDelta + CfdTypes.SIZE_QUANTUM, marginDelta, price, uint64(block.timestamp)
-            );
+            ICfdEngineTypes.OpenPreview memory next =
+                engineLens.previewOpen(account, side, quote.maxSizeDelta + CfdTypes.SIZE_QUANTUM, marginDelta, price);
             assertFalse(next.valid, "next quantum is invalid");
             assertEq(uint256(quote.limitingReason), uint256(next.invalidReason));
         }

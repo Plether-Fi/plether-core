@@ -4,14 +4,15 @@
 
 Ordinary and protection close attempts reserve an authenticated **zero** execution bounty. They never consume free settlement or position pledge for an execution reward. Opens/increases still pay their configured bounty. Protection creation still reserves the positive trigger reward, paid once on the original trigger. Liquidation rewards and trading charges are unchanged. Zero bounty does not waive carry, partial-close health, size, market-mode, oracle, configuration or execution bounds.
 
-Deploy a coherent fresh stack. This is not an in-place storage-compatible upgrade: collectible-pledge storage and internal entrypoints were removed. Preserve old manifests, decoders and service for old deployments until their orders, protections and balances are drained. Never point old components at new reservation accounting. Existing receipt tuple fields and enum numbers remain decodable; new close receipts have zero source amounts, source epoch zero, disposition `None` and zero payee. Missing reservation records are invalid even when the expected amount is zero.
+Deploy a coherent fresh stack. This is not an in-place storage-compatible upgrade: collectible-pledge storage and internal entrypoints were removed. Preserve old manifests, decoders and service for old deployments until their orders, protections and balances are drained. Never point old components at new reservation accounting. Current receipt tuples omit retained bounty, and current bounty dispositions contain only `None`, `Paid`, `Forfeited`, and `RefundedToAccount`. New close receipts have zero bounty amounts, disposition `None`, and zero payee. Decode older tuples and mixed dispositions with their archived ABI. Missing reservation records are invalid even when the expected amount is zero.
 
 The core changes are paired with `plether-app` branch `codex/zero-close-bounties`. Its existing Haskell order keeper and independent protection worker remain the production services. The SDK CLI below is a one-shot diagnostic/operator tool, not another daemon.
 
 The follow-up cleanup removes the USDC grant preview/guard (`previewSponsoredClose`, `validateSponsoredClose`) and
 the unused privileged clearinghouse hooks `reserveCloseExecutionBountyFromSettlement` and
-`reserveStaleCloseExecutionBountyFromSettlement`. The ordinary close previews, constructor and compatibility
-getters, order/receipt tuples, enum numbering and storage layouts remain unchanged. New app orders no longer carry
+`reserveStaleCloseExecutionBountyFromSettlement`. It also removes the close-preview sponsored constructor/getters/errors,
+legacy bounty provenance and protection-execution-bounty fields, and unused close-bounty configuration. The receipt
+and execution-config domains are V5; the request/intent domain remains V3. New app orders no longer carry
 USDC-assistance branches; gas-sponsored commitment and owner-paid fallback remain available. Keep archived grant
 ABIs, persisted operation metadata, recovery authorities and historical grant/PnL reconciliation. Do not point an
 old pending grant batch at the new lens. Runtime hashes must be pinned for any future deployment.

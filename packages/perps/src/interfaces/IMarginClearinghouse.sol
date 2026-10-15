@@ -70,22 +70,17 @@ interface IMarginClearinghouse {
     /// @notice Owner namespace for keeper-bounty reservations; ids are unique within each namespace.
     enum BountyKind {
         Order,
-        ProtectionTrigger,
-        ProtectionExecution
+        ProtectionTrigger
     }
 
     struct BountyRecovery {
         uint256 freeUsdc;
-        uint256 pledgeUsdc;
-        uint64 sourcePositionEpoch;
         uint8 discrepancy;
     }
     function recoverExpiredBounty(
         address account,
         uint64 orderId,
-        uint256 expectedFreeUsdc,
-        uint256 expectedPledgeUsdc,
-        uint64 expectedSourcePositionEpoch
+        uint256 expectedFreeUsdc
     ) external returns (BountyRecovery memory);
     enum BountyReservationState {
         None,
@@ -100,8 +95,6 @@ interface IMarginClearinghouse {
         uint96 amountUsdc;
         BountyReservationState state;
         uint96 freeFundedUsdc;
-        uint96 pledgeFundedUsdc;
-        uint64 sourcePositionEpoch;
     }
     function validateBountyReservation(
         address account,
@@ -243,20 +236,12 @@ interface IMarginClearinghouse {
     }
 
     /// @notice Engine-planned bucket mutation for liquidation settlement.
-    /// @dev All fields use 6-decimal USDC. The clearinghouse applies the unlock, debit, transfer, and bounty amounts;
-    ///      `settlementRetainedUsdc` and `freshTraderPayoutUsdc` are informational; `badDebtUsdc` is inactive.
-    /// @param settlementRetainedUsdc Existing account settlement left in place toward positive residual equity;
-    ///        informational to the clearinghouse mutation.
+    /// @dev All fields use 6-decimal USDC. The clearinghouse applies the unlock, debit, transfer, and bounty amounts.
     /// @param settlementSeizedUsdc Settlement debited from the account and transferred to the pool recipient.
-    /// @param freshTraderPayoutUsdc New surplus owed to the trader after liquidation.
-    /// @param badDebtUsdc Inactive compatibility field; the current planner leaves it zero and the clearinghouse ignores it.
     /// @param positionMarginUnlockedUsdc Active-position margin to consume or release.
     /// @param otherLockedMarginUnlockedUsdc Must be zero; this isolated liquidation plan cannot consume committed orders.
     struct LiquidationSettlementPlan {
-        uint256 settlementRetainedUsdc;
         uint256 settlementSeizedUsdc;
-        uint256 freshTraderPayoutUsdc;
-        uint256 badDebtUsdc;
         uint256 positionMarginUnlockedUsdc;
         uint256 otherLockedMarginUnlockedUsdc;
     }
@@ -517,10 +502,9 @@ interface IMarginClearinghouse {
     ) external returns (int256 netMarginChangeUsdc, uint256 protocolFeeCreditedUsdc);
 
     /// @notice Consumes carry from canonical active position margin first, then free settlement.
-    /// @dev Callable only by the engine or settlement sidecar. The legacy `lockedPositionMarginUsdc` argument is
-    ///      ignored in favor of stored buckets. Other locked buckets and claims are protected; uncovered carry is returned.
+    /// @dev Callable only by the engine or settlement sidecar. Consumption uses canonical stored buckets.
+    ///      Other locked buckets and claims are protected; uncovered carry is returned.
     /// @param account Account paying the loss
-    /// @param lockedPositionMarginUsdc Deprecated ABI parameter ignored by the implementation
     /// @param lossUsdc Maximum loss to collect in USDC
     /// @param recipient External recipient of collected USDC
     /// @return marginConsumedUsdc Active position margin consumed in six-decimal USDC units
@@ -528,7 +512,6 @@ interface IMarginClearinghouse {
     /// @return uncoveredUsdc Requested loss left uncovered in USDC
     function consumeSettlementLoss(
         address account,
-        uint256 lockedPositionMarginUsdc,
         uint256 lossUsdc,
         address recipient
     ) external returns (uint256 marginConsumedUsdc, uint256 freeSettlementConsumedUsdc, uint256 uncoveredUsdc);
@@ -545,7 +528,6 @@ interface IMarginClearinghouse {
     /// @dev Price seizure consumes PnL pledge only. Keeper, protocol, and LP liquidation fees consume liquidation
     ///      reserve only. Order margin, action reserve, and free settlement are never charge or price-loss sources.
     /// @param account Liquidated account
-    /// @param reservationOrderIds Ignored compatibility parameter; this isolated settlement never consumes order margin
     /// @param plan Engine-planned liquidation amounts, all in USDC
     /// @param recipient External pool recipient of `plan.settlementSeizedUsdc`
     /// @param keeper Clearinghouse account credited with the bounty
@@ -556,7 +538,6 @@ interface IMarginClearinghouse {
     /// @return seizedUsdc Amount transferred to `recipient` in USDC
     function applyLiquidationSettlementPlan(
         address account,
-        uint64[] calldata reservationOrderIds,
         LiquidationSettlementPlan calldata plan,
         address recipient,
         address keeper,

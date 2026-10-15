@@ -24,7 +24,7 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
 - Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
-- Existing-position protection creation locks both bounties first, then applies the canonical V2 exact-price safety
+- Existing-position protection creation locks its trigger bounty first, then applies the canonical V2 exact-price safety
   gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
   claim; free settlement and generic action/reservation buckets do not count. Uncovered carry, an underfunded
   negative-VPI reserve, or equity at or below the stricter of initial and active normal/FAD margin rejects the action.
@@ -47,7 +47,7 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Open-ticket planning: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.quoteMaxOpen(...)`; these exclude Router
   admission, bounty-reservation, and oracle-validation checks.
 - Pre-commit close review: `CfdClosePreview.previewClose(...)`, which projects commitment carry and the new order's
-  execution-bounty reservation before assessing execution. See [`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md). Continue to
+  zero-bounty commitment before assessing execution. See the current [close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy). Continue to
   simulate the actual Router commitment for queue, deadline, configuration, and other admission checks.
 
 Use these interfaces:
@@ -158,11 +158,11 @@ seed-lifecycle, and other tranche setup mechanics as admin/setup concerns rather
 
 The protocol-operated incident keeper should clear risk-off orders after containment. A risk-off open is already
 logically unexecutable before physical cleanup, and cleanup authority does not grant its caller the trader's bounty.
-Protection-attempt failure cleanup is unpaid when its exact protected position remains: its one reserved execution
-bounty is retained for the next attempt. Keeper infrastructure should therefore process the terminal attempt, observe
-`Latched`, confirm the exact position and zero pending-order retry preconditions, and submit the separate retry
-transaction; it must not assume that relatching cleanup itself earns the eventual execution bounty. A position
-mismatch follows ordinary paid cleanup and terminally fails the protection.
+Protection-attempt failure cleanup is unpaid when its exact protected position remains: the attempt's zero Order
+bounty record settles and the protection relatches. Keeper infrastructure should process the terminal attempt,
+observe `Latched`, confirm the exact position and retry preconditions, and submit the separate retry transaction;
+the new attempt gets a fresh zero record. A position mismatch terminally fails the protection with no close-bounty
+payment. The distinct protection trigger reward is paid only once, on trigger.
 
 Use this interface:
 
@@ -245,7 +245,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `CfdOrderPolicyEvaluator`: fixed permissionless stateless policy dependency used to assess authoritative Engine
   state against caller-pinned financial bounds; applications do not use it as an execution or custody surface.
 - `CfdClosePreview`: separately deployed stateless pre-commit close-review surface; projects commitment carry and a
-  new bounty reservation and does not replace or reconfigure the Router's immutable execution evaluator.
+  new zero-amount bounty record and does not replace or reconfigure the Router's immutable execution evaluator.
 - `OrderLifecycleBook`: independently predeployed canonical permanent order-identity and terminal-outcome reader. It
   is immutable-bound to the predicted Router, Engine, Clearinghouse, and HousePool; the Router constructor validates
   all four bindings before accepting it. Only that Router may register or finalize lifecycle state, and the Book owns
@@ -282,6 +282,6 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
   sidecar returned by `OrderRouter.liquidationBatchSidecar()`.
 - A `PendingOpen`, `Armed`, or `Latched` protection is a retained off-queue record, not an ordinary pending order.
   `Triggered` identifies exactly one live full-position close attempt. Every attempt is an ordinary binding FIFO order
-  read through the normal order surfaces; a non-liquidation failure returns the protection to `Latched` and retains its
-  execution bounty only when the exact protected side and size remain. A position mismatch resolves the protection as
-  `Failed` under ordinary paid cleanup. Neither path erases the failed order's permanent receipt.
+  read through the normal order surfaces; a non-liquidation failure returns the protection to `Latched` and settles
+  its zero Order bounty record only when the exact protected side and size remain. A position mismatch resolves the
+  protection as `Failed` with no close-bounty payment. Neither path erases the failed order's permanent receipt.

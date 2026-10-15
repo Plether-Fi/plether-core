@@ -109,7 +109,6 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint64,
         address,
         CfdTypes.Side,
-        uint256,
         uint256
     ) external nonReentrant returns (uint64 orderId) {
         return uint64(_delegateToKeeperSidecar());
@@ -193,9 +192,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 freeUsdc = lifecycleBook.isProtectionAttempt(orderId)
             ? pending.executionBountyUsdc
             : pending.commitment.bountyFromFreeUsdc;
-        uint256 pledgeUsdc = pending.commitment.bountyFromPledgeUsdc;
-        uint64 epoch = lifecycleBook.sourcePositionEpoch(orderId);
-        recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeUsdc, pledgeUsdc, epoch);
+        recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeUsdc);
         if (recovery.freeUsdc != 0) {
             clearinghouse.releaseReservedExecutionBountyToSource(order.account, recovery.freeUsdc);
         }
@@ -296,7 +293,10 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         uint256 bountyUsdc =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, order.orderId).amountUsdc;
         if (!success && lifecycleBook.isProtectionAttempt(order.orderId)) {
-            positionProtectionBook.handleFailedProtectionAttempt(order.orderId, order.account, reason, bountyUsdc);
+            if (bountyUsdc != 0) {
+                revert OrderRouter__ProtectedCloseBountyNonzero(bountyUsdc);
+            }
+            positionProtectionBook.handleFailedProtectionAttempt(order.orderId, order.account, reason);
         }
         // Even an unpaid attempt has an authenticated Active record that must terminalize.
         clearinghouse.takeBountyReservation(order.account, IMarginClearinghouse.BountyKind.Order, order.orderId);

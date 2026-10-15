@@ -223,6 +223,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "CfdEngine__InvalidRiskParams",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "CfdEngine__NoPositionToLiquidate",
     "inputs": []
   },
@@ -274,16 +279,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__EmptyFeeds",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__EmptyPythUpdateData",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__ExecutionBountyAboveGrossDebit",
     "inputs": [
       {
@@ -331,16 +326,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InsufficientPythFee",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__InvalidBasePrice",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__InvalidEngineLens",
     "inputs": []
   },
@@ -376,11 +361,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InvalidOraclePrice",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__InvalidPletherOracle",
     "inputs": []
   },
@@ -406,37 +386,12 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__InvalidWeights",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__LengthMismatch",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__LiquidationOraclePriceTooStale",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__MarginQueueCorrupt",
     "inputs": []
   },
   {
     "type": "error",
     "name": "OrderRouter__MarkPriceOutOfOrder",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__MevDetected",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__MockOracleUnavailable",
     "inputs": []
   },
   {
@@ -466,21 +421,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__OracleConfidenceTooWide",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__OraclePriceTooStale",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__OraclePublishTimesDiverged",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__OrderNotExpired",
     "inputs": []
   },
@@ -506,11 +446,6 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
-    "name": "OrderRouter__PledgeBountyRequiresEmptyQueue",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OrderRouter__PositionChanged",
     "inputs": []
   },
@@ -522,6 +457,17 @@ export const orderRouterV3Abi = [
         "name": "code",
         "type": "uint8",
         "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__ProtectedCloseBountyNonzero",
+    "inputs": [
+      {
+        "name": "bountyUsdc",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -558,11 +504,6 @@ export const orderRouterV3Abi = [
   {
     "type": "error",
     "name": "OrderRouter__ProtectionTriggerAlreadyMet",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "OrderRouter__RestoredPledgeMadeSolvent",
     "inputs": []
   },
   {
@@ -828,11 +769,6 @@ export const closePreviewV3Abi = [
         "name": "executionPrice",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "publishTime",
-        "type": "uint64",
-        "internalType": "uint64"
       }
     ],
     "outputs": [
@@ -862,11 +798,6 @@ export const closePreviewV3Abi = [
                 "internalType": "uint256"
               },
               {
-                "name": "bountyFromPledgeUsdc",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
                 "name": "settlementBeforeUsdc",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -885,11 +816,6 @@ export const closePreviewV3Abi = [
           },
           {
             "name": "commitmentCarryUsdc",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "executionBountyUsdc",
             "type": "uint256",
             "internalType": "uint256"
           },
@@ -1064,80 +990,12 @@ export const closePreviewV3Abi = [
   },
   {
     "type": "error",
-    "name": "CfdClosePreview__SponsoredAccountBusy",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "CfdClosePreview__SponsoredDeploymentMismatch",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "CfdClosePreview__SponsoredIntentInvalid",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "CfdClosePreview__SubsidyMismatch",
-    "inputs": [
-      {
-        "name": "expectedUsdc",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "requiredUsdc",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "CfdClosePreview__UncoveredCarry",
-    "inputs": [
-      {
-        "name": "unpaidCarryUsdc",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "CfdEngine__CloseSizeExceedsPosition",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "CfdEngine__InsufficientCloseOrderBountyBacking",
-    "inputs": [
-      {
-        "name": "requiredBountyUsdc",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "availableBackingUsdc",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "unpaidCarryUsdc",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "CfdEngine__InvalidCloseSizeQuantum",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "CfdEngine__InvalidRiskParams",
     "inputs": []
   },
   {
@@ -1302,11 +1160,6 @@ export const committedOrderV3Abi = [
         "name": "executionPrice",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "publishTime",
-        "type": "uint64",
-        "internalType": "uint64"
       }
     ],
     "outputs": [
@@ -1746,11 +1599,6 @@ export const orderLifecycleV5Abi = [
               },
               {
                 "name": "bountyFromFreeUsdc",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "bountyFromPledgeUsdc",
                 "type": "uint256",
                 "internalType": "uint256"
               },
@@ -2237,11 +2085,6 @@ export const orderLifecycleV5Abi = [
                 "internalType": "uint256"
               },
               {
-                "name": "bountyFromPledgeUsdc",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
                 "name": "settlementBeforeUsdc",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -2275,11 +2118,6 @@ export const orderLifecycleV5Abi = [
               },
               {
                 "name": "bountyRefundedUsdc",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "bountyRetainedUsdc",
                 "type": "uint256",
                 "internalType": "uint256"
               },
@@ -2867,11 +2705,6 @@ export const orderLifecycleV5Abi = [
                 "internalType": "uint256"
               },
               {
-                "name": "bountyFromPledgeUsdc",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
                 "name": "settlementBeforeUsdc",
                 "type": "uint256",
                 "internalType": "uint256"
@@ -2905,11 +2738,6 @@ export const orderLifecycleV5Abi = [
               },
               {
                 "name": "bountyRefundedUsdc",
-                "type": "uint256",
-                "internalType": "uint256"
-              },
-              {
-                "name": "bountyRetainedUsdc",
                 "type": "uint256",
                 "internalType": "uint256"
               },

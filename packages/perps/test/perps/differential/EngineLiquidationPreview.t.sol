@@ -86,7 +86,6 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
             10e6 + preview.freshTraderPayoutUsdc,
             "Trader claim should reflect the untouched existing claim plus the fresh claim amount in the current preview model"
         );
-        assertEq(preview.badDebtUsdc, 0, "Positive residual should not report bad debt");
 
         vm.prank(keeper);
         bytes[] memory liquidationPriceData = new bytes[](1);
@@ -156,7 +155,6 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
             preview.traderClaimBalanceUsdc,
             "Preview trader claim should match live liquidation after staged forfeiture"
         );
-        assertEq(preview.badDebtUsdc, 0, "Staged forfeiture must not recreate a protocol debt ledger");
         assertEq(
             afterSnapshot.protocolTreasuryBalanceUsdc - beforeSnapshot.protocol.protocolTreasuryBalanceUsdc,
             reservationBefore.executionBountyUsdc + preview.protocolLiquidationFeeUsdc,

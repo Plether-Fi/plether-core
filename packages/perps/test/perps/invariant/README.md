@@ -58,7 +58,7 @@ or its dependency response while retaining the reference model. They must fail t
 | Fee custody and payout | Repeated open/close/treasury-withdraw cycles | Add/remove one atom of treasury credit, or burn one atom of the paid wallet balance |
 | VPI and frozen spread | Positive/negative VPI, frozen partial/full close, thaw | Add one atom of unmodeled pool cash |
 | LP waterfall | Junior loss, Senior impairment/restoration, coupon accrual, recapitalization | Add one atom of unmodeled pool cash |
-| Bounty custody and payment | Fund protection, trigger it, then execute its close | Add one atom to the actual reservation aggregate, or remove one atom of actual execution-keeper credit |
+| Bounty custody and payment | Fund protection, pay its trigger reward, then execute its zero-bounty close | Add one atom to the actual reservation aggregate, or add an unauthorized atom of execution-keeper credit |
 | Shared accounting handler | Execute a real queued order, then reject the sixth pending commit | Inject unknown/empty/built-in errors or malformed planner codes; return internal Engine/receipt failures |
 | Independent carry | Both sides accrue; collateral exhausts while reservations remain protected; deposit repays retained arrears | Mock double-collected pledge or lost arrears and require the normal account/side comparator to fail |
 | Mixed trader/LP accounting | Public V3 trading, delayed deposits/redemptions, claim-backed partial close and reusable liquidation generations | Unrecorded pool cash, cross-account settlement credit, corrupted share supply and stale per-controller LP pricing |
@@ -83,8 +83,8 @@ bounded by each handler's actor set and input range.
   margin/free collection, arrears and paid/waived totals. Terminal carry recovery separately records physical cash,
   withheld new gains, and negative-VPI credit offsets: all extinguish carry once, but only physical recovery adds
   pool cash. Per-charge offset attribution comes from the independent action ledger; production exposes the combined
-  action settlement. Passive cash/depth changes and reservation-only reclassifications preserve carry clocks;
-  pledge-funded bounties change borrowing basis immediately. A read-only projection distinguishes stored arrears
+  action settlement. Passive cash/depth changes and opening-bounty reservations preserve carry clocks; zero-bounty
+  close commitment does not reclassify pledge. A read-only projection distinguishes stored arrears
   from carry still unpaid after collecting
   newly available backing. Incoming deposits can pay carry immediately; claim and bounty credits checkpoint existing
   backing before crediting without a second collection pass. The companion `../accounting/carry/CarryReferenceLedger.t.sol`
@@ -122,8 +122,8 @@ bounded by each handler's actor set and input range.
 - `ghost/PendingOrderReferenceLedger.sol`: input-driven request identity, deadlines, queued exposure, reservation
   provenance and terminal dispositions for four actors with five live orders each (twenty globally). Its insertion-order
   array supplies expected global/account FIFO membership independently of the Router's linked queues. Original and
-  remaining committed margin, free/pledge bounty sources, position epochs (distinct from liquidation generations)
-  and exact client-ID replay survive
+  remaining committed margin, opening-bounty funding and zero close-bounty records, position epochs (distinct from
+  liquidation generations), and exact client-ID replay survive
   terminalization. `properties/PendingOrderReferenceLedger.t.sol` tests the reference state machine;
   `properties/PerpMixedPendingOrders.t.sol` connects it to real commitment, execution, expiry and cleanup.
 - `ghost/CloseReferenceMath.sol`: input-driven partial/full close allocation for the mixed fixture. It models exact
@@ -139,9 +139,9 @@ bounded by each handler's actor set and input range.
   Entry prices use $0.80–$1.20 with dust, while mark transitions cover $0.60–$1.40. Generated opens/increases and
   partial commitments fund at least $60 of pledge per existing lot. Synchronous setup helpers retain focused
   live/frozen close funding; separate histories retain zero pledge for claim-supported admission or zero free cash
-  for pledge-funded close bounties. Partial closes can leave one lot; a generated half-close then requests zero lots.
-  That request is submitted and checked for exact `ZeroSize` rejection and rollback before minimum-notional checks,
-  while a full close of the same one-lot position remains valid. Minimum-notional and close-size commitment rejections require their exact code
+  for zero-bounty closes. Partial closes can leave one lot; the generator skips another half-close because it would
+  request zero lots. A separate explicit zero-size request checks exact `ZeroSize` rejection and rollback before
+  minimum-notional checks, while a full close of the same one-lot position remains valid. Minimum-notional and close-size commitment rejections require their exact code
   and unchanged accounting. Time has no artificial horizon cap;
   live actions and LP maturities move monotonically past Friday-noon/weekend closures to Monday noon.
   Carry is 500 bps, VPI and frozen spread are
@@ -157,26 +157,19 @@ bounded by each handler's actor set and input range.
   failures; historical full closes also exercise unpaid carry resolved by a healing negative-VPI adjustment while an
   unrelated account's live order remains reserved.
   Independent state includes settlement/token custody, exact entry basis, carry, claims, VPI reserves,
-  order margins/bounties and source generations, treasury/keeper entitlements, tranche principal, Junior shares and
-  all request/claim escrows. The existing reference
-  waterfall priority arithmetic is extended with independently summed terminal account PnL before LP pricing.
-  Source-bound close bounties add `collectiblePledge` independently of the remaining bounty classification. Original
-  submitted funding and source generation determine escrow amount and ownership; removing a reservation classification
-  alone cannot erase collectible backing. A pledged commitment requires an empty account queue; later free-funded
-  peers remain legal. The model prices LP NAV with `M + C + E`, restores `P` before testing liquidation health, and
-  authenticates terminal paid/refunded/forfeited components against its own input history. `assessWithoutCollection`
-  checkpoints old-basis carry before refund, preserving arrears and changing only subsequent borrow basis. The normal
-  comparator checks the Clearinghouse escrow tuple and independent Book epoch; it never resynchronizes expectations
-  from either production record.
-  Mandatory prelude counters are `mixedFailureRefunds`, `rejectedPledgeOverlap`, `freeOrdersBehindPledgedHead`,
-  `restoredSolventLiquidations`, `pledgeLiquidationRefunds`, and `lpEpochsWithCollectibleEscrow`. Generated
-  `commitPledgeFundedClose` actions retain escrow across later economic actions. A generated partial pledge-funded close
-  returns before changing mark, carry, custody or model state when fewer than two lots remain, because halving one lot
+  order margins/bounties and position generations, treasury/keeper entitlements, tranche principal, Junior shares and
+  request/claim escrows. The existing reference waterfall priority arithmetic is extended with independently summed
+  terminal account PnL before LP pricing. Ordinary and protection close attempts use authenticated zero Order bounty
+  records, with no pledged escrow, source epoch, keeper payment, refund or forfeiture. Opening bounties remain
+  free-funded, and a close may queue behind another order subject to the normal exposure and capacity checks.
+  The model prices LP NAV without close-bounty escrow and authenticates terminal bounty dispositions against its own
+  input history; it does not resynchronize expectations from production records. The generated `commitZeroFreeClose`
+  action withdraws available free collateral and submits a zero-bounty close. A generated partial close returns before
+  changing mark, carry, custody or model state when fewer than two lots remain, because halving one lot
   would submit zero size. The deterministic 85→43→1-lot replay in `PerpMixedAccountingInvariant.t.sol` checks this
   generator boundary and normal model preservation; it does not classify Router's zero-size rejection as an accounting
-  defect. Focused `PerpMixedPendingOrders`
-  regressions cover mixed failure with a surviving free-funded peer, restored-solvent liquidation, LP settlement across
-  reservation/refund, and a lost-escrow fault detected by the normal comparator. The domain remains four traders, two
+  defect. Focused `PerpMixedPendingOrders` regressions cover zero-free close expiry and self-execution, close/open
+  queue transitions, and preservation of unrelated opening reservations. The domain remains four traders, two
   Junior LPs, fixed Senior owners, five orders per account and twenty globally. Its external keeper is flat; this model
   does not generate corrupt/quarantined records or carry-bearing keeper accounts.
   Deterministic preludes require both VPI signs, deferred claims, a zero-pledge claim-supported partial close,
@@ -393,7 +386,7 @@ bounded by each handler's actor set and input range.
   - Exercises attached parents, pre-trigger protection cancellation, successful and reverted triggers, expiry,
     relatching, retry, execution, risk-off refunds, and liquidation of armed, triggered, and latched protection
   - Reconciles reserved, paid, refunded, and forfeited bounty value across separate order/protection namespaces,
-    including numeric-id collisions, retained attempt bounties, parent margin, and exact-once keeper credits
+    including numeric-id collisions, zero-bounty close attempts, parent margin, and exact-once trigger-keeper credits
 
 ## Coverage boundaries
 

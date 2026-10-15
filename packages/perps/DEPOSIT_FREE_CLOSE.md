@@ -1,5 +1,11 @@
 # New-stack deposit-free close implementation
 
+> Historical design and measurement record for the earlier deposit-free-close candidate. Its V3/V4 domains, packed
+> pledged-bounty/source-epoch fields, and SDK export names describe that candidate. Current source removes those
+> fields and uses V5 receipt/config domains while retaining the V3 request/intent domain. Use
+> [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md), [ZERO_CLOSE_OPERATIONS.md](ZERO_CLOSE_OPERATIONS.md), and generated current
+> ABIs for a new deployment; retain this record for older release provenance.
+
 ## Commitment and execution
 
 Ordinary full/partial closes and protection close execution have a permanently zero keeper bounty. A user does not
@@ -88,7 +94,7 @@ New work adds pledge-funded commitment, released-pledge charge funding, strict r
 
 The internal lifecycle record packs the two uint96 bounty-source amounts and uint64 source epoch into one slot. Carry and custody amounts retain uint256, including values above uint128. Pre-commitment custody is reconstructed exactly as post-commitment custody plus collected carry. Commitment validates that identity before accepting the record. Order identity remains in the router order; Book and clearinghouse independently record funding and epoch so neither record alone authorizes a refund.
 
-Actual commitment loads only the relevant side and funding/health fields, while prospective previews retain the full execution snapshot. Both use the unchanged `CloseCommitmentLib` calculation. The pure planner's `planCloseCommit` returns only commitment effects; its unused projected-snapshot return was removed from the new ABI. Planner consumers must use the matching interface.
+Actual commitment loads only the relevant side and funding/health fields, while prospective previews retain the full execution snapshot. Both use the same `CloseCommitmentLib` calculation. The Engine and settlement sidecar accept only `(account, sizeDelta)` for close commitment; the pure planner accepts only `(snapshot, size)`. The former required-zero bounty argument is removed throughout this path. The planner returns only commitment effects; its unused projected-snapshot return was also removed from the new ABI. Consumers must use the matching interfaces. Router reservation and preview boundaries still reject a nonzero configured close bounty.
 
 Both carry-side checkpoints share one pool-cash read because index updates do not move pool cash. Committed assessment also reuses its canonical pool-depth observation for carry cash; non-authoritative simulations still fetch actual pool cash independently from caller-supplied pricing depth. Reservation authentication, bounds, terminal conservation, and post-settlement checks remain in place.
 

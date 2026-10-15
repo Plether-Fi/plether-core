@@ -20,8 +20,7 @@ interface ICfdOrderPolicyEvaluator {
         address engine,
         uint64 orderId,
         address executor,
-        uint256 executionPrice,
-        uint64 publishTime
+        uint256 executionPrice
     ) external view returns (OrderV3Types.ExecutionAssessment memory assessment);
 
     /// @notice A planner returned `OK` without producing a valid delta.
@@ -52,7 +51,7 @@ interface ICfdOrderPolicyEvaluator {
     ///      this evaluator has no storage and performs no writes. Before assessing a pending open, the caller must
     ///      release that order's committed-margin classification through a no-carry path so the planner does not
     ///      require the same `marginDelta` twice. A caller that subsequently asks the Engine to apply the order must
-    ///      preserve the same price, depth, publish time, and protocol state between both calls. The order's bounty
+    ///      preserve the same price, depth, and protocol state between both calls. The order's bounty
     ///      must already be reserved. For a prospective close, use CfdClosePreview.previewClose instead.
     function assessOrder(
         address engine,
@@ -60,7 +59,6 @@ interface ICfdOrderPolicyEvaluator {
         address executor,
         uint256 currentOraclePrice,
         uint256 poolDepthUsdc,
-        uint64 publishTime,
         OrderV3Types.ExecutionBounds calldata bounds,
         uint256 executionBountyUsdc
     ) external view returns (OrderV3Types.ExecutionAssessment memory assessment);

@@ -72,7 +72,7 @@ contract FullCloseActionChargePlanTest is Test {
         order.account = snap.account;
         order.isClose = true;
         order.sizeDelta = size;
-        return planner.planClose(snap, order, price, 1);
+        return planner.planClose(snap, order, price);
     }
 
     function test_FullClose_SurplusFundingBoundaries() public view {

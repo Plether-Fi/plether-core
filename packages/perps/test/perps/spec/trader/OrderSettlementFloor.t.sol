@@ -348,12 +348,12 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
     }
 
     function test_AdmissionAwareClosePreviewsRejectPositiveMinimum() public {
-        CfdClosePreview preview = new CfdClosePreview(address(engine));
+        CfdClosePreview preview = new CfdClosePreview();
         OrderV3Types.OrderRequest memory r = _request();
         r.isClose = true;
         r.marginDelta = 0;
         vm.expectRevert(IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported.selector);
-        preview.previewClose(address(engine), BOUNTY_TRADER, r, BOUNTY_KEEPER, BOUNTY_PRICE, uint64(block.timestamp));
+        preview.previewClose(address(engine), BOUNTY_TRADER, r, BOUNTY_KEEPER, BOUNTY_PRICE);
     }
 
     function test_GasWithdrawWithoutFloor() public {

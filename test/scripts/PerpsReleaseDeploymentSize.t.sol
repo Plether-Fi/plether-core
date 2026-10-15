@@ -174,12 +174,7 @@ contract PerpsReleaseDeploymentSizeTest is Test {
             address(d.orderPolicyEvaluator),
             ""
         );
-        _measure(
-            "cfdClosePreview",
-            "CfdClosePreview.sol:CfdClosePreview",
-            address(d.closePreview),
-            abi.encode(address(d.engine))
-        );
+        _measure("cfdClosePreview", "CfdClosePreview.sol:CfdClosePreview", address(d.closePreview), "");
         _measure(
             "orderRouterExecutionSidecar",
             "OrderRouterExecutionSidecar.sol:OrderRouterExecutionSidecar",

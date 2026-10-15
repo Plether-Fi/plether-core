@@ -16,6 +16,8 @@ including historical versions of:
 - `HousePoolWaterfallAccountingLib`
 
 These are frozen research helpers, not current Solidity parity implementations.
+The current Solidity tree no longer contains `CfdEngineSettlementLib`; the name above identifies only the
+historical kernel reproduced by this research model.
 The close-loss and liquidation helpers retain legacy collateral/claim ordering
 and uncovered-loss accounting. They do not implement current exact-lot entry
 costs, claim-first capped price collection, margin-first carry checkpoints,
