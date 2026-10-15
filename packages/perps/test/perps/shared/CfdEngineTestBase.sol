@@ -271,7 +271,27 @@ contract CfdEnginePlanLibHarness {
     function planOpenWithExistingVpiAccrued(
         OpenWithExistingVpiParams calldata params
     ) external pure returns (CfdEnginePlanTypes.OpenDelta memory delta) {
-        CfdEnginePlanTypes.RawSnapshot memory snap;
+        CfdEnginePlanTypes.RawSnapshot memory snap = _openWithExistingVpiSnapshot(params);
+        return CfdEnginePlanLib.planOpen(
+            snap,
+            CfdTypes.Order({
+                account: snap.account,
+                sizeDelta: params.sizeDelta,
+                marginDelta: params.marginDelta,
+                targetPrice: params.price,
+                commitTime: 0,
+                commitBlock: 0,
+                orderId: 0,
+                side: CfdTypes.Side.LONG,
+                isClose: false
+            }),
+            params.price
+        );
+    }
+
+    function _openWithExistingVpiSnapshot(
+        OpenWithExistingVpiParams calldata params
+    ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         uint256 currentLots = CfdMath.sizeToLots(params.currentSize);
         uint256 currentEntryCostUsdcAtoms = currentLots * params.currentEntryPrice;
         uint256 currentMaxProfitUsdc =
@@ -343,22 +363,6 @@ contract CfdEnginePlanLibHarness {
         snap.executionFeeBps = 4;
         snap.poolAssetsUsdc = 1_000_000e6;
         snap.poolCashUsdc = 1_000_000e6;
-
-        return CfdEnginePlanLib.planOpen(
-            snap,
-            CfdTypes.Order({
-                account: snap.account,
-                sizeDelta: params.sizeDelta,
-                marginDelta: params.marginDelta,
-                targetPrice: params.price,
-                commitTime: 0,
-                commitBlock: 0,
-                orderId: 0,
-                side: CfdTypes.Side.LONG,
-                isClose: false
-            }),
-            params.price
-        );
     }
 
 }

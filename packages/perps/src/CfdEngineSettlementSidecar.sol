@@ -481,6 +481,16 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             delta.sideEntryNotionalDelta
         );
         _settleProtocolFeeTopUp(host, delta.executionFeeUsdc, protocolFeeCreditedUsdc);
+        _writeOpenPosition(host, delta, currentPosition);
+        _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterUsdc);
+    }
+
+    /// @dev Isolates position-write ABI encoding from the settlement frame for minimum-IR coverage compilation.
+    function _writeOpenPosition(
+        ICfdEngineSettlementHost host,
+        CfdEnginePlanTypes.OpenDelta calldata delta,
+        CfdTypes.Position calldata currentPosition
+    ) private {
         host.settlementWritePosition(
             delta.account,
             CfdEngineSettlementTypes.PositionState({
@@ -493,7 +503,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
                 side: currentPosition.size == 0 ? delta.posSide : currentPosition.side
             })
         );
-        _assertRequiredEffectiveAssets(host, delta.requiredEffectiveAssetsAfterUsdc);
     }
 
     /// @notice Verifies the planner's protected-solvency target against canonical post-open cash and claims.
