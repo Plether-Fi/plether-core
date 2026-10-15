@@ -567,7 +567,7 @@ liquidation:
    payout and causes no contemporaneous HousePool cash debit;
 3. claim consumption reduces the same beneficiary liability and offsets only
    that account's exact realized price loss;
-4. price loss above the collectible cap after carry and any earned bounty is
+4. price loss above the collectible cap after carry is
    emitted as a diagnostic write-off and creates no asset, claim, deficit, or
    protocol debt;
 5. every surviving account curve equals its remaining lots, entry cost, and
@@ -584,7 +584,7 @@ liquidation:
 payout or creates an equal claim; it never does both. The price-LOSS branch
 partitions exact realized loss into same-account claim consumption, PnL-pledge
 seizure, and an explicit amount above the cap that was absent from pre-close LP
-NAV after the carry checkpoint and any authorized earned-bounty cost. Carry
+NAV after the carry checkpoint. Carry
 first consumes margin and free settlement.
 The remaining carry, VPI, execution fees, and frozen spread settle separately
 against fresh price gain and permitted action cash, including committed order
@@ -786,9 +786,10 @@ The fee uses completed Unix hours, is capped at a 1,000-basis-point nominal APR,
 and has a 48-hour configuration delay. Each checkpoint charges at most 8,760
 hours and forgives older time. It transfers no USDC and changes neither tranche
 principal nor the Senior high-water mark. The current Arbitrum Sepolia
-deployment script configures a 100-basis-point nominal APR paid to the protocol
-treasury; the rate can also be configured to zero. Neither this dilution
-mechanism nor Senior capacity admission is simulated in the historical replay.
+deployment script initializes a zero-basis-point rate with the protocol treasury
+as the snapshotted recipient; a positive rate requires the governance delay.
+Neither this dilution mechanism nor Senior capacity admission is simulated in
+the historical replay.
 
 ---
 

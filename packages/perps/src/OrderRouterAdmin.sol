@@ -60,7 +60,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     error OrderRouterAdmin__InvalidStalenessLimit();
     /// @notice A confidence ratio or adverse-confidence multiplier exceeds its allowed bound.
     error OrderRouterAdmin__InvalidConfidenceRatio();
-    /// @notice An open-notional or execution-bounty setting is zero, inconsistent, or out of bounds.
+    /// @notice An open-notional or bounty setting violates its bounds, including the mandatory zero close bounty.
     error OrderRouterAdmin__InvalidExecutionBounty();
     /// @notice The pending-order limit is zero or greater than 32.
     error OrderRouterAdmin__InvalidPendingOrderLimit();
@@ -350,7 +350,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         }
     }
 
-    /// @notice Validates open-notional and execution-bounty floors, caps, and basis-point rate.
+    /// @notice Validates open-notional and bounty limits, including the mandatory zero close bounty.
     /// @param config Candidate router configuration; monetary values use 6-decimal USDC.
     function _validateExecutionBountyConfig(
         IOrderRouterAdminHost.RouterConfig memory config

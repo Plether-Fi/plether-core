@@ -46,7 +46,8 @@ interface ICfdEngineSettlementSidecar {
         address account
     ) external;
 
-    /// @notice Realizes carry and reserves one close bounty from free settlement, then eligible pledge.
+    /// @notice Plans close commitment and realizes carry without reserving a bounty.
+    /// @dev The retained bounty argument must be zero; nonzero values revert.
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,
@@ -75,6 +76,7 @@ interface ICfdEngineSettlementSidecar {
     /// @param delta Valid planned close/decrease delta
     /// @param currentPosition Position loaded by the engine immediately before settlement
     /// @param publishTime Oracle publish timestamp proposed for the execution mark
+    /// @param orderId Retained order-identity ABI argument, unused by current close settlement
     function executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,

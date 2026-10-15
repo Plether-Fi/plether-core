@@ -18,7 +18,8 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 ///      and timestamps are Unix seconds.
 library CfdEnginePlanTypes {
 
-    /// @notice Custody debits and bucket transfers applied once when a close is committed.
+    /// @notice Carry and custody effects computed when a close is committed.
+    /// @dev Bounty fields are retained for ABI compatibility and are zero for current close commitments.
     struct CloseCommitment {
         uint256 carryCollectedUsdc;
         uint256 carryOutstandingUsdc;
@@ -78,8 +79,10 @@ library CfdEnginePlanTypes {
     /// @param positionEntryCostUsdcAtoms Exact remaining position entry basis, in 6-decimal USDC atoms.
     /// @param account Clearinghouse account whose collateral and claims are represented.
     /// @param currentTimestamp Snapshot timestamp in Unix seconds; used by commitment-carry projection.
-    /// @param lastMarkPrice Latest stored mark price; retained as context but currently not read by plans.
-    /// @param lastMarkTime Latest stored mark publish time; retained as context but currently not read by plans.
+    /// @param lastMarkPrice Latest stored mark price; close-commitment planning checks availability and uses it for
+    ///        partial-close health. Open, close-execution, and liquidation plans do not read it.
+    /// @param lastMarkTime Latest stored mark publish time; close-commitment planning checks that it is nonzero.
+    ///        Open, close-execution, and liquidation plans do not read it.
     /// @param positionBorrowBaseUsdc Position carry borrow base.
     /// @param positionLastCarryIndex Side carry index last checkpointed for the position, scaled by 1e18.
     /// @param longSide Aggregate LONG-side state.

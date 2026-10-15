@@ -655,8 +655,8 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 bountyUsdc = 0;
         uint256 carryTimeDelta = 3_839_405;
 
-        // Leave a distinct free-settlement slice so the historical carry and close bounty are actually collectible;
-        // carry consumes position margin; the bounty remains exclusively free-funded.
+        // Leave a distinct free-settlement slice to show that historical carry consumes position margin
+        // without consuming unrelated free cash; the close's zero-value bounty record adds no action reserve.
         _fundTrader(trader, marginUsdc + 100e6);
         _open(account, CfdTypes.Side.LONG, size, marginUsdc, price);
 
@@ -688,12 +688,12 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         assertEq(
             clearinghouse.pnlPledgeUsdc(account),
             pnlPledgeBefore - expectedCarry,
-            "Only carry consumes position margin; bounty reservation preserves the remaining pledge"
+            "Only carry consumes position margin; zero-value close record leaves remaining pledge unchanged"
         );
         assertEq(
             clearinghouse.actionReserveUsdc(account),
             actionReserveBefore + bountyUsdc,
-            "The close bounty should move only into the isolated action reserve"
+            "Zero-value close record does not increase the isolated action reserve"
         );
     }
 

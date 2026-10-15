@@ -682,7 +682,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         assertEq(remaining, 0);
     }
 
-    // Synthetic lifecycle-entitlement corruption; custody and the authentic escrow remain untouched.
+    // Synthetic lifecycle-entitlement corruption; custody and the authentic zero-value record remain untouched.
     function _corruptEntitlement(
         uint64 id,
         uint256 amount
@@ -733,7 +733,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ExpiredReservationMismatch));
         assertEq(clearinghouse.balanceUsdc(KEEPER), keeper, "mismatch pays no keeper");
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), custody, "refund creates no custody");
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin, "same epoch restores original pledge");
+        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin, "expiry leaves the original pledge unchanged");
         assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
         assertEq(router.pendingOrderCounts(ACCOUNT), 0);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotPending.selector);
@@ -749,7 +749,7 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2);
         vm.prank(ACCOUNT);
         uint64 first = router.commitOrder(request);
-        // Later orders remain legal when their bounty is wholly funded by free settlement.
+        // Later unpaid close orders remain legal without free-settlement bounty funding.
 
         request = _request(CfdTypes.Side.LONG, SIZE / 2);
         request.bounds.executionWindowSeconds -= 1;
@@ -854,7 +854,11 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
             assertEq(uint8(afterRecord.state), uint8(IMarginClearinghouse.BountyReservationState.Quarantined));
         }
 
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0, "quarantine cannot unlock custody");
+        assertEq(
+            clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc,
+            0,
+            "quarantine leaves free settlement unchanged"
+        );
         assertEq(router.nextExecuteId(), 0);
     }
 
@@ -904,9 +908,17 @@ contract DepositFreeCloseTest is CfdClosePreviewTestBase {
         _corruptEntitlement(id, backing + 1);
         vm.warp(router.lifecycleBook().orderTiming(id).executionDeadline + 1);
         router.expireOrder(id);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin, "old backing cannot change new position pledge");
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0, "stale pledge cannot become free");
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), backing, "disputed custody remains locked");
+        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), margin, "stale source epoch cannot change new position pledge");
+        assertEq(
+            clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc,
+            0,
+            "stale source epoch cannot create free settlement"
+        );
+        assertEq(
+            clearinghouse.totalBountyReservationsUsdc(ACCOUNT),
+            backing,
+            "zero-value reservation creates no disputed custody"
+        );
 
         assertEq(
             uint8(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id).state),
@@ -994,7 +1006,7 @@ contract DepositFreeCarryTest is DepositFreeCloseTest {
         assertEq(
             beforeState.custody - clearinghouse.balanceUsdc(ACCOUNT),
             assessed.carryUsdc + _engineExecutionFeeUsdc(size, PRICE) + bounty,
-            "custody pays carry, execution fee and bounty exactly once"
+            "custody pays carry and execution fee; zero close bounty moves no cash"
         );
         assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, assessed.close.postFreeSettlementUsdc);
         assertEq(usdc.balanceOf(ACCOUNT), beforeState.wallet, "no additional wallet funding");

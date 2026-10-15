@@ -136,7 +136,7 @@ contract DeployPerpsArbitrumSepolia is Script {
     address internal constant PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint32 internal constant CAP_PRICE = 2e8;
     uint256 internal constant FROZEN_CLOSE_SPREAD_BPS = 50;
-    uint256 internal constant JUNIOR_MAINTENANCE_FEE_APR_BPS = 100;
+    uint256 internal constant JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
 
     bytes4 internal constant ERC165_INTERFACE_ID = 0x01ffc9a7;
     bytes4 internal constant ERC7540_OPERATOR_INTERFACE_ID = 0xe3bc4e65;

@@ -57,12 +57,12 @@ interface ICfdEngine is ICfdEngineTypes {
         uint64 publishTime
     ) external;
 
-    /// @notice Reserves close-order execution bounty exclusively from free settlement.
-    /// @dev Callable only by the router. Realizes margin-first carry, then funds the bounty from free settlement
-    ///      while protecting all locked buckets.
+    /// @notice Validates a close commitment and realizes collectible carry without reserving a bounty.
+    /// @dev Callable only by the router. The retained bounty argument must be zero; a nonzero value reverts.
+    ///      Carry uses position margin first, then free settlement, and any uncovered amount remains unsettled.
     /// @param account Account committing the close order
     /// @param sizeDelta Position size the close order intends to close (18 decimals)
-    /// @param amountUsdc Execution bounty amount to reserve in USDC
+    /// @param amountUsdc Legacy bounty argument, required to be zero
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,

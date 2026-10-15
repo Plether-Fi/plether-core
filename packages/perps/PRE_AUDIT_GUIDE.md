@@ -18,7 +18,7 @@ If reviewing quickly, focus on these questions in order:
 2. Does the path move value only across the intended custody domains?
 3. Does the path use the correct oracle regime and failure policy for the current market state?
 4. Does the path preserve bounded queue behavior and trader-claim seniority?
-5. Does every position/pledge/claim/collectible-escrow mutation atomically synchronize the matching `TerminalNavBookV2` curve from canonical Engine and clearinghouse state?
+5. Does every position, PnL-pledge, and trader-claim mutation atomically synchronize the matching `TerminalNavBookV2` curve from canonical Engine and clearinghouse state?
 
 ## Test Taxonomy
 
@@ -199,7 +199,8 @@ Reachability note:
   cap. No pledged-close escrow exists in the current implementation.
 - Each typed reserve may be consumed only for its matching obligation; bounded liquidation cleanup may separately forfeit abandoned order bounties.
 - Negative lifetime VPI must be fully covered by its dedicated reserve. Underfunding independently blocks withdrawal
-  and makes the account liquidatable; overfunding never increases price collateral.
+  and sets the account lens's liquidation flag, but close and liquidation planners reject the reserve mismatch rather
+  than executing settlement. Overfunding never increases price collateral.
 - Carry checks project collection from canonical active position margin first, then free settlement. Price-risk health
   uses the reduced pledge. Any remainder after both sources are exhausted blocks withdrawal and makes the position
   liquidatable; same-account claims cannot fund carry. Terminal action recovery/waiver applies only to unpaid carry.
@@ -286,14 +287,15 @@ Reachability note:
 - Ownership problem: entry and exit share pricing must not apply different marked-liability assumptions.
 - Chosen rule: both use `physicalAssets - totalTraderClaims + terminalLpPriceDelta`, with the signed delta computed from whole lots, exact entry cost, and account-capped collectible loss.
 - Liquidity separation: a positive marked receivable affects share ownership but cannot fund redemption cash before collection; endpoint max liability remains the withdrawal/admission reserve.
-- Protecting invariant: a current terminal deficit blocks deposit activation, and every position/pledge/claim/collectible-escrow transition synchronizes the account curve atomically.
+- Protecting invariant: a current terminal deficit blocks deposit activation, and every position, PnL-pledge, and trader-claim transition synchronizes the account curve atomically.
 
 ### Junior maintenance-fee dilution
 
 - Ownership choice: the fee is paid only by diluting Junior supply; it does not move USDC or alter principal, HWM,
   reserves, claimant buckets, or waterfall arithmetic.
 - Governance boundary: the current HousePool owner controls a 48-hour delayed configuration capped at `1,000 bps`
-  nominal APR. The fresh-deployment default is `0 bps` and `address(0)`.
+  nominal APR. The generic Junior constructor accepts a zero rate with either zero or a valid nonzero recipient; this
+  release initializes `0 bps` with the deployment-time protocol treasury as recipient.
 - Pricing invariant: every Junior conversion and epoch quote uses raw supply plus pending fee shares. Pending deposits
   join the fee base on activation; pending redemptions stay in it until funding burns their shares.
 - Liveness choice: accrual continues during settlement holds, oracle freeze, and zero NAV. Held or reverted settlement

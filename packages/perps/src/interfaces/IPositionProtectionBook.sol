@@ -11,6 +11,7 @@ import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProte
 interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtectionViews {
 
     /// @notice Values the router needs to append a triggered protection close to its ordinary FIFO queue.
+    /// @dev The execution-bounty field is retained for ABI compatibility and is always zero.
     struct TriggerPlan {
         address account;
         CfdTypes.Side side;
@@ -19,7 +20,7 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
         uint256 executionBountyUsdc;
     }
 
-    /// @notice Activates a met OCO leg and transfers both bounty obligations into a router trigger plan.
+    /// @notice Activates a met OCO leg and returns the trigger bounty with a zero-bounty close plan.
     /// @dev Router-only. The router calls this while atomically appending the linked close to its FIFO queue.
     function activate(
         uint64 protectionId,
@@ -36,10 +37,9 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
     ) external;
 
     /// @notice Relatches the current failed close attempt when its protected position still matches exactly.
-    /// @dev Router-only. The Router calls this before finalizing a non-liquidation failed child receipt. Returning
-    ///      `true` transfers accounting attribution for the unchanged reserved bounty from the child back to this
-    ///      Book; returning `false` permits ordinary bounty settlement after a missing or mismatched position resolves
-    ///      the protection as `Failed`. Unknown and stale order ids are harmless no-ops that return `false`.
+    /// @dev Router-only. The Router calls this before finalizing a non-liquidation failed child receipt. The close
+    ///      bounty must be zero. Returning `true` latches the protection for a fresh retry; returning `false` resolves
+    ///      a missing or mismatched position as `Failed`. Unknown and stale order ids return `false` without mutation.
     function handleFailedProtectionAttempt(
         uint64 orderId,
         address account,

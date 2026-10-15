@@ -8,7 +8,7 @@ import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 /// @notice Transfers queued bounty reservations during account liquidation.
 abstract contract OrderBountyAccounting is OrderRouterBase {
 
-    /// @notice Restores pledged order backing and forfeits only free-funded bounties before liquidation.
+    /// @notice Forfeits live order and unpaid protection-trigger bounty reservations before liquidation.
     /// @dev Does not release margin or unlink orders; post-liquidation queue cleanup performs those steps.
     ///      A downstream engine revert rolls back every cleared record.
     /// @param account Liquidated account whose bounties are forfeited.

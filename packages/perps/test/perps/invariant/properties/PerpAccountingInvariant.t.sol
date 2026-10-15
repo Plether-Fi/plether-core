@@ -382,7 +382,7 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
             assertEq(
                 curve.effectiveCapUsdcAtoms,
                 expectedEffectiveCapUsdcAtoms,
-                "Curve cap must match clipped claims, pledge and source-bound escrow"
+                "Curve cap must match clipped same-account claims and pledge"
             );
             assertEq(uint256(curve.side), uint256(side), "Curve side must match canonical Engine side");
 

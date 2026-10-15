@@ -195,12 +195,13 @@ Use `IPerpsKeeper` for execution:
 The submitting agent does not have to be the executor. Any keeper may execute an order. For a freshly submitted
 bounded-order request, including an attached protection parent, execution remains inside the limits pinned by the
 account. Only triggered and retried protection close orders use the documented protocol-synthesized envelope; they
-remain subject to ordinary Router, evaluator, Engine, and protection-state checks. Self-execution releases the stored
-order bounty to the account's free settlement on success; an external keeper receives a clearinghouse credit instead.
+remain subject to ordinary Router, evaluator, Engine, and protection-state checks. For an opening order with a
+nonzero bounty, self-execution releases that value to the account's free settlement on success; an external keeper
+receives a clearinghouse credit instead.
 For a nonzero bounty, receipts encode self-execution as `Paid` to `executor == account`; ordinary zero-bounty execution
 uses `None`. `RefundedToAccount` applies to risk-off cleanup and recoverable backing returned by
-`ExpiredReservationMismatch`. An ordinary failed close settles an authenticated zero Order record, pays no cleaner,
-and does not restore pledged bounty. No pledge-specific empty-queue rule applies; FIFO, queued-exposure, capacity,
+`ExpiredReservationMismatch`. An ordinary failed close settles an authenticated zero Order record and pays no cleaner.
+No pledged-close bounty exists to restore. No pledge-specific empty-queue rule applies; FIFO, queued-exposure, capacity,
 carry, and risk checks still do. A failed registered protection attempt likewise settles its zero record and pays no
 cleaner. It latches only while the exact protected position still matches; retry creates a fresh zero record. A
 missing or mismatched position terminally resolves the protection as `Failed` with zero close-bounty movement.
@@ -593,8 +594,8 @@ TP/SL thresholds are also raw 8-decimal FX-basket prices. Their product-facing d
    retries are expected, so reconcile again before replacing a reverted or uncertain submission. A missing or
    mismatched position produces `relatched=false` and terminal `Failed`, not another attempt.
 7. Reconcile both evidence domains: protection state/events for OCO intent and immutable trigger facts, and lifecycle
-   Book state/receipts for the caller-authored parent plus every synthesized close attempt. Track the trigger bounty separately from
-   the single execution bounty recycled across attempts.
+   Book state/receipts for the caller-authored parent plus every synthesized close attempt. Track the paid-once trigger
+   bounty separately from the fresh zero-amount Order record for each close attempt.
 
 ## Smart-account and session-key policy
 

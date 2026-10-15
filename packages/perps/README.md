@@ -116,9 +116,12 @@ If you want the accounting model first, read [`ACCOUNTING_SPEC.md`](ACCOUNTING_S
 - Each account may have one full-position OCO take-profit/stop-loss protection at a time.
 - Queue execution is FIFO from the global head.
 - LP-capital carry is used instead of side-to-side funding.
-- The optional Junior maintenance fee is share dilution, not a performance fee. It deploys disabled at `0 bps` and
-  can be enabled only through the vault's 48-hour governance delay.
-- If the HousePool is short on cash, trader profits can become senior trader claims instead of reverting the state transition; keeper bounties are funded from reserved trader margin inside the clearinghouse.
+- The optional Junior maintenance fee is share dilution, not a performance fee. The release deploys it disabled at
+  `0 bps` with the deployment-time protocol treasury as recipient; it can be enabled only through the vault's 48-hour
+  governance delay.
+- If the HousePool is short on cash, trader profits can become senior trader claims instead of reverting the state
+  transition. Opening-order and protection-trigger bounties are funded from trader USDC reserved in the clearinghouse;
+  close-order execution bounties are zero.
 
 ### Units and accounts
 
@@ -624,10 +627,12 @@ LPs provide USDC to the `HousePool`, which is split into senior and junior ERC-4
   surcharge, while deposit activation is deferred. Requests do not lock a price or fee; settlement fixes both.
 - During `oracleFrozen`, bootstrap admin flows stay blocked: `initializeSeedPosition(...)` and `assignUnassignedAssets(...)` must wait for the oracle to become live again instead of inheriting the stale-window LP fee path.
 
-Junior alone supports a governance-configurable maintenance fee. It starts at `0 bps` with no recipient, is capped at
-`1,000 bps` nominal APR, and can change only after a 48-hour proposal delay. Accrued fees are paid by minting ordinary
-transferable Junior shares to the recipient; no USDC leaves HousePool and no tranche principal, HWM, reserve, or
-waterfall value is rewritten. Pricing and estimates use raw supply plus pending fee shares even before those shares
+Junior alone supports a governance-configurable maintenance fee. The generic Junior constructor accepts an initial
+`0 bps` rate with either a zero or valid nonzero recipient. This release starts at `0 bps` with the deployment-time
+protocol treasury as recipient. The rate is capped at `1,000 bps` nominal APR and can change only after a 48-hour
+proposal delay. Accrued fees are paid by minting ordinary transferable Junior shares to the recipient; no USDC leaves
+HousePool and no tranche principal, HWM, reserve, or waterfall value is rewritten. Pricing and estimates use raw
+supply plus pending fee shares even before those shares
 are minted. Pending deposits begin paying only when activated, while pending redemption shares pay until they are
 funded and burned. Because accrual advances on completed Unix-hour boundaries, a mid-hour activation can receive less
 than one hour of pre-activation fee exposure, while a mid-hour funded redemption can avoid less than one hour of
@@ -1013,7 +1018,8 @@ The Engine exports one signed terminal price-PnL adjustment for both LP entry an
   nonwithdrawable sub-balance of action reserve; generic action charges cannot spend below the combined floor of
   protected execution bounties plus this VPI reserve.
 - VPI does not add to or subtract from P+C price-risk equity. Reserve below the target independently blocks withdrawal
-  and makes the account liquidatable; reserve above the target never adds price collateral.
+  and sets the account lens's liquidation flag. Close planning returns a typed failure and liquidation planning reverts
+  on that reserve mismatch; reserve above the target never adds price collateral.
 - An open/increase that makes lifetime VPI more negative must fully fund the higher target from eligible settlement or
   newly supplied pledge, otherwise it is rejected. A close or liquidation consumes reserve when the clawback is
   realized and releases only value no longer required after equivalent withholding or a lower surviving target.

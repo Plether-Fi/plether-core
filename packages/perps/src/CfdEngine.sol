@@ -586,13 +586,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         emit TraderClaimSettled(account, claimAmountUsdc);
     }
 
-    /// @notice Reserves a close bounty from free settlement, then eligible position pledge.
-    /// @dev Callable only by the router. Carry collection is attempted first, with any uncovered amount left unsettled.
-    ///      Carry uses margin first. Reservation reclassifies custody and protects other backing.
-    ///      Zero bounties still validate admission and checkpoint carry.
+    /// @notice Validates a close commitment and realizes collectible carry without reserving a bounty.
+    /// @dev Callable only by the router. The retained bounty argument must be zero; a nonzero value reverts.
+    ///      Carry uses position margin first, then free settlement, and any uncovered amount remains unsettled.
+    ///      The zero-bounty path still validates close admission and checkpoints carry.
     /// @param account Account committing the close order.
     /// @param sizeDelta Intended close size, with 18 decimals; must be nonzero and no greater than position size.
-    /// @param amountUsdc Execution bounty to reserve, in 6-decimal USDC units.
+    /// @param amountUsdc Legacy bounty argument, required to be zero.
     function reserveCloseOrderExecutionBounty(
         address account,
         uint256 sizeDelta,

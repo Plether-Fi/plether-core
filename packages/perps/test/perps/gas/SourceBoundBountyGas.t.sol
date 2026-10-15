@@ -11,7 +11,8 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {Vm} from "forge-std/Vm.sol";
 
-/// @dev Production-codegen gas selection. Public V3 fixture transitions; zero carry/VPI isolate source-bound escrow.
+/// @dev Production-codegen gas selection. Public V3 fixture transitions; zero carry/VPI isolate
+///      order processing with unpaid zero-value close records.
 ///      Request/oracle construction and cold-state preparation precede measurement; all proof checks follow it.
 ///      Reported gas excludes transaction intrinsic/calldata gas, refunds and external oracle service charges.
 contract SourceBoundBountyGasTest is SourceBoundBountyFixture {

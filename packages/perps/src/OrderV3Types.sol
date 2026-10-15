@@ -80,11 +80,14 @@ library OrderV3Types {
         Paid,
         Forfeited,
         RefundedToAccount,
-        /// @notice The bounty remains reserved for a fresh attempt of the same latched position protection.
+        /// @notice Retired compatibility value for a bounty retained for a protection retry.
+        /// @dev Current receipts never use it.
         RetainedForProtectionRetry,
-        /// @notice The original free-funded part was paid; the original pledge was restored to its position.
+        /// @notice Retired compatibility value for mixed paid/refunded funding.
+        /// @dev Current receipts never use it.
         PaidAndRefunded,
-        /// @notice The free-funded part was forfeited; the pledge was restored before liquidation loss recovery.
+        /// @notice Retired compatibility value for mixed forfeited/refunded funding.
+        /// @dev Current receipts never use it.
         ForfeitedAndRefunded
     }
 

@@ -100,9 +100,10 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
     ///      snapshots or arithmetic violations can still revert. `publishTime` is retained for interface parity but
     ///      the current pure planner does not use it.
     /// @param snap Trusted account, side, pool, collateral, claim, carry, and risk snapshot.
-    /// @param order Close/decrease order. The planner does not require `order.account == snap.account`, `isClose == true`,
-    ///        matching side, valid timestamps/target price, or router authorization; it uses `order.account` and size
-    ///        while using position and collateral state from `snap`.
+    /// @param order Close/decrease order. A side mismatch with a nonzero snapshot position returns `SIDE_MISMATCH`
+    ///        before carry projection. The planner does not require `order.account == snap.account`, `isClose == true`,
+    ///        valid timestamps/target price, or router authorization; it uses `order.account` and size while using
+    ///        position and collateral state from `snap`.
     /// @param executionPrice Candidate execution price, with 8 decimals.
     /// @param publishTime Oracle publish timestamp in Unix seconds; currently unused by planning calculations.
     /// @return delta Complete close settlement plan or a partially populated typed failure result.
@@ -117,7 +118,8 @@ contract CfdEnginePlanner is ICfdEnginePlanner {
 
     /// @notice Plans a full liquidation without reading or mutating protocol state.
     /// @dev The execution price is capped at `snap.capPrice`. A snapshot with no position returns a nonliquidatable
-    ///      zero/partial delta. `publishTime` is retained for interface parity but is not used by current calculations.
+    ///      zero/partial delta. An underfunded negative-VPI reserve reverts before liquidation eligibility is tested.
+    ///      `publishTime` is retained for interface parity but is not used by current calculations.
     /// @param snap Trusted account, position, pool, collateral, claim, carry, and risk snapshot.
     /// @param executionPrice Candidate liquidation price, with 8 decimals.
     /// @param publishTime Oracle publish timestamp in Unix seconds; currently unused by planning calculations.

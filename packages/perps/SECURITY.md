@@ -800,8 +800,8 @@ Same-account trader claim balance is price-risk backing, not generic cash or act
 - open/increase, trader-withdraw, close, and liquidation health use the exact same-account price-risk cap:
   `pnlPledgeUsdc + traderClaimBalanceUsdc`; VPI never adds to or subtracts from this price-risk equity,
 - the separately funded VPI reserve backs only that account's typed VPI obligation: overfunding never adds price
-  collateral, while backing below `max(-vpiAccrued, 0)` independently blocks withdrawal and makes the account
-  liquidatable,
+  collateral, while backing below `max(-vpiAccrued, 0)` independently blocks withdrawal and sets the account lens's
+  liquidation flag; close planning returns a typed failure and liquidation planning reverts on that reserve mismatch,
 - the terminal book includes the claim in that same account's collectible price-loss cap,
 - terminal settlement paths may explicitly net the same-account claim once against that account's exact price loss,
 - the claim is not withdrawable cash and cannot fund carry, VPI, execution fees, frozen spread, liquidation charges,
@@ -947,10 +947,11 @@ funded claims. It has no automatic expiry and only the HousePool owner can relea
 
 ### Junior maintenance-fee dilution
 
-The optional maintenance fee applies only to Junior and deploys disabled at `0 bps` with no recipient. The current
-HousePool owner may configure it through a 48-hour delay, subject to a `1,000 bps` nominal-APR cap. Finalization must
-checkpoint elapsed fees to the old recipient before changing the rate or recipient; enabling from zero starts
-prospectively.
+The optional maintenance fee applies only to Junior. The generic Junior constructor permits a zero rate with a zero
+or valid nonzero recipient; this release deploys at `0 bps` with the deployment-time protocol treasury as recipient.
+The current HousePool owner may configure it through a 48-hour delay, subject to a `1,000 bps` nominal-APR cap.
+Finalization must checkpoint elapsed fees to the old recipient before changing the rate or recipient; enabling from
+zero starts prospectively.
 
 The fee mints ordinary Junior shares and never transfers USDC or mutates tranche principal, the Senior HWM, reserves,
 claim escrows, or waterfall accounting. Security review must distinguish raw ERC-20 supply from effective pricing

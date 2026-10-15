@@ -42,7 +42,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_USDC = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
-    uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 100;
+    uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
 
     bytes32 internal constant PHASE_DEPLOYED = keccak256("deployed");
     bytes32 internal constant PHASE_SEEDED = keccak256("seeded");

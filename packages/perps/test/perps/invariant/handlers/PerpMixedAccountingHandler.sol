@@ -1944,7 +1944,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertModel();
     }
 
-    /// @dev A generated pledge-funded commitment must first remove only withdrawable free collateral. An
+    /// @dev A generated zero-free close commitment must first remove only withdrawable free collateral. An
     /// underwater position or unpaid carry rejects that preparation; classify and prove rollback explicitly.
     function _rejectPledgePreparationWithdrawal(
         uint256 i,
@@ -2503,7 +2503,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(receipt.bountyRecipient, recipient);
         assertEq(receipt.bounty.bountyEntitlementUsdc, o.bountyUsdc);
         assertEq(receipt.bounty.bountyPaidUsdc, paid, "only earned bounty is paid");
-        assertEq(receipt.bounty.bountyRefundedUsdc, refunded, "original source pledge is restored");
+        assertEq(receipt.bounty.bountyRefundedUsdc, refunded, "refund matches modeled terminal disposition");
         assertEq(receipt.bounty.bountyForfeitedUsdc, forfeited, "only free funding is forfeited");
         assertEq(receipt.bounty.bountyRetainedUsdc, 0);
         assertEq(paid + refunded + forfeited, o.bountyUsdc);
@@ -3367,7 +3367,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertModel();
     }
 
-    /// @notice Real source escrow straddles maintenance, blocks liquidation, then is recovered at a losing mark.
+    /// @notice An unpaid pending close remains solvent at the current mark but cannot block liquidation after a loss.
     function exercisePendingCloseSolvencyHistory() external {
         uint256 i = 2;
         assertEq(orders.liveCount(), 0);

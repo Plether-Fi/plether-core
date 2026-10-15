@@ -11,7 +11,7 @@ interface IOrderRouterErrors {
     /// @notice Close admission was requested for an opening order.
     error OrderRouter__NotCloseOrder();
     error OrderRouter__OrderNotExpired();
-    /// @notice Pledge-funded bounty must belong to the first pending order of its source position.
+    /// @notice Retired compatibility error for pledge-funded close bounties; current closes require zero bounty.
     error OrderRouter__PledgeBountyRequiresEmptyQueue();
     /// @notice A positive settlement minimum requires a flat account's first pending open.
     error OrderRouter__SettlementFloorUnsupported();
@@ -25,7 +25,7 @@ interface IOrderRouterErrors {
     error OrderRouter__SettlementFloorWithdrawal(
         uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc, uint256 maxGrossDebitUsdc
     );
-    /// @notice Internal liquidation marker; pledge restoration made the position solvent.
+    /// @notice Retired compatibility error for pledge restoration during liquidation.
     error OrderRouter__RestoredPledgeMadeSolvent();
 
     /// @notice Terminal result of one independently isolated liquidation-batch item.

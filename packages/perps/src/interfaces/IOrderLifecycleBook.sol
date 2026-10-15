@@ -14,21 +14,27 @@ interface IOrderLifecycleBook {
         OrderV3Types.ConstraintKind constraint, uint256 actual, uint256 limit
     );
 
+    /// @notice Records the Router's close-admission or open-bounty commitment for a pending order.
+    /// @dev Current commitments require zero pledge-funded bounty and a zero source position epoch.
+    /// @param orderId Pending order whose commitment is recorded.
+    /// @param effects Carry and bounty effects returned by the Engine or open-order reservation path.
+    /// @param sourcePositionEpoch Retained compatibility argument; must be zero.
     function recordCommitment(
         uint64 orderId,
         CfdEnginePlanTypes.CloseCommitment calldata effects,
         uint64 sourcePositionEpoch
     ) external;
 
-    /// @notice Pending funding differs from its independently recorded commitment or position escrow.
+    /// @notice A pending order's bounty reservation differs from its committed funding.
     error OrderLifecycleBook__BountyFundingMismatch(uint64 orderId);
 
-    /// @notice Authenticates custody, original funding and live collectible pledge ownership.
+    /// @notice Authenticates the pending order's clearinghouse bounty reservation and committed funding.
+    /// @dev Pledge-funded amounts and source position epochs must both be zero.
     function validateBountyFunding(
         uint64 orderId
     ) external view;
 
-    /// @notice Original pledge position generation, retained only while the order is pending.
+    /// @notice Retained source-position generation field, always zero for current pending orders.
     function sourcePositionEpoch(
         uint64 orderId
     ) external view returns (uint64);

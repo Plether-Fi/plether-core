@@ -380,8 +380,7 @@ library CfdEnginePlanLib {
         ) {
             return _numericOpenFailure(delta);
         }
-        // The terminal book reads P+C into uint144. Public opens execute at the account FIFO head; pledge-funded
-        // close escrow requires an empty queue at creation, so its older close clears it before an open executes.
+        // The terminal book reads P+C into uint144. Close commitment reserves no pledge and cannot increase P+C.
 
         delta.newPosSize = openState.newSize;
         delta.newPosEntryPrice = openState.newEntryPrice;
@@ -1316,7 +1315,8 @@ library CfdEnginePlanLib {
 
     /// @notice Plans eligibility and full settlement for liquidating a snapshot position.
     /// @dev Execution price is capped by `snap.capPrice`. A zero-size position returns a nonliquidatable delta after
-    ///      populating account and price. Otherwise pending carry is projected against active margin first, then free
+    ///      populating account and price. An underfunded negative-VPI reserve reverts before eligibility is evaluated.
+    ///      Otherwise pending carry is projected against active margin first, then free
     ///      settlement. Exact price health uses the reduced pledge plus same-account claim; any uncovered carry is an
     ///      independent delinquency condition. The liquidation threshold uses FAD margin in
     ///      the FAD window and normal maintenance margin otherwise, with equality liquidatable. A nonliquidatable

@@ -20,7 +20,7 @@ interface IOrderRouterAdminHost {
     /// @param openOrderExecutionBountyBps Open bounty rate applied to reference notional, in basis points.
     /// @param minOpenOrderExecutionBountyUsdc Minimum open-order bounty in 6-decimal USDC.
     /// @param maxOpenOrderExecutionBountyUsdc Maximum open-order bounty in 6-decimal USDC.
-    /// @param closeOrderExecutionBountyUsdc Fixed close-order bounty in 6-decimal USDC.
+    /// @param closeOrderExecutionBountyUsdc Close-order bounty in 6-decimal USDC; must remain zero.
     /// @param positionProtectionTriggerBountyUsdc Fixed protection-trigger bounty in 6-decimal USDC.
     /// @param maxPendingOrders Maximum number of live pending orders per account.
     /// @param minEngineGas Minimum EIP-150-forwardable gas required before an engine execution attempt.

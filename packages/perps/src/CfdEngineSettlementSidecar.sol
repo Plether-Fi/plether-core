@@ -523,6 +523,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @param delta Valid planned close/decrease delta; prices are 8 decimals, size 18, and USDC fields 6.
     /// @param currentPosition Position loaded by the engine immediately before settlement.
     /// @param publishTime Oracle publish timestamp proposed for the execution mark.
+    /// @param orderId Retained order-identity ABI argument; current close settlement does not read it.
     function executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
@@ -532,11 +533,11 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         host.settlementApplyCarryAndMark(delta.price, publishTime);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(host.clearinghouse());
-        // A successful close earns its bounty now. Until this point refundable pledged funding stays collectible.
+        // Close commitments reserve no bounty; settle price and action value from their separate planned sources.
         _executeClose(delta, currentPosition, clearinghouse);
     }
 
-    /// @dev Keep order identity and publish-time arguments outside the settlement frame's non-IR stack budget.
+    /// @dev Keep the retained order-id argument and publish-time processing outside the settlement frame's stack budget.
     function _executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,

@@ -144,7 +144,7 @@ library TerminalNavBruteForceModel {
         }
     }
 
-    /// @notice Evaluates the pledge, claim and contingent close-escrow cap without affine encoding.
+    /// @notice Evaluates exact-basis terminal price PnL with the supplied collectible cap, without affine encoding.
     /// @dev Positive values collectible by LPs are capped. Negative values owed by LPs remain uncapped.
     function accountDeltaAt(
         AccountState memory state,

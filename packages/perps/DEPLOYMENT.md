@@ -147,7 +147,7 @@ Contract creation is interleaved with the required set-once wiring:
 - `MarginClearinghouse.setEngine(...)`
 
 Vault ordering is deliberate: construct Senior with `0/address(0)`, call `HousePool.setSeniorVault`, snapshot
-`CfdEngine.protocolTreasury()`, construct Junior with `100` bps and that recipient, then call
+`CfdEngine.protocolTreasury()`, construct Junior with `0` bps and that recipient, then call
 `HousePool.setJuniorVault`. Both values and the empty fee-proposal state are verified immediately. This ordering lets
 the Junior constructor enforce the existing forbidden-recipient rules against the already canonical Senior vault.
 
@@ -264,7 +264,7 @@ Important:
   standalone verification also check the separate `IAsyncTrancheVaultClaimableRedeem` extension; adding that extension
   does not change the base custom interface id. Regenerate vault and lens ABIs for frontend, keeper, and indexer use.
 - Deploy verification and the release-default regression fail closed unless Senior reports `0/address(0)` and Junior
-  reports `maintenanceFeeAprBps() == 100` with the deployment-time `CfdEngine.protocolTreasury()` snapshot. Neither
+  reports `maintenanceFeeAprBps() == 0` with the deployment-time `CfdEngine.protocolTreasury()` snapshot. Neither
   vault may have a pending fee proposal or pending fee shares before seeding. Bootstrap enforces the same snapshot and
   does not contain a fee-configuration transaction.
 - `OrderRouter` is non-upgradeable and `CfdEngine.setOrderRouter(...)` is one-time. A release containing position
@@ -331,7 +331,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `maxPendingOrders` | `5` (unchanged) |
 | `closeOrderExecutionBountyUsdc` | `0` (nonzero configuration rejected) |
 | `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
-| `juniorMaintenanceFeeAprBps` | `100` nominal APR |
+| `juniorMaintenanceFeeAprBps` | `0` nominal APR (disabled at deployment) |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
 | `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
 | `maxSeniorShareBps` | `8_000` (release-HousePool constructor initialization) |
@@ -341,11 +341,13 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 
 `frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
 
-The Junior maintenance fee is initialized in the Junior vault constructor at `100` bps with the Engine's current
-protocol treasury. Senior is constructed with `0/address(0)` and registered first so the Junior constructor can reject
-all canonical forbidden recipients. `MaintenanceFeeConfigInitialized` records the rate, recipient, and first hourly
+The release initializes the Junior vault constructor at `0` bps with the Engine's current protocol treasury as
+recipient. Senior is constructed with `0/address(0)` and registered first so the Junior constructor can reject all
+canonical forbidden recipients. `MaintenanceFeeConfigInitialized` records the rate, recipient, and first hourly
 checkpoint boundary. The recipient is a snapshot, not a dynamic pointer; an Engine treasury rotation must be paired
-with a separately timelocked Junior recipient rotation.
+with a separately timelocked Junior recipient rotation if that recipient is to follow the treasury. The generic Junior
+vault constructor also permits a zero rate with a zero recipient; this release retains the treasury snapshot while
+the fee is disabled so a later rate change can retain the same recipient.
 
 After deployment, the current HousePool owner may propose a rate/recipient pair, wait 48 hours, verify the exact pending
 values, and finalize it. Rates are
@@ -578,7 +580,7 @@ The seed and activation phases of the bootstrap script are designed to be partia
 - it never proposes or finalizes initial HousePool or Router configuration
 - it refuses to seed unless the exact constructor-installed HousePool and Router values are active and neither admin
   has an outstanding proposal
-- it refuses to seed unless Junior already has the constructor-initialized `100`-bps fee, the deployment treasury
+- it refuses to seed unless Junior already has the constructor-initialized `0`-bps fee, the deployment treasury
   snapshot, no outstanding fee proposal, and zero pending fee shares before its first supply
 - it rotates the coordinator guardian only when the requested address differs; a matching rerun is a no-op
 - it skips a seed if that side is already initialized
@@ -688,7 +690,7 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
 - Never wire one replacement vault to an old pool or one old vault to a replacement pool. Deploy and verify the engine,
   terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, coordinator, and lenses as a single
   versioned unit.
-- Deploy Junior with the approved `100`-bps fee and the exact deployment-time protocol-treasury recipient. Do not add a
+- Deploy Junior with the approved `0`-bps fee and the exact deployment-time protocol-treasury recipient. Do not add a
   bootstrap fee transaction. Any later rate or recipient change is a separate 48-hour governance operation.
 - `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
   price cap, size quantum, and empty initial state were verified by the deploy transaction.
@@ -724,7 +726,7 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
    batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
    `SettlementMonitorLens` facade and its internal sidecar are bound to the same Router, Engine, pool, terminal book,
    clearinghouse, vaults, USDC, protocol lens, and planner version. Confirm Junior maintenance-fee rate, recipient,
-   pending shares, and effective supply read back as `100`, the deployment-time protocol-treasury snapshot, `0`, and
+   pending shares, and effective supply read back as `0`, the deployment-time protocol-treasury snapshot, `0`, and
    raw supply respectively. Also verify the constructor-installed HousePool `$40M/80%` and Router `$1,000/2,500`
    values with zero active configuration proposals. Verify the
    `EmergencyPauseCoordinator` is bound to the exact RouterAdmin and HousePool, installed as pauser on both, and starts

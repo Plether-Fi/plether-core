@@ -64,7 +64,7 @@ interface IOrderRouterExecutionHost {
     }
 
     /// @notice Canonical execution-bounty outcome returned by Router accounting.
-    /// @dev Protection attempts may retain their bounty in the protection Book instead of paying the terminal caller.
+    /// @dev Failed protection attempts may relatch for a fresh zero-bounty close; their terminal bounty is zero.
     struct BountySettlement {
         uint256 bountyUsdc;
         uint256 bountyRefundedUsdc;
@@ -106,9 +106,9 @@ interface IOrderRouterExecutionHost {
         ItemRequest calldata request
     ) external returns (OrderV3Types.ExecutionResult memory result);
 
-    /// @notice Releases remaining order margin, settles or retains its bounty, and unlinks its Router record.
+    /// @notice Releases remaining order margin, settles its bounty, and unlinks its Router record.
     /// @dev `bountyRecipient` is explicit because a Router self-call changes `msg.sender`. Failed protection attempts
-    ///      return a retained disposition with a zero recipient so their one reserved bounty can fund a fresh retry.
+    ///      may relatch for a fresh retry, but their zero-bounty order reservation still terminalizes.
     function settleOrderFromSidecar(
         uint64 orderId,
         bool success,

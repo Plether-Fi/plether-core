@@ -85,7 +85,7 @@ interface ICfdEngineTypes {
     error CfdEngine__StillInsolvent();
     /// @notice A required dependency, token, account, or recipient address is zero.
     error CfdEngine__ZeroAddress();
-    /// @notice Free settlement and eligible pledge after carry cannot fund the close-order bounty.
+    /// @notice Retained legacy close-bounty funding error; current zero-bounty commitments cannot emit it.
     error CfdEngine__InsufficientCloseOrderBountyBacking(
         uint256 requiredBountyUsdc, uint256 availableBackingUsdc, uint256 unpaidCarryUsdc
     );
@@ -229,8 +229,8 @@ interface ICfdEngineTypes {
     /// @param closeReachableUsdc Legacy close reachability value, exactly equal to `freeSettlementUsdc`.
     /// @param liquidationReachableSettlementUsdc Settlement balance available to liquidation after excluding
     ///        router-attributed execution-bounty reserves; this can include value liquidation releases.
-    /// @param terminalPriceCollectibleCapUsdc Live-position terminal price-loss cap: PnL pledge, same-account claim
-    ///        and refundable pledged-close escrow, clipped to maximum endpoint loss; zero without a live position.
+    /// @param terminalPriceCollectibleCapUsdc Live-position terminal price-loss cap: PnL pledge plus same-account
+    ///        claim, clipped to maximum endpoint loss; zero without a live position. Close records add no backing.
     /// @param accountEquityUsdc Clearinghouse-local settlement balance, excluding unrealized PnL and trader claims.
     /// @param freeBuyingPowerUsdc Clearinghouse-local free settlement, excluding engine withdrawal guards.
     /// @param traderClaimBalanceUsdc Separate senior HousePool payout liability owed to the account.
@@ -423,6 +423,7 @@ interface ICfdEngineTypes {
     /// @notice Read-only projection of liquidation economics and post-settlement solvency.
     /// @dev `oraclePrice` is clamped to the engine cap. Every monetary field is 6-decimal USDC. The simulation
     ///      models forfeiture of the account's pending execution bounties before computing liquidation reachability.
+    ///      An underfunded negative-VPI reserve causes planning to revert before this result is returned.
     /// @param liquidatable Whether exact P+C price risk breaches the active requirement or an independent delinquency
     ///        condition applies.
     /// @param oraclePrice Price used by the simulation, with 8 decimals.

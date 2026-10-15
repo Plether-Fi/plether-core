@@ -24,6 +24,7 @@ contract BountyBackingHarness is CfdOrderPolicyEvaluator {
 
 }
 
+/// @dev Synthetic planner snapshots exercise nonzero bounty classification; public close commitment rejects it.
 contract CfdOrderPolicyEvaluatorTest is Test {
 
     uint256 private constant PRICE = 1e8;

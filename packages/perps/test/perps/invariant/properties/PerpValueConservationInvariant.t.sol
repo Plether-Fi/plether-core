@@ -94,7 +94,9 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         // The two equal basket weights independently floor each half of an odd mock price.
         uint256 targetPrice = (executionPrice / 2) * 2 - (expectSlippage ? 1 : 0);
 
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(FULL_CLOSE_TRADER), 0, "fixture bounty is entirely pledge funded");
+        assertEq(
+            clearinghouse.getFreeBuyingPowerUsdc(FULL_CLOSE_TRADER), 0, "fixture leaves no free settlement for close"
+        );
         vm.prank(FULL_CLOSE_TRADER);
         uint64 orderId = LegacyOrderRouterHarness(payable(address(router)))
             .commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, targetPrice, true);
@@ -142,8 +144,8 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         uint256 expectedPaid = failed ? 0 : reservation.amountUsdc;
         uint256 expectedRefunded = failed ? reservation.amountUsdc : 0;
         OrderV3Types.BountyDisposition expectedDisposition = OrderV3Types.BountyDisposition.None;
-        // This fixture submits no free collateral beyond the original open's margin. A failed close must return
-        // its entire pledge-funded bounty to the same position; a successful close still pays the full bounty.
+        // This fixture leaves no free collateral and the close bounty is zero. A failed close must
+        // preserve the pledge; a successful close cannot pay an execution bounty to the keeper.
         return reservation.account != FULL_CLOSE_TRADER
             || reservation.state != IMarginClearinghouse.BountyReservationState.Active
             || reservation.freeFundedUsdc != 0 || reservation.pledgeFundedUsdc != reservation.amountUsdc
@@ -584,9 +586,7 @@ contract PerpValueConservationInvariantTest is BasePerpTest {
     }
 
     function _assertInvariant_FailedExecutionCannotExtractActiveMargin() internal view {
-        assertFalse(
-            handler.failedCloseExtractedMargin(), "Failed close extracted value beyond its authenticated bounty"
-        );
+        assertFalse(handler.failedCloseExtractedMargin(), "Failed close changed pledge or paid a zero-bounty keeper");
     }
 
     function _assertInvariant_NeutralMtmCannotCreateLpProfit() internal view {

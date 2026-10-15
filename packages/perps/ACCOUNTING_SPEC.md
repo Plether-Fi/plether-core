@@ -338,9 +338,10 @@ Required consequences:
 
 The Junior vault may dilute its outstanding shares to pay a maintenance fee. It never transfers USDC or changes
 `juniorPrincipal`, Senior principal/HWM, withdrawal reserves, claimant buckets, or the allocation of assets between tranches. The constructor
-accepts the initial rate and recipient. `DeployPerpsArbitrumSepolia` initializes Junior at `100` bps nominal APR with
-the engine's protocol treasury as recipient; Senior requires a zero rate and zero recipient. When the Junior rate is
-zero, pending fee shares are zero and effective supply equals raw ERC-20 `totalSupply()`.
+accepts the initial rate and recipient. `DeployPerpsArbitrumSepolia` initializes Junior at `0` bps nominal APR with
+the engine's protocol treasury snapshot as recipient; Senior requires a zero rate and zero recipient. The generic
+Junior constructor also accepts `0/address(0)`. When the Junior rate is zero, pending fee shares are zero and effective
+supply equals raw ERC-20 `totalSupply()`.
 
 For a configured nominal APR `r` in basis points, completed Unix hours accrue through a fixed-point hourly retention
 factor:
@@ -448,8 +449,9 @@ Rules:
 - exact price-risk health uses post-carry `pnlPledgeUsdc + traderClaimBalanceUsdc`, including for open/increase, trader-withdraw,
   close, and liquidation checks; the claim is nettable exactly once against that same account's price loss,
 - the separately funded VPI reserve backs only that account's typed VPI obligation: excess reserve never increases
-  price-risk equity or the terminal price-PnL cap, while backing below `max(-vpiAccrued, 0)` is an independent
-  delinquency that blocks withdrawal and makes the account liquidatable,
+  price-risk equity or the terminal price-PnL cap, while backing below `max(-vpiAccrued, 0)` blocks withdrawal and
+  makes account health views flag the position as liquidatable; close and liquidation planners reject the inconsistent
+  reserve state rather than executing a clawback,
 - same-account trader claim balance is not withdrawable cash and cannot fund carry, VPI, execution fees, frozen
   spread, liquidation charges, order margin, or other action obligations,
 - liquidation and close settlement must cap physical seizure and payout logic by actually spendable typed value while
@@ -1018,8 +1020,9 @@ Required property:
 - liquidation charge caps and residual planning use their typed physically eligible sources rather than folding carry
   into the price channel,
 - negative accrued VPI does not reduce P+C price-risk equity. Its gross target must instead remain fully backed by the
-  dedicated VPI reserve; underfunding is an independent liquidation condition, and the clawback is consumed from that
-  reserve or replaced by an equivalent withheld trader gain before excess reserve is released,
+  dedicated VPI reserve; underfunding sets the diagnostic account-health liquidation flag but causes liquidation
+  planning to revert. With sufficient backing, the clawback is consumed from that reserve or replaced by an equivalent
+  withheld trader gain before excess reserve is released,
 - the keeper/protocol charge is capped by its dedicated reserve and other explicitly eligible charge funds; it must
   never raid PnL pledge needed by price settlement,
 - an uncollectible terminal action charge is waived rather than reclassified as protocol debt or price loss,

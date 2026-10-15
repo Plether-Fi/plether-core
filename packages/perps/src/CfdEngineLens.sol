@@ -188,7 +188,8 @@ contract CfdEngineLens is ICfdEngineLens {
     /// @dev The oracle price is capped at `CAP_PRICE`. The lens hypothetically forfeits the account's router execution-
     ///      bounty reserve before planning, matching terminal liquidation reachability. It performs no oracle freshness,
     ///      publish-time, or router authorization validation. An account without a position returns a nonliquidatable
-    ///      preview with only the capped oracle price populated.
+    ///      preview with only the capped oracle price populated. An underfunded negative-VPI reserve makes planning
+    ///      revert instead of returning a liquidatable preview.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, and projected solvency.

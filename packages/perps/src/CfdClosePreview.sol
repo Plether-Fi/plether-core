@@ -41,6 +41,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
     error CfdClosePreview__SponsoredAccountBusy();
     error CfdClosePreview__UncoveredCarry(uint256 unpaidCarryUsdc);
     error CfdClosePreview__SubsidyMismatch(uint256 expectedUsdc, uint256 requiredUsdc);
+    /// @notice Retained legacy error selector; the current canonical zero-bounty close path does not raise it.
     error CfdEngine__InsufficientCloseOrderBountyBacking(
         uint256 requiredBountyUsdc, uint256 availableBackingUsdc, uint256 unpaidCarryUsdc
     );

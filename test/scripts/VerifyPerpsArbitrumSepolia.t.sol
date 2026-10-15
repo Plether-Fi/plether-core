@@ -23,6 +23,12 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         DeployPerpsArbitrumSepolia deployScript = new DeployPerpsArbitrumSepolia();
         DeployPerpsArbitrumSepolia.DeployedContracts memory deployed = deployScript.run();
         _assertDeploymentLimits(deployed);
+        assertEq(deployed.juniorVault.maintenanceFeeAprBps(), 0, "Junior maintenance fee starts disabled");
+        assertEq(
+            deployed.juniorVault.maintenanceFeeRecipient(),
+            deployed.engine.protocolTreasury(),
+            "Junior fee recipient remains treasury"
+        );
 
         _setAddress("PERPS_OWNER", vm.addr(DEPLOYER_KEY));
         _setAddress("PERPS_GUARDIAN", address(0xBEEF));
@@ -99,6 +105,8 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         verifier.run();
         assertTrue(deployed.housePool.isTradingActive());
         assertEq(deployed.usdc.totalSupply(), 2e6, "activation must not repeat seed funding");
+        vm.warp(block.timestamp + 365 days);
+        assertEq(deployed.juniorVault.pendingMaintenanceFeeShares(), 0, "disabled fee must not accrue");
     }
 
     function _setAddress(

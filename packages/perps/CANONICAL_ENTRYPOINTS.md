@@ -245,7 +245,7 @@ The following remain useful for tests, admin tooling, migration, and deep accoun
 - `CfdOrderPolicyEvaluator`: fixed permissionless stateless policy dependency used to assess authoritative Engine
   state against caller-pinned financial bounds; applications do not use it as an execution or custody surface.
 - `CfdClosePreview`: separately deployed stateless pre-commit close-review surface; projects commitment carry and a
-  new bounty reservation and does not replace or reconfigure the Router's immutable execution evaluator.
+  new zero-amount bounty record and does not replace or reconfigure the Router's immutable execution evaluator.
 - `OrderLifecycleBook`: independently predeployed canonical permanent order-identity and terminal-outcome reader. It
   is immutable-bound to the predicted Router, Engine, Clearinghouse, and HousePool; the Router constructor validates
   all four bindings before accepting it. Only that Router may register or finalize lifecycle state, and the Book owns
