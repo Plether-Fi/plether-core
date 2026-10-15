@@ -113,8 +113,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
             CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
             snap.unsettledCarryUsdc = 1e6;
             CfdTypes.Order memory wrong = _closeOrder(_opposite(original));
-            CfdEnginePlanTypes.CloseDelta memory delta =
-                engine.planner().planClose(snap, wrong, BOUNTY_PRICE, uint64(block.timestamp));
+            CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, wrong, BOUNTY_PRICE);
             assertFalse(delta.valid);
             assertEq(uint8(delta.revertCode), 7);
             assertEq(delta.pendingCarryUsdc, 0, "side rejection precedes carry assessment");
@@ -124,11 +123,9 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
             policyEvaluator.evaluateClose(snap, delta, request.bounds, 0);
             uint256 depth = pool.totalAssets();
             vm.expectRevert(_sideFailureData());
-            policyEvaluator.assessOrder(
-                address(engine), wrong, BOUNTY_KEEPER, BOUNTY_PRICE, depth, uint64(block.timestamp), request.bounds, 0
-            );
+            policyEvaluator.assessOrder(address(engine), wrong, BOUNTY_KEEPER, BOUNTY_PRICE, depth, request.bounds, 0);
             CfdTypes.Order memory right = _closeOrder(original);
-            delta = engine.planner().planClose(snap, right, BOUNTY_PRICE, uint64(block.timestamp));
+            delta = engine.planner().planClose(snap, right, BOUNTY_PRICE);
             assertTrue(delta.valid, "same-side close retains existing economics");
             assertEq(delta.pendingCarryUsdc, 1e6);
             assertEq(delta.realizedCarryUsdc, 1e6);
@@ -139,7 +136,7 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
     function test_PlannerMissingPositionKeepsExistingSizeFailure() public {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
         CfdEnginePlanTypes.CloseDelta memory delta =
-            engine.planner().planClose(snap, _closeOrder(CfdTypes.Side.SHORT), BOUNTY_PRICE, uint64(block.timestamp));
+            engine.planner().planClose(snap, _closeOrder(CfdTypes.Side.SHORT), BOUNTY_PRICE);
         assertFalse(delta.valid);
         assertEq(uint8(delta.revertCode), uint8(CfdEnginePlanTypes.CloseRevertCode.CLOSE_SIZE_EXCEEDS));
     }

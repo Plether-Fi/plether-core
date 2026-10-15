@@ -31,8 +31,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     uint256 public minOpenOrderExecutionBountyUsdc;
     /// @notice Maximum open-order keeper bounty (6-decimal USDC).
     uint256 public maxOpenOrderExecutionBountyUsdc;
-    /// @notice Close-order keeper bounty, fixed at zero in the current protocol (6-decimal USDC).
-    uint256 public closeOrderExecutionBountyUsdc;
     /// @notice Fixed keeper bounty paid when an armed protection is validly triggered (6-decimal USDC).
     uint256 public positionProtectionTriggerBountyUsdc;
 
@@ -74,7 +72,6 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         openOrderExecutionBountyBps = 1;
         minOpenOrderExecutionBountyUsdc = 10_000;
         maxOpenOrderExecutionBountyUsdc = 200_000;
-        closeOrderExecutionBountyUsdc = 0;
         positionProtectionTriggerBountyUsdc = 200_000;
         minEngineGas = 600_000;
         maxPruneOrdersPerCall = 64;
@@ -112,10 +109,9 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
 
     function _onOrderCommitted(
         CfdTypes.Order memory order,
-        CfdEnginePlanTypes.CloseCommitment memory effects,
-        uint64 sourcePositionEpoch
+        CfdEnginePlanTypes.CloseCommitment memory effects
     ) internal override {
-        lifecycleBook.recordCommitment(order.orderId, effects, sourcePositionEpoch);
+        lifecycleBook.recordCommitment(order.orderId, effects);
     }
 
     /// @notice Unlinks an order from every live queue, deletes its ephemeral record, and updates account aggregates.

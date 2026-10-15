@@ -1,4 +1,8 @@
-> Historical/additive-preview documentation. For the fresh-stack V3 intent / V4 receipt implementation, use [Deposit-free close migration](DEPOSIT_FREE_CLOSE.md). Keep this historical integration bound to its archived deployment; the new planner tuples are incompatible with v1.2.3.
+> Historical/additive-preview documentation. Its V3 intent / V4 receipt references describe the earlier candidate.
+> Current source uses V3 request/intent and V5 receipt/config domains; use [current accounting](ACCOUNTING_SPEC.md)
+> and generated ABIs for a fresh stack. Keep this historical integration bound to its archived deployment; current
+> planner tuples are incompatible with v1.2.3. The six-argument call below is for that pinned deployment;
+> current source omits the planner-only `publishTime` argument and uses a five-argument ordinary preview call.
 
 # Frontend handoff: reservation-aware close review
 

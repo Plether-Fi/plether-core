@@ -232,11 +232,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, partialCloseSize, 0, 0, true);
 
         (, uint256 marginAfterCommit,,,,,) = engine.positions(account);
-        assertEq(
-            marginAfterCommit,
-            marginBeforeCommit - router.closeOrderExecutionBountyUsdc(),
-            "bounty reclassification is exact"
-        );
+        assertEq(marginAfterCommit, marginBeforeCommit - 0, "bounty reclassification is exact");
         assertEq(router.pendingOrderCounts(account), 1, "eligible reduction enters queue");
         assertEq(router.nextCommitId(), 2, "eligible reduction consumes one ID");
     }

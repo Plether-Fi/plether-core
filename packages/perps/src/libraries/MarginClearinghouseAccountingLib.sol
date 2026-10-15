@@ -42,41 +42,25 @@ library MarginClearinghouseAccountingLib {
     ///        its positive trade cost; rebates never increase pledge and costs never decrease pre-existing pledge.
     /// @param settlementCreditUsdc Rebate credited when trade cost is negative.
     /// @param settlementDebitUsdc Positive trade cost debited from settlement.
-    /// @param positionMarginUnlockedUsdc Retained compatibility field; always zero under V3 pledge isolation.
     /// @param positionMarginLockedUsdc Active margin added when net margin change is positive.
     /// @param resultingSettlementBalanceUsdc Settlement balance after rebate or positive-cost debit.
     /// @param resultingPositionMarginUsdc Active-position margin after unlock or lock.
     /// @param resultingFreeSettlementUsdc Free settlement after every planned mutation.
     /// @param insufficientFreeEquity Whether a debit or margin lock exceeds free settlement.
-    /// @param insufficientPositionMargin Retained compatibility flag; always false because this path never unlocks pledge.
     struct OpenCostPlan {
         int256 netMarginChangeUsdc;
         uint256 settlementCreditUsdc;
         uint256 settlementDebitUsdc;
-        uint256 positionMarginUnlockedUsdc;
         uint256 positionMarginLockedUsdc;
         uint256 resultingSettlementBalanceUsdc;
         uint256 resultingPositionMarginUsdc;
         uint256 resultingFreeSettlementUsdc;
         bool insufficientFreeEquity;
-        bool insufficientPositionMargin;
     }
 
-    /// @notice Compatibility liquidation result populated by the isolated settlement planner.
-    /// @dev Current liquidation settlement uses the dedicated price-PnL and action fields on `LiquidationDelta`; this
-    ///      struct carries selected mirrors and legacy zero-valued fields.
-    /// @param liquidationChargeUsdc Total keeper, protocol, and LP charge reserved from the liquidated account.
-    /// @param settlementRetainedUsdc Projected settlement balance after all debits and any immediate price payout.
-    /// @param settlementSeizedUsdc PnL pledge collected for price loss; the outer delta separately includes the LP charge.
-    /// @param freshTraderPayoutUsdc New price gain after action-charge withholding, paid immediately or recorded as a claim.
-    /// @param badDebtUsdc Legacy field left zero; excess price loss is reported separately and never stored as debt.
+    /// @notice Full PnL-pledge unlock selected by isolated liquidation planning.
     /// @param mutation Current planner populates only the full PnL-pledge unlock; other fields remain zero.
     struct LiquidationResidualPlan {
-        uint256 liquidationChargeUsdc;
-        uint256 settlementRetainedUsdc;
-        uint256 settlementSeizedUsdc;
-        uint256 freshTraderPayoutUsdc;
-        uint256 badDebtUsdc;
         BucketMutation mutation;
     }
 
@@ -224,12 +208,10 @@ library MarginClearinghouseAccountingLib {
     }
 
     /// @notice Converts a carry-loss consumption plan into clearinghouse mutation amounts.
-    /// @dev The bucket snapshot is accepted for plan/apply API symmetry but is not read. Other locked margin is not
-    ///      unlocked on this path.
+    /// @dev Other locked margin is not unlocked on this path.
     /// @param consumption Carry-loss allocation to convert.
     /// @return mutation Settlement debit and active-position margin consumption.
     function applyCarryLossMutation(
-        IMarginClearinghouse.AccountUsdcBuckets memory,
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
         mutation.settlementDebitUsdc = consumption.totalConsumedUsdc;

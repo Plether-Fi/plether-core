@@ -99,7 +99,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         vm.warp(pool.lpEpochStart(id) + 61);
         OrderV3Types.OrderReceipt memory receipt = _bountyExpire(order, BOUNTY_KEEPER);
         assertEq(receipt.bounty.bountyPaidUsdc, 0);
-        assertEq(receipt.bounty.bountyRefundedUsdc, router.closeOrderExecutionBountyUsdc());
+        assertEq(receipt.bounty.bountyRefundedUsdc, 0);
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
 
         assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc, controlNav);
@@ -180,11 +180,11 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
     /// @dev regression; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
     function test_SuccessRealizesOnlyTheAuthorizedPledgeCostAndSelfMayWithdrawBounty() public {
         uint256 pledge = _bountyPosition(CfdTypes.Side.LONG);
-        uint256 expectedFree = _successfulCloseResidual() + router.closeOrderExecutionBountyUsdc();
+        uint256 expectedFree = _successfulCloseResidual() + 0;
         router.updateMarkPrice(_bountyPriceData(120_000_000));
         uint256 snapshot = vm.snapshotState();
         // Both branches commit the same unpaid zero-bounty close; compare its pledge and LP cash outcome.
-        uint256 bounty = router.closeOrderExecutionBountyUsdc();
+        uint256 bounty = 0;
         uint64 control = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         OrderV3Types.OrderReceipt memory controlReceipt =
             _bountyExecute(control, 120_000_000, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
@@ -213,7 +213,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
     function test_LpExitBeforeCommitAndDuringPendingEscrowHaveIdenticalSuccessEconomics() public {
         ExitControl memory expected;
         _bountyPosition(CfdTypes.Side.LONG);
-        uint256 expectedFree = _successfulCloseResidual() + router.closeOrderExecutionBountyUsdc();
+        uint256 expectedFree = _successfulCloseResidual() + 0;
         vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN() + 1);
         router.updateMarkPrice(_bountyPriceData(120_000_000));
         uint256 shares = juniorVault.balanceOf(address(this)) / 10;

@@ -62,10 +62,13 @@ it("requires exact typed evidence for a close side mismatch and leaves open nume
   expect(classifyCloseFailureV3(mismatch.slice(0, -2) as typeof mismatch)).toBeUndefined();
 });
 
-it("classifies pledged-bounty queue admission independently from funding and rejects malformed evidence", () => {
-  const abi = parseAbi(["error OrderRouter__PledgeBountyRequiresEmptyQueue()"]);
-  const error = encodeErrorResult({ abi, errorName: "OrderRouter__PledgeBountyRequiresEmptyQueue" });
-  expect(classifyCloseFailureV3(error)).toBe("pledgeQueue");
-  expect(classifyCloseFailureV3(`${error}00`)).toBeUndefined();
-  expect(classifyCloseFailureV3(error.slice(0, -2) as typeof error)).toBeUndefined();
+it("leaves retired pledge-bounty admission and funding errors unclassified", () => {
+  const queueAbi = parseAbi(["error OrderRouter__PledgeBountyRequiresEmptyQueue()"]);
+  const queueError = encodeErrorResult({ abi: queueAbi, errorName: "OrderRouter__PledgeBountyRequiresEmptyQueue" });
+  expect(classifyCloseFailureV3(queueError)).toBeUndefined();
+  expect(classifyCloseFailureV3(`${queueError}00`)).toBeUndefined();
+  expect(classifyCloseFailureV3(queueError.slice(0, -2) as typeof queueError)).toBeUndefined();
+  const fundingAbi = parseAbi(["error CfdEngine__InsufficientCloseOrderBountyBacking(uint256 required,uint256 available,uint256 unpaidCarry)"]);
+  const fundingError = encodeErrorResult({ abi: fundingAbi, errorName: "CfdEngine__InsufficientCloseOrderBountyBacking", args: [1n, 0n, 0n] });
+  expect(classifyCloseFailureV3(fundingError)).toBeUndefined();
 });

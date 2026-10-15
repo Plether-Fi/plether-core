@@ -11,6 +11,10 @@ npm login --scope=@plether-fi --auth-type=legacy --registry=https://npm.pkg.gith
 npm install --save-exact @plether-fi/perps-aa-client@0.1.0
 ```
 
+The command shows the initial published version. The V5 source described below
+is version 0.3.0; install its exact registry version only after release and
+deployment compatibility checks.
+
 Use your GitHub username and a classic PAT with `read:packages`. Authentication
 is required even for public GitHub npm packages. Never commit tokens. Actions
 consumers use `GITHUB_TOKEN` with `packages: read` after the consuming repository
@@ -159,21 +163,13 @@ the new order ABI. `RELEASING.md` describes the artifact compatibility gate.
 Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and contract failures into stable codes and user-safe messages. Do not silently fall back to an EOA transaction: it would create protocol state under a different `msg.sender` and split the user's account. If sponsorship is unavailable, show a retry/support state unless the product has explicitly implemented and disclosed user-paid smart-account gas.
 
 `buildCloseOrderV3` uses the same request shape for full closes and partial
-reductions. The protocol reserves the configured keeper bounty from free USDC,
-then eligible position margin. There is no mode selector or per-order bounty
-waiver. Admin configuration may set the close bounty to zero for all new closes;
-existing orders retain their snapshotted bounty. `classifyCloseFailureV3` keeps
-bounty funding, carry funding, action funding, residual health, and live-side mismatch failures
-distinct. `buildExpireOrderV3` encodes permissionless cleanup after the order's
-execution deadline without oracle data.
-
-Pledge funding requires an empty account queue; later wholly free-funded orders
-remain supported. `classifyCloseFailureV3` returns `pledgeQueue` for the exact
-`OrderRouter__PledgeBountyRequiresEmptyQueue()` admission error. Wait for pending
-orders to finish or fund the keeper reward from free USDC. Ordinary close failure
-or expiry pays only the original free-funded amount and restores original pledged
-funding to its source position. A zero-free-funded failure is unpaid cleanup.
-Successful execution still pays/releases the full bounty, including self-execution.
+reductions. New close commitments have zero USDC keeper bounty; normal native
+account-abstraction gas sponsorship remains available. Opening orders and
+protection triggers retain their separate reward rules. `classifyCloseFailureV3`
+keeps carry funding, action funding, residual health, and live-side mismatch
+failures distinct. `buildExpireOrderV3` encodes permissionless cleanup after the
+order's execution deadline without oracle data. Use archived bindings for older
+deployments with funded close bounties.
 
 A positive `minPostSettlementBalanceUsdc` is supported only for a first opening
 order while the account has no live position and no pending order. The account
@@ -192,11 +188,11 @@ sufficient. Increases and closes must use a zero minimum. This restriction
 protects the settlement minimum during its pending lifetime; other execution
 bounds still depend on the state at execution.
 
-## Terminal history on the new stack (0.2.0)
+## Terminal history on the new stack (0.3.0)
 
 The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
 `terminalOutcome(orderId)`: account, terminal block, status, reason and receipt
-hash. Full details come from the V4-domain `OrderFinalized` event, now including the merged timing tuple. Use the
+hash. Full details come from the V5-domain `OrderFinalized` event, including the merged timing tuple. Use the
 trusted deployment's chain, Book and Router addresses; do not take those or the
 summary from an untrusted indexer.
 
@@ -220,11 +216,11 @@ if (summary.status === 2 || summary.status === 3) {
 
 `history.getFinalizedLog` represents the application's event retrieval layer; it is not an SDK method. `matchingFinalizedLog` includes its emitter address, data, and nonempty topics.
 The helper authenticates the event, clocks and full receipt against the summary;
-`hashOrderReceiptV4` exposes the same digest separately. Solidity consumers can
-call `verifyReceipt(receipt, terminalTime)` on the Book. The V4 receipt and V3
-intent domain labels are unchanged; V5 is the read API version. Requests use one close flow,
-and the receipt includes authenticated timing. Earlier candidate event and request
-encodings must not be reused on the final graph.
+`hashOrderReceiptV5` exposes the same digest separately. Solidity consumers can
+call `verifyReceipt(receipt, terminalTime)` on the Book. The receipt and execution
+configuration domains are V5; the request intent domain remains V3. Requests use
+one close flow, and the receipt includes authenticated timing. Earlier candidate
+event and request encodings must not be reused on the final graph.
 
 Cache history by chain/Book/order ID and invalidate it on reorg. If a log cannot
 be retrieved, report history as unavailable instead of assuming zero fees or
@@ -234,19 +230,13 @@ export and old-stack action/assistance bindings remain available; choose ABI by
 deployment, and migrate external app/keeper reads before new-stack activation.
 Commitment history remains stored and does not require an event join.
 
-Source-bound refunds keep public request/receipt tuple layouts and the V4 receipt
-hash domain unchanged. `bountyDisposition` is a `uint8`: existing values 0–4 retain
-their meaning; `PaidAndRefunded=5` and `ForfeitedAndRefunded=6` append mixed outcomes.
-The former pays original free funding and restores pledge on ordinary close failure;
-the latter forfeits free funding to treasury and restores pledge before liquidation.
-Use the receipt's paid/refunded/forfeited/retained components, which authenticate the
-split. A pledged refund means position backing, potentially consumed by liquidation
-in the same transaction, not withdrawable wallet cash. `decodeVerifiedOrderFinalized`
-accepts and authenticates both values without an exhaustive enum switch; application
-labels and switches must also support them.
+The current receipt tuple omits pledged-bounty and retained-bounty fields. Its
+`bountyDisposition` values are `None=0`, `Paid=1`, `Forfeited=2`, and
+`RefundedToAccount=3`. Read the paid, refunded, and forfeited amounts from the
+authenticated receipt; do not decode a current receipt with a historical ABI.
 
-Internal interfaces and Clearinghouse/Book storage change. Deploy the compatible
-connected stack together; unchanged public tuples do not permit a Router hot swap
+Internal interfaces, public tuples, and Clearinghouse/Book storage change. Deploy the compatible
+connected stack together; this does not permit a Router hot swap
 or importing populated state with empty escrow mirrors. No publication, deployment,
 activation or live-state migration is performed by these SDK changes.
 
@@ -259,7 +249,7 @@ RPC log queries over the known L2 deployment-to-head range. Keep transport
 event's authenticated `terminalBlock` as emitted. See [Arbitrum block-number
 documentation](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time).
 
-## V3 order timing (0.2.0 source release)
+## Historical V3 order timing (0.2.0 source release)
 
 `buildPlaceOrderV3Action` and `buildProtectedOpenAction` encode `submitBy` and
 `executionWindowSeconds`. A fresh web review uses 120 seconds for submission

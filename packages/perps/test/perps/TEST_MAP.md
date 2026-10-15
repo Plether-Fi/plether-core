@@ -270,10 +270,10 @@ not validate this revision. Operator/client integration and funded deployment dr
 | Rule | Exact test/property | Evidence | Domain and limitation |
 | --- | --- | --- | --- |
 | Zero reservation identity | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`test_ZeroBountyReservationRejectsMissingForeignSettledAndDuplicateRecords` | Missing, foreign, settled and duplicate zero records reject; zero is not absence | Internal authorization fault controls with real contracts |
-| Permanent zero internal admission | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`test_NonzeroCloseBountyRejectedAtCanonicalProjection` | Nonzero authoritative close bounty rejects | Canonical projection boundary |
+| Removed close reservation ABI | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`test_RemovedThreeArgumentCloseReservationSelectorRejectsWithoutBlockingPublicClose` | Retired three-argument selector rejects without state change; public close still reserves zero | Engine reservation boundary |
 | Unpaid expiry conservation | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`testFuzz_UnpaidExpiryPreservesPledgeCashAndKeeper` | Exact pledge/custody/recipient and authenticated receipt checks | Both sides; zero carry/VPI isolates bounty economics |
 | Unpaid successful closes | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`testFuzz_UnpaidSuccessBothSidesPartialFullAndSelf` | Both sides, partial/full, self/external and zero bounty receipts | Fixed mark; financial bounds matrix adds Live/FAD/Frozen |
-| Overlapping zero-free closes | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`test_PartialCloseQueueNeedsNoFreeCashOrSourceEpoch` | Multiple closes retain FIFO without pledged reservation | Bounded account queue |
+| Overlapping zero-free closes | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`test_PartialCloseQueueNeedsNoFreeCashOrBounty` | Multiple closes retain FIFO without funded reservation | Bounded account queue |
 | Repeated underwater failures | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`test_RepeatedUnderwaterFailuresCannotDrainPositionOrCreditKeeper` | Repeated expiry preserves LP backing and credits nobody | Fixed underwater Long, zero carry/VPI |
 | Liquidation preserves loss recovery | [SourceBoundBountyLifecycle.t.sol](spec/keeper/SourceBoundBountyLifecycle.t.sol)::`test_PendingUnpaidCloseDoesNotChangeLiquidationLossRecovery` | Independent pending/no-pending comparison of loss recovery | Fixed mark and tranche fixture |
 | LP round-trip pricing | [SourceBoundBountyLpPricing.t.sol](spec/lp/SourceBoundBountyLpPricing.t.sol)::`testFuzz_ReserveRefundCannotChangeRealLpRoundTrip` | Real deposits, settlement, claim, cooldown, redeem and payout compare exactly | Historical test name retained; no escrow exists; both tranches/sides |
@@ -359,8 +359,9 @@ The raw bundle has not been uploaded; the linked JSON report alone does not incl
 [Refreshed timing measurements](https://github.com/Plether-Fi/plether-core/blob/33ceb7abd7486cca940c5739489ec67ad827accd/scripts/perps-shard-weights.json)
 are preserved at the same commit and inside the bundle. This PR retains the base shard weights; new files use the
 runner's fallback estimate. Weights affect shard allocation, not test inclusion or configured campaign budgets.
-Internal ABI and storage changed, requiring a fresh connected deployment even though public order/receipt tuples and
-their hash domains remain unchanged. No fork, live-network or populated-state migration validation is claimed.
+Internal ABI and storage changed, requiring a fresh connected deployment. The receipt tuple and its V5 hash domain,
+the execution-config V5 domain, and the order-intent V3 domain have changed in this revision. No fork, live-network or
+populated-state migration validation is claimed.
 
 Coverage excludes RPC tests, invariant campaigns, production gas/size checks, and specifically documented
 instrumentation-sensitive bounded batch scenarios. Each excluded correctness scenario still runs without coverage

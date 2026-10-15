@@ -26,17 +26,15 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         _fundTrader(ACCOUNT, 20_000e6);
         CfdTypes.Order memory order = _openOrder();
         uint256 depth = pool.totalAssets();
-        uint64 publishTime = uint64(block.timestamp);
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
 
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _sidecarSnapshot(ACCOUNT, depth);
-        CfdEnginePlanTypes.OpenDelta memory delta = engine.planner().planOpen(snapshot, order, PRICE, publishTime);
+        CfdEnginePlanTypes.OpenDelta memory delta = engine.planner().planOpen(snapshot, order, PRICE);
         assertTrue(delta.valid);
 
         OrderV3Types.ExecutionAssessment memory expected = parityEvaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
-        OrderV3Types.ExecutionAssessment memory actual = parityEvaluator.assessOrder(
-            address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, publishTime, bounds, BOUNTY
-        );
+        OrderV3Types.ExecutionAssessment memory actual =
+            parityEvaluator.assessOrder(address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, bounds, BOUNTY);
 
         assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)));
     }
@@ -47,16 +45,14 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         vm.warp(block.timestamp + 30 days);
         CfdTypes.Order memory order = _openOrder();
         uint256 depth = pool.totalAssets();
-        uint64 publishTime = uint64(block.timestamp);
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _sidecarSnapshot(ACCOUNT, depth);
-        CfdEnginePlanTypes.OpenDelta memory delta = engine.planner().planOpen(snapshot, order, PRICE, publishTime);
+        CfdEnginePlanTypes.OpenDelta memory delta = engine.planner().planOpen(snapshot, order, PRICE);
         assertTrue(delta.valid);
         assertGt(delta.pendingCarryUsdc, 0);
         OrderV3Types.ExecutionAssessment memory expected = parityEvaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
-        OrderV3Types.ExecutionAssessment memory actual = parityEvaluator.assessOrder(
-            address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, publishTime, bounds, BOUNTY
-        );
+        OrderV3Types.ExecutionAssessment memory actual =
+            parityEvaluator.assessOrder(address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, bounds, BOUNTY);
         assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)));
     }
 
@@ -68,19 +64,17 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
 
         CfdTypes.Order memory order = _partialCloseOrder();
         uint256 depth = pool.totalAssets();
-        uint64 publishTime = uint64(block.timestamp);
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
 
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _sidecarSnapshot(ACCOUNT, depth);
-        CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snapshot, order, PRICE, publishTime);
+        CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snapshot, order, PRICE);
         assertTrue(delta.valid);
         assertGt(delta.pendingCarryUsdc, 0);
 
         OrderV3Types.ExecutionAssessment memory expected =
             parityEvaluator.evaluateClose(snapshot, delta, bounds, BOUNTY);
-        OrderV3Types.ExecutionAssessment memory actual = parityEvaluator.assessOrder(
-            address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, publishTime, bounds, BOUNTY
-        );
+        OrderV3Types.ExecutionAssessment memory actual =
+            parityEvaluator.assessOrder(address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, bounds, BOUNTY);
 
         assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)));
     }
@@ -89,14 +83,12 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         _fundTrader(ACCOUNT, 20_000e6);
         CfdTypes.Order memory order = _openOrder();
         uint256 depth = pool.totalAssets();
-        uint64 publishTime = uint64(block.timestamp);
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
 
-        OrderV3Types.ExecutionAssessment memory externalExecution = parityEvaluator.assessOrder(
-            address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, publishTime, bounds, BOUNTY
-        );
+        OrderV3Types.ExecutionAssessment memory externalExecution =
+            parityEvaluator.assessOrder(address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, bounds, BOUNTY);
         OrderV3Types.ExecutionAssessment memory selfExecution =
-            parityEvaluator.assessOrder(address(engine), order, ACCOUNT, PRICE, depth, publishTime, bounds, BOUNTY);
+            parityEvaluator.assessOrder(address(engine), order, ACCOUNT, PRICE, depth, bounds, BOUNTY);
 
         assertEq(selfExecution.grossAccountDebitUsdc, externalExecution.grossAccountDebitUsdc);
         assertEq(selfExecution.postSettlementBalanceUsdc, externalExecution.postSettlementBalanceUsdc + BOUNTY);

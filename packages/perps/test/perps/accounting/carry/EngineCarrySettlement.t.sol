@@ -470,7 +470,6 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 100_010_000);
         assertTrue(preview.valid, "Carry-adjusted full close should remain executable");
-        assertEq(preview.badDebtUsdc, 0, "Carry-adjusted close should remain fully covered in this setup");
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 100_010_000, true);

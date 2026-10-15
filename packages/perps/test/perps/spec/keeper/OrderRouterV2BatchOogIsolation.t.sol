@@ -80,7 +80,7 @@ contract GasBurningBatchKeeper {
     function claimRefund(
         OrderRouterAdmin admin
     ) external {
-        admin.claimBalance(true);
+        admin.claimBalance();
     }
 
     function executeBatch(
@@ -198,7 +198,7 @@ contract OrderRouterV2BatchOogIsolationTest is BasePerpTest {
         assertEq(address(keeper).balance, 0, "the failed immediate callback must not retain cash");
 
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__NothingToClaim.selector);
-        routerAdmin.claimBalance(true);
+        routerAdmin.claimBalance();
         assertEq(routerAdmin.claimableEth(address(keeper)), REFUND_AMOUNT, "another caller cannot consume the credit");
         assertEq(address(routerAdmin).balance, REFUND_AMOUNT, "another caller cannot consume the backing cash");
 

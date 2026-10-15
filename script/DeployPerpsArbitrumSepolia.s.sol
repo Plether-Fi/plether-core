@@ -276,7 +276,7 @@ contract DeployPerpsArbitrumSepolia is Script {
             )
         );
         deployed.orderPolicyEvaluator = new CfdOrderPolicyEvaluator();
-        deployed.closePreview = new CfdClosePreview(address(deployed.engine));
+        deployed.closePreview = new CfdClosePreview();
         require(address(deployed.closePreview).code.length > 0, "Close preview has no code");
         deployed.orderExecutionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(deployer);

@@ -49,15 +49,16 @@ ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc \
 
 ## Publish the merged version
 
-Commit the exact stable version and lockfile; initial version is `0.1.0`. Merge
-the reviewed Core PR first. Use the GitHub CLI for dispatch and monitoring:
+Commit the exact stable version and lockfile; the current V5 schema source is
+`0.3.0`. Merge the reviewed Core PR first. Use the GitHub CLI for dispatch and
+monitoring, substituting the merged package version:
 
 ```bash
 gh auth status
 gh api user --jq .login
 gh api repos/Plether-Fi/plether-core/commits/master --jq .sha
 gh run list --repo Plether-Fi/plether-core --workflow publish-perps-aa-client.yml --limit 10
-gh workflow run publish-perps-aa-client.yml --repo Plether-Fi/plether-core --ref master -f version=0.1.0
+gh workflow run publish-perps-aa-client.yml --repo Plether-Fi/plether-core --ref master -f version=0.3.0
 ```
 
 Confirm the run's `headSha`, inspect its build/test results, then approve the
@@ -67,7 +68,7 @@ SHA-512 integrity. It performs no install, build, lifecycle scripts, or repack.
 Only that job has package-write and tag/release-write permissions.
 
 Publishing is followed by registry `gitHead`/integrity readback, an annotated
-`perps-aa-client-v0.1.0` tag at that commit, and a GitHub Release containing the
+`perps-aa-client-v0.3.0` tag at that commit, and a GitHub Release containing the
 integrity and commit. The package release is never marked the repository's latest
 protocol release. Use `gh run view` and `gh run watch --exit-status` for completion.
 

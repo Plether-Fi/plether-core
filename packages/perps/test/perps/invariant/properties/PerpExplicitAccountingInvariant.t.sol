@@ -348,9 +348,6 @@ contract PerpExplicitAccountingHandler is Test {
         if (observed.traderClaimBalanceUsdc != preview.traderClaimBalanceUsdc) {
             return (true, 3, preview.traderClaimBalanceUsdc, observed.traderClaimBalanceUsdc);
         }
-        if (preview.badDebtUsdc != 0) {
-            return (true, 4, 0, preview.badDebtUsdc);
-        }
         if (observed.remainingSize != preview.remainingSize) {
             return (true, 5, preview.remainingSize, observed.remainingSize);
         }
@@ -386,9 +383,6 @@ contract PerpExplicitAccountingHandler is Test {
         }
         if (observed.traderClaimBalanceUsdc != preview.traderClaimBalanceUsdc) {
             return (true, 3, preview.traderClaimBalanceUsdc, observed.traderClaimBalanceUsdc);
-        }
-        if (preview.badDebtUsdc != 0) {
-            return (true, 4, 0, preview.badDebtUsdc);
         }
         if (observed.keeperBountyUsdc != preview.keeperBountyUsdc) {
             return (true, 5, preview.keeperBountyUsdc, observed.keeperBountyUsdc);

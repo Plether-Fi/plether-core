@@ -65,8 +65,6 @@ interface IOrderLiquidationBatchHost {
 
     function maxOpenOrderExecutionBountyUsdc() external view returns (uint256);
 
-    function closeOrderExecutionBountyUsdc() external view returns (uint256);
-
     function executeCommitOrderItem() external;
 
     function executeLiquidationBatchItem(
@@ -140,13 +138,13 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     function previewCloseAdmission(
         address account,
         OrderV3Types.OrderRequest calldata request
-    ) external view returns (uint256) {
+    ) external view {
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(_delegatedLogicRouter());
         if (!request.isClose) {
             revert OrderRouter__NotCloseOrder();
         }
         _validateFreshRequest(host, account, request, true);
-        return _validatedCloseBounty(host, account, request.side, request.sizeDelta);
+        _validateCloseAdmission(host, account, request.side, request.sizeDelta);
     }
 
     /// @notice Resolves or submits a caller-authored bounded open through the Router's immutable protection Book.
@@ -169,15 +167,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint64 protectionId,
         address account,
         CfdTypes.Side side,
-        uint256 size,
-        uint256 executionBountyUsdc
+        uint256 size
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        if (
-            msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0
-                || executionBountyUsdc != 0
-        ) {
+        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0) {
             revert OrderRouter__Unauthorized();
         }
 
@@ -190,8 +184,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                 )
             )
         );
-        (uint64 registeredOrderId,, bool replayed) =
-            host.lifecycleBook().registerPending(account, orderId, request, executionBountyUsdc);
+        (uint64 registeredOrderId,, bool replayed) = host.lifecycleBook().registerPending(account, orderId, request, 0);
         if (replayed || registeredOrderId != orderId) {
             revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(orderId);
         }
@@ -220,9 +213,13 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         _validateFreshRequest(host, account, request, enforceProtectionLock);
-        uint256 executionBountyUsdc = request.isClose
-            ? _validatedCloseBounty(host, account, request.side, request.sizeDelta)
-            : _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+        uint256 executionBountyUsdc;
+        if (request.isClose) {
+            _validateCloseAdmission(host, account, request.side, request.sizeDelta);
+        } else {
+            executionBountyUsdc =
+                _validatedOpenBounty(host, account, request.side, request.sizeDelta, request.marginDelta);
+        }
         if (executionBountyUsdc > request.bounds.maxExecutionBountyUsdc) {
             revert IOrderLifecycleBook.OrderLifecycleBook__ExecutionBountyAboveBound(
                 executionBountyUsdc, request.bounds.maxExecutionBountyUsdc
@@ -326,12 +323,12 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
     }
 
-    function _validatedCloseBounty(
+    function _validateCloseAdmission(
         IOrderLiquidationBatchHost host,
         address account,
         CfdTypes.Side side,
         uint256 sizeDelta
-    ) private view returns (uint256 executionBountyUsdc) {
+    ) private view {
         ICfdEngineCore engine = host.engine();
         QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
         OrderValidationLib.validateCloseCommit(
@@ -346,7 +343,6 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         if (sizeDelta < queuedPosition.size && sizeDelta < minCloseSizeDelta) {
             revert OrderRouter__CommitValidation(11);
         }
-        return host.closeOrderExecutionBountyUsdc();
     }
 
     function _queuedPosition(
@@ -406,8 +402,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         uint64 commitMarkTime = engine.lastMarkTime();
-        uint8 revertCode = host.engineLensForCommit()
-            .previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice, commitMarkTime);
+        uint8 revertCode =
+            host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
         if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
             revert OrderRouter__PredictableOpenInvalid(revertCode);
         }
@@ -617,7 +613,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             )
         );
         (uint64 resolvedOrderId,, bool replayed) =
-            host.lifecycleBook().registerPending(plan.account, linkedOrderId, request, plan.executionBountyUsdc);
+            host.lifecycleBook().registerPending(plan.account, linkedOrderId, request, 0);
         if (replayed || resolvedOrderId != linkedOrderId) {
             revert IOrderLifecycleBook.OrderLifecycleBook__OrderIdAlreadyUsed(linkedOrderId);
         }
@@ -657,12 +653,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint256 size
     ) private {
         bytes memory itemCall = abi.encodeWithSelector(
-            IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector,
-            linkedOrderId,
-            account,
-            side,
-            size,
-            0
+            IOrderLiquidationBatchHost.executePositionProtectionTriggerItem.selector, linkedOrderId, account, side, size
         );
         (bool recorded, bytes memory revertData) = address(host).call(itemCall);
         if (!recorded) {

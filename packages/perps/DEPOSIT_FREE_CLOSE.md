@@ -1,5 +1,11 @@
 # New-stack deposit-free close implementation
 
+> Historical design and measurement record for the earlier deposit-free-close candidate. Its V3/V4 domains, packed
+> pledged-bounty/source-epoch fields, and SDK export names describe that candidate. Current source removes those
+> fields and uses V5 receipt/config domains while retaining the V3 request/intent domain. Use
+> [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md), [ZERO_CLOSE_OPERATIONS.md](ZERO_CLOSE_OPERATIONS.md), and generated current
+> ABIs for a new deployment; retain this record for older release provenance.
+
 ## Commitment and execution
 
 Ordinary full/partial closes and protection close execution have a permanently zero keeper bounty. A user does not

@@ -1,0 +1,13 @@
+{
+  "schema": "current-v5",
+  "protectionAbiHash": "0x68f1d062197f0c94da6b742def6a71f1e62c49d34619553571948e5b21bd9790",
+  "historicalProtectionAbiHash": "0x37e477e7c96661f80e5772d081c17346aef81f354c9a392668bdbea2aa2dd967",
+  "historicalOrderLifecycleV4AbiHash": "0x4ec225b250a1e35e6ea9159e9e5b67f2caa959acc9f755d388cd7afe465d4335",
+  "positionProtectionCreatedTopic0": "0xf8b87acf7dd7a499d91309bae85c5a4f684cfff775b4d1b1f78234d7c21ba795",
+  "abiHashes": {
+    "closePreviewV3Abi": "0xd8f3c37a51bde4c7d945841798faad2bf13c960fdc8c08e89baa742344e170d9",
+    "committedOrderV3Abi": "0x970faf1caded2ecf190f42a433d07d507995368560036f9763d7a4f9ed7e4c7f",
+    "orderLifecycleV5Abi": "0xa4821f2be10d49f4d04dab7fbaf005f3864683ddbe692420715c45bf0ff185db",
+    "orderRouterV3Abi": "0x079488e29acfafe6a67c6767a0166021bd58b01fc5964d350701ee03827f5ea4"
+  }
+}

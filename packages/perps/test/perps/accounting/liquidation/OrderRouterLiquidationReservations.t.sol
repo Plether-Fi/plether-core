@@ -127,7 +127,6 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Liquidation should still clear the underwater position");
-        assertEq(preview.badDebtUsdc, 0, "V2 liquidation price tails must remain diagnostic-only");
         assertEq(router.getAccountReservations(account).executionBountyUsdc, 0);
         assertEq(
             preview.reachableCollateralUsdc,
@@ -194,7 +193,6 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
             expectedPreview.keeperBountyUsdc,
             "Liquidation bounty should use post-forfeiture clearinghouse reachability"
         );
-        assertEq(expectedPreview.badDebtUsdc, 0, "V2 liquidation price tails must remain diagnostic-only");
     }
 
     function test_ExecuteLiquidation_ForfeitsReservedCloseBountiesBeforeClearingOrders() public {

@@ -484,7 +484,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         host.settlementWritePosition(
             delta.account,
             CfdEngineSettlementTypes.PositionState({
-                deletePosition: false,
                 size: delta.newPosSize,
                 entryCostUsdcAtoms: delta.newPosEntryCostUsdcAtoms,
                 maxProfitUsdc: currentPosition.maxProfitUsdc + delta.posMaxProfitIncrease,
@@ -522,12 +521,10 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
     /// @param delta Valid planned close/decrease delta; prices are 8 decimals, size 18, and USDC fields 6.
     /// @param currentPosition Position loaded by the engine immediately before settlement.
     /// @param publishTime Oracle publish timestamp proposed for the execution mark.
-    /// @param orderId Retained order-identity ABI argument; current close settlement does not read it.
     function executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
-        uint64 publishTime,
-        uint64 orderId
+        uint64 publishTime
     ) external onlyEngine {
         ICfdEngineSettlementHost host = ICfdEngineSettlementHost(msg.sender);
         host.settlementApplyCarryAndMark(delta.price, publishTime);
@@ -536,7 +533,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         _executeClose(delta, currentPosition, clearinghouse);
     }
 
-    /// @dev Keep the retained order-id argument and publish-time processing outside the settlement frame's stack budget.
+    /// @dev Keep publish-time processing outside the settlement frame's stack budget.
     function _executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
@@ -615,7 +612,6 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             host.settlementWritePosition(
                 delta.account,
                 CfdEngineSettlementTypes.PositionState({
-                    deletePosition: false,
                     size: delta.closeState.remainingSize,
                     entryCostUsdcAtoms: delta.posEntryCostAfterUsdcAtoms,
                     maxProfitUsdc: currentPosition.maxProfitUsdc - delta.posMaxProfitReduction,
@@ -851,21 +847,15 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         CfdEnginePlanTypes.LiquidationDelta calldata delta,
         address keeper
     ) private returns (uint256 seizedUsdc) {
-        uint64[] memory reservationOrderIds =
-            IMarginClearinghouse(host.clearinghouse()).getMarginReservationIds(delta.account);
         IMarginClearinghouse.LiquidationSettlementPlan memory settlementPlan =
             IMarginClearinghouse.LiquidationSettlementPlan({
-                settlementRetainedUsdc: delta.settlementRetainedUsdc,
                 settlementSeizedUsdc: delta.settlementSeizedUsdc,
-                freshTraderPayoutUsdc: delta.freshTraderPayoutUsdc,
-                badDebtUsdc: delta.badDebtUsdc,
                 positionMarginUnlockedUsdc: delta.residualPlan.mutation.positionMarginUnlockedUsdc,
                 otherLockedMarginUnlockedUsdc: delta.residualPlan.mutation.otherLockedMarginUnlockedUsdc
             });
         seizedUsdc = IMarginClearinghouse(host.clearinghouse())
             .applyLiquidationSettlementPlan(
                 delta.account,
-                reservationOrderIds,
                 settlementPlan,
                 host.pool(),
                 keeper,

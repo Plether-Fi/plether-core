@@ -148,10 +148,9 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         // preserve the pledge; a successful close cannot pay an execution bounty to the keeper.
         return reservation.account != FULL_CLOSE_TRADER
             || reservation.state != IMarginClearinghouse.BountyReservationState.Active
-            || reservation.freeFundedUsdc != 0 || reservation.pledgeFundedUsdc != reservation.amountUsdc
-            || keeperGain != expectedPaid || receipt.bountyDisposition != expectedDisposition
-            || receipt.bounty.bountyPaidUsdc != expectedPaid || receipt.bounty.bountyRefundedUsdc != expectedRefunded
-            || receipt.bounty.bountyForfeitedUsdc != 0 || receipt.bounty.bountyRetainedUsdc != 0
+            || reservation.freeFundedUsdc != 0 || reservation.amountUsdc != 0 || keeperGain != expectedPaid
+            || receipt.bountyDisposition != expectedDisposition || receipt.bounty.bountyPaidUsdc != expectedPaid
+            || receipt.bounty.bountyRefundedUsdc != expectedRefunded || receipt.bounty.bountyForfeitedUsdc != 0
             || receipt.bountyRecipient != address(0)
             || (failed
                     ? sizeAfter != 100_000e18 || marginAfter != marginAfterCommit + reservation.amountUsdc

@@ -11,13 +11,11 @@ import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProte
 interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtectionViews {
 
     /// @notice Values the router needs to append a triggered protection close to its ordinary FIFO queue.
-    /// @dev The execution-bounty field is retained for ABI compatibility and is always zero.
     struct TriggerPlan {
         address account;
         CfdTypes.Side side;
         uint256 size;
         uint256 triggerBountyUsdc;
-        uint256 executionBountyUsdc;
     }
 
     /// @notice Activates a met OCO leg and returns the trigger bounty with a zero-bounty close plan.
@@ -37,14 +35,13 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
     ) external;
 
     /// @notice Relatches the current failed close attempt when its protected position still matches exactly.
-    /// @dev Router-only. The Router calls this before finalizing a non-liquidation failed child receipt. The close
-    ///      bounty must be zero. Returning `true` latches the protection for a fresh retry; returning `false` resolves
-    ///      a missing or mismatched position as `Failed`. Unknown and stale order ids return `false` without mutation.
+    /// @dev Router-only. The Router validates that the close bounty is zero before this call. Returning `true`
+    ///      latches the protection for a fresh retry; returning `false` resolves a missing or mismatched position as
+    ///      `Failed`. Unknown and stale order ids return `false` without mutation.
     function handleFailedProtectionAttempt(
         uint64 orderId,
         address account,
-        OrderV3Types.TerminalReason reason,
-        uint256 executionBountyUsdc
+        OrderV3Types.TerminalReason reason
     ) external returns (bool retained);
 
     /// @notice Fails protection attached to a risk-off-invalidated parent without unlocking its reserve directly.

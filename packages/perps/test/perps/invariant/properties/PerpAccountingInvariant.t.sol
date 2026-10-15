@@ -429,16 +429,6 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         }
     }
 
-    function _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion() internal view {
-        for (uint256 i; i < handler.actorCount(); ++i) {
-            assertEq(
-                handler.ghost().liquidationDebtDiagnosticTotal(handler.actorAt(i)),
-                0,
-                "Every liquidation price tail must remain a diagnostic writeoff, never protocol debt"
-            );
-        }
-    }
-
     function _assertInvariant_GhostCommittedMarginMatchesAccountReservation() internal view {
         uint256 ghostTotalCommittedMargin;
         for (uint256 i = 0; i < handler.actorCount(); i++) {
@@ -821,7 +811,6 @@ contract PerpAccountingInvariantTest is BasePerpInvariantTest {
         _assertInvariant_TerminalNavBookMatchesCanonicalEngineState();
         _assertInvariant_LiquidatedGenerationsHaveNoLiveOrdersOrReserves();
         _assertInvariant_WalletsMatchSubmittedFlows();
-        _assertInvariant_LiquidationPriceTailsRemainDiagnosticAfterReservationExhaustion();
         _assertInvariant_GhostCommittedMarginMatchesAccountReservation();
         _assertInvariant_OrderReservationModuleSummariesMatchAccountReservation();
         _assertInvariant_GhostOrderCommittedMarginStateMachineMatchesRouter();

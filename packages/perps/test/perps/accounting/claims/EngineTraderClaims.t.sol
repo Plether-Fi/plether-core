@@ -431,7 +431,6 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
             observed.traderClaimBalanceUsdc,
             "Live close should leave the same trader claim remainder observed in settlement state"
         );
-        assertEq(preview.badDebtUsdc, 0, "Post-claim terminal price loss must remain a diagnostic write-off");
         assertEq(
             preview.existingTraderClaimConsumedUsdc,
             traderClaimBefore - preview.existingTraderClaimRemainingUsdc,
@@ -578,7 +577,6 @@ contract EngineTraderClaimsTest is CfdEngineTestBase {
 
         assertTrue(preview.valid, "Terminal action fee shortfall should be waived rather than blocking close");
         assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action fees from price PnL");
-        assertEq(preview.badDebtUsdc, 0, "Action-fee shortfall must remain a waiver rather than protocol debt");
         assertEq(preview.executionFeeUsdc, expectedFee, "Only released physical reserve may recover the fee");
         assertEq(preview.existingTraderClaimConsumedUsdc, 0, "Action fees must not consume same-account trader claims");
         assertEq(

@@ -416,11 +416,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         }
 
         assertEq(
-            eventSnapshot.legacyDebtDiagnosticUsdc,
-            0,
-            "Terminal price tails must be diagnostic writeoffs rather than protocol debt"
-        );
-        assertEq(
             engine.traderClaimBalanceUsdc(eventSnapshot.account),
             eventSnapshot.expectedTraderClaimAfterUsdc,
             "Terminal price-loss settlement must leave exactly the claim projected by the planner"
@@ -440,11 +435,6 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
             actualFinalResidualUsdc += usdc.balanceOf(trader) - eventSnapshot.traderWalletBeforeUsdc;
         }
 
-        assertEq(
-            eventSnapshot.legacyDebtDiagnosticUsdc,
-            0,
-            "Terminal settlement must not externalize uncollectible price tails as mutable debt"
-        );
         assertEq(
             actualFinalResidualUsdc,
             eventSnapshot.expectedFinalResidualUsdc,
@@ -763,14 +753,9 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         assertEq(snapshot.degradedMode, engine.degradedMode(), "House-pool status degraded mode mismatch");
     }
 
-    function _assertInvariant_LiquidationWriteoffsNeverBecomeDebtOrPreserveExecutionBounties() internal view {
+    function _assertInvariant_LiquidationClearsExecutionBounties() internal view {
         for (uint256 i; i < handler.actorCount(); ++i) {
             address account = _account(handler.actorAt(i));
-            assertEq(
-                handler.ghost().liquidationDebtDiagnosticTotal(account),
-                0,
-                "Every liquidation price-loss shortfall must remain a diagnostic writeoff"
-            );
             (, uint256 liveReserves, uint256 reserved) = handler.liquidatedGenerationExposure(account);
             assertEq(liveReserves, 0, "Liquidated generations must forfeit all reservations");
             assertEq(reserved, 0, "Liquidation must forfeit old-generation bounty and margin reserves");
@@ -849,7 +834,7 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         _assertInvariant_AccountLedgerSnapshotFullySubsumesCompactAndLegacyViews();
         _assertInvariant_HousePoolInputSnapshotMatchesGlobalLedgerBuckets();
         _assertInvariant_HousePoolStatusSnapshotMatchesEngineState();
-        _assertInvariant_LiquidationWriteoffsNeverBecomeDebtOrPreserveExecutionBounties();
+        _assertInvariant_LiquidationClearsExecutionBounties();
         _assertInvariant_ObservedClaimsReconcileWithEngine();
     }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate new-stack SDK ABIs from `forge build --root packages/perps`. Historical exports are untouched."""
+"""Regenerate current zero-close/V5 SDK ABIs from a perps build. Historical exports are untouched."""
 import argparse
 import json
 from pathlib import Path
@@ -20,7 +20,21 @@ for export, (contract, names) in specs.items():
     artifact = json.loads((args.artifacts_dir / (contract + ".sol") / (contract + ".json")).read_text())
     abi = [item for item in artifact["abi"] if item.get("type") == "error" or item.get("name") in names]
     if contract == "CfdClosePreview":
+        retired = {
+            "CfdClosePreview__SponsoredDeploymentMismatch",
+            "CfdClosePreview__SponsoredIntentInvalid",
+            "CfdClosePreview__SponsoredAccountBusy",
+            "CfdClosePreview__UncoveredCarry",
+            "CfdClosePreview__SubsidyMismatch",
+            "CfdEngine__InsufficientCloseOrderBountyBacking",
+        }
+        found = retired.intersection(item.get("name") for item in artifact["abi"])
+        if found:
+            raise ValueError(f"Stale sponsored-close preview errors in rebuilt ABI: {sorted(found)}")
         abi = [item for item in abi if item.get("name") != "previewClose" or item["inputs"][1]["type"] == "address"]
+        preview = next(item for item in abi if item.get("name") == "previewClose")
+        if any(part["name"] == "executionBountyUsdc" for part in preview["outputs"][0]["components"]):
+            raise ValueError("Current ClosePreview still exposes the removed bounty output")
     lines.append(f"export const {export} = {json.dumps(abi, indent=2)} as const;\n")
 lines.append("export const orderRouterV3TraderAbi = orderRouterV3Abi;\n")
 output.write_text("\n".join(lines))

@@ -247,7 +247,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             }
         }
 
-        snapshot = _snapshotFromBasket(PriceMode.OrderExecution, basket, policy, false);
+        snapshot = _snapshotFromBasket(basket, policy, false);
         snapshot.price = _orderExecutionPrice(request, snapshot.price, basket.confidence, policy.oracleFrozen);
         if (!policy.oracleFrozen && !reusedBasket) {
             nextCache = BatchOrderPriceCache({
@@ -448,7 +448,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         BasketPrice memory basket = _computeLiveBasketPrice(
             PriceMode.Liquidation, policy.maxStaleness, _policyPublishTimeDivergence(PriceMode.Liquidation, policy)
         );
-        snapshot = _snapshotFromBasket(PriceMode.Liquidation, basket, policy, true);
+        snapshot = _snapshotFromBasket(basket, policy, true);
         snapshot.updateFee = pythFee;
         confidence = basket.confidence;
     }
@@ -465,7 +465,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             snapshot.updateFee = basket.pythFee;
             return (false, snapshot);
         }
-        snapshot = _snapshotFromBasket(PriceMode.OrderExecution, basket, policy, false);
+        snapshot = _snapshotFromBasket(basket, policy, false);
         snapshot.price = _orderExecutionPrice(request, snapshot.price, basket.confidence, policy.oracleFrozen);
         ok = true;
     }
@@ -482,7 +482,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         PolicySnapshot memory policy = _policyForMode(mode);
         BasketPrice memory basket =
             _computeLiveBasketPrice(mode, policy.maxStaleness, _policyPublishTimeDivergence(mode, policy));
-        snapshot = _snapshotFromBasket(mode, basket, policy, true);
+        snapshot = _snapshotFromBasket(basket, policy, true);
         confidence = basket.confidence;
     }
 
@@ -692,7 +692,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
 
     function _snapshotFromBasket(
-        PriceMode mode,
         BasketPrice memory basket,
         PolicySnapshot memory policy,
         bool enforcePublishOrder
@@ -709,7 +708,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (enforcePublishOrder && snapshot.publishTime < engine.lastMarkTime()) {
             revert PletherOracle__PriceOutOfOrder(snapshot.publishTime, engine.lastMarkTime());
         }
-        mode;
     }
 
     function _adverseOrderPrice(

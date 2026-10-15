@@ -138,7 +138,7 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(marginAfter, marginBefore - router.closeOrderExecutionBountyUsdc(), "bounty reclassification is exact");
+        assertEq(marginAfter, marginBefore - 0, "bounty reclassification is exact");
         assertEq(router.pendingOrderCounts(account), 1, "accepted close enters FIFO");
         assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
     }
@@ -210,7 +210,6 @@ contract PositionFundedCloseBountyTest is BasePerpTest {
             openOrderExecutionBountyBps: router.openOrderExecutionBountyBps(),
             minOpenOrderExecutionBountyUsdc: router.minOpenOrderExecutionBountyUsdc(),
             maxOpenOrderExecutionBountyUsdc: router.maxOpenOrderExecutionBountyUsdc(),
-            closeOrderExecutionBountyUsdc: router.closeOrderExecutionBountyUsdc(),
             positionProtectionTriggerBountyUsdc: router.positionProtectionTriggerBountyUsdc(),
             maxPendingOrders: router.maxPendingOrders(),
             minEngineGas: router.minEngineGas(),
@@ -514,9 +513,7 @@ contract RebateAdmissionFailureTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 2000e6);
 
-        uint8 code = engineLens.previewOpenRevertCode(
-            bobAccount, CfdTypes.Side.SHORT, 300_000e18, 10_000e6, 1e8, uint64(block.timestamp)
-        );
+        uint8 code = engineLens.previewOpenRevertCode(bobAccount, CfdTypes.Side.SHORT, 300_000e18, 10_000e6, 1e8);
         assertEq(
             code,
             uint8(CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED),
@@ -609,7 +606,7 @@ contract TerminalSlippageBountyTest is BasePerpTest {
 contract PendingDepositLifecycleBountyTest is BasePerpTest {
 
     /// @dev spec; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
-    function test_UnderwaterFullCloseFreeFundedBountyCanCommitAndPaysKeeperOnFailure() public {
+    function test_UnderwaterFullCloseWithZeroBountyCanCommitWithoutCreditingKeeper() public {
         address account = address(0xA11CE);
         address keeper = address(0xB0B);
         uint256 size = 100_000e18;
@@ -621,8 +618,6 @@ contract PendingDepositLifecycleBountyTest is BasePerpTest {
         engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
 
         uint256 accountBalanceBeforeCommit = clearinghouse.balanceUsdc(account);
-        uint256 bountyUsdc = router.closeOrderExecutionBountyUsdc();
-
         vm.prank(account);
         router.commitOrder(CfdTypes.Side.LONG, size, 0, 100_000_000, true);
 
@@ -630,17 +625,17 @@ contract PendingDepositLifecycleBountyTest is BasePerpTest {
         vm.prank(keeper);
         router.executeOrder(1, priceData);
 
-        assertEq(clearinghouse.balanceUsdc(keeper), bountyUsdc, "failed underwater full close should pay keeper");
+        assertEq(clearinghouse.balanceUsdc(keeper), 0, "failed underwater full close must not credit keeper");
         assertApproxEqAbs(
             clearinghouse.balanceUsdc(account),
-            accountBalanceBeforeCommit - bountyUsdc,
+            accountBalanceBeforeCommit,
             1000,
-            "failed underwater full close should consume the free-funded bounty"
+            "failed underwater full close must not charge a bounty"
         );
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
             0,
-            "reserved bounty bucket should be released"
+            "zero-bounty close leaves no reserved cash"
         );
     }
 
@@ -651,7 +646,7 @@ contract PledgeFundedBountyIsolationTest is BasePerpTest {
     address trader = address(0xA11CE);
 
     /// @dev spec; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
-    function test_KeeperReserveUsesPledgeButProtectsLiquidationReserve() public {
+    function test_UnpaidClosePreservesPledgeAndLiquidationReserve() public {
         address account = trader;
         _fundTrader(trader, 175e6);
         _open(account, CfdTypes.Side.LONG, 10_000e18, 175e6, 1e8);
@@ -664,9 +659,7 @@ contract PledgeFundedBountyIsolationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
 
         assertEq(
-            clearinghouse.pnlPledgeUsdc(account),
-            pledgeBefore - router.closeOrderExecutionBountyUsdc(),
-            "Unpaid close commitment preserves the position pledge"
+            clearinghouse.pnlPledgeUsdc(account), pledgeBefore, "Unpaid close commitment preserves the position pledge"
         );
         assertEq(
             clearinghouse.liquidationReserveUsdc(account),
@@ -1144,9 +1137,7 @@ contract PledgedBountyClaimVpiLiquidationTest is BasePerpTest {
         assertTrue(vm.revertToState(snapshot));
         vm.prank(TRADER);
         uint64 id = router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 0, 0, true);
-        uint256 pledgeBounty = router.closeOrderExecutionBountyUsdc();
-
-        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), pledgeBefore - pledgeBounty);
+        assertEq(clearinghouse.pnlPledgeUsdc(TRADER), pledgeBefore);
         update = _mockPythUpdateData(0.2e8);
         vm.prank(KEEPER);
         router.executeLiquidation(TRADER, update);

@@ -29,7 +29,6 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
 
     struct SolventProtectionSnapshot {
         uint256 triggerBountyUsdc;
-        uint256 executionBountyUsdc;
         uint256 reservationBountyUsdc;
         uint256 reservedSettlementUsdc;
         uint256 freeSettlementUsdc;
@@ -85,7 +84,6 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
         PositionProtectionTypes.PositionProtectionView memory protection =
             protectionViews.getPositionProtection(protectionId);
         snapshot.triggerBountyUsdc = protection.triggerBountyUsdc;
-        snapshot.executionBountyUsdc = protection.executionBountyUsdc;
         snapshot.reservationBountyUsdc = router.getAccountReservations(SOLVENT_ACCOUNT).executionBountyUsdc;
         snapshot.reservedSettlementUsdc = clearinghouse.getLockedMarginBuckets(SOLVENT_ACCOUNT).reservedSettlementUsdc;
         snapshot.freeSettlementUsdc = _freeSettlementUsdc(SOLVENT_ACCOUNT);
@@ -104,7 +102,6 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
             "caught solvent revert must restore Book status"
         );
         assertEq(protection.triggerBountyUsdc, beforeSnapshot.triggerBountyUsdc, "trigger bounty must roll back");
-        assertEq(protection.executionBountyUsdc, beforeSnapshot.executionBountyUsdc, "execution bounty must roll back");
         assertEq(
             protectionViews.activePositionProtectionId(SOLVENT_ACCOUNT),
             protectionId,
@@ -146,7 +143,7 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
     }
 
     function _totalProtectionBountyUsdc() internal view returns (uint256) {
-        return router.positionProtectionTriggerBountyUsdc() + router.closeOrderExecutionBountyUsdc();
+        return router.positionProtectionTriggerBountyUsdc();
     }
 
     function _positionSize(

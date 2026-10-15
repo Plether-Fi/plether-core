@@ -24,8 +24,7 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         address engineAddress,
         uint64 orderId,
         address executor,
-        uint256 executionPrice,
-        uint64 publishTime
+        uint256 executionPrice
     ) external view returns (OrderV3Types.ExecutionAssessment memory assessment) {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(engineAddress);
         address router = engine.orderRouter();
@@ -49,7 +48,6 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
             executor,
             executionPrice,
             IHousePool(engine.pool()).totalAssets(),
-            publishTime,
             pending.executionBountyUsdc
         );
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
@@ -94,7 +92,6 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         address executor,
         uint256 currentOraclePrice,
         uint256 poolDepthUsdc,
-        uint64 publishTime,
         OrderV3Types.ExecutionBounds calldata bounds,
         uint256 executionBountyUsdc
     ) external view returns (OrderV3Types.ExecutionAssessment memory assessment) {
@@ -103,7 +100,6 @@ contract CfdOrderPolicyEvaluator is CfdOrderPolicyEvaluatorBase, ICfdOrderPolicy
         context.executor = executor;
         context.currentOraclePrice = currentOraclePrice;
         context.poolDepthUsdc = poolDepthUsdc;
-        context.publishTime = publishTime;
         context.executionBountyUsdc = executionBountyUsdc;
         return _assessOrder(context, order, bounds);
     }

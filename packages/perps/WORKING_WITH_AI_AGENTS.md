@@ -357,9 +357,8 @@ domains contribute their finalized active configuration versions; pending timelo
 policy and therefore are not committed.
 
 The bounded request ABI and intent-hash domain are V3, including `submitBy` and `executionWindowSeconds`.
-Execution-config and receipt domains are V4. The zero-close implementation retains public request/receipt
-compatibility fields and historical disposition ordinals 5 and 6; normal close receipts use `None` and zero bounty
-amounts. Use the matching request, receipt, and
+Execution-config and receipt domains are V5. The current receipt omits the retained-bounty field and mixed
+dispositions; normal close receipts use `None` and zero bounty amounts. Use the matching request, receipt, and
 lifecycle interfaces for this release; historical V2 request or V3 receipt/config encodings are not interchangeable
 with the current domains. Always verify receipts against their actual chain, Book and Router; never reinterpret a
 historical deployment through the current source ABI or assume equal domain labels imply interchangeable bindings.
@@ -453,7 +452,7 @@ original protection action.
 - lifecycle status, terminal reason, execution regime, executor, and price source;
 - adverse execution price, neutral mark, pool depth, and oracle publish time;
 - whether the price reached the Engine;
-- the queued order's bounty entitlement, actual paid/refunded/retained/forfeited amounts, recipient, disposition, and
+- the queued order's bounty entitlement, actual paid/refunded/forfeited amounts, recipient, disposition, and
   any reservation discrepancy; `ExpiredReservationMismatch` reports the actual recoverable refund, which can differ
   from the stored entitlement;
 - typed failure evidence and revert-data hash;
@@ -484,7 +483,7 @@ For `AccountLiquidated`, the order receipt proves queued-order cleanup and bount
 liquidation events remain canonical for the position's liquidation economics. Both receipt state-summary slots use
 the observed post-liquidation state.
 
-Disposition ordinals are stable and append-only for this release:
+Current disposition ordinals are:
 
 | Value | Name | Interpretation |
 | --- | --- | --- |
@@ -492,15 +491,15 @@ Disposition ordinals are stable and append-only for this release:
 | 1 | `Paid` | Paid/released amount, including successful self-execution |
 | 2 | `Forfeited` | Free-funded amount credited to treasury |
 | 3 | `RefundedToAccount` | Pure refund to the account, including risk-off opening cleanup |
-| 4 | `RetainedForProtectionRetry` | Historical compatibility ordinal; current matching failed close attempts settle zero and latch |
-| 5 | `PaidAndRefunded` | Historical mixed close-bounty outcome; not emitted for normal current closes |
-| 6 | `ForfeitedAndRefunded` | Historical mixed liquidation outcome; not emitted for normal current closes |
+
+Values 4–6 belong to older receipts and are absent from the current enum. Decode those releases with their archived
+ABIs and hash domains.
 
 Read the numeric components rather than treating every nonzero disposition as full payment. The single recipient is
 the executor for a nonzero paid part, treasury for a nonzero forfeited part, or source account for a pure refund.
 Opening-bounty self-release remains intentional. Current ordinary and protection closes have no bounty recipient.
-The SDK decoder authenticates these values as `uint8` through the unchanged full
-receipt hash; it does not independently prove that the contract's accounting policy was correct.
+The SDK decoder must authenticate the current V5 full receipt hash; it does not independently prove that the
+contract's accounting policy was correct.
 
 This is a fresh connected-stack release: internal interfaces and Clearinghouse/Book storage change despite stable
 public tuples. Never point a new Router at an already-wired Engine or mix old pending

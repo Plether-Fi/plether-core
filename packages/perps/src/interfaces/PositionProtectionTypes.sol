@@ -62,7 +62,6 @@ library PositionProtectionTypes {
     /// @param takeProfitTriggerPrice Direction-aware take-profit trigger, or zero when disabled.
     /// @param stopLossTriggerPrice Direction-aware stop-loss trigger, or zero when disabled.
     /// @param triggerBountyUsdc Current unpaid trigger bounty; zero after trigger, cancellation, or terminal cleanup.
-    /// @param executionBountyUsdc Retained view field that is always zero under the current close-bounty policy.
     /// @param armedAt Timestamp at which the protection most recently became armed.
     /// @param armedBlock Block number at which the protection most recently became armed.
     /// @param triggerMarkPrice Neutral oracle mark that activated the protection, or zero before triggering.
@@ -79,7 +78,6 @@ library PositionProtectionTypes {
         uint256 takeProfitTriggerPrice;
         uint256 stopLossTriggerPrice;
         uint256 triggerBountyUsdc;
-        uint256 executionBountyUsdc;
         uint64 armedAt;
         uint64 armedBlock;
         uint256 triggerMarkPrice;

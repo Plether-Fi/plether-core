@@ -273,7 +273,6 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "basket confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
         assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000, "position protection trigger bounty");
-        assertEq(router.closeOrderExecutionBountyUsdc(), 0, "ordinary/protection close execution bounty");
     }
 
     function test_DeploymentGuardsAcceptDistinctCanonicalPositionProtectionBookAndBoundSidecar() public {
@@ -745,7 +744,6 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
         config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
         config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.closeOrderExecutionBountyUsdc = router.closeOrderExecutionBountyUsdc();
         config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();

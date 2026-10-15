@@ -198,7 +198,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         assertEq(pletherOracle.claimableEth(address(recipient)), 0);
         assertEq(address(recipient).balance, 2 * FEE);
         vm.prank(address(recipient));
-        routerAdmin.claimBalance(true);
+        routerAdmin.claimBalance();
         assertEq(address(recipient).balance, 5 * FEE);
         assertEq(routerAdmin.claimableEth(address(recipient)), 0);
         assertEq(address(routerAdmin).balance, 0);
@@ -207,7 +207,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         recipient.claim();
         vm.prank(address(recipient));
         vm.expectRevert();
-        routerAdmin.claimBalance(true);
+        routerAdmin.claimBalance();
         assertEq(address(recipient).balance, 5 * FEE);
     }
 

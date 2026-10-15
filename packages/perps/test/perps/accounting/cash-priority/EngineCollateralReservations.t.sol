@@ -62,8 +62,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         uint256 currentPoolDepthUsdc = pool.totalAssets();
         vm.prank(address(engine));
         CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(account, currentPoolDepthUsdc);
-        CfdEnginePlanTypes.CloseDelta memory delta =
-            engine.planner().planClose(snap, closeOrder, 103_000_000, uint64(block.timestamp));
+        CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, closeOrder, 103_000_000);
 
         uint256 committedBefore = clearinghouse.getLockedMarginBuckets(account).committedOrderMarginUsdc;
         assertTrue(delta.valid, "Terminal close plan should remain executable");

@@ -74,7 +74,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         snap.lockedBuckets.positionMarginUsdc = 10_000e6;
         snap.lockedBuckets.totalLockedMarginUsdc = 10_000e6;
         CfdTypes.Order memory order = CfdTypes.Order(ACCOUNT, size, 0, price, 0, 0, 0, CfdTypes.Side.SHORT, true);
-        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, price, 0);
+        CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, order, price);
         assertTrue(delta.valid);
         assertEq(delta.pricePnlPledgeConsumedUsdc, 10_000e6);
         assertEq(delta.actionChargeCollectedUsdc, bounty);
@@ -93,7 +93,7 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         snap.lockedBuckets.reservedSettlementUsdc = bounty;
         snap.actionReserveUsdc = bounty;
         snap.protectedExecutionBountyUsdc = bounty;
-        delta = planner.planClose(snap, order, price, 0);
+        delta = planner.planClose(snap, order, price);
         assertTrue(delta.valid);
         assertEq(delta.actionChargeCollectedUsdc, 0);
         OrderV3Types.ExecutionAssessment memory assessment =
@@ -148,11 +148,10 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         });
         OrderV3Types.ExecutionBounds memory bounds = _permissiveBounds();
 
-        OrderV3Types.ExecutionAssessment memory externalExecution = evaluator.assessOrder(
-            ENGINE, order, address(0xB0B), PRICE, 2_000_000e6, uint64(block.timestamp), bounds, BOUNTY
-        );
+        OrderV3Types.ExecutionAssessment memory externalExecution =
+            evaluator.assessOrder(ENGINE, order, address(0xB0B), PRICE, 2_000_000e6, bounds, BOUNTY);
         OrderV3Types.ExecutionAssessment memory selfExecution =
-            evaluator.assessOrder(ENGINE, order, ACCOUNT, PRICE, 2_000_000e6, uint64(block.timestamp), bounds, BOUNTY);
+            evaluator.assessOrder(ENGINE, order, ACCOUNT, PRICE, 2_000_000e6, bounds, BOUNTY);
 
         assertEq(externalExecution.executionNotionalUsdc, 100_000e6);
         assertEq(externalExecution.grossAccountDebitUsdc, 40e6 + BOUNTY);

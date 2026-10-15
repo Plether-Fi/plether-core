@@ -74,12 +74,10 @@ interface ICfdEngineSettlementSidecar {
     /// @param delta Valid planned close/decrease delta
     /// @param currentPosition Position loaded by the engine immediately before settlement
     /// @param publishTime Oracle publish timestamp proposed for the execution mark
-    /// @param orderId Retained order-identity ABI argument, unused by current close settlement
     function executeClose(
         CfdEnginePlanTypes.CloseDelta calldata delta,
         CfdTypes.Position calldata currentPosition,
-        uint64 publishTime,
-        uint64 orderId
+        uint64 publishTime
     ) external;
 
     /// @notice Applies a liquidation settlement delta through the host hooks.

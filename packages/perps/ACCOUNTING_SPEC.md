@@ -72,7 +72,7 @@ Operational rules:
 - `shortMaxProfit`: worst-case payout to all live SHORT positions at the opposite price extreme
 - `maxLiability = max(longMaxProfit, shortMaxProfit)`
 - `priceLossWrittenOffUsdc`: diagnostic trader price loss above the account's collectible cap; it is not a liability
-  or receivable. Active close/liquidation planners leave the legacy `badDebtUsdc` field at zero. Unpaid protocol-side
+  or receivable. The legacy zero-valued preview debt field is absent from the current ABI. Unpaid protocol-side
   price payouts become trader claims; negative aggregate terminal equity is reported separately as `terminalDeficit`.
 
 ### Settlement-buffer terms
@@ -788,9 +788,9 @@ Rules:
 
 ### Close-order bounty policy
 
-Ordinary and protection close execution bounties are permanently zero in the new coherent stack. The public
-`closeOrderExecutionBountyUsdc` configuration field remains for tuple/hash compatibility; governance cannot set it
-nonzero. Opening/increase bounties, protection trigger rewards and independent liquidation rewards remain paid.
+Ordinary and protection close execution bounties are permanently zero in the new coherent stack. The former
+`closeOrderExecutionBountyUsdc` configuration field and getter are absent from the current ABI. Opening/increase
+bounties, protection trigger rewards and independent liquidation rewards remain paid.
 There is no prepaid close balance, pledged bounty, execution-fee escrow, or on-chain protocol subsidy pool.
 
 Commitment still validates position, queued exposure, side/size/quantum, minimum partial size, carry and financial
@@ -800,7 +800,7 @@ rules, including possible unpaid carry; zero bounty is not a bypass of economic 
 
 For settlement custody `S` and collected commitment carry `C`, commitment leaves `S - C`. Pledge, borrowing and
 terminal curves change only by canonical carry effects. The Router creates an explicit Active Order bounty record
-with amount zero, no monetary reserve increase, and zero legacy funding/source-epoch fields. Missing is not Active.
+with amount zero and no monetary reserve increase. Legacy pledge/source-epoch fields are absent. Missing is not Active.
 There is no pledge-specific empty-queue restriction; FIFO, account capacity and queued exposure rules remain.
 
 | Transition | Accounting | Queue and receipt |
@@ -812,9 +812,10 @@ There is no pledge-specific empty-queue restriction; FIFO, account capacity and 
 | Liquidation | Existing loss recovery and liquidation reward; paid open/trigger forfeitures remain | Clear own unpaid close records; preserve foreign FIFO |
 | Retryable/unknown failure | No item movement | Preserve pending state, identity and links |
 
-Normal close receipts have zero entitlement, paid, refunded, retained and forfeited bounty amounts, disposition
-`None` and no bounty recipient. Historical enum ordinals remain decodable; discrepancy receipts preserve actual
-corruption evidence. Every terminal transition is atomic with receipt finalization and queue cleanup.
+Normal close receipts have zero entitlement, paid, refunded and forfeited bounty amounts, disposition `None`, and no
+bounty recipient. The retained amount and mixed-disposition variants are absent from the current receipt ABI; decode
+older releases with their archived ABI. Discrepancy receipts preserve actual corruption evidence. Every terminal
+transition is atomic with receipt finalization and queue cleanup.
 
 Before expiry, reservation mismatch is retryable. Strictly after the committed deadline, authenticated independent
 Book funding can authorize recovery of a paid opening reservation into free settlement without a new carry pass.
@@ -833,7 +834,7 @@ Component authority is deliberately split:
 - `MarginClearinghouse` owns custody, reserved-settlement balances, and the canonical bounty records in every
   namespace. The Book holds no tokens, and it cannot mutate the Router queue directly.
 
-- one protection snapshots a fixed trigger bounty; its compatibility execution-bounty field is zero,
+- one protection snapshots a fixed trigger bounty; there is no separate protection-execution bounty field,
 - only the trigger bounty is reserved from free settlement; protection creation does not reclassify active
   position pledge. The Router creates a fresh zero Order bounty record for every generated close attempt,
 - the protection reserve is locked before post-reservation safety is evaluated. Existing-position creation uses the
@@ -860,8 +861,8 @@ Component authority is deliberately split:
 - permissionless retry appends a fresh zero-bounty FIFO attempt with new timing, no USDC debit and no repeat trigger
   payout. At most one live attempt exists; latched lifecycle state does not mean retained execution funds,
 - cancellation/risk-off/liquidation refund or forfeit only legitimately unpaid trigger/open funds under their
-  existing policy. Liquidation rewards remain independent. The retired ProtectionExecution namespace accepts no new
-  reservations; historical numeric enums and public tuple fields are retained for decoding.
+  existing policy. Liquidation rewards remain independent. `BountyKind` contains only `Order` and
+  `ProtectionTrigger`; use the older ABI to decode historical protection-execution records.
 
 ### Open-order failure policy
 
@@ -1227,7 +1228,8 @@ The accounting system should preserve the following:
 31. every successful open or increase leaves `E >= L + ceil(L * settlementBufferBps / 10_000)`
 32. the LP base withdrawal reserve includes `C + L + B`, while terminal NAV, raw degraded-mode detection, custody,
     and yield exclude `B`
-33. ordinary and protection close attempts have a zero bounty and no pledged-close escrow or source-position epoch;
+33. ordinary and protection close attempts have a zero bounty and no pledged-close escrow or source-position epoch
+    field in the current records;
     no pledge-specific empty-queue restriction applies
 34. successful close, recognized failure, expiry, and liquidation settle each authenticated zero Order record exactly
     once with no bounty recipient; opening and protection-trigger rewards follow their separate policies

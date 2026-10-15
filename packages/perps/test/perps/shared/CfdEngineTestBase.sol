@@ -132,7 +132,7 @@ contract CfdEnginePlanLibHarness {
         snap.executionFeeBps = 4;
         snap.frozenCloseSpreadBps = 1000;
         snap.oracleFrozen = true;
-        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
+        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice);
     }
 
     function planLiquidationWithUnsettledCarry(
@@ -198,7 +198,7 @@ contract CfdEnginePlanLibHarness {
         });
         snap.unsettledCarryUsdc = unsettledCarryUsdc;
         snap.executionFeeBps = 4;
-        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
+        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice);
     }
 
     function planLiquidationWithVpiAccrued(
@@ -265,7 +265,7 @@ contract CfdEnginePlanLibHarness {
             protocolShareBps: 0
         });
         snap.executionFeeBps = 4;
-        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice, 0);
+        return CfdEnginePlanLib.planLiquidation(snap, oraclePrice);
     }
 
     function planOpenWithExistingVpiAccrued(
@@ -357,8 +357,7 @@ contract CfdEnginePlanLibHarness {
                 side: CfdTypes.Side.LONG,
                 isClose: false
             }),
-            params.price,
-            0
+            params.price
         );
     }
 

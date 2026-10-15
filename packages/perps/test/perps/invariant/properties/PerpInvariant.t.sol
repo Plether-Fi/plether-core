@@ -88,9 +88,6 @@ abstract contract PerpActionHandler is Test {
                     || code == uint8(CfdEnginePlanTypes.OpenRevertCode.VPI_REBATE_RESERVE_UNFUNDED);
             }
         }
-        if (isClose && reason.length == 100) {
-            return selector == ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector;
-        }
         if (reason.length != 4) {
             return false;
         }
@@ -100,8 +97,7 @@ abstract contract PerpActionHandler is Test {
         if (isClose) {
             return selector == IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector
                 || selector == IOrderRouterErrors.OrderRouter__SideMismatch.selector
-                || selector == IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector
-                || selector == IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue.selector;
+                || selector == IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector;
         }
         return selector == IOrderRouterErrors.OrderRouter__DegradedMode.selector
             || selector == IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector
@@ -981,7 +977,6 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         address account;
         uint256 bountyUsdc;
         uint256 freeFundedUsdc;
-        uint256 pledgeFundedUsdc;
         uint256 committedMarginUsdc;
     }
 
@@ -1330,7 +1325,6 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
                 account: record.core.account,
                 bountyUsdc: record.executionBountyUsdc,
                 freeFundedUsdc: funding.freeFundedUsdc,
-                pledgeFundedUsdc: funding.pledgeFundedUsdc,
                 committedMarginUsdc: clearinghouse.getOrderReservation(cursor).remainingAmountUsdc
             });
             cursor = record.nextGlobalOrderId;
@@ -1409,23 +1403,16 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         } else if (receipt.reason == OrderV3Types.TerminalReason.RiskOff) {
             assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RefundedToAccount));
             assertEq(receipt.bountyRecipient, pending.account);
-        } else if (receipt.status == OrderV3Types.LifecycleStatus.Failed && pending.pledgeFundedUsdc != 0) {
-            OrderV3Types.BountyDisposition disposition = pending.freeFundedUsdc == 0
-                ? OrderV3Types.BountyDisposition.RefundedToAccount
-                : OrderV3Types.BountyDisposition.PaidAndRefunded;
-            assertEq(uint8(receipt.bountyDisposition), uint8(disposition));
-            assertEq(receipt.bountyRecipient, pending.freeFundedUsdc == 0 ? pending.account : address(this));
-            keeperCreditUsdc = pending.freeFundedUsdc;
         } else {
             // This handler creates ordinary orders. It never creates protection attempts or liquidates within a batch.
             assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
             assertEq(receipt.bountyRecipient, address(this));
             keeperCreditUsdc = pending.bountyUsdc;
         }
+        assertEq(pending.freeFundedUsdc, pending.bountyUsdc, "bounty is fully funded from free settlement");
         OrderV3Types.OrderReceipt memory fullReceipt = _verifiedReceipt(router.lifecycleBook(), pending.orderId);
         assertEq(fullReceipt.bounty.bountyPaidUsdc, keeperCreditUsdc);
         assertEq(fullReceipt.bounty.bountyRefundedUsdc, pending.bountyUsdc - keeperCreditUsdc);
-        assertEq(fullReceipt.bounty.bountyRetainedUsdc, 0);
         assertEq(fullReceipt.bounty.bountyForfeitedUsdc, 0);
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, pending.orderId);

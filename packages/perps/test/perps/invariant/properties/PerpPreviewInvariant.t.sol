@@ -350,7 +350,6 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
         assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Trader claim should match");
-        assertEq(actual.badDebtUsdc, expected.badDebtUsdc, "Bad debt should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
         assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");

@@ -8,31 +8,13 @@ import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
 
 /// @notice Aggregate delayed-order router action, keeper, accounting, and admin-host surface.
-/// @dev The concrete router also inherits the wider canonical errors in `IOrderRouterErrors`; the declarations below
-///      are a legacy compatibility subset. Inherited function semantics and authorization are documented by their
-///      role-specific parent interfaces.
+/// @dev Router errors are declared in `IOrderRouterErrors`. Inherited function semantics and authorization are
+///      documented by their role-specific parent interfaces.
 interface IOrderRouter is IPerpsKeeper, IPerpsTraderActions, IOrderRouterAccounting, IOrderRouterAdminHost {
 
     /// @notice Returns the immutable position-protection book exposing TP/SL actions and retained protection views.
     /// @dev TP/SL calls are made directly to this address; the router does not forward their selectors.
     function positionProtectionBook() external view returns (address book);
-
-    /// @notice An order commit supplied a zero position-size delta.
-    error OrderRouter__ZeroSize();
-    /// @notice Legacy compact oracle validation failure.
-    /// @param code Numeric oracle validation reason.
-    error OrderRouter__OracleValidation(uint8 code);
-    /// @notice Legacy compact queue-state failure.
-    /// @param code Numeric queue-state reason.
-    error OrderRouter__QueueState(uint8 code);
-    /// @notice A commit failed a compact economic or planner-derived validation rule.
-    /// @param code Numeric validation reason; current code `11` denotes a below-minimum economic size.
-    error OrderRouter__CommitValidation(uint8 code);
-    /// @notice The EIP-150-forwardable gas remaining is below the configured minimum for an engine call.
-    error OrderRouter__InsufficientGas();
-    /// @notice Commit-time planner preflight identified a predictably invalid open/increase.
-    /// @param code Numeric `CfdEnginePlanTypes.OpenRevertCode` returned by the engine lens.
-    error OrderRouter__PredictableOpenInvalid(uint8 code);
 
     /// @notice Emitted after a delayed order is stored, reserved, and linked into live queues.
     /// @param orderId Monotonically increasing router order id.

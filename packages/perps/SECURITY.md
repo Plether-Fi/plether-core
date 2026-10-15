@@ -407,7 +407,7 @@ The attached parent open is a caller-authored public V3 intent and must carry th
 financial bounds as an ordinary open. Only Router-authenticated triggered or retried close attempts may carry
 `expectedConfigHash == bytes32(0)`. Zero is an internal unpinned marker, not a public wildcard: attempt creation runs
 through the exactly Router-bound keeper sidecar or Router-only Book retry hooks plus Router-only registration hooks.
-Fresh external V2 commits reject a zero hash and remain bound to the exact digest they supplied. Internal protection
+Fresh external V3 commits reject a zero hash and remain bound to the exact digest they supplied. Internal protection
 close attempts skip only config-digest equality; their typed execution modes, deadlines, financial policy, lifecycle
 evidence, and observed receipt digest remain enforced.
 
@@ -421,8 +421,8 @@ the close mandate.
 The Router registers every generated close as a protection attempt in `OrderLifecycleBook`. A matching failed
 attempt settles its authenticated zero Order record, pays no caller, and relatches the protection. A mismatched
 position terminally fails it with the same zero-bounty outcome. Retry requires the exact protected position and
-creates a fresh zero Order record without another trader debit. The retained-bounty disposition remains a historical
-enum value but is not emitted for a normal current close.
+creates a fresh zero Order record without another trader debit. The former retained-bounty disposition is absent from
+the current enum; archived decoders remain necessary for older receipts.
 
 When existing-position protection locks its trigger bounty, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
@@ -578,7 +578,7 @@ finalized policy drift produces terminal `ConfigMismatch` for config-pinned exte
 economics must fit the separately pinned request bounds. The internal TP/SL close-attempt marker skips the
 hash-equality check but still records the observed digest in its terminal receipt.
 
-The request ABI and permanent intent-hash domain are V3. The receipt and execution-config domains are V4;
+The request ABI and permanent intent-hash domain are V3. The receipt and execution-config domains are V5;
 receipts authenticate the original submission limit, execution duration, commitment time, and resolved deadline. Cross-version digest or receipt-hash equality must never
 be used as a compatibility signal.
 
@@ -609,10 +609,10 @@ compact outcome; it does not rely on an agent retaining private request data.
 Expiry and configuration mismatch are pre-oracle terminal paths: their receipts use `PriceSource.None`, zero
 execution price and oracle publish time, and `priceReachedEngine == false`, even though they may report the stored
 neutral mark and current pool depth as context. Risk-off uses the same no-price convention. Any terminal receipt with
-a zero bounty must use `BountyDisposition.None` and the zero recipient. Historical mixed `PaidAndRefunded` and
-`ForfeitedAndRefunded` enum values remain decodable but are not emitted for normal current closes. The Book checks
-the authenticated zero record and receipt components exactly. Public request/receipt field layouts remain stable;
-enum consumers, internal interfaces and storage require the compatible fresh stack.
+a zero bounty must use `BountyDisposition.None` and the zero recipient. Mixed disposition values and the retained
+bounty amount are absent from the current receipt ABI; decode historical receipts with their archived ABI. The Book
+checks the authenticated zero record and receipt components exactly. Enum consumers, receipt decoders, internal
+interfaces and storage require the compatible fresh stack.
 
 Book finalization occurs last and is fail closed. If identity, status/reason, bounty, or event construction cannot be
 finalized, the enclosing item reverts: Engine/Clearinghouse/Router changes are not allowed to persist without their

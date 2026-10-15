@@ -92,14 +92,14 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         assertEq(usdc.balanceOf(BOUNTY_TRADER), wallet, "no additional USDC deposited");
     }
 
-    function test_PartialCloseQueueNeedsNoFreeCashOrSourceEpoch() public {
+    function test_PartialCloseQueueNeedsNoFreeCashOrBounty() public {
         uint256 pledge = _bountyPosition(CfdTypes.Side.LONG);
         uint64 first = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
         uint64 second = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE / 2, 0);
         assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 2);
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
-        assertEq(_bountyReservation(first).sourcePositionEpoch, 0);
-        assertEq(_bountyReservation(second).sourcePositionEpoch, 0);
+        assertEq(_bountyReservation(first).amountUsdc, 0);
+        assertEq(_bountyReservation(second).amountUsdc, 0);
         _assertUnpaid(_bountyExecute(first, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed));
         _assertUnpaid(_bountyExecute(second, BOUNTY_PRICE, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed));
         _assertBountyResolved(first);
@@ -165,7 +165,6 @@ contract SourceBoundBountyLifecycleTest is SourceBoundBountyFixture {
         assertEq(receipt.bountyUsdc, 0);
         assertEq(receipt.bounty.bountyPaidUsdc, 0);
         assertEq(receipt.bounty.bountyRefundedUsdc, 0);
-        assertEq(receipt.bounty.bountyRetainedUsdc, 0);
         assertEq(receipt.bounty.bountyForfeitedUsdc, 0);
         assertEq(receipt.bountyRecipient, address(0));
         assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None));

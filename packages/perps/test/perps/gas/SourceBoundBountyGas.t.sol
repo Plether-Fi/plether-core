@@ -53,8 +53,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         IMarginClearinghouse.BountyReservation memory reserved = _bountyReservation(id);
         assertEq(reserved.amountUsdc, before.bounty);
         assertEq(reserved.freeFundedUsdc, 0);
-        assertEq(reserved.pledgeFundedUsdc, before.bounty);
-        assertEq(reserved.sourcePositionEpoch, 0);
+        assertEq(reserved.amountUsdc, 0);
         assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), before.pledge - before.bounty);
 
         assertEq(clearinghouse.actionReserveUsdc(BOUNTY_TRADER), before.bounty);
@@ -77,7 +76,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         request.targetPrice = 1;
         vm.prank(BOUNTY_TRADER);
         before.id = router.commitOrder(request);
-        assertEq(_bountyReservation(before.id).pledgeFundedUsdc, before.pledged);
+        assertEq(_bountyReservation(before.id).amountUsdc, 0);
         bytes[] memory data = _mockPythUpdateData(BOUNTY_PRICE);
         _coolBountyProtocol();
         vm.recordLogs();
@@ -98,7 +97,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         BeforeState memory before = _positionState();
         before.pledged = before.bounty;
         before.id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
-        assertEq(_bountyReservation(before.id).pledgeFundedUsdc, before.pledged);
+        assertEq(_bountyReservation(before.id).amountUsdc, 0);
         vm.warp(uint256(router.lifecycleBook().orderTiming(before.id).executionDeadline) + 1);
         _coolBountyProtocol();
         vm.recordLogs();
@@ -143,8 +142,8 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         for (uint256 i; i < ids.length; ++i) {
             totalBounty += _bountyReservation(ids[i]).amountUsdc;
         }
-        assertEq(_bountyReservation(ids[0]).pledgeFundedUsdc, before.bounty);
-        assertEq(_bountyReservation(ids[2]).pledgeFundedUsdc, 0);
+        assertEq(_bountyReservation(ids[0]).amountUsdc, 0);
+        assertEq(_bountyReservation(ids[2]).amountUsdc, 0);
         bytes[] memory data = _mockPythUpdateData(BOUNTY_PRICE);
         _coolBountyProtocol();
         vm.recordLogs();
@@ -194,7 +193,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
 
     function _positionState() private returns (BeforeState memory before) {
         before.pledge = _bountyPosition(CfdTypes.Side.LONG);
-        before.bounty = router.closeOrderExecutionBountyUsdc();
+        before.bounty = 0;
         before.custody = clearinghouse.balanceUsdc(BOUNTY_TRADER);
         before.keeper = clearinghouse.balanceUsdc(BOUNTY_KEEPER);
         before.treasury = clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT);
@@ -212,7 +211,6 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         assertEq(receipt.bounty.bountyPaidUsdc, before.free);
         assertEq(receipt.bounty.bountyRefundedUsdc, before.pledged);
         assertEq(receipt.bounty.bountyForfeitedUsdc, 0);
-        assertEq(receipt.bounty.bountyRetainedUsdc, 0);
         assertEq(receipt.bountyRecipient, address(0));
         assertEq(clearinghouse.balanceUsdc(BOUNTY_KEEPER), before.keeper + before.free);
         assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), before.custody - before.free);
@@ -230,7 +228,7 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
     ) private {
         BeforeState memory before = _positionState();
         before.id = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, size, 0);
-        assertEq(_bountyReservation(before.id).pledgeFundedUsdc, before.bounty);
+        assertEq(_bountyReservation(before.id).amountUsdc, 0);
         uint256 fee = (size * BOUNTY_PRICE / 1e20) * 4 / 10_000;
         bytes[] memory data = _mockPythUpdateData(BOUNTY_PRICE);
         _coolBountyProtocol();
@@ -289,13 +287,13 @@ contract SourceBoundBountyGasTest is SourceBoundBountyFixture {
         setup.state = _positionState();
         setup.ids = new uint64[](count);
         setup.ids[0] = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, 100e18, 0);
-        assertEq(_bountyReservation(setup.ids[0]).pledgeFundedUsdc, setup.state.bounty);
+        assertEq(_bountyReservation(setup.ids[0]).amountUsdc, 0);
         if (count > 1) {
             _fundTrader(BOUNTY_OTHER, 100e6);
             setup.firstOther = _bountyCommit(BOUNTY_OTHER, CfdTypes.Side.LONG, false, 100e18, 10e6);
             for (uint256 i = 1; i < count; ++i) {
                 setup.ids[i] = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, 100e18, 0);
-                assertEq(_bountyReservation(setup.ids[i]).pledgeFundedUsdc, 0);
+                assertEq(_bountyReservation(setup.ids[i]).amountUsdc, 0);
                 if (i == count / 2) {
                     setup.lastOther = _bountyCommit(BOUNTY_OTHER, CfdTypes.Side.LONG, false, 100e18, 10e6);
                 }

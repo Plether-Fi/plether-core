@@ -2068,7 +2068,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             bounty = 10_000;
         }
         if (isClose) {
-            bytes memory rejection = _closeCommitFailure(i, lots, bounty);
+            bytes memory rejection = _closeCommitFailure(i, lots);
             if (rejection.length != 0) {
                 _rejectCommit(i, request, rejection);
                 ++rejectedCloseCommitments;
@@ -2141,8 +2141,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
 
     function _closeCommitFailure(
         uint256 i,
-        uint256 lots,
-        uint256 bounty
+        uint256 lots
     ) internal view returns (bytes memory) {
         Trader memory t = traders[i];
         if (t.lots == 0) {
@@ -2153,20 +2152,11 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         }
         CarryReferenceLedger.Collection memory c = carry.previewCheckpoint(actorAt(i), vm.getBlockTimestamp());
         uint256 pledge = t.margin - c.fromMargin;
-        uint256 free = _free(i) - c.fromFree;
-        if (bounty > free + pledge) {
-            return abi.encodeWithSelector(
-                ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector, bounty, free + pledge, c.unpaid
-            );
-        }
         if (lots == t.lots) {
             return new bytes(0);
         }
         if (c.unpaid != 0) {
             return abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, c.unpaid);
-        }
-        if (bounty > free) {
-            pledge -= bounty - free;
         }
         int256 pnl = int256(t.basis) - int256(t.lots * currentPrice);
         if (i % 2 != 0) {
@@ -2505,7 +2495,6 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(receipt.bounty.bountyPaidUsdc, paid, "only earned bounty is paid");
         assertEq(receipt.bounty.bountyRefundedUsdc, refunded, "refund matches modeled terminal disposition");
         assertEq(receipt.bounty.bountyForfeitedUsdc, forfeited, "only free funding is forfeited");
-        assertEq(receipt.bounty.bountyRetainedUsdc, 0);
         assertEq(paid + refunded + forfeited, o.bountyUsdc);
     }
 
@@ -3185,9 +3174,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         assertEq(bounty.account, account);
         assertEq(bounty.amountUsdc, o.remainingBounty);
         assertEq(bounty.freeFundedUsdc, o.bountyFree);
-        assertEq(bounty.pledgeFundedUsdc, o.bountyPledge);
-        assertEq(bounty.sourcePositionEpoch, o.sourceGeneration);
-        assertEq(router.lifecycleBook().sourcePositionEpoch(id), o.sourceGeneration);
+        assertEq(bounty.freeFundedUsdc, bounty.amountUsdc);
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Active));
         if (o.request.isClose) {
             assertEq(intent.commitment.carryCollectedUsdc, committedCarry[id]);

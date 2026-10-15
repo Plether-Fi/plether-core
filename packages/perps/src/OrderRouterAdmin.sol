@@ -60,7 +60,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     error OrderRouterAdmin__InvalidStalenessLimit();
     /// @notice A confidence ratio or adverse-confidence multiplier exceeds its allowed bound.
     error OrderRouterAdmin__InvalidConfidenceRatio();
-    /// @notice An open-notional or bounty setting violates its bounds, including the mandatory zero close bounty.
+    /// @notice An open-notional, open-bounty, or protection-trigger bounty setting violates its bounds.
     error OrderRouterAdmin__InvalidExecutionBounty();
     /// @notice The pending-order limit is zero or greater than 32.
     error OrderRouterAdmin__InvalidPendingOrderLimit();
@@ -72,7 +72,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     error OrderRouterAdmin__Unauthorized();
     /// @notice A caller other than the owner or configured pauser attempted to pause.
     error OrderRouterAdmin__UnauthorizedPauser();
-    /// @notice An ETH claim was disabled by its flag or the caller had no deferred balance.
+    /// @notice The caller has no deferred ETH balance to claim.
     error OrderRouterAdmin__NothingToClaim();
     /// @notice Transferring a claimed ETH balance to its beneficiary failed.
     error OrderRouterAdmin__EthTransferFailed();
@@ -268,13 +268,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
 
     /// @notice Claims deferred ETH refunds owed to the caller.
     /// @dev Uses checks-effects-interactions: the balance is cleared before transfer and restored if the call reverts.
-    /// @param ethBalance Must be true; retained for compatibility with the public claim interface shape.
-    function claimBalance(
-        bool ethBalance
-    ) external {
-        if (!ethBalance) {
-            revert OrderRouterAdmin__NothingToClaim();
-        }
+    function claimBalance() external {
         uint256 amount = claimableEth[msg.sender];
         if (amount == 0) {
             revert OrderRouterAdmin__NothingToClaim();
@@ -350,7 +344,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         }
     }
 
-    /// @notice Validates open-notional and bounty limits, including the mandatory zero close bounty.
+    /// @notice Validates open-notional, open-bounty, and protection-trigger bounty limits.
     /// @param config Candidate router configuration; monetary values use 6-decimal USDC.
     function _validateExecutionBountyConfig(
         IOrderRouterAdminHost.RouterConfig memory config
@@ -361,7 +355,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         if (
             config.openOrderExecutionBountyBps == 0 || config.openOrderExecutionBountyBps > 10_000
                 || config.minOpenOrderExecutionBountyUsdc == 0 || config.maxOpenOrderExecutionBountyUsdc == 0
-                || config.closeOrderExecutionBountyUsdc != 0 || config.positionProtectionTriggerBountyUsdc == 0
+                || config.positionProtectionTriggerBountyUsdc == 0
                 || config.positionProtectionTriggerBountyUsdc > MAX_POSITION_PROTECTION_TRIGGER_BOUNTY_USDC
                 || config.minOpenOrderExecutionBountyUsdc > config.maxOpenOrderExecutionBountyUsdc
         ) {

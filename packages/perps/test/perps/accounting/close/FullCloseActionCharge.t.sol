@@ -35,11 +35,10 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
         uint64 pendingId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, PRICE, false);
         clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc);
         vm.stopPrank();
-        uint256 bounty = router.closeOrderExecutionBountyUsdc();
+        uint256 bounty = 0;
         uint256 protectedBefore = clearinghouse.totalBountyReservationsUsdc(ACCOUNT);
-        OrderV3Types.ExecutionAssessment memory assessment = policyEvaluator.assessCommittedOrder(
-            address(engine), closeId, KEEPER, PRICE, uint64(vm.getBlockTimestamp())
-        );
+        OrderV3Types.ExecutionAssessment memory assessment =
+            policyEvaluator.assessCommittedOrder(address(engine), closeId, KEEPER, PRICE);
         assertEq(assessment.actionChargeCollectedUsdc, assessment.actionChargeAssessedUsdc);
         bytes[] memory update = _mockPythUpdateData(PRICE);
         vm.recordLogs();
@@ -169,7 +168,7 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
         CfdEnginePlanTypes.RawSnapshot memory snap =
             ICfdEngineSettlementSidecar(sidecar).buildRawSnapshot(ACCOUNT, depth);
         // Match the engine's actual frozen-market policy; the raw snapshot already includes current carry.
-        return engine.planner().planClose(snap, _order(CfdTypes.Side.LONG, SIZE), price, uint64(block.timestamp));
+        return engine.planner().planClose(snap, _order(CfdTypes.Side.LONG, SIZE), price);
     }
 
     function _routerClose(
@@ -197,7 +196,7 @@ contract FullCloseActionChargeTest is CfdClosePreviewTestBase {
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), p.assessment.postSettlementBalanceUsdc);
         assertEq(
             int256(clearinghouse.balanceUsdc(ACCOUNT)),
-            int256(beforeBalance) + p.assessment.realizedPnlUsdc - int256(assessed + p.executionBountyUsdc)
+            int256(beforeBalance) + p.assessment.realizedPnlUsdc - int256(assessed)
         );
         uint256 treasuryIncrease = clearinghouse.balanceUsdc(engine.protocolTreasury()) - beforeTreasury;
         assertEq(treasuryIncrease, p.assessment.executionFeeUsdc);

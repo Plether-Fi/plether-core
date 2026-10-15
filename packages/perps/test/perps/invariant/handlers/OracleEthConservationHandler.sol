@@ -79,7 +79,7 @@ contract OracleEthKeeper {
         claiming = true;
         bytes memory data = fromOracle
             ? abi.encodeCall(IPletherOracle.claimEthRefund, ())
-            : abi.encodeCall(OrderRouterAdmin.claimBalance, (true));
+            : abi.encodeCall(OrderRouterAdmin.claimBalance, ());
         // A deliberately burning claim recipient must not consume the handler's assertion/cleanup gas.
         (success,) = (fromOracle ? oracle : admin).call{gas: 150_000}(data);
         claiming = false;
@@ -101,7 +101,7 @@ contract OracleEthKeeper {
             if (msg.sender == oracle) {
                 data = abi.encodeCall(IPletherOracle.claimEthRefund, ());
             } else if (msg.sender == admin) {
-                data = abi.encodeCall(OrderRouterAdmin.claimBalance, (true));
+                data = abi.encodeCall(OrderRouterAdmin.claimBalance, ());
             } else {
                 data = abi.encodeCall(IPerpsKeeper.executeOrderBatch, (uint64(0), new bytes[](0)));
             }
@@ -120,7 +120,7 @@ contract OracleEthKeeper {
             bool fromOracle = msg.sender == admin;
             bytes memory data = fromOracle
                 ? abi.encodeCall(IPletherOracle.claimEthRefund, ())
-                : abi.encodeCall(OrderRouterAdmin.claimBalance, (true));
+                : abi.encodeCall(OrderRouterAdmin.claimBalance, ());
             (bool success,) = (fromOracle ? oracle : admin).call{gas: 80_000}(data);
             claimingOtherLedger = false;
             emit CrossLedgerClaim(fromOracle, success);

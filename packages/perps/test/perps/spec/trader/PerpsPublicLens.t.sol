@@ -188,7 +188,6 @@ contract PerpsPublicLensTest is BasePerpTest {
         expected.takeProfitTriggerPrice = 120_000_000;
         expected.stopLossTriggerPrice = 80_000_000;
         expected.triggerBountyUsdc = 200_000;
-        expected.executionBountyUsdc = 200_000;
         expected.armedAt = 1_720_000_000;
         expected.armedBlock = 12_345;
         expected.status = PositionProtectionTypes.PositionProtectionStatus.Armed;

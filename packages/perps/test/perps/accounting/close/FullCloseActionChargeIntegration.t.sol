@@ -61,7 +61,6 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
     function _planAndAssess(
         CloseFixture memory f
     ) private returns (CfdEnginePlanTypes.CloseDelta memory d, OrderV3Types.ExecutionAssessment memory assessment) {
-        uint64 publishTime = uint64(_mockHistoricalPublishTime());
         CfdTypes.Order memory order = _order(CfdTypes.Side.LONG, SIZE);
         order.orderId = f.closeId;
         order.commitTime = f.commitTime;
@@ -71,9 +70,9 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
             ICfdEngineSettlementSidecar sidecar = engine.settlementSidecar();
             vm.prank(address(engine));
             CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(ACCOUNT, depth);
-            d = engine.planner().planClose(snap, order, CLOSE_PRICE, publishTime);
+            d = engine.planner().planClose(snap, order, CLOSE_PRICE);
         }
-        assessment = policyEvaluator.assessCommittedOrder(address(engine), f.closeId, KEEPER, CLOSE_PRICE, publishTime);
+        assessment = policyEvaluator.assessCommittedOrder(address(engine), f.closeId, KEEPER, CLOSE_PRICE);
     }
 
     function _prepareClose() private returns (CloseFixture memory f) {

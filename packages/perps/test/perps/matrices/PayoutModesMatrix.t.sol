@@ -84,7 +84,6 @@ contract PayoutModesMatrixTest is BasePerpTest {
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 180_000_000);
         assertTrue(preview.liquidatable, "Deeply underwater position should be liquidatable");
-        assertEq(preview.badDebtUsdc, 0, "Uncollectible price loss is written off, not stored as protocol debt");
         uint256 poolCashBefore = usdc.balanceOf(address(pool));
         uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
         bytes[] memory priceData = new bytes[](1);

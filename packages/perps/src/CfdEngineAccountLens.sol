@@ -65,8 +65,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             ? buckets.settlementBalanceUsdc - executionBountyReserveUsdc
             : 0;
         viewData.terminalPriceCollectibleCapUsdc = _terminalPriceCollectibleCapUsdc(account, _position(account));
-        viewData.accountEquityUsdc = engineContract.clearinghouse().getAccountEquityUsdc(account);
-        viewData.freeBuyingPowerUsdc = engineContract.clearinghouse().getFreeBuyingPowerUsdc(account);
+        viewData.accountEquityUsdc = buckets.settlementBalanceUsdc;
+        viewData.freeBuyingPowerUsdc = buckets.freeSettlementUsdc;
         viewData.traderClaimBalanceUsdc = engineContract.traderClaimBalanceUsdc(account);
     }
 
@@ -246,8 +246,8 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.liquidationReachableSettlementUsdc =
             MarginClearinghouseAccountingLib.getTerminalReachableUsdc(terminalBuckets);
         snapshot.terminalPriceCollectibleCapUsdc = _terminalPriceCollectibleCapUsdc(account, pos);
-        snapshot.accountEquityUsdc = clearinghouse.getAccountEquityUsdc(account);
-        snapshot.freeBuyingPowerUsdc = clearinghouse.getFreeBuyingPowerUsdc(account);
+        snapshot.accountEquityUsdc = buckets.settlementBalanceUsdc;
+        snapshot.freeBuyingPowerUsdc = buckets.freeSettlementUsdc;
 
         if (pos.size == 0) {
             return snapshot;

@@ -40,9 +40,6 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         vm.prank(ACCOUNT);
         clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1, 1e6);
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
-        vm.prank(address(router));
-        clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, 1e6);
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
         vm.prank(book);
         clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.Order, 1, 1e6);
 
@@ -76,13 +73,6 @@ contract ClearinghouseReservationOwnershipTest is BasePerpTest {
         assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), 0);
         assertEq(clearinghouse.balanceUsdc(ACCOUNT), balance, "self-refund changes no custody");
         assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).reservedSettlementUsdc, 0);
-    }
-
-    function test_RetiredProtectionExecutionNamespaceCannotReserveEvenZero() public {
-        address book = address(router.positionProtectionBook());
-        vm.expectRevert(MarginClearinghouse.MarginClearinghouse__NotOperator.selector);
-        vm.prank(book);
-        clearinghouse.recordBountyReservation(ACCOUNT, IMarginClearinghouse.BountyKind.ProtectionExecution, 1, 0);
     }
 
     function test_ZeroOrderReservationStillAuthenticatesIdentityAndCannotBeReused() public {

@@ -11,8 +11,6 @@ interface IOrderRouterErrors {
     /// @notice Close admission was requested for an opening order.
     error OrderRouter__NotCloseOrder();
     error OrderRouter__OrderNotExpired();
-    /// @notice Retired compatibility error for pledge-funded close bounties; current closes require zero bounty.
-    error OrderRouter__PledgeBountyRequiresEmptyQueue();
     /// @notice A positive settlement minimum requires a flat account's first pending open.
     error OrderRouter__SettlementFloorUnsupported();
     /// @notice A pending funded-floor open must finish before another fresh order is committed.
@@ -25,8 +23,6 @@ interface IOrderRouterErrors {
     error OrderRouter__SettlementFloorWithdrawal(
         uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc, uint256 maxGrossDebitUsdc
     );
-    /// @notice Retired compatibility error for pledge restoration during liquidation.
-    error OrderRouter__RestoredPledgeMadeSolvent();
 
     /// @notice Terminal result of one independently isolated liquidation-batch item.
     enum LiquidationBatchResult {
@@ -44,24 +40,10 @@ interface IOrderRouterErrors {
     /// @param code Numeric validation code; current code `11` denotes a below-minimum notional or close-size floor.
     error OrderRouter__CommitValidation(uint8 code);
 
-    /// @notice Legacy router-level oracle configuration supplied no basket feeds.
-    error OrderRouter__EmptyFeeds();
-    /// @notice Legacy router-level oracle arrays or parsed feed counts have inconsistent lengths.
-    error OrderRouter__LengthMismatch();
-    /// @notice Legacy router-level basket configuration contains a zero normalization base price.
-    error OrderRouter__InvalidBasePrice();
-    /// @notice Legacy router-level basket weights do not sum to the required 1e18 total.
-    error OrderRouter__InvalidWeights();
-    /// @notice Legacy test-only oracle behavior was requested when no compatible mock was configured.
-    error OrderRouter__MockOracleUnavailable();
     /// @notice A proposed Plether oracle has invalid code, Pyth, engine, or HousePool wiring.
     error OrderRouter__InvalidPletherOracle();
     /// @notice The supplied stateless keeper sidecar has no code or is not bound to this exact Router address.
     error OrderRouter__InvalidKeeperSidecar();
-    /// @notice Legacy router oracle path received no Pyth update blobs.
-    error OrderRouter__EmptyPythUpdateData();
-    /// @notice Legacy router oracle path received less ETH than the required Pyth update fee.
-    error OrderRouter__InsufficientPythFee();
     /// @notice The engine-lens dependency is the zero address.
     error OrderRouter__InvalidEngineLens();
     /// @notice The V3 policy-evaluator dependency is zero or has no deployed code.
@@ -70,20 +52,8 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidExecutionSidecar();
     /// @notice The supplied lifecycle Book has no code or does not match this Router's immutable protocol bindings.
     error OrderRouter__InvalidLifecycleBook();
-    /// @notice Legacy router oracle resolution produced a zero or otherwise invalid execution price.
-    error OrderRouter__InvalidOraclePrice();
     /// @notice Engine execution rejected an oracle publish timestamp older than its cached mark.
     error OrderRouter__MarkPriceOutOfOrder();
-    /// @notice Legacy order-execution oracle data exceeds the configured live staleness limit.
-    error OrderRouter__OraclePriceTooStale();
-    /// @notice Legacy order-execution oracle confidence exceeds the configured price ratio.
-    error OrderRouter__OracleConfidenceTooWide();
-    /// @notice Legacy liquidation oracle data exceeds the configured liquidation staleness limit.
-    error OrderRouter__LiquidationOraclePriceTooStale();
-    /// @notice Non-frozen execution was attempted in the commit block or with a non-post-commit publish timestamp.
-    error OrderRouter__MevDetected();
-    /// @notice Legacy basket components exceed the configured maximum publish-time divergence.
-    error OrderRouter__OraclePublishTimesDiverged();
 
     /// @notice Execution was requested while the global FIFO queue has no live head.
     error OrderRouter__NoOrdersToExecute();
@@ -155,6 +125,8 @@ interface IOrderRouterErrors {
     error OrderRouter__ProtectionNotArmed();
     /// @notice The requested retry requires a latched protection with no live close attempt.
     error OrderRouter__ProtectionNotLatched();
+    /// @notice A protection close carried a nonzero keeper bounty despite zero-bounty close policy.
+    error OrderRouter__ProtectedCloseBountyNonzero(uint256 bountyUsdc);
     /// @notice An ordinary discretionary order was attempted while account protection is active.
     error OrderRouter__ProtectionActive();
     /// @notice Trigger prices are both disabled, out of bounds, or inconsistent with the protected direction.
@@ -209,8 +181,7 @@ interface IOrderRouterErrors {
         uint64 indexed parentOrderId,
         uint256 takeProfitTriggerPrice,
         uint256 stopLossTriggerPrice,
-        uint256 triggerBountyUsdc,
-        uint256 executionBountyUsdc
+        uint256 triggerBountyUsdc
     );
 
     /// @notice Emitted when a staged or armed protection's trigger prices are atomically replaced.

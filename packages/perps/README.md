@@ -6,21 +6,21 @@ V3 order timing is a fresh-stack breaking change. See [V3 timing integration](OR
 
 Use `CfdClosePreview.previewClose` to project commitment carry and validate zero-bounty close admission before
 planning. `CfdOrderPolicyEvaluator.assessOrder` expects execution state with that bounty already reserved. See
-[`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) for the API, accounting baseline, error decoding, and additive deployment path.
-The [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) contains the post-deployment configuration packet,
-implementation file map, accounting display rules, and activation checks.
+[current close accounting](ACCOUNTING_SPEC.md#close-order-bounty-policy) and generated ABIs for new integrations.
+[`CLOSE_PREVIEW.md`](CLOSE_PREVIEW.md) and the [frontend handoff](CLOSE_PREVIEW_FRONTEND_HANDOFF.md) document the
+historical additive-preview deployment and its activation checks.
 The [September 14 release record](../../deployments/releases/2026-09-14-close-preview-arbitrum-sepolia/README.md)
 documents the original standalone lens alongside v1.2.3. The
 [September 15 sponsored-close release](../../deployments/releases/2026-09-15-sponsored-close-arbitrum-sepolia/README.md)
 preserves `previewClose` and adds `previewSponsoredClose` plus `validateSponsoredClose`. These are historical testnet
 release records; the handoff's frontend activation status is not a live deployment check.
 
-The zero-close-bounty source removes those two sponsored-grant methods; use either ordinary `previewClose`
-overload for new orders. Historical grants and pending operations continue to use their archived deployments and
-ABIs. The constructor argument, `SPONSORED_ENGINE` and `MAX_CLOSE_SUBSIDY_USDC` getters, and declared sponsored errors
-remain compatibility-only; they do not enable new grants. Normal gas sponsorship is unaffected.
+The current source exposes the ordinary `previewClose` overloads for new orders. The historical sponsored-grant
+methods, constructor argument, `SPONSORED_ENGINE` and `MAX_CLOSE_SUBSIDY_USDC` getters, and sponsored errors are absent
+from the current ABI. Historical grants and pending operations continue to use their archived deployments and ABIs.
+Normal gas sponsorship is unaffected.
 
-## Next release: unused perps API cleanup
+## Fresh-stack API cleanup
 
 The next deployment removes unused privileged clearinghouse entrypoints: `lockCommittedOrderMargin`,
 `unlockCommittedOrderMargin`, `promoteOrderReservationToPnlPledge`, `consumeOrderReservation`,
@@ -42,10 +42,25 @@ Close commitment still uses the Engine path to assess carry and validate admissi
 bounty reservation. Opening/increase bounties and the positive protection trigger reward are unchanged.
 
 Unused internal accounting, calendar, risk, and frozen-mint helpers are removed, including the unreferenced
-`OrderOraclePolicyLib`. Maintained planner/simulation interfaces and existing ABI tuple layouts remain available. Tests exercise
+`OrderOraclePolicyLib`. Maintained planner/simulation entrypoints remain available with fresh-stack signatures.
+Tests exercise
 the maintained exact-entry-cost math, carry index, settlement snapshot, claimant inflow, and live close/claim paths.
-These removals require new bindings for a future deployment; this source change does not deploy contracts or migrate
-existing state.
+These removals require new bindings and a complete fresh-stack deployment; this source change does not deploy
+contracts or migrate existing state.
+
+The current cleanup also removes unused close-bounty configuration/getters, pledged-bounty provenance and recovery
+fields, protection-execution bounty fields, reservation-id snapshot data, and legacy zero-value fee/debt/queue fields.
+`OrderRouterAdmin.claimBalance()` takes no argument. `CfdClosePreview` has no sponsored constructor state or errors.
+Receipt and execution-config hashes use V5 domains; the caller-authored request and intent domain remains V3. Rebuild
+ABIs and receipt/config decoders together. Archived release records describe their own deployed runtime, not this ABI.
+
+Pure `planOpen`, `planClose`, and `planLiquidation` take an execution price without a planner-only `publishTime`.
+The same removed argument applies to `CfdOrderPolicyEvaluator.assessCommittedOrder` and `assessOrder`, both current
+`CfdClosePreview.previewClose` overloads, `CfdEngineLens.previewOpen`, `quoteMaxOpen`,
+`previewOpenRevertCode`, `previewOpenFailurePolicyCategory`, and `CfdEngineOpenQuoter.quote`.
+`ICfdEngineTypes.ClosePreview` and `LiquidationPreview` omit their always-zero
+`badDebtUsdc` fields; canonical write-off fields in settlement plans remain. Live oracle execution and receipt
+timestamps retain their existing meaning. Regenerate bindings from this source for a complete fresh-stack release.
 
 The planner also retires `computeOpenMarginAfter` and `isExactPositionLiquidatableWithCarry`, together with their
 exclusive library helpers. These pure selectors had only test callers. Open planning continues through `planOpen`;
@@ -223,13 +238,13 @@ the relevant `TrancheVault`.
 
 ### Trade-ticket previews
 
-Frontends can use `CfdEngineLens.quoteMaxOpen(account, side, marginDelta, oraclePrice, publishTime)` to obtain the
+Frontends can use `CfdEngineLens.quoteMaxOpen(account, side, marginDelta, oraclePrice)` to obtain the
 largest quantum-aligned open or same-side increase accepted by the current engine plan. It returns a `MaxOpenQuote`
 containing `maxSizeDelta`, the complete `preview` for that size, and `limitingReason` (the planner rejection at the
-next quantum). `previewOpen(account, side, sizeDelta, marginDelta, oraclePrice, publishTime)` remains available for
+next quantum). `previewOpen(account, side, sizeDelta, marginDelta, oraclePrice)` remains available for
 simulating a user-selected size. If capacity is zero, the quote's invalid preview and reason describe the minimum
 notional-admissible candidate (one quantum at zero price); `preview.sizeDelta` is that attempted size.
-Both calls are read-only: they use the caller-supplied `oraclePrice` and `publishTime`, do not fetch Hermes data, do not
+Both calls are read-only: they use the caller-supplied `oraclePrice`, do not fetch Hermes data, do not
 ingest Pyth updates, and do not mutate engine mark state. Router timing, queue, slippage, and execution-bounty policy
 remain outside these engine-lens quotes, as do terminal-NAV-book execution bounds.
 
@@ -1256,8 +1271,8 @@ This preserves close and liquidation liveness during real market closures withou
 Position protection has a separate retained state machine: `None`, `PendingOpen`, `Armed`, `Triggered`, `Executed`,
 `Failed`, `Cancelled`, `Liquidated`, and `Latched`. `Latched` is appended so existing status ordinals remain stable.
 It means the trigger is irreversible and no close attempt is currently live; `Triggered` means exactly one attempt is
-live. `BountyDisposition.RetainedForProtectionRetry` remains decodable at ordinal `4`, preserving the existing
-disposition ordinals; current zero-bounty close attempts settle with `None`. Protection state must not be inferred
+live. The current `BountyDisposition` enum ends at `RefundedToAccount`; older retained/mixed dispositions require
+archived decoders. Current zero-bounty close attempts settle with `None`. Protection state must not be inferred
 from or folded into the ordinary order status enum.
 
 ![Order lifecycle](../../assets/diagrams/perps-order-lifecycle.svg)
@@ -1379,7 +1394,7 @@ only one field must repeat the desired active values for the other five.
 increments after successful risk, calendar, or freshness finalization; the Router version increments after successful
 router-policy or oracle-address finalization. These counters are monotonic inputs to the execution-config digest, so a
 finalized change invalidates the pinned configuration of an otherwise pending V3 order. The request and intent domain are V3, with signed submission and execution timing. Receipt and execution-config
-domains are V4. Timing is retained in terminal receipts alongside protection-attempt and bounty disposition evidence.
+domains are V5 in this fresh-stack release. Timing is retained in terminal receipts alongside protection-attempt and bounty disposition evidence.
 
 ### Fresh V3 deployment boundary
 
@@ -1391,11 +1406,11 @@ binding is correct. Do not mix a V3 Router/Book with legacy Router queue state o
 pending orders, client ids, and outcomes are not imported. Recovery from a Book or immutable-binding fault likewise
 requires containment and a new compatible stack rather than storage repair.
 
-The zero-close-bounty lifecycle also requires a connected fresh stack. Public `OrderRequest` and `OrderReceipt`
-field layouts retain their compatibility fields, but ordinary and protection close receipts carry zero bounty
-amounts and `None` disposition. Historical mixed disposition ordinals remain decodable; they are not emitted for
-normal closes by this implementation. Never combine the new accounting model with old pending records or escrow
-mirrors on a populated stack. Migration of an existing deployment requires a separate authenticated design.
+The zero-close-bounty lifecycle also requires a connected fresh stack. Ordinary and protection close receipts carry
+zero bounty amounts and `None` disposition. The current receipt tuple omits the legacy retained-bounty field, and
+`BountyDisposition` contains only `None`, `Paid`, `Forfeited`, and `RefundedToAccount`; use archived decoders for older
+mixed dispositions. Never combine the new accounting model with old pending records or escrow mirrors on a populated
+stack. Migration of an existing deployment requires a separate authenticated design.
 
 The latched-retry lifecycle is likewise a fresh-stack boundary. The Router-created stateful protection Book and the
 predeployed lifecycle Book cannot be upgraded or populated from the old stack. Before switching application manifests,

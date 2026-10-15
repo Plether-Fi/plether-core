@@ -14,13 +14,13 @@ reservation id. Records remain as terminal receipts and cannot be reused.
 
 The Router's `getMarginReservationIds`, `marginHeadOrderId`, and `marginTailOrderId` forward to this canonical queue.
 They exclude exhausted records immediately. There is no `syncMarginQueue` operation. Execution FIFO and the existing
-32 pending orders per account cap remain Router responsibilities.
+five pending orders per account cap remain Router responsibilities.
 
 ## Bounty records
 
-A record is keyed by `(BountyKind, id)` and contains its account, amount, and lifecycle state. Numeric ids may overlap
-between `Order` and `ProtectionTrigger`. New records are wholly free-funded or zero: `pledgeFundedUsdc` and
-`sourcePositionEpoch` remain zero. `ProtectionExecution` is a retired namespace and rejects new reservations.
+A record is keyed by `(BountyKind, id)` and contains its account, amount, free-funded amount, and lifecycle state.
+Numeric ids may overlap between `Order` and `ProtectionTrigger`; those are the only current bounty kinds. The legacy
+pledge-funded and source-position-epoch fields are absent from the current record ABI.
 `totalBountyReservationsUsdc(account)` sums active nonzero records and changes on creation or take.
 
 | Transition | Caller | Canonical change | Funding/custody |
@@ -42,8 +42,8 @@ amount plus all existing bounties and the VPI floor. A zero-bounty close still c
 its funding identity can be authenticated. A take returns the classified amount and settles the record; exact
 lifecycle and owner checks prevent another payment or re-creation under a used id.
 
-The lifecycle Book independently authenticates the original funding fields. For a close, entitlement, free funding,
-pledge funding, and source epoch are all zero. There is no pledge-specific empty-queue rule or collectible escrow
+The lifecycle Book independently authenticates the original bounty entitlement and free funding. For a close, both
+are zero. There is no pledge-specific empty-queue rule or collectible escrow
 mirror. FIFO, account pending limits, queued exposure, carry, and risk admission still apply.
 
 ## Atomicity and accounting
@@ -77,8 +77,10 @@ Existing trader order/protection input and view shapes remain unchanged; margin 
 records. Rebuild clients that consume the internal accounting interface and do not reuse old raw-storage decoders.
 
 The current zero-close implementation removes the source-bound pledged-close escrow and its internal mutation paths.
-Public request/receipt compatibility fields and historical disposition ordinals remain decodable; normal close
-receipts use `None` with zero amounts. See [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy).
+`BountyReservation` has no pledge or source-epoch fields, and `BountyRecovery` reports only `freeUsdc` and
+`discrepancy`. Current receipts omit retained bounty and the mixed disposition variants; normal close receipts use
+`None` with zero amounts. Decode older releases with their archived ABIs. See
+[Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy).
 Deploy a matching fresh stack together; there is no Router-only hot swap or live-state migration. See
 [Deployment](DEPLOYMENT.md) for cutover constraints.
 

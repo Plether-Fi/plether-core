@@ -355,7 +355,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         if (block.timestamp > pending.timing.executionDeadline) {
             try book.validateBountyFunding(request.orderId) {}
             catch {
-                return _recoverExpired(host, book, pending, request);
+                return _recoverExpired(request);
             }
         } else {
             book.validateBountyFunding(request.orderId);
@@ -371,10 +371,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
 
         if (block.timestamp > pending.timing.executionDeadline) {
             return _settleNonEngine(
-                host,
-                book,
-                orderView.order,
-                pending,
                 request,
                 OrderV3Types.TerminalReason.Expired,
                 OrderV3Types.FailureDetails(bytes4(0), 0, 0, OrderV3Types.ConstraintKind.None, 0, 0, bytes32(0))
@@ -395,10 +391,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             IOrderRouterExecutionHost.ItemRequest memory configRequest = request;
             configRequest.observedConfigHash = observedConfigHash;
             return _settleNonEngine(
-                host,
-                book,
-                orderView.order,
-                pending,
                 configRequest,
                 OrderV3Types.TerminalReason.ConfigMismatch,
                 OrderV3Types.FailureDetails(bytes4(0), 0, 0, OrderV3Types.ConstraintKind.None, 0, 0, bytes32(0))
@@ -412,9 +404,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     }
 
     function _recoverExpired(
-        IOrderRouterExecutionHost,
-        IOrderLifecycleBook,
-        OrderV3Types.PendingIntent memory,
         IOrderRouterExecutionHost.ItemRequest calldata request
     ) private returns (OrderV3Types.ExecutionResult memory) {
         return
@@ -458,22 +447,12 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
                     true
                 );
                 return _settleNonEngine(
-                    host,
-                    book,
-                    order,
-                    pending,
-                    request,
-                    OrderV3Types.TerminalReason.PlannerRejected,
-                    _classifyTypedFailure(evidence).failure
+                    request, OrderV3Types.TerminalReason.PlannerRejected, _classifyTypedFailure(evidence).failure
                 );
             }
         }
         if (!OrderValidationLib.checkSlippage(order, request.executionPrice)) {
             return _settleNonEngine(
-                host,
-                book,
-                order,
-                pending,
                 request,
                 OrderV3Types.TerminalReason.Slippage,
                 OrderV3Types.FailureDetails(bytes4(0), 0, 0, OrderV3Types.ConstraintKind.None, 0, 0, bytes32(0))
@@ -565,9 +544,8 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     ) private view returns (address evaluator, bool assessed, bytes memory assessmentData) {
         evaluator = context.host.policyEvaluator();
         uint256 evaluatorGas = _evaluatorCallGas(engineAddress, context.minimumEngineGas);
-        (assessed, assessmentData) = evaluator.staticcall{gas: evaluatorGas}(
-            _assessmentCallData(engineAddress, context.order, request, context.pending)
-        );
+        (assessed, assessmentData) =
+            evaluator.staticcall{gas: evaluatorGas}(_assessmentCallData(engineAddress, context.order, request));
     }
 
     function _settleAssessmentFailure(
@@ -628,13 +606,11 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     function _assessmentCallData(
         address engineAddress,
         CfdTypes.Order memory order,
-        IOrderRouterExecutionHost.ItemRequest calldata request,
-        OrderV3Types.PendingIntent memory pending
+        IOrderRouterExecutionHost.ItemRequest calldata request
     ) private pure returns (bytes memory) {
-        pending;
         return abi.encodeCall(
             ICfdOrderPolicyEvaluator.assessCommittedOrder,
-            (engineAddress, order.orderId, request.executor, request.executionPrice, request.oraclePublishTime)
+            (engineAddress, order.orderId, request.executor, request.executionPrice)
         );
     }
 
@@ -666,10 +642,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     }
 
     function _settleNonEngine(
-        IOrderRouterExecutionHost,
-        IOrderLifecycleBook,
-        CfdTypes.Order memory,
-        OrderV3Types.PendingIntent memory,
         IOrderRouterExecutionHost.ItemRequest memory request,
         OrderV3Types.TerminalReason reason,
         OrderV3Types.FailureDetails memory failure

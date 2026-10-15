@@ -30,12 +30,12 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertEq(marginAfter, marginBefore - router.closeOrderExecutionBountyUsdc(), "bounty reclassification is exact");
+        assertEq(marginAfter, marginBefore - 0, "bounty reclassification is exact");
         assertEq(router.pendingOrderCounts(account), 1, "accepted close enters FIFO");
         assertEq(router.nextCommitId(), 2, "accepted close consumes one ID");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
-            router.closeOrderExecutionBountyUsdc(),
+            0,
             "bounty is protected in action reserve"
         );
     }
@@ -61,15 +61,11 @@ contract OrderRouterBountiesTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 50_000e18, 0, 0, true);
 
         (, uint256 marginAfter,,,,,) = engine.positions(account);
-        assertLe(
-            marginAfter,
-            marginBefore - router.closeOrderExecutionBountyUsdc(),
-            "commit collects carry and reserves its bounty"
-        );
+        assertLe(marginAfter, marginBefore - 0, "commit collects carry and reserves its bounty");
         assertEq(router.pendingOrderCounts(account), 1, "accepted stale-mark close queues");
         assertEq(
             clearinghouse.getLockedMarginBuckets(account).reservedSettlementUsdc,
-            router.closeOrderExecutionBountyUsdc(),
+            0,
             "accepted close protects its bounty"
         );
     }

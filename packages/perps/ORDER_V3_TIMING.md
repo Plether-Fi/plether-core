@@ -20,8 +20,8 @@ both pending and terminal orders, or zeros for an unknown order. `IntentRegister
 request. Pending intents and full receipts append `timing`; the Book authenticates receipt timing
 against its pending record. The two-slot `terminalOutcome` summary remains unchanged, with terminal timing retained
 separately in one packed slot for `orderTiming`. Current ordinary and protection closes use an authenticated zero
-bounty record; nonzero close-bounty configuration is rejected. The intent domain is V3;
-receipt and execution-config domains are V4. Event tuples and selectors differ from the earlier close-only schema;
+bounty record; the old close-bounty configuration field is absent. The intent domain is V3;
+receipt and execution-config domains are V5. Event tuples and selectors differ from the earlier close-only schema;
 consumers must use interfaces generated from the merged schema.
 
 Execution, single-head cleanup and batch preparation compare chain time with the stored deadline, expiring strictly
@@ -40,5 +40,6 @@ Recovery must distinguish submission authorization expiry from a committed order
 chain evidence before releasing an ambiguous signed operation. Local elapsed time is insufficient.
 
 Before activation, export fresh schema-3 release artifacts with `orderInterfaceVersion: 3`, verify all reciprocal
-bindings and runtime hashes, and configure the app, API, history indexer and workers together. The sponsored-close
-preview now takes its permitted engine as a constructor argument instead of a historical deployment constant.
+bindings and runtime hashes, and configure the app, API, history indexer and workers together. The current
+`CfdClosePreview` has no sponsored-grant constructor argument, getters, or errors; archived sponsored-close releases
+must continue using their own ABI.

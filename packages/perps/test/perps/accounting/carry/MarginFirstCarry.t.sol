@@ -234,7 +234,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         uint256 carry = _expectedIndexedCarryUsdc(TRADER);
         uint256 beforeMargin = _margin(TRADER);
         ICfdEngineTypes.OpenPreview memory preview =
-            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, uint64(block.timestamp));
+            engineLens.previewOpen(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
         assertTrue(preview.valid);
         _open(TRADER, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
         assertEq(_margin(TRADER), beforeMargin - carry + 986e6);
@@ -377,8 +377,7 @@ contract MarginFirstCarryTest is BasePerpTest {
         // No gain, a partially covering new gain, and a fully covering new gain.
         for (uint256 i; i < 3; ++i) {
             uint256 price = 1e8 - i * 100_000;
-            CfdEnginePlanTypes.CloseDelta memory delta =
-                engine.planner().planClose(snap, order, price, uint64(block.timestamp));
+            CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snap, order, price);
             assertTrue(delta.valid);
             assertEq(delta.realizedCarryUsdc, directCarry);
             assertEq(delta.actionChargeAssessedUsdc, 123e6);
@@ -396,8 +395,7 @@ contract MarginFirstCarryTest is BasePerpTest {
             assertEq(delta.actionChargeWaivedUsdc, afterWithholding - fromReleasedReserve);
         }
         // Liquidation retains its separate charge allocation and cannot release its bounty reserve to pay carry.
-        CfdEnginePlanTypes.LiquidationDelta memory liquidation =
-            engine.planner().planLiquidation(snap, 1e8, uint64(block.timestamp));
+        CfdEnginePlanTypes.LiquidationDelta memory liquidation = engine.planner().planLiquidation(snap, 1e8);
         assertTrue(liquidation.liquidatable);
         assertEq(
             liquidation.pendingCarryUsdc,

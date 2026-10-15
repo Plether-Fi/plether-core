@@ -30,9 +30,9 @@ unchanged. See [Reservation ledger](RESERVATION_LEDGER.md) for the complete owne
 
 ## Zero-close-bounty compatibility
 
-Ordinary and protection close execution bounties are permanently zero in the current source. The Router initializes
-`closeOrderExecutionBountyUsdc` to zero, governance rejects a nonzero value, and close commitment rejects a nonzero
-bounty. Every close attempt creates an authenticated Active zero Order record; successful execution, recognized
+Ordinary and protection close execution bounties are permanently zero in the current source. The former Router
+`closeOrderExecutionBountyUsdc` configuration field/getter and protection-execution-bounty fields are removed.
+Every close attempt creates an authenticated Active zero Order record; successful execution, recognized
 failure, expiry, and liquidation settle it without paying a close executor or moving PnL pledge. Opening/increase
 bounties, the separate protection trigger reward, and liquidation rewards remain positive under their own policies.
 The protocol keeper must fund unpaid close execution and oracle-free expiry. See
@@ -329,7 +329,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
 | `minOpenNotionalUsdc` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` (unchanged) |
-| `closeOrderExecutionBountyUsdc` | `0` (nonzero configuration rejected) |
+| Close execution bounty | Always zero; no configuration field or getter |
 | `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
 | `juniorMaintenanceFeeAprBps` | `0` nominal APR (disabled at deployment) |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
@@ -489,7 +489,7 @@ including at least:
 - `SettlementMonitorLens` and its internally deployed `SettlementMonitorLensSidecar`
 - `EmergencyPauseCoordinator`
 
-Also record the active V3 execution-config hash, source commit, deployment block, transaction hashes, and
+Also record the active V5 execution-config hash, source commit, deployment block, transaction hashes, and
 verified-bytecode status. `MockUSDC`,
 `HousePool`, `HousePoolRedemptionMathSidecar`, `OrderRouter`, and `EmergencyPauseCoordinator` are consumed directly by
 the bootstrap script. Bootstrap derives the RouterAdmin, policy evaluator, V3 execution sidecar, lifecycle Book,
@@ -637,7 +637,7 @@ The protected parent open is a caller-authored bounded V3 request and must pin t
 Router-authenticated triggered or retried close attempts set `expectedConfigHash == bytes32(0)`, which is an unpinned
 internal marker rather than a public wildcard. Deploy, bootstrap, and integration tests must verify both sides of that
 boundary: external zero-hash commits, including Book-forwarded parents, fail; valid bounded parents and authenticated
-attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request and intent domain are V3, with V4 receipt and execution-config domains. Registered protection
+attempt creation succeed; and terminal receipts retain the expected and observed config hashes. The request and intent domain are V3, with V5 receipt and execution-config domains. Registered protection
 attempts settle authenticated zero bounty records with `None` disposition and no recipient.
 
 The bounded protected-open selector replaces the former scalar selector without a compatibility overload. Ship it
@@ -663,10 +663,9 @@ retain the one-to-many attempt history. They must also index the lifecycle Book'
 pending marker.
 
 Regenerate frontend, keeper, governance, and indexer bindings from this release. The ABI adds the permissionless retry
-action, lifecycle-Book registration/view surface, and close-attempt events. `PositionProtectionStatus.Latched` and
-`BountyDisposition.RetainedForProtectionRetry` are appended, preserving prior numeric ordinals. The bounty disposition
-remains decodable for historical receipts but is not emitted for normal current closes. The receipt and execution-config
-hash domains are V4 and the request/intent ABI is V3; do not compare their
+action, lifecycle-Book registration/view surface, and close-attempt events. `PositionProtectionStatus.Latched` remains
+part of the current lifecycle. The current bounty-disposition enum ends at `RefundedToAccount`; mixed and retained
+variants require archived decoders. The receipt and execution-config hash domains are V5 and the request/intent ABI is V3; do not compare their
 hashes with an earlier stack.
 
 Position protection is available immediately on an unpaused fresh Router; no protection-specific governance proposal
@@ -678,6 +677,12 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
 
 ## Operational Notes
 
+- Regenerate all current Solidity, SDK, keeper, and indexer bindings together. The receipt/config domains are V5,
+  while the public request/intent domain remains V3. Current ABIs omit the old close-bounty config/getter,
+  protection-execution bounty and pledged/source-epoch fields, receipt retained amount and mixed dispositions,
+  reservation-id snapshot data, unused zero fee/debt/queue fields, and sponsored close-preview state. The RouterAdmin
+  ETH-refund claim is `claimBalance()` with no argument. The old `CfdEngineSnapshotsLib` and
+  `CfdEngineSettlementLib` are absent. Preserve archived decoders for earlier deployments.
 - Close commitment uses `reserveCloseOrderExecutionBounty(address,uint256)` on both the Engine and settlement sidecar,
   and `planCloseCommit(snapshot,size)` on the planner. Their former required-zero bounty argument and old selectors
   are removed. Regenerate bindings and deploy the matching Router, Engine, sidecar, planner, and close preview together.

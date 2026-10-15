@@ -20,7 +20,7 @@ Public Router execution accepts no cache. Its in-memory cache starts empty and i
 
 `PletherOracle__StoredFeedBehind(feedId, storedPublishTime, requiredPublishTime)` means synchronization or cache coverage failed. Synchronization errors, insufficient fees and failed coverage revert the whole transaction, including previous batch progress. Only a reverted historical parser follows the existing unavailable-history path. Caught later item failures retain synchronized mark updates and consumed fees according to the existing lifecycle policy.
 
-Import the matching release ABIs and verify chain, addresses, runtime hashes, Engine/Router/Oracle bindings and execution-config hash. The order/receipt and snapshot/cache tuple layouts are unchanged. New deployment addresses change the existing configuration hash domain; invalidate old reviews and require fresh review plus explicit user confirmation. Keep existing worker repair and bounded UI recovery.
+Import the matching release ABIs and verify chain, addresses, runtime hashes, Engine/Router/Oracle bindings and execution-config hash. The isolated oracle-synchronization change did not alter its snapshot/cache tuples, but the combined current fresh-stack cleanup changes order receipt and configuration ABIs and uses V5 receipt/config hash domains. Regenerate consumers from the final release build; the request/intent domain remains V3. New deployment addresses change the configuration hash; invalidate old reviews and require fresh review plus explicit user confirmation. Keep existing worker repair and bounded UI recovery.
 
 ## Release qualification
 

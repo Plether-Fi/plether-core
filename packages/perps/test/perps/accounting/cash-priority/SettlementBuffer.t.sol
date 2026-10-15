@@ -140,9 +140,7 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         );
         assertEq(accounting.freeUsdc, 0, "under-buffer raw solvency must expose no LP withdrawal cash");
 
-        uint8 revertCode = engineLens.previewOpenRevertCode(
-            freshTrader, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1e8, uint64(block.timestamp)
-        );
+        uint8 revertCode = engineLens.previewOpenRevertCode(freshTrader, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1e8);
         assertEq(
             revertCode,
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),
@@ -178,9 +176,8 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
 
         uint256 queuedSize = 10_000e18;
         uint256 queuedMarginUsdc = 1000e6;
-        uint8 commitCode = engineLens.previewOpenRevertCode(
-            queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8, uint64(block.timestamp)
-        );
+        uint8 commitCode =
+            engineLens.previewOpenRevertCode(queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8);
         assertEq(commitCode, uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "25 bps commit preflight must pass");
 
         uint64 orderId = router.nextCommitId();
@@ -191,9 +188,8 @@ contract SettlementBufferIntegrationTest is BasePerpTest {
         vm.warp(activationTime);
         engineAdmin.finalizeRiskConfig();
 
-        uint8 executionCode = engineLens.previewOpenRevertCode(
-            queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8, pending.commitTime + 1
-        );
+        uint8 executionCode =
+            engineLens.previewOpenRevertCode(queuedTrader, CfdTypes.Side.LONG, queuedSize, queuedMarginUsdc, 1e8);
         assertEq(
             executionCode,
             uint8(CfdEnginePlanTypes.OpenRevertCode.SOLVENCY_EXCEEDED),

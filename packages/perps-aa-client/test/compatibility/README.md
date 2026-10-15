@@ -1,6 +1,6 @@
 # Compatibility baseline
 
-`baseline.json` freezes the runtime exports, complete Book ABI hash, eleven action
+`baseline.json` freezes the 0.2 runtime exports, complete Book ABI hash, eleven action
 plans, SimpleAccount calldata, native sponsorship envelopes, and EntryPoint v0.8
 UserOperation hashes consumed by plether-app commit
 `54126ce6ed260611bacde05a8f6ae245a0520518`.
@@ -16,35 +16,27 @@ and TypeScript tests, and by plether-app's Haskell paymaster tests. Protection
 actions also verify signature → durable journal → submission ordering and that
 journal failure prevents submission.
 
-Version 0.2.0 intentionally adds `orderLifecycleV5Abi`, `hashOrderReceiptV4` and
+Version 0.2.0 intentionally added `orderLifecycleV5Abi`, `hashOrderReceiptV4` and
 `decodeVerifiedOrderFinalized` to the reviewed export list. The current V3 request
 uses one close flow, so `CloseMode` is removed from exports and the protected-open
 calldata and its dependent sponsorship/UserOperation hashes use the final V3
 tuple without a mode field. The protection ABI hash tracks that current schema.
 The other ten action vectors, sponsorship envelope, historical Book ABI, and
 old-stack bindings remain unchanged. `terminalHistory.test.ts` independently
-checks the archived V4 ABI and shares a current receipt hash vector with the
-Solidity lifecycle tests.
+checks the archived V4 ABI and shares a V5 receipt hash vector with the Solidity
+lifecycle tests.
 
-The reviewed source-bound bounty extension adds two zero-argument error entries
-to the generated protection ABI:
-`OrderRouter__PledgeBountyRequiresEmptyQueue()` and
-`OrderRouter__RestoredPledgeMadeSolvent()`. It retains the source-candidate 0.2.0
-version; no package publication or deployed compatibility is implied. Its historical
-candidate hash was `0xee750da38a95fac8079820ac2c4501e6c59f73c55d570388b69dcf3601cb1066`.
+Version 0.3.0 changes current receipt and protection views. The V3 intent domain
+stays fixed; the receipt and execution-configuration domains move to V5. The
+current receipt omits pledged and retained bounty fields, and the current
+close preview omits its zero-only bounty output. `hashOrderReceiptV5` replaces
+the current V4-domain helper. The archived `orderLifecycleV4Abi` is retained.
 
-The settlement-floor fix adds exactly four more errors, matching the Router's
-declarations: `OrderRouter__SettlementFloorUnsupported()`,
-`OrderRouter__SettlementFloorOrderPending(uint64 orderId)`, and
-`OrderRouter__SettlementFloorFunding` / `OrderRouter__SettlementFloorWithdrawal`,
-both taking `(uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc,
-uint256 maxGrossDebitUsdc)`. No historical ABI entry changes or disappears.
-`baseline.json` remains unchanged. The compatibility assertion checks the complete
-current ABI hash `0x04a062fcc4bf7b94828d9064e7ca95f9f6990d59e35f83a4abcb2ba884095deb`,
-then removes exactly those six full declarations, including parameter names and
-internal types, and requires reconstruction of the historical complete hash.
-It does not ignore arbitrary errors. All eleven
-action vectors, runtime exports, sponsorship and UserOperation hashes remain
-identical. A control rejects each missing/altered addition, extra errors and removed
-functions. Public request/receipt tuples and V3-intent/V4-receipt hash domains do
-not change; internal protocol interfaces and storage still require a fresh stack.
+`current-v5-schema.json` pins the exact reviewed current ABIs and archived Book
+ABI separately. The compatibility test compares the unchanged eleven action
+vectors, sponsorship envelopes and UserOperation hashes with `baseline.json`;
+it permits only the reviewed receipt-helper export rename. It also checks the
+current ABI hashes and current preview/receipt shapes. This keeps the historical
+fixture immutable while making the fresh-stack schema migration explicit. An
+intentional future ABI or export change requires a new reviewed golden, not an
+automatic fixture rewrite.

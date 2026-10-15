@@ -34,7 +34,6 @@ library OrderV3Types {
         uint256 bountyEntitlementUsdc;
         uint256 bountyPaidUsdc;
         uint256 bountyRefundedUsdc;
-        uint256 bountyRetainedUsdc;
         uint256 bountyForfeitedUsdc;
         ReservationDiscrepancy discrepancy;
     }
@@ -79,16 +78,7 @@ library OrderV3Types {
         None,
         Paid,
         Forfeited,
-        RefundedToAccount,
-        /// @notice Retired compatibility value for a bounty retained for a protection retry.
-        /// @dev Current receipts never use it.
-        RetainedForProtectionRetry,
-        /// @notice Retired compatibility value for mixed paid/refunded funding.
-        /// @dev Current receipts never use it.
-        PaidAndRefunded,
-        /// @notice Retired compatibility value for mixed forfeited/refunded funding.
-        /// @dev Current receipts never use it.
-        ForfeitedAndRefunded
+        RefundedToAccount
     }
 
     /// @notice Canonical reason for a terminal order transition.

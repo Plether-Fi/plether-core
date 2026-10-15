@@ -273,7 +273,6 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
             preview.frozenSpreadUsdc,
             "Paid and waived spread should conserve the assessment"
         );
-        assertEq(preview.badDebtUsdc, 0, "Waived spread should not become LP bad debt");
 
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
         emit FrozenCloseSpreadSettled(
@@ -306,7 +305,6 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
             uint8(CfdTypes.CloseInvalidReason.PartialCloseUnhealthy),
             "An unhealthy remainder is diagnosed before fee funding"
         );
-        assertEq(preview.badDebtUsdc, 0, "Spread-only shortfall should remain distinct from base bad debt");
     }
 
     function test_PreviewClose_RejectsUnhealthyReleaseWithoutTouchingQueuedBacking() public {
@@ -356,7 +354,6 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
             cappedPreview.traderClaimBalanceUsdc,
             "Preview trader claim should clamp to CAP_PRICE"
         );
-        assertEq(overCapPreview.badDebtUsdc, cappedPreview.badDebtUsdc, "Preview bad debt should clamp to CAP_PRICE");
     }
 
 }

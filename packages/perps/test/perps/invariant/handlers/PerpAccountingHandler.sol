@@ -60,14 +60,12 @@ contract PerpAccountingHandler is Test {
     struct PriceLossTraderClaimEvent {
         bool active;
         address account;
-        uint256 legacyDebtDiagnosticUsdc;
         uint256 expectedTraderClaimAfterUsdc;
     }
 
     struct TerminalResidualEvent {
         bool active;
         address account;
-        uint256 legacyDebtDiagnosticUsdc;
         uint256 expectedFinalResidualUsdc;
         uint256 traderWalletBeforeUsdc;
         bool walletPayoutExpected;
@@ -98,7 +96,6 @@ contract PerpAccountingHandler is Test {
         bool terminalClose;
         bool terminalPriceLoss;
         uint256 traderClaimBalanceUsdc;
-        uint256 legacyDebtDiagnosticUsdc;
         uint256 expectedFinalResidualUsdc;
         uint256 priceGainUsdc;
         uint256 traderWalletBeforeUsdc;
@@ -311,10 +308,10 @@ contract PerpAccountingHandler is Test {
                 && !engine.isFadWindow() && housePool.canIncreaseRisk() && router.pendingOrderCounts(account) < 5,
             prefilterActive: _canUseCommitMarkForOpenPrefilter(),
             failureCategory: engineLens.previewOpenFailurePolicyCategory(
-                account, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+                account, side, sizeDelta, marginDelta, _commitReferencePrice()
             ),
             revertCode: engineLens.previewOpenRevertCode(
-                account, side, sizeDelta, marginDelta, _commitReferencePrice(), engine.lastMarkTime()
+                account, side, sizeDelta, marginDelta, _commitReferencePrice()
             ),
             commitSucceeded: false
         });
@@ -473,7 +470,6 @@ contract PerpAccountingHandler is Test {
                     model.terminalClose = true;
                     model.terminalPriceLoss = preview.realizedPnlUsdc < 0;
                     model.priceGainUsdc = preview.realizedPnlUsdc > 0 ? uint256(preview.realizedPnlUsdc) : 0;
-                    model.legacyDebtDiagnosticUsdc = preview.badDebtUsdc;
                     uint256 grossResidualUsdc = beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc
                         + preview.traderClaimBalanceUsdc;
                     uint256 terminalDebitUsdc = preview.seizedCollateralUsdc + orderRecord.executionBountyUsdc;
@@ -492,17 +488,11 @@ contract PerpAccountingHandler is Test {
         _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId(), false);
         _observeTraderClaim(model.account);
         if (model.terminalPriceLoss) {
-            _recordPriceLossTraderClaimEvent(
-                model.account, model.legacyDebtDiagnosticUsdc, model.traderClaimBalanceUsdc
-            );
+            _recordPriceLossTraderClaimEvent(model.account, model.traderClaimBalanceUsdc);
         }
         if (model.terminalClose) {
             _recordTerminalResidualEvent(
-                model.account,
-                model.legacyDebtDiagnosticUsdc,
-                model.expectedFinalResidualUsdc,
-                model.traderWalletBeforeUsdc,
-                false
+                model.account, model.expectedFinalResidualUsdc, model.traderWalletBeforeUsdc, false
             );
         }
     }
@@ -587,26 +577,17 @@ contract PerpAccountingHandler is Test {
         _recordTerminalReservationSet(account);
 
         try router.executeLiquidation(account, priceData) {
-            _recordLiquidationSuccess(account, preview.badDebtUsdc);
+            ghost.recordLiquidation(account);
             ghostSuccessfulLiquidations++;
             _reconcileCommittedMarginAfterLiquidation(account, committedBefore);
             _observeTraderClaim(account);
             if (preview.pnlUsdc < 0) {
-                _recordPriceLossTraderClaimEvent(account, preview.badDebtUsdc, preview.traderClaimBalanceUsdc);
+                _recordPriceLossTraderClaimEvent(account, preview.traderClaimBalanceUsdc);
             }
-            _recordTerminalResidualEvent(
-                account, preview.badDebtUsdc, expectedFinalResidualUsdc, traderWalletBeforeUsdc, false
-            );
+            _recordTerminalResidualEvent(account, expectedFinalResidualUsdc, traderWalletBeforeUsdc, false);
         } catch (bytes memory err) {
             _recordCaughtRevert(RejectionDomain.Liquidation, err);
         }
-    }
-
-    function _recordLiquidationSuccess(
-        address account,
-        uint256 legacyDebtDiagnosticUsdc
-    ) internal {
-        ghost.recordLiquidation(account, legacyDebtDiagnosticUsdc);
     }
 
     function createTraderClaim(
@@ -843,7 +824,6 @@ contract PerpAccountingHandler is Test {
                 && (selector == ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector
                     || selector == ICfdEngineTypes.CfdEngine__MarkPriceStale.selector
                     || selector == ICfdEngineTypes.CfdEngine__DegradedMode.selector
-                    || selector == ICfdEngineTypes.CfdEngine__CarryExceedsMargin.selector
                     || selector == IMarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector);
         }
         if (domain == RejectionDomain.Commit) {
@@ -859,9 +839,6 @@ contract PerpAccountingHandler is Test {
                 assembly ("memory-safe") { code := mload(add(err, 36)) }
                 return code == 11;
             }
-            if (selector == ICfdEngineTypes.CfdEngine__InsufficientCloseOrderBountyBacking.selector) {
-                return err.length == 100;
-            }
             if (selector == ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector) {
                 return err.length == 36;
             }
@@ -873,7 +850,6 @@ contract PerpAccountingHandler is Test {
                     || selector == IOrderRouterErrors.OrderRouter__NoQueuedPosition.selector
                     || selector == IOrderRouterErrors.OrderRouter__SideMismatch.selector
                     || selector == IOrderRouterErrors.OrderRouter__SizeExceedsQueued.selector
-                    || selector == IOrderRouterErrors.OrderRouter__PledgeBountyRequiresEmptyQueue.selector
                     || selector == IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector
                     || selector == IMarginClearinghouse.MarginClearinghouse__InsufficientFreeEquity.selector
                     || selector == ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector
@@ -932,20 +908,15 @@ contract PerpAccountingHandler is Test {
 
     function _recordPriceLossTraderClaimEvent(
         address account,
-        uint256 legacyDebtDiagnosticUsdc,
         uint256 expectedTraderClaimAfterUsdc
     ) internal {
         lastPriceLossTraderClaimEvent = PriceLossTraderClaimEvent({
-            active: true,
-            account: account,
-            legacyDebtDiagnosticUsdc: legacyDebtDiagnosticUsdc,
-            expectedTraderClaimAfterUsdc: expectedTraderClaimAfterUsdc
+            active: true, account: account, expectedTraderClaimAfterUsdc: expectedTraderClaimAfterUsdc
         });
     }
 
     function _recordTerminalResidualEvent(
         address account,
-        uint256 legacyDebtDiagnosticUsdc,
         uint256 expectedFinalResidualUsdc,
         uint256 traderWalletBeforeUsdc,
         bool walletPayoutExpected
@@ -953,7 +924,6 @@ contract PerpAccountingHandler is Test {
         lastTerminalResidualEvent = TerminalResidualEvent({
             active: true,
             account: account,
-            legacyDebtDiagnosticUsdc: legacyDebtDiagnosticUsdc,
             expectedFinalResidualUsdc: expectedFinalResidualUsdc,
             traderWalletBeforeUsdc: traderWalletBeforeUsdc,
             walletPayoutExpected: walletPayoutExpected

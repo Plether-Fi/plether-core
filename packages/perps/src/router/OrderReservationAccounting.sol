@@ -17,8 +17,7 @@ abstract contract OrderReservationAccounting is IOrderRouterAccounting, IOrderRo
 
     function _onOrderCommitted(
         CfdTypes.Order memory order,
-        CfdEnginePlanTypes.CloseCommitment memory effects,
-        uint64 sourcePositionEpoch
+        CfdEnginePlanTypes.CloseCommitment memory effects
     ) internal virtual;
 
     /// @notice Ephemeral metadata and linked-list pointers for one pending order.
