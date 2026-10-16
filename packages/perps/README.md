@@ -1154,6 +1154,7 @@ authorizes settlement.
 - Keepers execute from the global queue head.
 - Pyth update data is required for live-market execution and the caller must attach ETH for the Pyth fee.
 - Live order settlement uses Pyth's unique historical parse over `(commitTime, commitTime + orderSettlementWindow]`, capped at `block.timestamp`, rather than the latest reveal-time price.
+- "Post-commit" means after the recorded L2 timestamp, not necessarily after a trader first observed the price. See the acknowledged [Arbitrum and Pyth clock alignment limitation](SECURITY.md#arbitrum-and-pyth-clock-alignment).
 - `executeOrderBatch` caches a successfully parsed historical basket and reuses it for later FIFO orders whose `commitTime` is still strictly before the cached tick and covered by the same unique range, avoiding repeated Pyth parsing for clustered commits.
 - A keeper cannot skip an unfavorable post-commit tick by submitting a later tick: the unique parse requires the previous publish time to be no later than the order's `commitTime`.
 - A protection trigger is separate from close execution. It uses a fresh neutral mark to create a market-style close at
