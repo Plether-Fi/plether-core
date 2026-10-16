@@ -7,6 +7,7 @@ Read this with:
 - [`README.md`](README.md) for the product overview
 - [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md) for normative accounting semantics
 - [`SECURITY.md`](SECURITY.md) for trust assumptions and protocol invariants
+- [Arbitrum and Pyth clock alignment](SECURITY.md#arbitrum-and-pyth-clock-alignment) for the acknowledged timing limitation and its Informational assessment
 - [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md) for custody and mutation boundaries
 - [`CANONICAL_ENTRYPOINTS.md`](CANONICAL_ENTRYPOINTS.md) for product-facing vs internal surfaces
 
