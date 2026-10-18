@@ -1014,7 +1014,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         OracleResult memory result
     ) private {
         ICfdEngineCore engine_ = ICfdEngineCore(host.engine());
-        if (result.publishTime >= engine_.lastMarkTime()) {
+        if (result.publishTime > engine_.lastMarkTime()) {
             engine_.updateMarkPrice(result.neutralMarkPrice, result.publishTime);
         }
     }

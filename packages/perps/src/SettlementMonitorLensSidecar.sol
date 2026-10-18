@@ -357,7 +357,14 @@ contract SettlementMonitorLensSidecar {
             }
             return false;
         }
-        return returnSize == 4 && selector == IPletherOracle.PletherOracle__ZeroBasketPrice.selector;
+        if (returnSize == 100) {
+            return
+                selector == IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector
+                    && failureArg0 <= type(uint64).max;
+        }
+        return returnSize == 4
+            && (selector == IPletherOracle.PletherOracle__ZeroBasketPrice.selector
+                || selector == IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
     }
 
     function _isCanonicalInt64(

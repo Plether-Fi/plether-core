@@ -138,6 +138,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 stopLossTriggerPrice;
         uint64 armedAt;
         uint64 armedBlock;
+        uint64 armedOracleTime;
         uint256 triggerMarkPrice;
         uint64 triggerPublishTime;
         PositionProtectionTypes.PositionProtectionTriggerLeg triggeredLeg;
@@ -169,6 +170,8 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     error PositionProtectionBook__InvalidHostResponse();
     /// @notice The Router supplied a reason that cannot represent a failed retryable close attempt.
     error PositionProtectionBook__InvalidTerminalReason();
+    /// @notice The accepted live basket has not been installed as the Engine mark.
+    error PositionProtectionBook__OracleMarkAhead();
 
     modifier onlyRouter() {
         _requireRouter();
@@ -462,7 +465,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         if (_activeOracle().isOracleFrozen()) {
             revert OrderRouter__ConditionalTriggerFrozen();
         }
-        if (block.number <= protection.armedBlock || publishTime <= protection.armedAt) {
+        if (block.number <= protection.armedBlock || publishTime <= protection.armedOracleTime) {
             revert OrderRouter__SameBlockTrigger();
         }
         _requireMatchingPosition(protection);
@@ -532,20 +535,15 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             }
             if (terminalStatus == IOrderRouterAccounting.OrderStatus.Executed) {
                 _requireMatchingPosition(parentProtection);
+                if (!_acceptedMarkInstalled()) {
+                    _failPendingParent(parentProtection);
+                    return;
+                }
                 _arm(parentProtection);
                 _emitArmed(parentProtection);
                 return;
             }
-
-            delete _activeProtectionIds[account];
-            parentProtection.status = PositionProtectionTypes.PositionProtectionStatus.Failed;
-            uint256 refundUsdc = _takeUnpaidBounties(parentProtection);
-            emit PositionProtectionTerminal(
-                protectionId, account, 0, PositionProtectionTypes.PositionProtectionStatus.Failed
-            );
-            if (refundUsdc != 0) {
-                _clearinghouse().unlockReservedSettlement(account, refundUsdc);
-            }
+            _failPendingParent(parentProtection);
             return;
         }
 
@@ -807,6 +805,32 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         ) {
             revert OrderRouter__ProtectionMarkTooStale();
         }
+        if (!_acceptedMarkInstalled()) {
+            revert PositionProtectionBook__OracleMarkAhead();
+        }
+    }
+
+    function _acceptedMarkInstalled() private view returns (bool) {
+        (bool accepted, uint256 acceptedPrice, uint64 acceptedTime) = _activeOracle().getAcceptedBasketMark();
+        if (!accepted) {
+            return true;
+        }
+        uint64 markTime = ENGINE.lastMarkTime();
+        return acceptedTime < markTime || (acceptedTime == markTime && acceptedPrice == ENGINE.lastMarkPrice());
+    }
+
+    function _failPendingParent(
+        StoredProtection storage protection
+    ) private {
+        delete _activeProtectionIds[protection.account];
+        protection.status = PositionProtectionTypes.PositionProtectionStatus.Failed;
+        uint256 refundUsdc = _takeUnpaidBounties(protection);
+        emit PositionProtectionTerminal(
+            protection.protectionId, protection.account, 0, PositionProtectionTypes.PositionProtectionStatus.Failed
+        );
+        if (refundUsdc != 0) {
+            _clearinghouse().unlockReservedSettlement(protection.account, refundUsdc);
+        }
     }
 
     function _validateProtectionPrices(
@@ -962,6 +986,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     ) private {
         protection.armedAt = uint64(block.timestamp);
         protection.armedBlock = uint64(block.number);
+        protection.armedOracleTime = ENGINE.lastMarkTime();
         protection.status = PositionProtectionTypes.PositionProtectionStatus.Armed;
     }
 

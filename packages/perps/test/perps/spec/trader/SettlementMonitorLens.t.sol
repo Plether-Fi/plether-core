@@ -544,7 +544,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(uint8(fresh.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.CachedMark));
     }
 
-    function test_FrozenStaleRecoveryDoesNotRequireCurrentRoundHourPublishFloor() public {
+    function test_FrozenStaleRecoveryRequiresFreshEngineMarkWithoutRoundHourFloor() public {
         uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
         _openMonitorPosition();
         vm.warp(SATURDAY_FROZEN);
@@ -567,16 +567,16 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
 
         SettlementMonitorViewTypes.SettlementObservation memory observation =
             monitorLens.getSettlementObservation(observedEpoch);
-        assertTrue(observation.oracle.policyValid);
-        assertEq(observation.oracle.publishTime, preBoundaryPublishTime);
-        assertTrue(observation.oracle.publishTimeMeetsEpochFloor);
+        assertFalse(observation.oracle.policyValid);
+        assertEq(observation.oracle.failureSelector, IPletherOracle.PletherOracle__StalePrice.selector);
+        assertFalse(observation.oracle.publishTimeMeetsEpochFloor);
         assertFalse(
             _hasOperationalBlocker(
                 observation.status.operationalBlockerMask,
                 SettlementMonitorViewTypes.OperationalBlocker.OracleBeforeEpochBoundary
             )
         );
-        assertTrue(observation.observationComplete);
+        assertFalse(observation.observationComplete);
     }
 
     function test_RequiredInvalidOracleIsFailSoftAndNotActionable() public {
@@ -588,7 +588,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         SettlementMonitorViewTypes.OracleStatus memory oracleStatus = monitorLens.getPoolReconcileOracleStatus();
         assertFalse(oracleStatus.readSucceeded);
         assertFalse(oracleStatus.policyValid);
-        assertEq(oracleStatus.failureSelector, IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
+        assertEq(oracleStatus.failureSelector, IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
         assertTrue(oracleStatus.failureHash != bytes32(0));
         assertEq(oracleStatus.dependencyFailureMask, 0, "recognized oracle rejection is not an unreadable dependency");
 
@@ -609,7 +609,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(
             uint8(observation.health.state),
             uint8(SettlementMonitorViewTypes.HealthState.Healthy),
-            "bad current feed data is operational, not structural health corruption"
+            "uninitialized accepted basket is operational, not structural health corruption"
         );
     }
 

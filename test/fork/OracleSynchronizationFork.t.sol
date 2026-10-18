@@ -53,6 +53,14 @@ contract OracleSynchronizationForkTest is BasePerpTest {
         // Deploy/fund only local test contracts. Super setup never calls the real Pyth deployment.
         vm.warp(SETUP_TIMESTAMP);
         super.setUp();
+        // The baseline rotation retains the release wrapper's 2500 bps, while the current
+        // rotation copies the active Oracle policy. Set that policy before either rotation
+        // so the historical fill comparison measures synchronization, not setup drift.
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.adverseConfidenceMultiplierBps = 2500;
+        routerAdmin.proposeRouterConfig(config);
+        vm.warp(routerAdmin.routerConfigActivationTime());
+        routerAdmin.finalizeRouterConfig();
         pletherOracle = new ArbitrumSepoliaReleaseOracle(
             address(engine),
             address(pool),
@@ -136,7 +144,9 @@ contract OracleSynchronizationForkTest is BasePerpTest {
             for (uint256 i; i < ids.length; ++i) {
                 assertGe(IPyth(realPyth).getPriceUnsafe(ids[i]).publishTime, parsed[i].price.publishTime);
             }
-            assertGt(pletherOracle.getLatestPrice(), 0);
+            // Historical storage synchronization does not authenticate a new live basket.
+            vm.expectPartialRevert(bytes4(keccak256("PletherOracle__NoAcceptedBasket()")));
+            pletherOracle.getLatestPrice();
         } else {
             vm.expectPartialRevert(IPletherOracle.PletherOracle__PriceOutOfOrder.selector);
             pletherOracle.getLatestPrice();

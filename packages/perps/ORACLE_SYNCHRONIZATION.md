@@ -1,4 +1,33 @@
-# Atomic historical oracle synchronization
+# Historical synchronization and live basket watermark
+
+Live mark refresh, liquidation, and LP reconciliation now use a Router-owned accepted basket. For each nonempty
+live update, the Oracle sets a cutoff to the greatest of `block.timestamp - 15`, the prior accepted basket's
+minimum publish time plus one, and the Engine mark time plus one. It reuses a cached feed only if that feed's
+verified tick is at or after the cutoff, and uniquely parses the first signed tick after the cutoff for every
+remaining feed. The aggregate is accepted only after all component age, divergence, confidence, and mark-ordering
+checks pass. Pyth's mutable stored latest prices cannot change a current basket or view. The Router installs the
+neutral Engine mark before settlement, protection activation, or any excess-ETH refund callback. A live empty payload
+replays the unchanged accepted basket at zero fee if it still passes the selected policy. An uninitialized basket
+cannot be read or replayed.
+
+For live payload construction, read `getAcceptedBasketMark()`, `getAcceptedFeedPublishTimes()`, the indexed
+`pythFeedIds`, `LIVE_TICK_LOOKBACK()`, and `Engine.lastMarkTime()` at one block. Compute the cutoff shown above;
+request a Hermes timestamp update for each feed whose accepted time is below that cutoff, including every feed
+before initialization. Submit the signed first-after-cutoff ticks together. Do not substitute a latest-only bundle.
+The companion `plether-app` oracle worker implements this selection using Hermes' timestamp endpoint for the missing
+IDs and reports rejected cutoffs and last-complete-basket age. Deploy it only with the matching candidate addresses;
+this repository does not contain that worker. Validate its live behavior with signed target-chain data before activation.
+
+The Engine rejects a different clamped price at the same publish time. Position protection records the Engine
+oracle time when armed and requires a later signed activation tick and a later block. Its public wall-clock arming
+time remains available for display. An attached protection that cannot safely arm after its parent fill fails and
+refunds its own bounty without reverting the valid fill.
+
+During the oracle-frozen window, current paths and delayed closes replay the Engine's stored mark at zero Pyth fee,
+subject to `fadMaxStaleness`. Frozen liquidation uses a deterministic adverse shift from the configured maximum
+basket confidence ratio; voluntary closes retain their frozen spread policy. Operators must install a final live
+mark before the market closes and verify that it will remain within the frozen age limit. A stale mark cannot be
+repaired from mutable Pyth storage during the freeze.
 
 Historical order resolution now pays for `parsePriceFeedUpdatesUnique` and `updatePriceFeeds` on the **same signed payload**. It checks each configured stored feed against its corresponding parsed timestamp before returning. The fill and neutral mark still come from the unique historical tick. A newer stored price never substitutes for that tick.
 
@@ -6,11 +35,11 @@ This requires a fresh complete stack: the execution sidecar is immutable and the
 
 ## Consumer integration
 
-For a new order resolution, call the new oracle's `getOrderExecutionFee(updateData)` at the same block as other preflight reads. Outside frozen policy it returns twice `getUpdateFee(updateData)`; frozen execution returns one fee. The generic quote remains correct for mark refresh, liquidation and LP settlement. FAD alone does not enable the single-fee path. Consumers must not fall back to the generic quote when the new selector is absent.
+For a new order resolution, call the new oracle's `getOrderExecutionFee(updateData)` at the same block as other preflight reads. Outside frozen policy it returns twice Pyth's update fee and rejects empty data unless a proven historical batch cache is reused. Frozen execution returns zero. `getUpdateFee(updateData)` quotes one Pyth parse fee for a nonempty live update and zero for empty or frozen replay. FAD alone does not enable the zero-fee path. Consumers must not fall back to the generic quote when the new selector is absent.
 
 Single execution forwards the quoted amount. For a batch of N candidate orders using one payload, N times the execution quote is a conservative funding bound; cleanup and synchronized cache reuse consume no Pyth fee. Re-simulate before submission because policy, queue and fee state may change. Keep the keeper's outcome-aware gas preflight: a successful RPC call or estimate that returns Pending is not successful execution.
 
-`PriceSnapshot.updateFee` reports funding forwarded for the resolution, not unconditionally consumed fees. Successful new historical resolution reports two fees; frozen resolution reports one; reuse reports zero. On unavailable history with `ok=false`, it reports two fees even though both are refunded/deferred by the oracle. Router accounting subtracts that allocation from its final refund, preventing double payment. Direct oracle execution callers must continue supplying the exact quote; successful direct calls do not refund overpayment.
+`PriceSnapshot.updateFee` reports funding forwarded for the resolution, not unconditionally consumed fees. Successful new historical resolution reports two fees; frozen resolution and replay report zero; historical batch reuse reports zero. On unavailable history with `ok=false`, it reports two fees even though both are refunded/deferred by the oracle. Router accounting subtracts that allocation from its final refund, preventing double payment. Direct historical callers should supply the exact quote; successful historical calls do not refund overpayment. Frozen direct calls refund excess ETH.
 
 Failed immediate oracle refunds remain in `oracle.claimableEth(recipient)`. Failed Router refunds are recorded by RouterAdmin. Index and expose both existing claim paths; do not infer that an unavailable parse consumed the quoted funding.
 
@@ -25,7 +54,7 @@ Import the matching release ABIs and verify chain, addresses, runtime hashes, En
 ## Release qualification
 
 1. Run normal CI, all four production-codegen deep shards, formatting, package boundaries and full creation-input/runtime size gates on one immutable source commit.
-2. Capture a signed six-feed fixture with `scripts/capture-oracle-sync-fixture.py`. Run `scripts/run-oracle-sync-fork.py FIXTURE OUTPUT` to replay identical baseline/candidate scenarios. This pins block/hash, untouched Pyth storage, signed bytes/checksum, unique windows and exact fill/mark equality. A missing fixture, frozen window, already-covered mark or skipped test fails qualification.
+2. Capture a signed six-feed fixture with `scripts/capture-oracle-sync-fixture.py`. Run `scripts/run-oracle-sync-fork.py FIXTURE OUTPUT` to replay identical baseline/candidate historical scenarios. Run `LiveBasketWatermarkForkTest` with the pinned Hermes fixture to verify initial acceptance, the fixed 15-second live cutoff, rejection of a tick that skipped the first eligible tick, and subsequent advancement in real Pyth. Separately capture real timestamp-endpoint payloads with unequal feed times, missing components, and faster-feed reuse; the pinned live fixture has equal feed times and does not establish representative-gap liveness. These checks require a configured Arbitrum Sepolia RPC and real signed Pyth data; local equal-time mocks do not qualify the timing bound. A missing fixture, frozen window, already-covered mark or skipped test fails qualification.
 3. Run `OracleSynchronizationTest`, `OracleSynchronizationGasTest`, and both synchronization/ETH conservation invariant suites under production settings; their exact paths and evidence limits are listed in [TEST_MAP.md](test/perps/TEST_MAP.md). Gas tests use the app revision/cap in the candidate's `keeper-evidence.json`: 30,000,000 gas for single/batch execution. Require actual expected lifecycle progress and refund completion. Preserve `minEngineGas`, EIP-150 checks, the 1,000,000 post-engine reserve and 250,000 evaluator-return reserve. Do not raise limits to make a failing gate pass.
 4. Export the immutable build with `scripts/export-perps-release.py`. Include test/fork logs, fixture and gas evidence, ABI hashes and full creation-input checks. Dirty-source outputs cannot count as an immutable release bundle.
 5. Use the existing complete-stack deployment and verification flow. Write addresses/receipts to a separate candidate manifest, not the active deployment record. Do not bootstrap, seed or activate trading. Invoke `VerifyPerpsArbitrumSepolia.verifyOracleSynchronization()` with `ORACLE_SYNC_FIXTURE` and `PERPS_EXECUTION_CONFIG_HASH` in addition to the existing deployment environment. It never broadcasts.
@@ -33,8 +62,9 @@ Import the matching release ABIs and verify chain, addresses, runtime hashes, En
 
 ## Monitoring contract
 
-At one pinned block, read the Engine mark and all six configured Pyth feeds:
-
-`coverageLag = max(0, lastMarkTime - min(component.publishTime))`
-
-Require zero lag after every execution that installs a mark. For validation inspect state immediately after the target transaction (replay/trace if there are later transactions in its block); a later worker repair must not mask a violation. Timestamp coverage is independent of freshness, divergence and confidence: classify those failures separately. Missing RPC data is inconclusive, never a healthy observation. Record block/transaction identity, feed timestamps and mark timestamp for any violation; block qualification/activation pending investigation.
+At one pinned block after each current Router update, read `getAcceptedBasketMark()` and the Engine mark. Require the
+accepted mark's price and time to equal the Engine mark. A historical order may advance the Engine mark without
+advancing the accepted live basket; record that provenance separately. Do not infer current-basket coverage from
+Pyth's stored-feed timestamps, which historical execution still changes. The settlement monitor classifies an
+uninitialized accepted basket or stale frozen mark as a known oracle-policy blocker. Record transaction identity,
+accepted mark, Engine mark, and policy mode for any violation; block qualification pending investigation.

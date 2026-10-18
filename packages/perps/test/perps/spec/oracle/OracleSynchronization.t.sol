@@ -8,12 +8,85 @@ import {
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
+import {Vm} from "forge-std/Vm.sol";
+
+contract MarkRefundObserver {
+
+    event RefundObserved(uint64 markTime);
+
+    ICfdEngineCore private immutable ENGINE;
+
+    constructor(
+        ICfdEngineCore engine_
+    ) {
+        ENGINE = engine_;
+    }
+
+    receive() external payable {
+        emit RefundObserved(ENGINE.lastMarkTime());
+    }
+
+    function refresh(
+        IOrderRouter router,
+        bytes[] calldata data
+    ) external payable {
+        router.updateMarkPrice{value: msg.value}(data);
+    }
+
+    function liquidateBatch(
+        IPerpsKeeper router,
+        address account,
+        bytes[] calldata data
+    ) external payable {
+        address[] memory accounts = new address[](1);
+        accounts[0] = account;
+        router.executeLiquidationBatch{value: msg.value}(accounts, data);
+    }
+
+}
 
 contract OracleSynchronizationTest is OracleSynchronizationTestBase {
+
+    function test_RefreshRefundCallbackSeesInstalledMark() public {
+        uint64 tick = uint64(block.timestamp + 1);
+        _advance(tick);
+        MarkRefundObserver observer = new MarkRefundObserver(ICfdEngineCore(address(engine)));
+        vm.recordLogs();
+        observer.refresh{value: 2 * FEE}(IOrderRouter(address(router)), _payload(tick, tick - 20));
+        _assertRefundObserved(observer, tick);
+        assertEq(engine.lastMarkTime(), tick);
+    }
+
+    function test_LiquidationBatchRefundCallbackSeesInstalledMark() public {
+        uint64 tick = uint64(block.timestamp + 1);
+        _advance(tick);
+        MarkRefundObserver observer = new MarkRefundObserver(ICfdEngineCore(address(engine)));
+        vm.recordLogs();
+        observer.liquidateBatch{value: 2 * FEE}(router, ALICE, _payload(tick, tick - 20));
+        _assertRefundObserved(observer, tick);
+        assertEq(engine.lastMarkTime(), tick);
+    }
+
+    function _assertRefundObserved(
+        MarkRefundObserver observer,
+        uint64 tick
+    ) private {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topic = keccak256("RefundObserved(uint64)");
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter == address(observer) && logs[i].topics[0] == topic) {
+                assertEq(abi.decode(logs[i].data, (uint64)), tick, "callback must observe installed mark");
+                return;
+            }
+        }
+        fail("refund callback was not invoked");
+    }
 
     function test_LaterSynchronizationFailureRevertsCompletedBatchPrefix() public {
         uint64 mark = engine.lastMarkTime();
@@ -122,7 +195,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
             pletherOracle.updateOrderExecutionPrice{value: 2 * FEE}(address(this), data, _request(commit, true));
         assertTrue(ok);
         assertEq(snapshot.price, 99_980_000);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
         pletherOracle.getLatestPrice();
 
         baseMockPyth.setAllPrices(_synchronizationFeedIds(), 100_000_000, -8, commit + 2);
@@ -131,7 +204,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
             pletherOracle.updateOrderExecutionPrice{value: 2 * FEE}(address(this), data, _request(commit, true));
         assertTrue(ok);
         assertEq(snapshot.price, 99_980_000);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
         pletherOracle.getLatestPrice();
     }
 
@@ -147,7 +220,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         _assertCoverage(commit + 1);
     }
 
-    function test_EqualTimestampRepairsStorage() public {
+    function test_EqualTimestampRepairsHistoricalStorageWithoutBootstrappingLiveBasket() public {
         uint64 commit = uint64(block.timestamp);
         uint64 id = _commit(ALICE, 0);
         _advance(commit + 1);
@@ -155,7 +228,8 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         engine.updateMarkPrice(100_000_000, commit + 1);
         router.executeOrder{value: 2 * FEE}(id, _payload(commit + 1, commit));
         _assertCoverage(engine.lastMarkTime());
-        assertEq(pletherOracle.getLatestPrice(), 100_000_000);
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
+        pletherOracle.getLatestPrice();
     }
 
     function test_InsufficientExecutionFundingRollsBack() public {
