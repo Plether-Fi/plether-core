@@ -188,6 +188,17 @@ contract PletherOracleTest is Test {
         new PletherOracle(address(engine), address(vault), address(pyth), feedIds, weights, basePrices, inversions);
     }
 
+    function test_Constructor_RejectsZeroAndDuplicateFeedIds() public {
+        feedIds[0] = bytes32(0);
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InvalidFeedId.selector, bytes32(0)));
+        _deployOracle(address(pyth));
+
+        feedIds[0] = FEED_A;
+        feedIds[1] = FEED_A;
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InvalidFeedId.selector, FEED_A));
+        _deployOracle(address(pyth));
+    }
+
     function test_Constructor_RevertsOnInvalidTotalWeight() public {
         weights[1] = 0.4e18;
 
@@ -203,6 +214,44 @@ contract PletherOracleTest is Test {
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.OrderExecution);
+    }
+
+    function test_CurrentUpdates_RejectNonRouterCaller() public {
+        vm.warp(1000);
+        _setBothPrices(120_000_000, 995);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
+        vm.prank(address(0xBEEF));
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
+        vm.prank(address(0xBEEF));
+        oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+    }
+
+    function test_LiveUpdate_RequiresQuotedPythFee() public {
+        vm.warp(1000);
+        pyth.setFee(1 gwei);
+        _setBothPrices(120_000_000, 995);
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InsufficientFee.selector, 0, 1 gwei));
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+        assertFalse(oracle.hasAcceptedBasket());
+    }
+
+    function test_FrozenCurrentUpdate_RequiresStoredMark() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
+        oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.MarkRefresh);
+    }
+
+    function test_HistoricalOrderExecution_RequiresSignedPayload() public {
+        vm.warp(1000);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__MissingUpdateData.selector);
+        oracle.updateOrderExecutionPrice(address(this), new bytes[](0), _orderRequest(CfdTypes.Side.LONG, false));
     }
 
     function test_UpdatePrice_AllowsWideLowWeightComponentWhenBasketConfidenceWithinLimit() public {
