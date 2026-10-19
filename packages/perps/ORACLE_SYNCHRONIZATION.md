@@ -1,22 +1,24 @@
 # Historical synchronization and live basket watermark
 
-Live mark refresh, liquidation, and LP reconciliation now use a Router-owned accepted basket. For each nonempty
-live update, the Oracle sets a cutoff to the greatest of `block.timestamp - 15`, the prior accepted basket's
-minimum publish time plus one, and the Engine mark time plus one. It reuses a cached feed only if that feed's
-verified tick is at or after the cutoff, and uniquely parses the first signed tick after the cutoff for every
-remaining feed. The aggregate is accepted only after all component age, divergence, confidence, and mark-ordering
+Live mark refresh, liquidation, and LP reconciliation use a Router-owned accepted basket. For each nonempty
+live update, the Oracle sets a caller-independent cutoff at `block.timestamp - min(15, modeMaxStaleness)` and
+parses a signed price for every configured feed within that window. Each component must be at least as new as
+its previously accepted price. The aggregate is accepted only after all component age, divergence, confidence, and mark-ordering
 checks pass. Pyth's mutable stored latest prices cannot change a current basket or view. The Router installs the
 neutral Engine mark before settlement, protection activation, or any excess-ETH refund callback. A live empty payload
 replays the unchanged accepted basket at zero fee if it still passes the selected policy. An uninitialized basket
 cannot be read or replayed.
 
-For live payload construction, read `getAcceptedBasketMark()`, `getAcceptedFeedPublishTimes()`, the indexed
-`pythFeedIds`, `LIVE_TICK_LOOKBACK()`, and `Engine.lastMarkTime()` at one block. Compute the cutoff shown above;
-request a Hermes timestamp update for each feed whose accepted time is below that cutoff, including every feed
-before initialization. Submit the signed first-after-cutoff ticks together. Do not substitute a latest-only bundle.
-The companion `plether-app` oracle worker implements this selection using Hermes' timestamp endpoint for the missing
-IDs and reports rejected cutoffs and last-complete-basket age. Deploy it only with the matching candidate addresses;
-this repository does not contain that worker. Validate its live behavior with signed target-chain data before activation.
+The basket publish time is the newest component time so protection activation can observe a move in any component.
+Equal-time baskets cannot change the mark price. Pool reconciliation additionally requires the oldest component to
+be published in the current LP epoch before the Router may settle that epoch.
+
+For live payload construction, read the indexed `pythFeedIds`, the mode's freshness limit, and
+`LIVE_TICK_LOOKBACK()` at one block. Submit recent signed data for every feed in one payload; a missing component
+or a component older than the cutoff is rejected. Empty data replays the accepted basket when it remains fresh.
+The companion `plether-app` oracle worker must send complete live bundles and report rejected cutoffs and
+last-complete-basket age. This repository does not contain that worker. Validate its live behavior with signed
+target-chain data before activation.
 
 The Engine rejects a different clamped price at the same publish time. Position protection records the Engine
 oracle time when armed and requires a later signed activation tick and a later block. Its public wall-clock arming
@@ -54,7 +56,7 @@ Import the matching release ABIs and verify chain, addresses, runtime hashes, En
 ## Release qualification
 
 1. Run normal CI, all four production-codegen deep shards, formatting, package boundaries and full creation-input/runtime size gates on one immutable source commit.
-2. Capture a signed six-feed fixture with `scripts/capture-oracle-sync-fixture.py`. Run `scripts/run-oracle-sync-fork.py FIXTURE OUTPUT` to replay identical baseline/candidate historical scenarios. Run `LiveBasketWatermarkForkTest` with the pinned Hermes fixture to verify initial acceptance, the fixed 15-second live cutoff, rejection of a tick that skipped the first eligible tick, and subsequent advancement in real Pyth. Separately capture real timestamp-endpoint payloads with unequal feed times, missing components, and faster-feed reuse; the pinned live fixture has equal feed times and does not establish representative-gap liveness. These checks require a configured Arbitrum Sepolia RPC and real signed Pyth data; local equal-time mocks do not qualify the timing bound. A missing fixture, frozen window, already-covered mark or skipped test fails qualification.
+2. Capture a signed six-feed fixture with `scripts/capture-oracle-sync-fixture.py`. Run `scripts/run-oracle-sync-fork.py FIXTURE OUTPUT` to replay identical baseline/candidate historical scenarios. Run `LiveBasketWatermarkForkTest` with the pinned Hermes fixture to verify initial acceptance, the fixed 15-second live cutoff, rejection of stale signed data, and subsequent advancement in real Pyth. Separately capture real payloads with unequal feed times and missing components; the pinned live fixture has equal feed times and does not establish representative-gap liveness. These checks require a configured Arbitrum Sepolia RPC and real signed Pyth data; local equal-time mocks do not qualify the timing bound. A missing fixture, frozen window, already-covered mark or skipped test fails qualification.
 3. Run `OracleSynchronizationTest`, `OracleSynchronizationGasTest`, and both synchronization/ETH conservation invariant suites under production settings; their exact paths and evidence limits are listed in [TEST_MAP.md](test/perps/TEST_MAP.md). Gas tests use the app revision/cap in the candidate's `keeper-evidence.json`: 30,000,000 gas for single/batch execution. Require actual expected lifecycle progress and refund completion. Preserve `minEngineGas`, EIP-150 checks, the 1,000,000 post-engine reserve and 250,000 evaluator-return reserve. Do not raise limits to make a failing gate pass.
 4. Export the immutable build with `scripts/export-perps-release.py`. Include test/fork logs, fixture and gas evidence, ABI hashes and full creation-input checks. Dirty-source outputs cannot count as an immutable release bundle.
 5. Use the existing complete-stack deployment and verification flow. Write addresses/receipts to a separate candidate manifest, not the active deployment record. Do not bootstrap, seed or activate trading. Invoke `VerifyPerpsArbitrumSepolia.verifyOracleSynchronization()` with `ORACLE_SYNC_FIXTURE` and `PERPS_EXECUTION_CONFIG_HASH` in addition to the existing deployment environment. It never broadcasts.

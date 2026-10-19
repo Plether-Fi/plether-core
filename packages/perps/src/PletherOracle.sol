@@ -12,7 +12,7 @@ import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 
 /// @title PletherOracle
 /// @notice Builds the Plether perps basket from Pyth feeds under action-specific freshness and execution policies.
-/// @dev Basket prices and confidence amounts use 8 decimals. Live current updates parse signed first-after-cutoff ticks, validate
+/// @dev Basket prices and confidence amounts use 8 decimals. Live current updates parse signed complete baskets, validate
 ///      feed prices/freshness, aggregate confidence, and component timing; applies side-adverse confidence shifts,
 ///      and caps returned prices at the engine's `CAP_PRICE`. Feed ids, weights, bases, inversion flags, the engine,
 ///      the HousePool, and Pyth endpoint cannot be changed after deployment; policy limits can be changed only by the
@@ -24,13 +24,13 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
     /// @dev Keeps an untrusted refund recipient from consuming the Oracle's post-call accounting gas.
     uint256 internal constant ETH_REFUND_GAS = 30_000;
-    /// @dev A fixed maximum age for the first signed tick after the live basket cutoff.
+    /// @dev Limits signed live-basket updates even when an action permits an older cached mark.
     uint256 public constant LIVE_TICK_LOOKBACK = 15;
 
     /// @notice Internal aggregate of a validated set of basket component prices.
     /// @param price Weighted basket price in 8-decimal units
     /// @param confidence Sum of weighted component confidence contributions in 8-decimal price units
-    /// @param publishTime Earliest component publish time as a Unix timestamp
+    /// @param publishTime Newest component publish time as a Unix timestamp
     /// @param pythFee Funding allocated to Pyth operations in wei, also recorded when unavailable history refunds or
     ///        defers it; zero for cache reuse
     struct BasketPrice {
@@ -160,15 +160,15 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
 
     /// @notice Pays for Pyth update data and returns the validated current basket snapshot for a policy mode.
-    /// @dev Router-only. A nonempty live payload proves the first tick after the advancing cutoff for each missing feed;
-    ///      cached faster feeds are reused. Empty data replays the accepted basket. Frozen policy replays the Engine mark.
+    /// @dev Router-only. A nonempty live payload supplies a signed price for every configured feed within the bounded
+    ///      live window. Empty data replays the accepted basket. Frozen policy replays the Engine mark.
     ///      Validates the selected mode's age and publish-time-divergence policy, rejects a basket
     ///      older than the engine mark, and clamps price and mark price to `CAP_PRICE`. It does not update the engine
     ///      mark. ETH above the Pyth fee is sent to `refundRecipient` or recorded in `claimableEth` if that call fails.
     /// @param refundRecipient Recipient of `msg.value` remaining after the Pyth fee
     /// @param pythUpdateData Signed Pyth payloads, or empty for replay
     /// @param mode Policy selecting freshness and component-divergence limits
-    /// @return snapshot Current 8-decimal price/mark, earliest publish time, fee in wei, and policy metadata
+    /// @return snapshot Current 8-decimal price/mark, newest publish time, fee in wei, and policy metadata
     function updatePrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,
@@ -311,14 +311,14 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
 
     /// @notice Resolves a current basket or frozen Engine mark adverse to the liquidated account's position.
-    /// @dev Uses liquidation freshness policy and the minimum component publish time, rejects an out-of-order basket,
+    /// @dev Uses liquidation freshness policy and the newest component publish time, rejects an out-of-order basket,
     ///      shifts the price upward for a LONG position and downward for a SHORT position by the configured fraction of
     ///      aggregate confidence, then caps it at `CAP_PRICE`. An account with no position receives the neutral basket.
     ///      The function does not update the engine mark. Excess ETH is refunded to `refundRecipient` or deferred.
     /// @param refundRecipient Recipient of `msg.value` remaining after the Pyth fee
     /// @param pythUpdateData Signed Pyth payloads, or empty for replay
     /// @param account Account whose current engine position determines the adverse direction
-    /// @return snapshot Adverse 8-decimal price, neutral mark, earliest publish time, fee, and policy metadata
+    /// @return snapshot Adverse 8-decimal price, neutral mark, newest publish time, fee, and policy metadata
     function updateLiquidationPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,
@@ -336,7 +336,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     ///      neutral basket values capped at `CAP_PRICE`; `updateFee` is zero. This view may revert when accepted state
     ///      is invalid or stale.
     /// @param mode Policy selecting freshness and component-divergence limits
-    /// @return snapshot Current 8-decimal price/mark, earliest publish time, zero fee, and policy metadata
+    /// @return snapshot Current 8-decimal price/mark, newest publish time, zero fee, and policy metadata
     function getLatestPrice(
         PriceMode mode
     ) external view override returns (PriceSnapshot memory snapshot) {
@@ -704,7 +704,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
     /// @dev Every state-changing caller is nonReentrant. During the Pyth call, views can only see the previous
     ///      complete accepted basket; after the call, all accepted-basket writes occur without another external call.
-    ///      The bounded cache/parse branches are kept together to validate one complete basket before storing it.
     // slither-disable-start reentrancy-eth
     // slither-disable-start cyclomatic-complexity
     function _resolveCurrentBasket(
@@ -720,49 +719,38 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             return _acceptedLiveBasket(mode, policy.maxStaleness, divergence);
         }
 
-        uint256 cutoff = block.timestamp > LIVE_TICK_LOOKBACK ? block.timestamp - LIVE_TICK_LOOKBACK : 1;
-        if (hasAcceptedBasket && cutoff <= _acceptedBasket.publishTime) {
-            cutoff = uint256(_acceptedBasket.publishTime) + 1;
-        }
-        uint64 engineTime = engine.lastMarkTime();
-        if (cutoff <= engineTime) {
-            cutoff = uint256(engineTime) + 1;
-        }
-
+        uint256 liveWindow = policy.maxStaleness < LIVE_TICK_LOOKBACK ? policy.maxStaleness : LIVE_TICK_LOOKBACK;
+        uint256 cutoff = block.timestamp > liveWindow ? block.timestamp - liveWindow : 1;
         uint256 len = pythFeedIds.length;
-        bytes32[] memory missingIds = new bytes32[](len);
-        PythStructs.PriceFeed[] memory feeds = new PythStructs.PriceFeed[](len);
-        uint256 missingCount = 0;
-        for (uint256 i; i < len; ++i) {
-            PythStructs.Price memory cached = _acceptedPrices[i];
-            if (hasAcceptedBasket && cached.publishTime >= cutoff) {
-                feeds[i] = PythStructs.PriceFeed({id: pythFeedIds[i], price: cached, emaPrice: cached});
-            } else {
-                missingIds[missingCount++] = pythFeedIds[i];
-            }
+        uint256 pythFee = pyth.getUpdateFee(pythUpdateData);
+        if (msg.value < pythFee) {
+            revert PletherOracle__InsufficientFee(msg.value, pythFee);
         }
-
-        uint256 pythFee = 0;
-        if (missingCount != 0) {
-            PythStructs.PriceFeed[] memory parsed;
-            (parsed, pythFee) = _parseMissingFeeds(pythUpdateData, missingIds, missingCount, cutoff);
-            uint256 nextParsed = 0;
-            for (uint256 i; i < len; ++i) {
-                if (feeds[i].id == bytes32(0)) {
-                    feeds[i] = parsed[nextParsed++];
-                }
-            }
+        PythStructs.PriceFeed[] memory feeds = pyth.parsePriceFeedUpdates{value: pythFee}(
+            pythUpdateData, pythFeedIds, uint64(cutoff), uint64(block.timestamp)
+        );
+        if (feeds.length != len) {
+            revert PletherOracle__ArrayLengthMismatch(feeds.length, len, len, len);
         }
 
         for (uint256 i; i < len; ++i) {
             uint256 feedTime = feeds[i].price.publishTime;
+            if (hasAcceptedBasket && feedTime < _acceptedPrices[i].publishTime) {
+                revert PletherOracle__FeedTimeOutOfOrder(pythFeedIds[i], feedTime, _acceptedPrices[i].publishTime);
+            }
             if (OracleFreshnessPolicyLib.isStale(feedTime, policy.maxStaleness, block.timestamp)) {
                 revert PletherOracle__StalePrice(mode, pythFeedIds[i], feedTime, policy.maxStaleness, block.timestamp);
             }
         }
         basket = _computeBasketPriceFromFeeds(mode, feeds, divergence);
-        if (hasAcceptedBasket && basket.publishTime <= _acceptedBasket.publishTime) {
+        if (hasAcceptedBasket && basket.publishTime < _acceptedBasket.publishTime) {
             revert PletherOracle__PriceOutOfOrder(basket.publishTime, _acceptedBasket.publishTime);
+        }
+        if (
+            hasAcceptedBasket && basket.publishTime == _acceptedBasket.publishTime
+                && basket.price != _acceptedBasket.price
+        ) {
+            revert PletherOracle__EqualTimeMarkMismatch(basket.publishTime, basket.price, _acceptedBasket.price);
         }
         for (uint256 i; i < len; ++i) {
             _acceptedPrices[i] = feeds[i].price;
@@ -773,28 +761,6 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
     // slither-disable-end cyclomatic-complexity
     // slither-disable-end reentrancy-eth
-
-    function _parseMissingFeeds(
-        bytes[] calldata pythUpdateData,
-        bytes32[] memory missingIds,
-        uint256 missingCount,
-        uint256 cutoff
-    ) internal returns (PythStructs.PriceFeed[] memory parsed, uint256 pythFee) {
-        bytes32[] memory requestedIds = new bytes32[](missingCount);
-        for (uint256 j; j < missingCount; ++j) {
-            requestedIds[j] = missingIds[j];
-        }
-        pythFee = pyth.getUpdateFee(pythUpdateData);
-        if (msg.value < pythFee) {
-            revert PletherOracle__InsufficientFee(msg.value, pythFee);
-        }
-        parsed = pyth.parsePriceFeedUpdatesUnique{value: pythFee}(
-            pythUpdateData, requestedIds, uint64(cutoff), uint64(block.timestamp)
-        );
-        if (parsed.length != missingCount) {
-            revert PletherOracle__ArrayLengthMismatch(parsed.length, missingCount, missingCount, missingCount);
-        }
-    }
 
     function _computeBasketPriceFromFeeds(
         PriceMode mode,
@@ -837,6 +803,12 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (maxPublishTime > minPublishTime + maxPublishTimeDivergence) {
             revert PletherOracle__PublishTimeDivergence(mode, minPublishTime, maxPublishTime, maxPublishTimeDivergence);
         }
+        if (mode == PriceMode.PoolReconcile) {
+            uint256 epochStart = block.timestamp - (block.timestamp % 1 hours);
+            if (minPublishTime < epochStart) {
+                revert PletherOracle__PoolEpochComponentTooOld(minPublishTime, epochStart);
+            }
+        }
 
         if (basket.price == 0) {
             revert PletherOracle__ZeroBasketPrice();
@@ -846,7 +818,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
                 mode, basket.confidence, basket.price, basketMaxConfidenceRatioBps
             );
         }
-        basket.publishTime = uint64(minPublishTime);
+        basket.publishTime = uint64(maxPublishTime);
     }
 
     function _snapshotFromBasket(

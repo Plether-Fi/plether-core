@@ -310,6 +310,10 @@ Mitigations:
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
 - conservative weighted basket confidence propagation, a timelocked aggregate pre-cap confidence limit, and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
+- live current baskets parse signed prices for every component within a caller-independent window of at most 15
+  seconds; component times cannot regress, equal-time marks cannot change price, and the newest component time
+  advances the protection clock,
+- live LP epoch reconciliation also requires every component to be published after the current epoch boundary,
 - frozen-oracle regime for close liveness during genuine market closure.
 
 Risks:

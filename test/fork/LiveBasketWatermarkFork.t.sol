@@ -6,7 +6,7 @@ import {ArbitrumSepoliaReleaseOracle} from "../../script/DeployPerpsArbitrumSepo
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 
-/// @notice Exercises the live watermark against the real Arbitrum Sepolia Pyth parser and signed Hermes bytes.
+/// @notice Exercises complete signed live baskets against the real Arbitrum Sepolia Pyth parser.
 contract LiveBasketWatermarkForkTest is BasePerpTest {
 
     string internal fixture;
@@ -45,19 +45,12 @@ contract LiveBasketWatermarkForkTest is BasePerpTest {
         vm.deal(address(this), 10 ether);
     }
 
-    function test_RealSignedFirstTicksAdvanceAndSkippedTickReverts() public {
+    function test_RealSignedBasketsAdvanceAndStaleDataReverts() public {
         uint256 initialCutoff = vm.parseJsonUint(fixture, ".updates.initial.cutoff");
         uint256 nextCutoff = vm.parseJsonUint(fixture, ".updates.next.cutoff");
         bytes[] memory initial = _data("initial");
         bytes[] memory next = _data("next");
-        bytes[] memory skipped = _data("skipped");
         assertEq(nextCutoff, initialCutoff + 6);
-        _assertFirstTick("initial");
-        _assertFirstTick("next");
-        uint256[] memory skippedPrevious = vm.parseJsonUintArray(fixture, ".updates.skipped.previousPublishTimes");
-        for (uint256 i; i < ids.length; ++i) {
-            assertGe(skippedPrevious[i], nextCutoff, "skipped payload has an earlier eligible tick");
-        }
 
         uint256[] memory storedBefore = new uint256[](ids.length);
         for (uint256 i; i < ids.length; ++i) {
@@ -86,13 +79,13 @@ contract LiveBasketWatermarkForkTest is BasePerpTest {
 
         vm.warp(nextCutoff + pletherOracle.LIVE_TICK_LOOKBACK());
         vm.roll(block.number + 1);
-        uint256 skippedFee = pletherOracle.getUpdateFee(skipped);
+        uint256 staleFee = pletherOracle.getUpdateFee(initial);
         vm.expectRevert();
-        IPyth(realPyth).parsePriceFeedUpdatesUnique{value: skippedFee}(
-            skipped, ids, uint64(nextCutoff), uint64(block.timestamp)
+        IPyth(realPyth).parsePriceFeedUpdates{value: staleFee}(
+            initial, ids, uint64(nextCutoff), uint64(block.timestamp)
         );
         vm.expectRevert();
-        router.updateMarkPrice{value: skippedFee}(skipped);
+        router.updateMarkPrice{value: staleFee}(initial);
         _assertAccepted(initialCutoff);
 
         fee = pletherOracle.getUpdateFee(next);
@@ -106,19 +99,6 @@ contract LiveBasketWatermarkForkTest is BasePerpTest {
         string memory name
     ) internal view returns (bytes[] memory) {
         return abi.decode(vm.parseJson(fixture, string.concat(".updates.", name, ".updateData")), (bytes[]));
-    }
-
-    function _assertFirstTick(
-        string memory name
-    ) internal view {
-        uint256 cutoff = vm.parseJsonUint(fixture, string.concat(".updates.", name, ".cutoff"));
-        uint256[] memory times = vm.parseJsonUintArray(fixture, string.concat(".updates.", name, ".publishTimes"));
-        uint256[] memory previous =
-            vm.parseJsonUintArray(fixture, string.concat(".updates.", name, ".previousPublishTimes"));
-        for (uint256 i; i < ids.length; ++i) {
-            assertEq(times[i], cutoff);
-            assertLt(previous[i], cutoff);
-        }
     }
 
     function _assertAccepted(

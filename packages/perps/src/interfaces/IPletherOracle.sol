@@ -9,7 +9,7 @@ import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 /// @title Plether perps basket oracle interface
 /// @notice Builds a capped, mode-aware Pyth basket for perps execution, liquidation, and pool accounting.
 /// @dev Basket prices and aggregate confidence use 8 decimals. Current-basket updates are Router-only and consume
-///      signed first-after-cutoff Pyth ticks; historical order resolution remains permissionless. The Router installs
+///      a complete signed Pyth basket within a bounded live window; historical order resolution remains permissionless. The Router installs
 ///      returned current marks in the Engine in the same transaction.
 interface IPletherOracle {
 
@@ -155,9 +155,11 @@ interface IPletherOracle {
     /// @param required ETH required by Pyth in wei.
     error PletherOracle__InsufficientFee(uint256 provided, uint256 required);
     /// @notice Thrown when a current basket predates the engine's cached mark.
-    /// @param publishTime Earliest basket component publish time.
+    /// @param publishTime Basket publish time.
     /// @param lastMarkTime Engine cached-mark publish time.
     error PletherOracle__PriceOutOfOrder(uint64 publishTime, uint64 lastMarkTime);
+    /// @notice A signed live component predates the previously accepted price for that feed.
+    error PletherOracle__FeedTimeOutOfOrder(bytes32 feedId, uint256 publishTime, uint256 acceptedPublishTime);
     /// @notice A replay disagrees with the Engine mark at the same oracle timestamp.
     error PletherOracle__EqualTimeMarkMismatch(uint64 publishTime, uint256 basketPrice, uint256 enginePrice);
     /// @notice No signed live basket has been accepted yet.
@@ -199,6 +201,8 @@ interface IPletherOracle {
     error PletherOracle__PublishTimeDivergence(
         PriceMode mode, uint256 minPublishTime, uint256 maxPublishTime, uint256 maxDivergence
     );
+    /// @notice A pool-reconciliation basket contains a feed published before the current LP epoch.
+    error PletherOracle__PoolEpochComponentTooOld(uint256 minPublishTime, uint256 epochStart);
     /// @notice Thrown when weighted basket construction rounds or resolves to zero.
     error PletherOracle__ZeroBasketPrice();
     /// @notice Thrown when configuration contains a zero required window or an excessive component divergence.
@@ -290,7 +294,7 @@ interface IPletherOracle {
     /// @param refundRecipient Recipient for any ETH left after paying Pyth fees.
     /// @param pythUpdateData Nonempty Pyth update payloads.
     /// @param account Account whose engine position determines the adverse confidence-shift direction.
-    /// @return snapshot Adverse 8-decimal price, neutral mark, earliest publish time, fee, and policy metadata.
+    /// @return snapshot Adverse 8-decimal price, neutral mark, newest publish time, fee, and policy metadata.
     function updateLiquidationPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,

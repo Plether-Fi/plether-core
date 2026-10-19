@@ -38,7 +38,7 @@ contract LiveBasketWatermarkTest is Test {
         vm.deal(address(this), 1 ether);
     }
 
-    function test_InitialBasketRequiresSignedFirstTicksAndIgnoresStoredFeeds() public {
+    function test_InitialBasketRequiresCompleteSignedFeedsAndIgnoresStoredFeeds() public {
         pyth.setPrice(A, 200_000_000, -8, 999);
         pyth.setPrice(B, 200_000_000, -8, 999);
         vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
@@ -52,42 +52,48 @@ contract LiveBasketWatermarkTest is Test {
             address(this), _twoTicks(100_000_000, 990, 980, 100_000_000, 993, 980), IPletherOracle.PriceMode.MarkRefresh
         );
         assertEq(snapshot.price, 100_000_000);
-        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.publishTime, 993);
         times = oracle.getAcceptedFeedPublishTimes();
         assertEq(times[0], 990);
         assertEq(times[1], 993);
         assertEq(pyth.updatePriceFeedsCallCount(), 0);
-        assertEq(pyth.parseUniqueCallCount(), 1);
+        assertEq(pyth.parseCallCount(), 1);
 
         pyth.setPrice(A, 50_000_000, -8, 1000);
         pyth.setPrice(B, 50_000_000, -8, 1000);
         assertEq(oracle.getLatestPrice(), 100_000_000);
     }
 
-    function test_ReusesFutureComponentAndRejectsSkippedFirstTick() public {
+    function test_RejectsMissingAndRegressedComponents() public {
         oracle.updatePrice{value: FEE}(
             address(this), _twoTicks(100_000_000, 990, 980, 100_000_000, 993, 980), IPletherOracle.PriceMode.MarkRefresh
         );
-        engine.setLastMark(100_000_000, 990);
+        engine.setLastMark(100_000_000, 993);
         vm.warp(1001);
         IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: FEE}(
-            address(this), _twoTicks(110_000_000, 991, 990, 80_000_000, 992, 991), IPletherOracle.PriceMode.MarkRefresh
+            address(this), _twoTicks(110_000_000, 994, 993, 80_000_000, 995, 993), IPletherOracle.PriceMode.MarkRefresh
         );
-        assertEq(snapshot.price, 105_000_000, "B at 993 remains the first tick after 991");
-        assertEq(snapshot.publishTime, 991);
+        assertEq(snapshot.price, 95_000_000);
+        assertEq(snapshot.publishTime, 995);
         engine.setLastMark(snapshot.markPrice, snapshot.publishTime);
 
         vm.warp(1002);
-        vm.expectRevert(bytes("feed not found within range"));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__FeedTimeOutOfOrder.selector);
         oracle.updatePrice{value: FEE}(
-            address(this), _twoTicks(120_000_000, 993, 992, 80_000_000, 992, 991), IPletherOracle.PriceMode.MarkRefresh
+            address(this), _twoTicks(120_000_000, 996, 994, 80_000_000, 994, 993), IPletherOracle.PriceMode.MarkRefresh
         );
-        assertEq(oracle.getLatestPrice(), 105_000_000);
+        bytes[] memory missing = new bytes[](1);
+        MockPyth.FeedUpdate[] memory onlyA = new MockPyth.FeedUpdate[](1);
+        onlyA[0] = MockPyth.FeedUpdate(A, MockPyth.MockPrice(120_000_000, 0, -8, 996, 994));
+        missing[0] = abi.encode(onlyA);
+        vm.expectRevert(bytes("feed not found within range"));
+        oracle.updatePrice{value: FEE}(address(this), missing, IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(oracle.getLatestPrice(), 95_000_000);
 
         bytes[] memory empty = new bytes[](0);
         snapshot = oracle.updatePrice(address(this), empty, IPletherOracle.PriceMode.MarkRefresh);
         assertEq(snapshot.updateFee, 0);
-        assertEq(snapshot.price, 105_000_000);
+        assertEq(snapshot.price, 95_000_000);
     }
 
     function test_EqualTimeReplayRequiresMatchingEngineMark() public {
@@ -97,6 +103,52 @@ contract LiveBasketWatermarkTest is Test {
         engine.setLastMark(101_000_000, 990);
         vm.expectPartialRevert(IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector);
         oracle.getLatestPrice(IPletherOracle.PriceMode.MarkRefresh);
+    }
+
+    function test_NewerComponentAdvancesBasketMarkerForProtection() public {
+        oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(120_000_000, 990, 980, 120_000_000, 993, 980), IPletherOracle.PriceMode.MarkRefresh
+        );
+        engine.setLastMark(120_000_000, 993);
+        vm.warp(1001);
+
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(130_000_000, 994, 990, 120_000_000, 993, 990), IPletherOracle.PriceMode.MarkRefresh
+        );
+        assertEq(snapshot.price, 125_000_000);
+        assertEq(snapshot.publishTime, 994, "a moving component advances the protection clock");
+    }
+
+    function test_EqualBasketMarkerCannotChangePrice() public {
+        oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(120_000_000, 990, 980, 120_000_000, 993, 980), IPletherOracle.PriceMode.MarkRefresh
+        );
+        engine.setLastMark(120_000_000, 993);
+        vm.warp(1001);
+
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector);
+        oracle.updatePrice{value: FEE}(
+            address(this), _twoTicks(140_000_000, 992, 990, 120_000_000, 993, 990), IPletherOracle.PriceMode.MarkRefresh
+        );
+    }
+
+    function test_PoolEpochRequiresEveryComponentAfterBoundary() public {
+        vm.warp(3605);
+        vm.expectRevert(
+            abi.encodeWithSelector(IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector, 3599, 3600)
+        );
+        oracle.updatePrice{value: FEE}(
+            address(this),
+            _twoTicks(120_000_000, 3599, 3590, 120_000_000, 3601, 3590),
+            IPletherOracle.PriceMode.PoolReconcile
+        );
+
+        IPletherOracle.PriceSnapshot memory snapshot = oracle.updatePrice{value: FEE}(
+            address(this),
+            _twoTicks(120_000_000, 3601, 3590, 120_000_000, 3602, 3590),
+            IPletherOracle.PriceMode.PoolReconcile
+        );
+        assertEq(snapshot.publishTime, 3602);
     }
 
     function test_FrozenReplaysEngineMarkAtZeroFee() public {

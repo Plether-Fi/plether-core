@@ -1241,7 +1241,7 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
 - Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `LONG` opens are priced lower, `SHORT` opens are priced higher, `LONG` closes are priced higher, and `SHORT` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
-- The minimum `publishTime` across feeds remains the basket publish time passed to the engine; historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
+- The newest component `publishTime` is the live basket marker passed to the engine, allowing protection to react when any component advances. A different price cannot replace an equal-time mark. Pool epoch settlement also requires every component to be published after the current round-hour boundary. Historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
 - Frozen-oracle close-only windows are the only regime that relaxes historical live-market settlement.
 - Protection creation, replacement, and triggering are disabled while `oracleFrozen`. A close generated before the
   freeze remains an ordinary close and may execute under the existing frozen-close policy.
