@@ -744,20 +744,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
 
         uint256 pythFee = 0;
         if (missingCount != 0) {
-            bytes32[] memory requestedIds = new bytes32[](missingCount);
-            for (uint256 j; j < missingCount; ++j) {
-                requestedIds[j] = missingIds[j];
-            }
-            pythFee = pyth.getUpdateFee(pythUpdateData);
-            if (msg.value < pythFee) {
-                revert PletherOracle__InsufficientFee(msg.value, pythFee);
-            }
-            PythStructs.PriceFeed[] memory parsed = pyth.parsePriceFeedUpdatesUnique{value: pythFee}(
-                pythUpdateData, requestedIds, uint64(cutoff), uint64(block.timestamp)
-            );
-            if (parsed.length != missingCount) {
-                revert PletherOracle__ArrayLengthMismatch(parsed.length, missingCount, missingCount, missingCount);
-            }
+            PythStructs.PriceFeed[] memory parsed;
+            (parsed, pythFee) = _parseMissingFeeds(pythUpdateData, missingIds, missingCount, cutoff);
             uint256 nextParsed = 0;
             for (uint256 i; i < len; ++i) {
                 if (feeds[i].id == bytes32(0)) {
@@ -785,6 +773,28 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     }
     // slither-disable-end cyclomatic-complexity
     // slither-disable-end reentrancy-eth
+
+    function _parseMissingFeeds(
+        bytes[] calldata pythUpdateData,
+        bytes32[] memory missingIds,
+        uint256 missingCount,
+        uint256 cutoff
+    ) internal returns (PythStructs.PriceFeed[] memory parsed, uint256 pythFee) {
+        bytes32[] memory requestedIds = new bytes32[](missingCount);
+        for (uint256 j; j < missingCount; ++j) {
+            requestedIds[j] = missingIds[j];
+        }
+        pythFee = pyth.getUpdateFee(pythUpdateData);
+        if (msg.value < pythFee) {
+            revert PletherOracle__InsufficientFee(msg.value, pythFee);
+        }
+        parsed = pyth.parsePriceFeedUpdatesUnique{value: pythFee}(
+            pythUpdateData, requestedIds, uint64(cutoff), uint64(block.timestamp)
+        );
+        if (parsed.length != missingCount) {
+            revert PletherOracle__ArrayLengthMismatch(parsed.length, missingCount, missingCount, missingCount);
+        }
+    }
 
     function _computeBasketPriceFromFeeds(
         PriceMode mode,
