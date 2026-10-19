@@ -109,7 +109,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         router.updateMarkPrice(_emptyUpdateData());
         uint64 markTimeBefore = engine.lastMarkTime();
         vm.warp(boundary + 30);
-        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector);
         router.settleLpEpoch(new bytes[](0));
 
         assertEq(engine.lastMarkTime(), markTimeBefore, "rejected boundary mark must roll back Engine state");
@@ -169,7 +169,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
 
         uint64 markTimeBefore = engine.lastMarkTime();
         _setBasket(110_000_000, 0, boundary - 1);
-        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector);
         router.settleLpEpoch(_emptyUpdateData());
 
         assertEq(engine.lastMarkTime(), markTimeBefore, "failed boundary attempt must roll back the Engine mark");
@@ -339,7 +339,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
 
         updateCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
         _setBasket(110_000_000, 0, boundary - 1);
-        vm.expectRevert(bytes("feed not found within range"));
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__FeedTimeOutOfOrder.selector);
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(
             baseMockPyth.updatePriceFeedsCallCount(), updateCallsBefore, "out-of-order update must roll back Pyth call"

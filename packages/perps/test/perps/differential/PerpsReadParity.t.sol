@@ -244,6 +244,7 @@ contract PerpsReadParityTest is BasePerpTest {
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, keeper);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
+        _ensureLaterOracleTime();
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
 

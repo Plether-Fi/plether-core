@@ -23,7 +23,6 @@ import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
-import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -99,7 +98,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        vm.expectRevert(bytes("outside range"));
         router.updateMarkPrice(updateData);
     }
 
@@ -110,7 +109,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        vm.expectRevert(bytes("outside range"));
         router.updateMarkPrice(updateData);
 
         assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
@@ -118,7 +117,7 @@ contract MarkPriceStalenessTest is BasePerpTest {
 
     function test_UpdateMarkPrice_AcceptsFreshOracle() public {
         _startRecordingLogs();
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 30);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp - 10);
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";

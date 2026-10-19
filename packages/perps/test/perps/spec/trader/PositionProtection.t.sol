@@ -308,7 +308,7 @@ contract PositionProtectionTest is BasePerpTest {
 
         vm.roll(block.number + 1);
         vm.warp(block.timestamp + 1);
-        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(LONG_TAKE_PROFIT)), 0, int32(-8), armed.armedAt);
+        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(LONG_TAKE_PROFIT)), 0, int32(-8), armed.armedAt - 60);
         bytes[] memory oldPublishData = new bytes[](1);
         oldPublishData[0] = hex"01";
 

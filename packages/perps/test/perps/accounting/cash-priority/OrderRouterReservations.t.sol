@@ -199,8 +199,9 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         _open(account, CfdTypes.Side.LONG, 50_000e18, 1000e6, 1e8);
         _open(counterpartyAccount, CfdTypes.Side.SHORT, 50_000e18, 50_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(103_000_000, uint64(vm.getBlockTimestamp()));
 
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 

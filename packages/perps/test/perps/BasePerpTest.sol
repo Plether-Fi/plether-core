@@ -431,6 +431,12 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
 
     // --- Trading helpers ---
 
+    function _ensureLaterOracleTime() internal {
+        if (vm.getBlockTimestamp() <= engine.lastMarkTime()) {
+            vm.warp(uint256(engine.lastMarkTime()) + 1);
+        }
+    }
+
     function _open(
         address account,
         CfdTypes.Side side,
