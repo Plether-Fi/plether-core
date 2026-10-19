@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-import {PletherOracleEngineMock, PletherOracleVaultMock} from "./PletherOracle.t.sol";
+import {PletherOracleEngineMock, PletherOracleVaultMock} from "./PletherOracleMocks.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";

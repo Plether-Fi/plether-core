@@ -702,6 +702,11 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         basket.confidence = basket.price * basketMaxConfidenceRatioBps / 10_000;
     }
 
+    /// @dev Every state-changing caller is nonReentrant. During the Pyth call, views can only see the previous
+    ///      complete accepted basket; after the call, all accepted-basket writes occur without another external call.
+    ///      The bounded cache/parse branches are kept together to validate one complete basket before storing it.
+    // slither-disable-start reentrancy-eth
+    // slither-disable-start cyclomatic-complexity
     function _resolveCurrentBasket(
         bytes[] calldata pythUpdateData,
         PriceMode mode,
@@ -727,7 +732,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         uint256 len = pythFeedIds.length;
         bytes32[] memory missingIds = new bytes32[](len);
         PythStructs.PriceFeed[] memory feeds = new PythStructs.PriceFeed[](len);
-        uint256 missingCount;
+        uint256 missingCount = 0;
         for (uint256 i; i < len; ++i) {
             PythStructs.Price memory cached = _acceptedPrices[i];
             if (hasAcceptedBasket && cached.publishTime >= cutoff) {
@@ -737,7 +742,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             }
         }
 
-        uint256 pythFee;
+        uint256 pythFee = 0;
         if (missingCount != 0) {
             bytes32[] memory requestedIds = new bytes32[](missingCount);
             for (uint256 j; j < missingCount; ++j) {
@@ -753,7 +758,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             if (parsed.length != missingCount) {
                 revert PletherOracle__ArrayLengthMismatch(parsed.length, missingCount, missingCount, missingCount);
             }
-            uint256 nextParsed;
+            uint256 nextParsed = 0;
             for (uint256 i; i < len; ++i) {
                 if (feeds[i].id == bytes32(0)) {
                     feeds[i] = parsed[nextParsed++];
@@ -778,6 +783,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         hasAcceptedBasket = true;
         basket.pythFee = pythFee;
     }
+    // slither-disable-end cyclomatic-complexity
+    // slither-disable-end reentrancy-eth
 
     function _computeBasketPriceFromFeeds(
         PriceMode mode,

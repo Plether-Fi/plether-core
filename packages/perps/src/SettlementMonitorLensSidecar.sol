@@ -333,45 +333,37 @@ contract SettlementMonitorLensSidecar {
         }
     }
 
+    /// @dev Compact selector/shape checks keep the facade and its constructor-created sidecar deployable.
+    // slither-disable-next-line assembly
     function _isRecognizedOraclePolicyFailure(
         bytes4 selector,
         uint256 returnSize,
         uint256 failureArg0,
         uint256 failureArg1
-    ) internal pure returns (bool) {
-        if (returnSize == 164) {
-            return selector == IPletherOracle.PletherOracle__StalePrice.selector
-                && failureArg0 == uint256(IPletherOracle.PriceMode.PoolReconcile);
-        }
-        if (returnSize == 132) {
-            return (selector == IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector
-                    || selector == IPletherOracle.PletherOracle__PublishTimeDivergence.selector)
-                && failureArg0 == uint256(IPletherOracle.PriceMode.PoolReconcile);
-        }
-        if (returnSize == 68) {
-            if (selector == IPletherOracle.PletherOracle__PriceOutOfOrder.selector) {
-                return failureArg0 <= type(uint64).max && failureArg1 <= type(uint64).max;
-            }
-            if (selector == IPletherOracle.PletherOracle__InvalidPrice.selector) {
-                return _isCanonicalInt64(failureArg1);
-            }
-            return false;
-        }
-        if (returnSize == 100) {
-            return
-                selector == IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector
-                    && failureArg0 <= type(uint64).max;
-        }
-        return returnSize == 4
-            && (selector == IPletherOracle.PletherOracle__ZeroBasketPrice.selector
-                || selector == IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
-    }
-
-    function _isCanonicalInt64(
-        uint256 word
-    ) internal pure returns (bool canonical) {
+    ) internal pure returns (bool recognized) {
+        bytes4 stale = IPletherOracle.PletherOracle__StalePrice.selector;
+        bytes4 confidence = IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector;
+        bytes4 divergence = IPletherOracle.PletherOracle__PublishTimeDivergence.selector;
+        bytes4 outOfOrder = IPletherOracle.PletherOracle__PriceOutOfOrder.selector;
+        bytes4 invalidSelector = IPletherOracle.PletherOracle__InvalidPrice.selector;
+        bytes4 mismatch = IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector;
+        bytes4 zero = IPletherOracle.PletherOracle__ZeroBasketPrice.selector;
+        bytes4 missing = IPletherOracle.PletherOracle__NoAcceptedBasket.selector;
+        uint256 poolMode = uint256(IPletherOracle.PriceMode.PoolReconcile);
         assembly ("memory-safe") {
-            canonical := eq(word, signextend(7, word))
+            switch returnSize
+            case 164 { recognized := and(eq(selector, stale), eq(failureArg0, poolMode)) }
+            case 132 {
+                recognized := and(or(eq(selector, confidence), eq(selector, divergence)), eq(failureArg0, poolMode))
+            }
+            case 68 {
+                recognized := or(
+                    and(eq(selector, outOfOrder), and(iszero(shr(64, failureArg0)), iszero(shr(64, failureArg1)))),
+                    and(eq(selector, invalidSelector), eq(failureArg1, signextend(7, failureArg1)))
+                )
+            }
+            case 100 { recognized := and(eq(selector, mismatch), iszero(shr(64, failureArg0))) }
+            case 4 { recognized := or(eq(selector, zero), eq(selector, missing)) }
         }
     }
 
