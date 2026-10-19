@@ -536,6 +536,7 @@ contract OrderExecutionBoundsMatrixTest is BasePerpTest {
         _close(ACCOUNT, CfdTypes.Side.LONG, SIZE, 70_000_000);
         assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 997_200_000);
         usdc.mint(address(pool), cashShock);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(90_000_000, uint64(vm.getBlockTimestamp()));
         // The remaining 100 lots lose $1,000 at $0.90: $997.20 claims and $2.80 pledge fund that loss.

@@ -494,13 +494,13 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             uint8(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh)
         );
         assertEq(early.status.clock.minimumAtomicPublishTime, boundary);
-        assertTrue(early.oracle.readSucceeded);
-        assertTrue(early.oracle.policyValid);
+        assertFalse(early.oracle.readSucceeded);
+        assertFalse(early.oracle.policyValid);
         assertFalse(early.oracle.publishTimeMeetsEpochFloor);
         assertTrue(
             _hasOperationalBlocker(
                 early.status.operationalBlockerMask,
-                SettlementMonitorViewTypes.OperationalBlocker.OracleBeforeEpochBoundary
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
             )
         );
         assertFalse(early.observationComplete);

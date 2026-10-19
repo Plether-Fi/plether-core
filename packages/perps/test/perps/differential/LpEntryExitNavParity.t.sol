@@ -57,8 +57,9 @@ contract PendingDepositLifecycleNavTest is BasePerpTest {
         _open(long, CfdTypes.Side.LONG, size, 20_000e6, 1e8);
         _open(short, CfdTypes.Side.SHORT, size, 20_000e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(120_000_000, uint64(vm.getBlockTimestamp()));
 
         (, uint256 depositJuniorAssets) = pool.getPendingDepositTrancheState();
         uint256 withdrawalJuniorAssets = juniorVault.totalAssets();

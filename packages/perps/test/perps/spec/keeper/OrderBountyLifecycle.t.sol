@@ -614,8 +614,9 @@ contract PendingDepositLifecycleBountyTest is BasePerpTest {
         _fundTrader(account, 2000e6);
         _open(account, CfdTypes.Side.LONG, size, 2000e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(150_000_000, uint64(vm.getBlockTimestamp()));
 
         uint256 accountBalanceBeforeCommit = clearinghouse.balanceUsdc(account);
         vm.prank(account);
@@ -799,6 +800,7 @@ contract TerminalActionLivenessTest is BasePerpTest {
         vm.mockCallRevert(address(pool), abi.encodeWithSelector(pool.payOut.selector), bytes("pool illiquid"));
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.roll(block.number + 1);
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
@@ -998,7 +1000,7 @@ contract SnapshottedCloseBountyTest is BasePerpTest {
             maintMarginBps: 100,
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
-            baseCarryBps: 500,
+            baseCarryBps: 0,
             minBountyUsdc: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
@@ -1013,8 +1015,9 @@ contract SnapshottedCloseBountyTest is BasePerpTest {
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
         _open(counterparty, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(1.96e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.96e8, uint64(vm.getBlockTimestamp()));
 
         (, uint256 marginBefore,,,,,) = engine.positions(trader);
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeper);

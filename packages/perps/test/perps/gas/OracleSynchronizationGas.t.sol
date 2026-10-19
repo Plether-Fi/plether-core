@@ -18,12 +18,12 @@ contract OracleSynchronizationGasTest is OracleSynchronizationTestBase {
     function test_Gas_SixFeedLiveRefreshUsesOneParseAndNoStorageUpdate() public {
         uint64 previous = engine.lastMarkTime();
         _advance(previous + 1);
-        uint256 parses = baseMockPyth.parseUniqueCallCount();
+        uint256 parses = baseMockPyth.parseCallCount();
         uint256 updates = baseMockPyth.updatePriceFeedsCallCount();
         uint256 beforeGas = gasleft();
         router.updateMarkPrice{value: FEE, gas: KEEPER_GAS_CAP}(_payload(previous + 1, previous));
         emit log_named_uint("six feed live refresh gas", beforeGas - gasleft());
-        assertEq(baseMockPyth.parseUniqueCallCount(), parses + 1);
+        assertEq(baseMockPyth.parseCallCount(), parses + 1);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
         (bool accepted, uint256 price, uint64 tick) = pletherOracle.getAcceptedBasketMark();
         assertTrue(accepted);

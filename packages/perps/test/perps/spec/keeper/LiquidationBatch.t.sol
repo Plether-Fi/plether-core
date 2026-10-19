@@ -85,7 +85,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         address[] memory accounts = new address[](1);
         accounts[0] = ELIGIBLE_ONE;
         bytes[] memory updateData = new bytes[](0);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         (bool ok, bytes memory result) = foreign.execute(router.liquidationBatchSidecar(), accounts, updateData);
 
@@ -97,9 +97,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         );
 
         assertEq(
-            baseMockPyth.parseUniqueCallCount(),
-            pythCallsBefore,
-            "foreign delegate context must reject before oracle work"
+            baseMockPyth.parseCallCount(), pythCallsBefore, "foreign delegate context must reject before oracle work"
         );
     }
 
@@ -156,14 +154,14 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         accounts[4] = ELIGIBLE_TWO;
 
         bytes[] memory updateData = _liveLiquidationData(LIQUIDATION_PRICE);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
         uint256 keeperSettlementBefore = _settlementBalance(KEEPER);
         uint256 routerSettlementBefore = _settlementBalance(address(router));
 
         vm.prank(KEEPER);
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
 
-        assertEq(baseMockPyth.parseUniqueCallCount() - pythCallsBefore, 1, "the batch must update Pyth exactly once");
+        assertEq(baseMockPyth.parseCallCount() - pythCallsBefore, 1, "the batch must update Pyth exactly once");
         assertEq(_positionSize(ELIGIBLE_ONE), 0, "first eligible account must liquidate");
         assertEq(_positionSize(ELIGIBLE_TWO), 0, "later eligible account must survive earlier skips");
         assertEq(_positionSize(SOLVENT), solventSizeBefore, "solvent account position must remain unchanged");
@@ -271,7 +269,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         bytes[] memory updateData = _liveLiquidationData(LIQUIDATION_PRICE);
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
         uint256 keeperBefore = _settlementBalance(KEEPER);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         vm.prank(KEEPER);
         uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
@@ -307,7 +305,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
             "keeper must receive the liquidation bounty"
         );
         assertEq(
-            baseMockPyth.parseUniqueCallCount() - pythCallsBefore,
+            baseMockPyth.parseCallCount() - pythCallsBefore,
             1,
             "maximum-order liquidation must still share one Pyth update"
         );
@@ -334,7 +332,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         accounts[1] = succeedingAccount;
         bytes[] memory updateData = _liveLiquidationData(LIQUIDATION_PRICE);
         uint256 keeperSettlementBefore = _settlementBalance(KEEPER);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         vm.prank(KEEPER);
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
@@ -347,7 +345,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
             "failed item must not pay a bounty"
         );
         assertEq(
-            baseMockPyth.parseUniqueCallCount() - pythCallsBefore,
+            baseMockPyth.parseCallCount() - pythCallsBefore,
             1,
             "per-account failure must not trigger another Pyth update"
         );
@@ -375,7 +373,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         accounts[2] = laterAccount;
         bytes[] memory updateData = _liveLiquidationData(LIQUIDATION_PRICE);
         uint256 keeperSettlementBefore = _settlementBalance(KEEPER);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         vm.prank(KEEPER);
         uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
@@ -390,7 +388,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
             "only the earlier successful item may pay a bounty"
         );
         assertEq(
-            baseMockPyth.parseUniqueCallCount() - pythCallsBefore,
+            baseMockPyth.parseCallCount() - pythCallsBefore,
             1,
             "empty item revert must not roll back or repeat the shared oracle update"
         );
@@ -451,14 +449,12 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         address[] memory accounts = new address[](1);
         accounts[0] = NO_POSITION;
         bytes[] memory updateData = _liveLiquidationData(NEUTRAL_PRICE);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InsufficientFee.selector, 0, requiredFee));
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
 
-        assertEq(
-            baseMockPyth.parseUniqueCallCount(), pythCallsBefore, "insufficient fee must revert before Pyth update"
-        );
+        assertEq(baseMockPyth.parseCallCount(), pythCallsBefore, "insufficient fee must revert before Pyth update");
     }
 
     function test_Batch_SequentialCallsClearOuterGuardAndPreserveOracleValueFlow() public {
@@ -471,7 +467,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         accounts[0] = NO_POSITION;
         uint256 callerBalanceBefore = address(this).balance;
         uint256 pythBalanceBefore = address(baseMockPyth).balance;
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         bytes[] memory firstUpdateData = _liveLiquidationData(NEUTRAL_PRICE);
         uint256 firstNextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch{value: updateFee + overpayment}(
@@ -486,7 +482,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         assertEq(firstNextIndex, 1, "first call must complete");
         assertEq(secondNextIndex, 1, "a completed call must clear the outer transient guard");
         assertEq(
-            baseMockPyth.parseUniqueCallCount() - pythCallsBefore,
+            baseMockPyth.parseCallCount() - pythCallsBefore,
             2,
             "each independent call must perform exactly one oracle update"
         );
@@ -508,23 +504,23 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
     function test_Batch_EmptyAccountsRevertsBeforePythUpdate() public {
         address[] memory accounts = new address[](0);
         bytes[] memory updateData = new bytes[](0);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidLiquidationBatchSize.selector);
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
 
-        assertEq(baseMockPyth.parseUniqueCallCount(), pythCallsBefore, "empty batch must reject before oracle work");
+        assertEq(baseMockPyth.parseCallCount(), pythCallsBefore, "empty batch must reject before oracle work");
     }
 
     function test_Batch_MoreThan256AccountsRevertsBeforePythUpdate() public {
         address[] memory accounts = new address[](257);
         bytes[] memory updateData = new bytes[](0);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidLiquidationBatchSize.selector);
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
 
-        assertEq(baseMockPyth.parseUniqueCallCount(), pythCallsBefore, "oversized batch must reject before oracle work");
+        assertEq(baseMockPyth.parseCallCount(), pythCallsBefore, "oversized batch must reject before oracle work");
     }
 
     function test_Batch_LowGasReturnsSameUnattemptedIndex() public {
@@ -539,7 +535,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         address[] memory accounts = new address[](1);
         accounts[0] = unattemptedAccount;
         bytes[] memory updateData = _liveLiquidationData(NEUTRAL_PRICE);
-        uint256 pythCallsBefore = baseMockPyth.parseUniqueCallCount();
+        uint256 pythCallsBefore = baseMockPyth.parseCallCount();
 
         vm.prank(KEEPER);
         uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch{gas: 1_200_000}(accounts, updateData);
@@ -548,7 +544,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         assertEq(_positionSize(unattemptedAccount), 0, "unattempted account position state must remain unchanged");
         _assertReservationUnchanged(unattemptedAccount, reservationBefore);
         assertEq(
-            baseMockPyth.parseUniqueCallCount() - pythCallsBefore,
+            baseMockPyth.parseCallCount() - pythCallsBefore,
             1,
             "shared oracle update must complete before the clean low-gas stop"
         );

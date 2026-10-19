@@ -103,8 +103,9 @@ contract HousePoolAccountBehaviorTest is HousePoolAsyncTestBase {
         _fundTrader(alice, 50_000e6);
         _open(alice, CfdTypes.Side.SHORT, 100_000e18, 10_000e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.1e8, uint64(vm.getBlockTimestamp()));
         assertLt(_terminalLpPriceDelta(), 0, "setup requires a live trader-profit liability");
 
         (, uint256 withdrawalJuniorNav,,) = pool.getPendingTrancheState();
