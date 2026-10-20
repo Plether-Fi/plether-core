@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -215,6 +216,63 @@ contract SeniorCapacityTest is BasePerpTest {
         assertEq(seniorVault.claimableDepositRequest(epochId, ALICE), reservedAssets);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
         assertEq(pool.getSeniorDepositCapacity(), 0);
+    }
+
+    function test_RateChangeFreshnessCannotDisplaceFirmSeniorReservation() public {
+        _fundJunior(BOB, 200_000e6);
+
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.maxSeniorExposureUsdc = 2000e6;
+        config.maxSeniorShareBps = 9999;
+        config.markStalenessLimit = 300;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+        _refreshMark();
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+
+        _fundTrader(CAROL, 50_000e6);
+        _refreshMark();
+        _open(CAROL, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
+
+        uint256 reservedAssets = pool.getSeniorDepositCapacity();
+        assertGt(reservedAssets, 0);
+        uint256 epochId = _requestSenior(ALICE, reservedAssets);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
+
+        config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
+        uint256 activationTime = pool.poolConfigActivationTime();
+        uint256 markTime = activationTime - 120;
+        vm.warp(markTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(markTime));
+        vm.warp(activationTime);
+
+        uint256 principalBefore = pool.seniorPrincipal();
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        pool.finalizePoolConfig();
+        assertEq(pool.seniorRateBps(), 800);
+        assertEq(pool.seniorPrincipal(), principalBefore);
+        assertEq(pool.lastSeniorCouponCheckpointTime(), couponCheckpoint);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
+        assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(activationTime));
+        pool.finalizePoolConfig();
+        assertEq(pool.seniorRateBps(), 1600);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
+        assertFalse(pool.areSeniorDepositReservationsWithinLimits());
+        assertEq(pool.getSeniorDepositCapacity(), 0);
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+        assertEq(result.seniorDepositAssets, reservedAssets);
+        assertEq(seniorVault.claimableDepositRequest(epochId, ALICE), reservedAssets);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
 
     function test_RatioCap_ExactBoundaryUsesJuniorCapital() public {
