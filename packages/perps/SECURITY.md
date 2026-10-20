@@ -78,6 +78,16 @@ The release-script `frozenCloseSpreadBps` default is `50` bps (0.50%). Both cons
 The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
 `0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
 
+### Owner-funded recapitalization
+
+`CfdEngine.recapitalizePool(amountUsdc)` is an immediate, owner-only, non-reentrant recovery action.
+The engine owner approves the engine to pull USDC from its own wallet directly into the configured HousePool.
+The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
+`Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
+The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
+automatically cleared. Funding remains available with stale marks, frozen markets, and LP pause or settlement holds.
+`CfdEngineAdmin` retains its configuration-only role.
+
 ### One-time wiring
 
 These are one-time configuration setters rather than mutable governance knobs:

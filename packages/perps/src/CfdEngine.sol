@@ -641,6 +641,34 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         _endTerminalCurveMutation(account, expectedOldHash);
     }
 
+    /// @notice Funds non-dilutive claimant recapitalization from the engine owner's wallet.
+    /// @dev The owner must approve this engine for USDC. Checkpoints carry before changing pool depth and requires
+    ///      exact receipt before queuing recapitalization. Allocation occurs through normal pool reconciliation;
+    ///      this call mints no shares and does not clear degraded mode. Funding remains available while paused or frozen.
+    /// @param amountUsdc Nonzero USDC amount to transfer directly into the configured pool (6 decimals).
+    function recapitalizePool(
+        uint256 amountUsdc
+    ) external onlyOwner nonReentrant {
+        if (amountUsdc == 0) {
+            revert CfdEngine__ZeroAmount();
+        }
+        if (address(pool) == address(0)) {
+            revert CfdEngine__InvalidPool();
+        }
+        _advanceAllCarryIndexes(block.timestamp);
+        uint256 balanceBefore = USDC.balanceOf(address(pool));
+        USDC.safeTransferFrom(msg.sender, address(pool), amountUsdc);
+        uint256 balanceAfter = USDC.balanceOf(address(pool));
+        uint256 received = balanceAfter >= balanceBefore ? balanceAfter - balanceBefore : 0;
+        if (received != amountUsdc) {
+            revert CfdEngine__UnexpectedTransferAmount(amountUsdc, received);
+        }
+        pool.recordClaimantInflow(
+            amountUsdc, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        emit PoolRecapitalized(msg.sender, amountUsdc);
+    }
+
     /// @notice Clears degraded mode once adjusted solvency has recovered.
     /// @dev Callable only by the owner. Recovery requires HousePool physical assets net of senior trader claims to
     ///      cover the larger side's aggregate maximum-profit liability.

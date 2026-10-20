@@ -621,6 +621,12 @@ Keep these categories separate:
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the pool and only needing ownership routing
 - `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
 
+Governance funds recapitalization through `CfdEngine.recapitalizePool(amountUsdc)`. The engine owner approves
+the engine for USDC; the call checkpoints carry at the old depth, transfers from the owner's wallet directly to
+the pool, and verifies exact receipt before recording `Recapitalization` with `CashArrived`. Transfer and recording
+are atomic. Normal reconciliation allocates the queued amount to senior restoration or unassigned assets;
+the funding call mints no LP shares and does not automatically clear degraded mode.
+
 Rules:
 
 - source semantics decide the owner of the inflow,

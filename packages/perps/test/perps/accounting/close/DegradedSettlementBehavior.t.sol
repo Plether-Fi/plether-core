@@ -8,7 +8,6 @@ import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 contract CloseContainmentTransitionsTest is BasePerpTest {
 
@@ -114,11 +113,10 @@ contract CloseContainmentTransitionsTest is BasePerpTest {
         vm.expectRevert(ICfdEngineTypes.CfdEngine__StillInsolvent.selector);
         engine.clearDegradedMode();
 
-        usdc.mint(address(pool), 500_000e6);
-        vm.prank(address(engine));
-        pool.recordClaimantInflow(
-            500_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
-        );
+        usdc.mint(address(this), 500_000e6);
+        usdc.approve(address(engine), 500_000e6);
+        engine.recapitalizePool(500_000e6);
+        assertTrue(engine.degradedMode(), "Funding must not automatically clear degraded mode");
         vm.prank(address(juniorVault));
         pool.reconcile();
         engine.clearDegradedMode();
