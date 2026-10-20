@@ -44,8 +44,10 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidPletherOracle();
     /// @notice The supplied stateless keeper sidecar has no code or is not bound to this exact Router address.
     error OrderRouter__InvalidKeeperSidecar();
-    /// @notice The engine-lens dependency is the zero address.
+    /// @notice The engine lens has no code, lacks its binding getters, or is bound to another engine.
     error OrderRouter__InvalidEngineLens();
+    /// @notice The HousePool has no code, is bound to another engine, or lacks its binding or asset-total getter.
+    error OrderRouter__InvalidHousePool();
     /// @notice The V3 policy-evaluator dependency is zero or has no deployed code.
     error OrderRouter__InvalidPolicyEvaluator();
     /// @notice The immutable V3 execution-sidecar dependency is zero or has no deployed code.

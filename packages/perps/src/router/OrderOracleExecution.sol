@@ -8,6 +8,18 @@ import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {OrderReservationAccounting} from "@plether/perps/router/OrderReservationAccounting.sol";
 import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 
+interface IOrderRouterEngineLensBinding {
+
+    function engineContract() external view returns (address);
+
+}
+
+interface IOrderRouterHousePoolBinding {
+
+    function ENGINE() external view returns (address);
+
+}
+
 /// @title OrderOracleExecution
 /// @notice Owns and validates the Router oracle, engine lens, and HousePool bindings.
 abstract contract OrderOracleExecution is OrderReservationAccounting {
@@ -20,8 +32,8 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
     IPletherOracle public pletherOracle;
 
     /// @notice Binds the router oracle layer to its engine, lens, pool, and initial Plether oracle.
-    /// @dev Reverts for a zero engine lens. The oracle is validated for deployed code, nonzero Pyth,
-    ///      and exact engine and HousePool wiring; `_housePool` itself is not independently code-checked.
+    /// @dev Requires deployed lens and pool contracts bound to this engine, and a readable pool asset total.
+    ///      The oracle is validated for deployed code, nonzero Pyth, and exact engine and HousePool wiring.
     /// @param _engine Engine used for mark updates and oracle identity validation.
     /// @param _engineLens Engine lens used for open preflight reads.
     /// @param _housePool House pool used for depth and oracle identity validation.
@@ -32,11 +44,39 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         address _housePool,
         address _pletherOracle
     ) OrderReservationAccounting(_engine) {
-        if (_engineLens == address(0)) {
+        if (_engineLens.code.length == 0) {
             revert OrderRouter__InvalidEngineLens();
         }
-        housePool = IHousePool(_housePool);
         engineLens = ICfdEngineLens(_engineLens);
+        try engineLens.engine() returns (address lensEngine) {
+            if (lensEngine != _engine) {
+                revert OrderRouter__InvalidEngineLens();
+            }
+        } catch {
+            revert OrderRouter__InvalidEngineLens();
+        }
+        try IOrderRouterEngineLensBinding(_engineLens).engineContract() returns (address lensEngine) {
+            if (lensEngine != _engine) {
+                revert OrderRouter__InvalidEngineLens();
+            }
+        } catch {
+            revert OrderRouter__InvalidEngineLens();
+        }
+        if (_housePool.code.length == 0) {
+            revert OrderRouter__InvalidHousePool();
+        }
+        housePool = IHousePool(_housePool);
+        try IOrderRouterHousePoolBinding(_housePool).ENGINE() returns (address poolEngine) {
+            if (poolEngine != _engine) {
+                revert OrderRouter__InvalidHousePool();
+            }
+        } catch {
+            revert OrderRouter__InvalidHousePool();
+        }
+        try housePool.totalAssets() returns (uint256) {}
+        catch {
+            revert OrderRouter__InvalidHousePool();
+        }
         _validateOracleConfig(_pletherOracle);
         pletherOracle = IPletherOracle(_pletherOracle);
     }
