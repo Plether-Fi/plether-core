@@ -512,8 +512,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Enables live trading after both tranche seed positions are initialized.
-    /// @dev Only the owner may call. Requires finite governed senior limits and compliant seeded protected exposure.
-    ///      It does not itself validate oracle freshness. Repeated calls leave the flag set and emit the event again.
+    /// @dev Only the owner may call. Requires finite governed senior limits, compliant seeded protected exposure,
+    ///      and no unresolved ownerless assets on initial activation. It does not itself validate oracle freshness.
+    ///      Repeated calls leave the flag set and emit the event again.
     function activateTrading() external onlyOwner {
         if (!HousePoolSeedLifecycleLib.tradingActivationReady(seniorSeedInitialized, juniorSeedInitialized)) {
             revert HousePool__TradingActivationNotReady();
@@ -524,6 +525,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         if (!_seniorCommitmentsWithinLimits(ctx.pendingState.waterfall)) {
             revert HousePool__ExceedsSeniorDepositCapacity();
+        }
+        if (
+            !isTradingActive
+                && (unassignedAssets != 0
+                    || ctx.pendingState.unassignedAssets != 0
+                    || ctx.residualPendingClaimantAssets != 0)
+        ) {
+            revert HousePool__PendingBootstrap();
         }
         isTradingActive = true;
         emit TradingActivated();

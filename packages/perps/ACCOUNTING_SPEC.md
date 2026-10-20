@@ -332,7 +332,8 @@ Rules:
 
 Required consequences:
 
-- `unassignedAssets > 0` blocks new tranche-deposit requests and activation,
+- `unassignedAssets > 0` blocks new tranche-deposit requests and deposit activation; initial trading activation also
+  rejects stored or projected unassigned assets and residual pending claimant assets,
 - a wiped tranche cannot be silently revived by an ordinary asynchronous deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
 

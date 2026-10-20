@@ -847,7 +847,8 @@ Security purpose:
 ### Seed and senior-capacity lifecycle gate
 
 The protocol blocks normal live operation until governance finalizes a finite absolute senior limit and a senior-share
-limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated.
+limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated. Initial trading
+activation also requires no stored or projected unassigned assets and no residual pending claimant assets.
 
 This prevents partially initialized or uncapped live state and ambiguous ownership of early revenue flows.
 
