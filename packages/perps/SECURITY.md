@@ -145,7 +145,7 @@ The owner can act immediately to:
 - pause and unpause `HousePool` LP epoch settlement independently,
 - install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
 - rotate or disable the coordinator guardian,
-- set the protocol treasury account once the previous treasury clearinghouse balance is empty,
+- set the protocol treasury account; existing balances remain withdrawable by their original accounts,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:

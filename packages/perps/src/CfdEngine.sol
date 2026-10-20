@@ -440,8 +440,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Updates the clearinghouse account receiving protocol fees.
-    /// @dev Callable only by the owner. For a change, the current treasury must have a zero clearinghouse balance;
-    ///      no existing balance is migrated. Supplying the current treasury is a no-op.
+    /// @dev Callable only by the owner. Existing balances remain in their original clearinghouse accounts;
+    ///      supplying the current treasury is a no-op.
     /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
     function setProtocolTreasury(
         address treasury
@@ -449,12 +449,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (treasury == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
-        address currentTreasury = protocolTreasury;
-        if (treasury == currentTreasury) {
+        if (treasury == protocolTreasury) {
             return;
-        }
-        if (clearinghouse.balanceUsdc(currentTreasury) != 0) {
-            revert CfdEngine__ProtocolTreasuryBalanceNotEmpty();
         }
         protocolTreasury = treasury;
         emit ProtocolTreasuryUpdated(treasury);

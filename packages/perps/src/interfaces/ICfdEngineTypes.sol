@@ -25,8 +25,6 @@ interface ICfdEngineTypes {
     error CfdEngine__InvalidSettlementAsset();
     /// @notice The proposed pool has no code or is not bound to this engine and settlement token.
     error CfdEngine__InvalidPool();
-    /// @notice The current protocol-treasury account still has a clearinghouse balance and therefore cannot be replaced.
-    error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     /// @notice The account attempted to settle a zero trader-claim balance.
     error CfdEngine__NoTraderClaim();
     /// @notice HousePool cash cannot presently service the selected trader claim under aggregate claim priority.
