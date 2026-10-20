@@ -724,9 +724,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
         _requireBootstrapOracleLive(statusSnapshot);
-        if (toSenior) {
-            _reconcile(_getHousePoolInputSnapshot());
-        }
+        _reconcile(_getHousePoolInputSnapshot());
 
         uint256 shares = ITrancheVaultBootstrap(targetVault).quoteBootstrapDeposit(amount);
         if (shares == 0) {

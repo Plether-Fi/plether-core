@@ -113,6 +113,32 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(juniorVault.balanceOf(seed), juniorVault.seedShareFloor());
     }
 
+    function test_InitializeJuniorSeed_QuarantinesPreviouslyAccountedExcess() public {
+        uint256 excess = 100_000e6;
+        uint256 seedAssets = 10_000e6;
+        usdc.mint(address(this), excess + seedAssets);
+        usdc.transfer(address(pool), excess);
+        pool.accountExcess();
+        assertEq(pool.unassignedAssets(), 0, "excess has not yet been reconciled");
+        assertEq(juniorVault.totalSupply(), 0, "junior has no owners before seeding");
+
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, alice);
+
+        assertEq(pool.accountedAssets(), excess + seedAssets);
+        assertEq(pool.unassignedAssets(), excess, "pre-seed excess must remain ownerless");
+        assertEq(pool.juniorPrincipal(), seedAssets, "only the seed deposit belongs to junior");
+        assertEq(juniorVault.totalAssets(), seedAssets);
+        assertGt(juniorVault.seedShareFloor(), 0);
+        assertEq(juniorVault.balanceOf(alice), juniorVault.seedShareFloor());
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), excess, "later reconciliation must preserve the quarantine");
+        assertEq(pool.juniorPrincipal(), seedAssets);
+        assertEq(juniorVault.totalAssets(), seedAssets);
+    }
+
     function test_SeedReceiverCannotRedeemBelowFloor() public {
         uint256 assets = 100_000e6;
         address seed = address(0xBEEF);
