@@ -58,6 +58,7 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
         ExpectedAccounting memory expected
     ) internal returns (uint256[4] memory preview) {
         bytes32 beforePreview = _accountingHash();
+        assertEq(pool.getSettlementFreeUSDC(), pool.getFreeUSDC(), "Settlement cash matches withdrawal reserves");
         uint256 previewGasBefore = gasleft();
         (preview[0], preview[1], preview[2], preview[3]) = pool.getPendingTrancheState();
         emit log_named_uint("pending_tranche_preview_gas", previewGasBefore - gasleft());
@@ -83,6 +84,7 @@ abstract contract HousePoolAccountingParityBase is BasePerpTest {
         assertEq(pool.unassignedAssets(), expected.unassigned, "reconciled ownerless assets");
         assertEq(pool.pendingRecapitalizationUsdc(), expected.pendingRecapitalization, "remaining recapitalization");
         assertEq(pool.pendingTradingRevenueUsdc(), expected.pendingRevenue, "remaining trading revenue");
+        assertEq(pool.getSettlementFreeUSDC(), pool.getFreeUSDC(), "Settlement cash matches reconciled reserves");
         assertEq(pool.getMaxSeniorWithdraw(), preview[2], "senior withdrawal-cap parity");
         assertEq(pool.getMaxJuniorWithdraw(), preview[3], "junior withdrawal-cap parity");
     }

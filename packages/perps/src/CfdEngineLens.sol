@@ -10,6 +10,7 @@ import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol";
 import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRiskParamsView.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
@@ -617,6 +618,10 @@ contract CfdEngineLens is ICfdEngineLens {
         snap.shortSide = _sideSnapshot(CfdTypes.Side.SHORT, short);
         snap.poolAssetsUsdc = poolDepthUsdc;
         snap.poolCashUsdc = poolDepthUsdc;
+        IHousePool pool = IHousePool(address(engineContract.pool()));
+        snap.poolAdditionalReservedUsdc =
+            pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc() + pool.unassignedAssets();
+        snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engineContract.clearinghouse());
         snap.accountBuckets = clearinghouse.getAccountUsdcBuckets(account);
         snap.lockedBuckets = clearinghouse.getLockedMarginBuckets(account);

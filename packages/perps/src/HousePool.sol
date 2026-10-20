@@ -24,6 +24,7 @@ import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeni
 import {HousePoolTrancheGateLib} from "@plether/perps/libraries/HousePoolTrancheGateLib.sol";
 import {HousePoolWaterfallAccountingLib} from "@plether/perps/libraries/HousePoolWaterfallAccountingLib.sol";
 import {HousePoolWithdrawalPreviewLib} from "@plether/perps/libraries/HousePoolWithdrawalPreviewLib.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @dev Pool-only queue hooks implemented by both asynchronous tranche vaults.
 interface ITrancheVaultEpochSettlement {
@@ -1216,6 +1217,23 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     /// @return Free USDC available to the tranche withdrawal waterfall (6 decimals)
     function getFreeUSDC() public view returns (uint256) {
         return _getWithdrawalSnapshot().freeUsdc;
+    }
+
+    /// @inheritdoc IHousePool
+    /// @dev Reads live side aggregates because the terminal-NAV lens rejects reads during engine settlement.
+    ///      At rest, the same reserve components and withdrawal-snapshot arithmetic back `getFreeUSDC()`.
+    function getSettlementFreeUSDC() public view override returns (uint256) {
+        (uint256 longMaxProfitUsdc,,,) = ENGINE.sides(0);
+        (uint256 shortMaxProfitUsdc,,,) = ENGINE.sides(1);
+        uint256 maxLiabilityUsdc = longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
+
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot;
+        accountingSnapshot.physicalAssetsUsdc = totalAssets();
+        accountingSnapshot.maxLiabilityUsdc = maxLiabilityUsdc;
+        accountingSnapshot.traderClaimBalanceUsdc = ENGINE.totalTraderClaimBalanceUsdc();
+        accountingSnapshot.supplementalReservedUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, ENGINE.settlementBufferBps());
+        return _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets()).freeUsdc;
     }
 
     /// @notice Returns the current stored senior principal that pool liquidity permits withdrawing.
