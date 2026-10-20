@@ -521,6 +521,13 @@ Security properties:
   boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
   `maxOrderId` and separate pre-oracle cleanup from price-dependent execution.
 
+Deferred ETH belongs to the credited beneficiary. `OrderRouterAdmin.claimBalanceTo(recipient)` and
+`PletherOracle.claimEthRefundTo(recipient)` let that beneficiary send its full credit to a nonzero payable recipient,
+including when the beneficiary contract itself cannot receive ETH (LOW-62). Both debit only `msg.sender` before the
+transfer; a failed transfer reverts and preserves the credit. The existing self-claim methods remain available.
+Directed claims emit `EthRefundClaimedTo(beneficiary, recipient, amount)`; the Oracle's legacy self-claim event remains
+unchanged. A beneficiary contract must be capable of invoking the claim API to redirect its refund.
+
 ### Arbitrum and Pyth clock alignment
 
 `OrderRouter` records `commitTime` from Arbitrum `block.timestamp`. `PletherOracle` selects the first unique

@@ -129,8 +129,10 @@ interface IPletherOracle {
     error PletherOracle__Unauthorized();
     /// @notice Thrown when a caller tries to claim with no deferred ETH refund.
     error PletherOracle__NothingToClaim();
-    /// @notice Thrown when sending a deferred ETH refund to its claimant fails.
+    /// @notice Thrown when sending a deferred ETH refund to its selected recipient fails.
     error PletherOracle__EthTransferFailed();
+    /// @notice Thrown when the selected deferred-refund recipient is the zero address.
+    error PletherOracle__InvalidRefundRecipient();
     /// @notice Thrown when deployment is attempted with an empty basket.
     error PletherOracle__NoFeeds();
     /// @notice Thrown when basket arrays or parsed feed results have incompatible lengths or ordering.
@@ -207,6 +209,11 @@ interface IPletherOracle {
     /// @param recipient Account that received the refund.
     /// @param amount Claimed ETH amount in wei.
     event EthRefundClaimed(address indexed recipient, uint256 amount);
+    /// @notice Emitted when a beneficiary claims its deferred ETH to a selected recipient.
+    /// @param beneficiary Account whose deferred credit was consumed.
+    /// @param recipient Account receiving the refund.
+    /// @param amount Claimed ETH amount in wei.
+    event EthRefundClaimedTo(address indexed beneficiary, address indexed recipient, uint256 amount);
 
     /// @notice Atomically applies oracle update data and returns the validated price snapshot for `mode`.
     /// @dev Pays Pyth's quoted fee, validates the resulting current neutral basket under the selected freshness,
@@ -328,6 +335,13 @@ interface IPletherOracle {
     /// @dev Reverts if the caller has no refund or if the nonreentrant ETH transfer fails; a failed transfer restores the
     ///      claimable balance.
     function claimEthRefund() external;
+
+    /// @notice Claims the caller's full deferred ETH refund to a nonzero recipient.
+    /// @dev Only the caller's credit is debited. A failed nonreentrant transfer preserves the credit.
+    /// @param recipient Address receiving the caller's refund.
+    function claimEthRefundTo(
+        address payable recipient
+    ) external;
 
     /// @notice Returns deferred ETH refund balance for an account.
     /// @param account Account to inspect.

@@ -347,17 +347,33 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @dev Uses checks-effects-interactions and is nonreentrant. Reverts when the caller has no claim or when the ETH
     ///      transfer fails; a failed claim leaves the balance claimable.
     function claimEthRefund() external override nonReentrant {
-        uint256 amount = claimableEth[msg.sender];
+        uint256 amount = _claimEthRefund(payable(msg.sender));
+        emit EthRefundClaimed(msg.sender, amount);
+    }
+
+    /// @inheritdoc IPletherOracle
+    function claimEthRefundTo(
+        address payable recipient
+    ) external override nonReentrant {
+        uint256 amount = _claimEthRefund(recipient);
+        emit EthRefundClaimedTo(msg.sender, recipient, amount);
+    }
+
+    function _claimEthRefund(
+        address payable recipient
+    ) private returns (uint256 amount) {
+        if (recipient == address(0)) {
+            revert PletherOracle__InvalidRefundRecipient();
+        }
+        amount = claimableEth[msg.sender];
         if (amount == 0) {
             revert PletherOracle__NothingToClaim();
         }
         claimableEth[msg.sender] = 0;
-        (bool ok,) = payable(msg.sender).call{value: amount}("");
+        (bool ok,) = recipient.call{value: amount}("");
         if (!ok) {
-            claimableEth[msg.sender] = amount;
             revert PletherOracle__EthTransferFailed();
         }
-        emit EthRefundClaimed(msg.sender, amount);
     }
 
     /// @notice Returns the effective policy the router should use for an open/increase or close order.
