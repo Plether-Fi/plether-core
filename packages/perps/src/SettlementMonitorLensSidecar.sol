@@ -357,6 +357,7 @@ contract SettlementMonitorLensSidecar {
         }
         bytes4 outOfOrder = IPletherOracle.PletherOracle__PriceOutOfOrder.selector;
         bytes4 invalidSelector = IPletherOracle.PletherOracle__InvalidPrice.selector;
+        bytes4 invalidInverse = IPletherOracle.PletherOracle__InvalidInverseConfidence.selector;
         bytes4 mismatch = IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector;
         bytes4 zero = IPletherOracle.PletherOracle__ZeroBasketPrice.selector;
         bytes4 missing = IPletherOracle.PletherOracle__NoAcceptedBasket.selector;
@@ -368,7 +369,12 @@ contract SettlementMonitorLensSidecar {
                     and(eq(selector, invalidSelector), eq(failureArg1, signextend(7, failureArg1)))
                 )
             }
-            case 100 { recognized := and(eq(selector, mismatch), iszero(shr(64, failureArg0))) }
+            case 100 {
+                recognized := or(
+                    and(eq(selector, mismatch), iszero(shr(64, failureArg0))),
+                    and(eq(selector, invalidInverse), eq(failureArg1, signextend(7, failureArg1)))
+                )
+            }
             case 4 { recognized := or(eq(selector, zero), eq(selector, missing)) }
         }
     }

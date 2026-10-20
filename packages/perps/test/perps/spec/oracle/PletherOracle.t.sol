@@ -319,13 +319,33 @@ contract PletherOracleTest is Test {
         oracle = _deployOracle(address(pyth));
         engine.setPosition(1e18, CfdTypes.Side.LONG);
         pyth.setPrice(FEED_A, int64(100_000_000), uint64(100_000), int32(-8), 990);
-        pyth.setPrice(FEED_B, int64(200_000_000), uint64(200_000), int32(-8), 990);
+        pyth.setPrice(FEED_B, int64(200_000_000), uint64(100_000), int32(-8), 990);
 
         IPletherOracle.PriceSnapshot memory snapshot =
             oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
 
         assertEq(snapshot.markPrice, 100_000_000, "normalized basket price");
-        assertEq(snapshot.price, 100_020_000, "aggregate confidence should be 100,000 before the 20% shift");
+        assertEq(snapshot.price, 100_015_002, "inverse confidence uses the upper transformed endpoint");
+    }
+
+    function test_HistoricalOrderRejectsInvertedConfidenceAboveBasketLimit() public {
+        vm.warp(1000);
+        inversions[1] = true;
+        basePrices[1] = 50_000_000;
+        oracle = _deployOracle(address(pyth));
+        pyth.setUniquePrice(FEED_A, 100_000_000, 0, -8, 995, 990);
+        pyth.setUniquePrice(FEED_B, 200_000_000, 400_000, -8, 995, 990);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector,
+                IPletherOracle.PriceMode.OrderExecution,
+                uint256(100_200),
+                uint256(100_000_000),
+                uint256(10)
+            )
+        );
+        oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, false));
     }
 
     function testFuzz_BasketAcceptsWhenBothComponentsAreWithinLimit(

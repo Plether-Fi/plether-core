@@ -797,10 +797,23 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             if (p.price <= 0) {
                 revert PletherOracle__InvalidPrice(feedId, p.price);
             }
-            uint256 norm = inversions[i] ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
-            uint256 weightedPrice = (norm * quantities[i]) / (basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE);
+            bool inverted = inversions[i];
+            uint256 norm = inverted ? _invertPythPrice(p.price, p.expo) : _normalizePythPrice(p.price, p.expo);
+            uint256 denominator = basePrices[i] * DecimalConstants.CHAINLINK_TO_TOKEN_SCALE;
+            uint256 weightedPrice = (norm * quantities[i]) / denominator;
             basket.price += weightedPrice;
-            basket.confidence += (weightedPrice * uint256(uint64(p.conf))) / uint256(uint64(p.price));
+            if (inverted) {
+                uint256 rawPrice = uint256(uint64(p.price));
+                if (uint256(p.conf) >= rawPrice) {
+                    revert PletherOracle__InvalidInverseConfidence(feedId, p.price, p.conf);
+                }
+                // Inversion is nonlinear: the upper basket endpoint comes from the lower raw Pyth endpoint.
+                uint256 upperNorm = _invertPythPrice(int64(uint64(rawPrice - uint256(p.conf))), p.expo);
+                uint256 upperWeightedPrice = (upperNorm * quantities[i]) / denominator;
+                basket.confidence += upperWeightedPrice - weightedPrice;
+            } else {
+                basket.confidence += (weightedPrice * uint256(p.conf)) / uint256(uint64(p.price));
+            }
 
             if (p.publishTime < minPublishTime) {
                 minPublishTime = p.publishTime;

@@ -956,6 +956,34 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(observation.completeObservationDigest, bytes32(0));
     }
 
+    function test_InvalidInverseConfidenceIsRecognizedOraclePolicyFailure() public {
+        uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
+        _openMonitorPosition();
+        vm.warp(pool.lpEpochStart(observedEpoch));
+        vm.mockCallRevert(
+            address(router.pletherOracle()),
+            abi.encodeWithSelector(IPletherOracle.getLatestPoolReconcilePrice.selector),
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__InvalidInverseConfidence.selector,
+                BASE_PYTH_FEED_A,
+                int64(100_000_000),
+                uint64(100_000_000)
+            )
+        );
+
+        SettlementMonitorViewTypes.SettlementObservation memory observation =
+            monitorLens.getSettlementObservation(observedEpoch);
+
+        assertEq(observation.oracle.failureSelector, IPletherOracle.PletherOracle__InvalidInverseConfidence.selector);
+        assertEq(observation.oracle.dependencyFailureMask, 0, "canonical policy rejection is readable");
+        assertTrue(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            )
+        );
+    }
+
     function test_WrongModeOraclePolicyErrorIsMalformedDependency() public {
         uint256 observedEpoch = pool.currentLpEpoch();
         bytes memory wrongModeError = abi.encodeWithSelector(

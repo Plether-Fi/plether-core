@@ -190,6 +190,8 @@ interface IPletherOracle {
     /// @param feedId Failing Pyth feed id, or zero for an internal normalization failure.
     /// @param price Raw signed Pyth price.
     error PletherOracle__InvalidPrice(bytes32 feedId, int64 price);
+    /// @notice An inverted feed's confidence interval reaches a nonpositive raw price.
+    error PletherOracle__InvalidInverseConfidence(bytes32 feedId, int64 price, uint64 confidence);
     /// @notice Thrown when the aggregate basket confidence-to-price ratio exceeds its configured limit.
     /// @param mode Action policy under which validation failed.
     /// @param basketConfidence Aggregate weighted confidence in 8-decimal basket-price units.

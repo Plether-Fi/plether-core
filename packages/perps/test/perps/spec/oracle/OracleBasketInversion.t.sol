@@ -42,6 +42,83 @@ contract InversionTest is Test {
         assertEq(snapshot.publishTime, 1000);
     }
 
+    function test_InvertedConfidenceAboveBasketLimitReverts() public {
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = FEED_JPY;
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = 1e18;
+        uint256[] memory bases = new uint256[](1);
+        bases[0] = 50_000_000;
+        bool[] memory inversions = new bool[](1);
+        inversions[0] = true;
+        PletherOracle oracle = _deploy(ids, weights, bases, inversions);
+
+        mockPyth.setPrice(FEED_JPY, 200_000_000, 200_000, -8, 1000);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector,
+                IPletherOracle.PriceMode.MarkRefresh,
+                uint256(100_100),
+                uint256(100_000_000),
+                uint256(10)
+            )
+        );
+        oracle.updatePrice(
+            address(this), _oneFeedWithConfidence(200_000_000, 200_000, -8, 1000), IPletherOracle.PriceMode.MarkRefresh
+        );
+    }
+
+    function test_InvertedConfidenceUsesWeightedUpperEndpoint() public {
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = FEED_JPY;
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = 1e18;
+        uint256[] memory bases = new uint256[](1);
+        bases[0] = 50_000_000;
+        bool[] memory inversions = new bool[](1);
+        inversions[0] = true;
+        PletherOracle oracle = _deploy(ids, weights, bases, inversions);
+
+        mockPyth.setPrice(FEED_JPY, 200_000_000, 100_000, -8, 1000);
+        oracle.updatePrice(
+            address(this), _oneFeedWithConfidence(200_000_000, 100_000, -8, 1000), IPletherOracle.PriceMode.MarkRefresh
+        );
+        (IPletherOracle.PriceSnapshot memory snapshot, uint256 confidence) = oracle.getLatestPoolReconcilePrice();
+
+        assertEq(snapshot.markPrice, 100_000_000, "midpoint is unchanged");
+        assertEq(confidence, 50_024, "upper inverse endpoint is normalized and weighted before subtraction");
+    }
+
+    function test_InvertedConfidenceRejectsNonpositiveRawLowerBound() public {
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = FEED_JPY;
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = 1e18;
+        uint256[] memory bases = new uint256[](1);
+        bases[0] = 50_000_000;
+        bool[] memory inversions = new bool[](1);
+        inversions[0] = true;
+        PletherOracle oracle = _deploy(ids, weights, bases, inversions);
+
+        uint64[2] memory confidences = [uint64(200_000_000), uint64(200_000_001)];
+        for (uint256 i; i < confidences.length; ++i) {
+            mockPyth.setPrice(FEED_JPY, 200_000_000, confidences[i], -8, 1000);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    IPletherOracle.PletherOracle__InvalidInverseConfidence.selector,
+                    FEED_JPY,
+                    int64(200_000_000),
+                    confidences[i]
+                )
+            );
+            oracle.updatePrice(
+                address(this),
+                _oneFeedWithConfidence(200_000_000, confidences[i], -8, 1000),
+                IPletherOracle.PriceMode.MarkRefresh
+            );
+        }
+    }
+
     function test_InversionsLengthMismatchReverts() public {
         bytes32[] memory ids = new bytes32[](2);
         ids[0] = FEED_JPY;
@@ -110,8 +187,17 @@ contract InversionTest is Test {
         int64 price,
         uint64 time
     ) private pure returns (bytes[] memory data) {
+        return _oneFeedWithConfidence(price, 0, -3, time);
+    }
+
+    function _oneFeedWithConfidence(
+        int64 price,
+        uint64 confidence,
+        int32 exponent,
+        uint64 time
+    ) private pure returns (bytes[] memory data) {
         MockPyth.FeedUpdate[] memory feeds = new MockPyth.FeedUpdate[](1);
-        feeds[0] = MockPyth.FeedUpdate(FEED_JPY, MockPyth.MockPrice(price, 0, -3, time, 0));
+        feeds[0] = MockPyth.FeedUpdate(FEED_JPY, MockPyth.MockPrice(price, confidence, exponent, time, 0));
         data = new bytes[](1);
         data[0] = abi.encode(feeds);
     }
