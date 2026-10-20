@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {HousePool} from "@plether/perps/HousePool.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
@@ -145,7 +146,9 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     }
 
     function test_ConstructorRejectsRouterSettlementPoolDifferentFromEnginePool() public {
-        address wrongPool = address(0xBADF00D);
+        // Pass the router's pool checks while retaining a different pool from engine.pool().
+        address wrongPool =
+            address(new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar)));
         SettlementMonitorOracleBindingMock wrongOracle =
             new SettlementMonitorOracleBindingMock(address(engine), wrongPool, address(baseMockPyth));
         OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
