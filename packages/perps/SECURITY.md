@@ -1142,6 +1142,20 @@ indexers to the new manifest; old protection and attempt state is not migrated.
   a claim-time delay, and the direct route can consume an independently aged source lot without mixing it into the
   wallet. Redemption cancellation or terminal refund still begins a new cooldown when shares return to a wallet.
 
+### Accepted rounding behavior
+
+- **MED-22 — position carry rounding:** Converting a position's carry-index delta to six-decimal USDC rounds down.
+  The checkpoint advances even when the result is zero, without retaining the fractional remainder. Each such
+  conversion can discard less than one USDC atom (`0.000001 USDC`). User-triggered checkpoints, including
+  zero-amount withdrawals, can therefore reduce LP carry revenue; an interval whose entire accrual is below one atom
+  contributes no collectible carry. Practical savings depend on borrow size, utilization, checkpoint frequency, and
+  transaction costs. This rounding behavior is accepted; fractional carry persistence is not planned.
+- **LOW-27 — zero-share Junior maintenance-fee checkpoints:** With a nonzero maintenance-fee rate and sufficiently
+  small raw Junior share supply, the fee for completed chargeable hours can round down to zero shares. The checkpoint
+  boundary still advances, so those hours do not accumulate toward a later fee mint. Mint/burn activity can trigger
+  these checkpoints. This possible undercollection is accepted; fractional fee persistence or deferring zero-share
+  checkpoints is not planned.
+
 ### VPI limitations
 
 - liquidation does not compute a fresh VPI delta, but the gross negative accrued VPI clawback is settled from its
@@ -1157,6 +1171,8 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 ### Clearinghouse limitations
 
 - V1 is USDC-only cross-margin,
+- the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; settlement USDC
+  is always excluded, including uncredited direct transfers, and rescue does not alter account balances or margin,
 - non-USDC collateral pricing and staleness policy are intentionally out of scope.
 
 ## Emergency Procedures
