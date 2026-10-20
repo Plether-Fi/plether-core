@@ -118,6 +118,11 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         router = IOrderRouterAdminHost(router_);
     }
 
+    /// @notice Ownership cannot be renounced because governance must retain emergency recovery authority.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
+    }
+
     /// @notice Restricts a function to the immutable router host.
     modifier onlyRouterHost() {
         if (msg.sender != address(router)) {

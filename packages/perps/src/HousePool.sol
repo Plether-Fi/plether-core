@@ -258,6 +258,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     // ADMIN (set-once pattern)
     // ==========================================
 
+    /// @notice Ownership cannot be renounced because governance must retain emergency recovery authority.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
+    }
+
     /// @notice Sets the senior tranche vault address once.
     /// @dev Only the owner may call. The address cannot be zero and cannot be changed after it is set.
     /// @param _vault Senior tranche ERC4626 vault address

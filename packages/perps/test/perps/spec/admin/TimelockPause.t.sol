@@ -401,6 +401,32 @@ contract TimelockPauseTest is BasePerpTest {
     // HousePool TIMELOCK TESTS
     // ==========================================
 
+    function test_HousePool_RenounceOwnershipRevertsAndPreservesTransfer() public {
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        pool.renounceOwnership();
+        assertEq(pool.owner(), address(this));
+
+        pool.transferOwnership(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        pool.renounceOwnership();
+        assertEq(pool.owner(), address(this));
+        assertEq(pool.pendingOwner(), alice);
+
+        pool.transferOwnership(address(0));
+        assertEq(pool.owner(), address(this));
+        assertEq(pool.pendingOwner(), address(0));
+
+        pool.transferOwnership(alice);
+        vm.prank(alice);
+        pool.acceptOwnership();
+        assertEq(pool.owner(), alice);
+        assertEq(pool.pendingOwner(), address(0));
+
+        vm.prank(alice);
+        pool.setPauser(pauser);
+        assertEq(pool.pauser(), pauser);
+    }
+
     function test_ProposePoolConfig_TimelockFlow() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1200;
@@ -546,6 +572,23 @@ contract TimelockPauseTest is BasePerpTest {
         vm.prank(nonOwner);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner));
         routerAdmin.proposeRouterConfig(config);
+    }
+
+    function test_OrderRouterAdmin_RenounceOwnershipRevertsAndPreservesTransfer() public {
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        routerAdmin.renounceOwnership();
+        assertEq(routerAdmin.owner(), address(this));
+
+        routerAdmin.transferOwnership(alice);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        routerAdmin.renounceOwnership();
+        assertEq(routerAdmin.owner(), address(this));
+        assertEq(routerAdmin.pendingOwner(), alice);
+
+        vm.prank(alice);
+        routerAdmin.acceptOwnership();
+        assertEq(routerAdmin.owner(), alice);
+        assertEq(routerAdmin.pendingOwner(), address(0));
     }
 
     function test_OrderRouterAdmin_OwnershipTransferRequiresPendingOwnerAcceptance() public {
