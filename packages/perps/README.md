@@ -745,6 +745,10 @@ this order:
 3. matured Junior deposits,
 4. matured Senior deposits.
 
+Cached-mark staleness is reported through `markFresh`, mark age, and the selected execution route. The legacy
+`CachedMarkStale` blocker bit is reserved and no longer emitted. The selected route enforces freshness; failures
+of its required oracle policy or dependencies remain operational blockers.
+
 Deposits activated in that transaction do not fund withdrawals in the same transaction. Deposit claims and eligible
 claimable-deposit-to-redeem routes remain separate controller/operator pull actions and stay available while new
 deposit requests or entry activation are paused; redemption requests remain available so exit demand can queue during

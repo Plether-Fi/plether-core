@@ -9,6 +9,7 @@ import {
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -573,6 +574,34 @@ contract PletherOracleTest is Test {
         oracle.applyConfig(config);
 
         assertEq(oracle.orderExecutionStalenessLimit(), 120, "router can apply config");
+    }
+
+    function test_ParserFailureIsNotUnavailableHistory() public {
+        vm.warp(1000);
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.LONG, false);
+        bytes[5] memory errors = [
+            bytes(hex"e69ffece"), // Pyth InvalidUpdateData()
+            abi.encodeWithSignature("Panic(uint256)", uint256(0x11)),
+            bytes(""),
+            bytes(hex"45805f"), // Truncated PriceFeedNotFoundWithinRange()
+            bytes.concat(IPyth.PriceFeedNotFoundWithinRange.selector, hex"00")
+        ];
+        for (uint256 i; i < errors.length; ++i) {
+            vm.mockCallRevert(
+                address(pyth), abi.encodeWithSelector(IPyth.parsePriceFeedUpdatesUnique.selector), errors[i]
+            );
+            for (uint256 strict; strict < 2; ++strict) {
+                request.revertOnHistoricalUnavailable = strict == 1;
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        IPletherOracle.PletherOracle__HistoricalParserFailure.selector,
+                        bytes4(errors[i]),
+                        errors[i].length
+                    )
+                );
+                oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), request);
+            }
+        }
     }
 
     function _deployOracle(

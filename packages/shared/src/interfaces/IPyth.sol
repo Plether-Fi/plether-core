@@ -23,6 +23,9 @@ library PythStructs {
 /// @notice Minimal interface for reading Pyth price feeds.
 interface IPyth {
 
+    /// @notice The supplied data contains no qualifying update for at least one requested feed.
+    error PriceFeedNotFoundWithinRange();
+
     /// @notice Returns the price without staleness checks.
     /// @param id The Pyth price feed ID.
     /// @return price The price data.

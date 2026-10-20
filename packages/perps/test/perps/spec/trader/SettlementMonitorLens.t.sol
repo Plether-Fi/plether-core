@@ -449,6 +449,17 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
         _openMonitorPosition();
         vm.warp(pool.lpEpochStart(observedEpoch));
+        SettlementMonitorViewTypes.SettlementStatus memory stale = monitorLens.getSettlementStatus(observedEpoch);
+        assertFalse(stale.markFresh);
+        assertEq(
+            uint8(stale.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh)
+        );
+        assertFalse(
+            _hasOperationalBlocker(
+                stale.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
+            ),
+            "stale cached mark must not block an atomic refresh"
+        );
         _setCurrentBasket(110_000_000, 50_000, block.timestamp);
 
         SettlementMonitorViewTypes.SettlementStatus memory status = monitorLens.getSettlementStatus(observedEpoch);
@@ -569,6 +580,18 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             monitorLens.getSettlementObservation(observedEpoch);
         assertFalse(observation.oracle.policyValid);
         assertEq(observation.oracle.failureSelector, IPletherOracle.PletherOracle__StalePrice.selector);
+        assertFalse(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
+            )
+        );
+        assertTrue(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            ),
+            "the actual frozen-oracle age rejection must remain visible"
+        );
         assertFalse(observation.oracle.publishTimeMeetsEpochFloor);
         assertFalse(
             _hasOperationalBlocker(

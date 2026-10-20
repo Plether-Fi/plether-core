@@ -521,8 +521,11 @@ Security properties:
 - batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds
   cap recipient-call gas and defer rejected refunds; a later gas-burning prepared item or refund recipient therefore
   cannot roll back an already finalized batch prefix,
-- Oracle/Pyth preparation and the resulting Engine mark update remain in the outer batch frame. A revert at that
-  boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
+- Unexpected historical parser errors stop the batch with `OracleFailure`, preserving finalized predecessors and
+  refunding the failed call's unspent funding. `HistoricalPriceUnavailable` means the supplied payload contains no
+  qualifying update for at least one feed; it does not prove no such history exists elsewhere.
+- Other Oracle/Pyth preparation failures and the resulting Engine mark update remain in the outer batch frame.
+  A revert at that boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
   `maxOrderId` and separate pre-oracle cleanup from price-dependent execution.
 
 ### Queue failure handling

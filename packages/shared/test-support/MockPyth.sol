@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {PythStructs} from "@plether/shared/interfaces/IPyth.sol";
+import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 
 contract MockPyth {
 
@@ -289,7 +289,9 @@ contract MockPyth {
                         break;
                     }
                 }
-                require(found, "feed not found within range");
+                if (!found) {
+                    revert IPyth.PriceFeedNotFoundWithinRange();
+                }
             } else if (hasUniquePrice[priceIds[i]]) {
                 p = uniquePrices[priceIds[i]];
             } else if (hasEncodedUpdate) {
@@ -303,8 +305,10 @@ contract MockPyth {
             } else {
                 p = prices[priceIds[i]];
             }
-            require(p.prevPublishTime < minPublishTime, "not unique");
-            require(p.publishTime >= minPublishTime && p.publishTime <= maxPublishTime, "outside range");
+            if (p.prevPublishTime >= minPublishTime || p.publishTime < minPublishTime || p.publishTime > maxPublishTime)
+            {
+                revert IPyth.PriceFeedNotFoundWithinRange();
+            }
             PythStructs.Price memory price =
                 PythStructs.Price({price: p.price, conf: p.conf, expo: p.expo, publishTime: p.publishTime});
             priceFeeds[i] = PythStructs.PriceFeed({id: priceIds[i], price: price, emaPrice: price});

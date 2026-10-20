@@ -13,6 +13,7 @@ import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -254,6 +255,58 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         assertEq(address(baseMockPyth).balance, 0);
         assertEq(address(pletherOracle).balance, 0);
         assertEq(address(router).balance, 0);
+    }
+
+    function test_LaterParserFailurePreservesBatchPrefixAndRefundsOnlyUnspentFunding() public {
+        bytes[] memory data = _mixedBatch();
+        uint64 secondTick = uint64(block.timestamp);
+        vm.mockCallRevert(
+            address(baseMockPyth),
+            abi.encodeCall(
+                IPyth.parsePriceFeedUpdatesUnique, (data, _synchronizationFeedIds(), secondTick, secondTick)
+            ),
+            hex"e69ffece"
+        );
+        uint256 beforeBalance = address(this).balance;
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 5 * FEE}(2, data);
+        assertEq(uint256(result.stopReason), uint256(OrderV3Types.PendingReason.OracleFailure));
+        assertEq(result.terminalCount, 1);
+        assertEq(result.nextOrderId, 2);
+        assertEq(engine.lastMarkTime(), secondTick - 2, "first order's mark survives");
+        assertEq(uint256(router.lifecycleBook().lifecycleStatus(1)), uint256(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(uint256(router.lifecycleBook().lifecycleStatus(2)), uint256(OrderV3Types.LifecycleStatus.Pending));
+        (uint256 firstSize,,,,,,) = engine.positions(ALICE);
+        (uint256 secondSize,,,,,,) = engine.positions(BOB);
+        assertGt(firstSize, 0);
+        assertEq(secondSize, 0);
+        assertEq(beforeBalance - address(this).balance, 2 * FEE);
+        assertEq(address(baseMockPyth).balance, 2 * FEE);
+        assertEq(address(pletherOracle).balance, 0);
+        assertEq(address(router).balance, 0);
+
+        vm.clearMockedCalls();
+        result = router.executeOrderBatch{value: 2 * FEE}(2, data);
+        assertEq(result.terminalCount, 1, "valid retry executes the pending order");
+        assertEq(uint256(result.stopReason), uint256(OrderV3Types.PendingReason.None));
+        assertEq(uint256(router.lifecycleBook().lifecycleStatus(2)), uint256(OrderV3Types.LifecycleStatus.Executed));
+    }
+
+    function test_ParserFailureDefersRefundAtRouterWithoutDoubleRefund() public {
+        uint64 commit = uint64(block.timestamp);
+        uint64 id = _commit(ALICE, 0);
+        _advance(commit + 1);
+        vm.mockCallRevert(
+            address(baseMockPyth), abi.encodeWithSelector(IPyth.parsePriceFeedUpdatesUnique.selector), hex"e69ffece"
+        );
+        SynchronizationRefundReceiver recipient = new SynchronizationRefundReceiver(pletherOracle);
+        recipient.execute{value: 5 * FEE}(address(router), id, _payload(commit + 1, commit));
+        assertEq(router.nextExecuteId(), id);
+        assertEq(pletherOracle.claimableEth(address(recipient)), 0);
+        assertEq(routerAdmin.claimableEth(address(recipient)), 5 * FEE);
+        assertEq(address(pletherOracle).balance, 0);
+        assertEq(address(baseMockPyth).balance, 0);
+        assertEq(address(router).balance, 0);
+        assertEq(address(routerAdmin).balance, 5 * FEE);
     }
 
     function test_UnavailableHistoryDefersFullFundingAndClaimRejectsReentry() public {

@@ -153,4 +153,61 @@ contract OracleSynchronizationForkTest is BasePerpTest {
         }
     }
 
+    function test_RealPythAbsentUpdateRemainsRetryableAndRefundsFunding() public {
+        uint256 fee = IPyth(realPyth).getUpdateFee(data);
+        vm.deal(address(this), 10 ether);
+        vm.warp(executionTime);
+        // Asking for an absent component has the same Pyth error as an out-of-range update.
+        bytes32[] memory missingIds = new bytes32[](1);
+        missingIds[0] = bytes32(uint256(type(uint256).max));
+        vm.expectRevert(bytes4(keccak256("PriceFeedNotFoundWithinRange()")));
+        IPyth(realPyth).parsePriceFeedUpdatesUnique{value: fee}(data, missingIds, commitTime + 1, executionTime);
+
+        uint64[] memory published = abi.decode(vm.parseJson(fixture, ".publishTimes"), (uint64[]));
+        uint64 afterUpdates;
+        for (uint256 i; i < published.length; ++i) {
+            if (published[i] > afterUpdates) {
+                afterUpdates = published[i];
+            }
+        }
+        vm.warp(uint256(afterUpdates) + 1);
+        uint256 beforeBalance = address(this).balance;
+        uint256 pythBefore = realPyth.balance;
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) = pletherOracle.updateOrderExecutionPrice{
+            value: 2 * fee
+        }(
+            address(this), data, IPletherOracle.OrderExecutionRequest(afterUpdates, 0, CfdTypes.Side.LONG, false, false)
+        );
+        assertFalse(ok);
+        assertEq(snapshot.updateFee, 2 * fee);
+        assertEq(address(this).balance, beforeBalance);
+        assertEq(realPyth.balance, pythBefore);
+        assertEq(address(pletherOracle).balance, 0);
+    }
+
+    function test_RealPythCorruptedPayloadReportsParserFailure() public {
+        uint256 fee = IPyth(realPyth).getUpdateFee(data);
+        vm.deal(address(this), 10 ether);
+        vm.warp(executionTime);
+        bytes[] memory corrupted = data;
+        corrupted[0][corrupted[0].length - 1] ^= bytes1(uint8(1));
+        (bool parsed, bytes memory reason) = realPyth.call{value: fee}(
+            abi.encodeCall(IPyth.parsePriceFeedUpdatesUnique, (corrupted, ids, commitTime + 1, executionTime))
+        );
+        assertFalse(parsed, "the real Pyth parser must reject the corrupted proof");
+        assertGe(reason.length, 4);
+        assertNotEq(bytes4(reason), bytes4(keccak256("PriceFeedNotFoundWithinRange()")));
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "PletherOracle__HistoricalParserFailure(bytes4,uint256)", bytes4(reason), reason.length
+            )
+        );
+        pletherOracle.updateOrderExecutionPrice{value: 2 * fee}(
+            address(this),
+            corrupted,
+            IPletherOracle.OrderExecutionRequest(commitTime, 0, CfdTypes.Side.LONG, false, false)
+        );
+        assertEq(address(pletherOracle).balance, 0);
+    }
+
 }

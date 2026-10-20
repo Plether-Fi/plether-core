@@ -599,7 +599,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             }
             basket.pythFee = executionFunding;
             ok = true;
-        } catch {
+        } catch (bytes memory reason) {
+            if (reason.length != 4 || bytes4(reason) != IPyth.PriceFeedNotFoundWithinRange.selector) {
+                revert PletherOracle__HistoricalParserFailure(bytes4(reason), reason.length);
+            }
             if (request.revertOnHistoricalUnavailable) {
                 revert PletherOracle__StalePrice(
                     PriceMode.OrderExecution, bytes32(0), maxPublishTime, orderExecutionStalenessLimit, block.timestamp

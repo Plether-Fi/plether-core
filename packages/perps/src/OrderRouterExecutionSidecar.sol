@@ -286,14 +286,14 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             }
 
             (
-                bool oracleResolved,
+                OrderV3Types.PendingReason oracleStopReason,
                 OracleResult memory oracleResult,
                 IPletherOracle.BatchOrderPriceCache memory nextCache
             ) = _prepareBatchOracle(host, orderView.order, pythUpdateData, state);
             state.oracleCache = nextCache;
             state.oracleFundingTotal += oracleResult.fee;
-            if (!oracleResolved) {
-                batchResult.stopReason = OrderV3Types.PendingReason.HistoricalPriceUnavailable;
+            if (oracleStopReason != OrderV3Types.PendingReason.None) {
+                batchResult.stopReason = oracleStopReason;
                 break;
             }
 
@@ -970,7 +970,14 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         CfdTypes.Order memory order,
         bytes[] calldata pythUpdateData,
         BatchExecutionState memory state
-    ) private returns (bool ok, OracleResult memory result, IPletherOracle.BatchOrderPriceCache memory nextCache) {
+    )
+        private
+        returns (
+            OrderV3Types.PendingReason stopReason,
+            OracleResult memory result,
+            IPletherOracle.BatchOrderPriceCache memory nextCache
+        )
+    {
         IPletherOracle oracle = IPletherOracle(host.pletherOracle());
         uint256 fee = 0;
         if (!_canReuseHistoricalBatchBasket(oracle, order, state.oracleCache)) {
@@ -984,12 +991,32 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         }
         IPletherOracle.PriceSnapshot memory snapshot;
         IPletherOracle.OrderExecutionRequest memory oracleRequest = _oracleRequest(order, false);
-        (ok, snapshot, nextCache) = oracle.updateBatchOrderExecutionPrice{value: fee}(
+        bool ok;
+        try oracle.updateBatchOrderExecutionPrice{value: fee}(
             state.executor, pythUpdateData, oracleRequest, state.oracleCache
-        );
+        ) returns (
+            bool resolved,
+            IPletherOracle.PriceSnapshot memory resolvedSnapshot,
+            IPletherOracle.BatchOrderPriceCache memory resolvedCache
+        ) {
+            ok = resolved;
+            snapshot = resolvedSnapshot;
+            nextCache = resolvedCache;
+        } catch (bytes memory reason) {
+            if (
+                reason.length != 68
+                    || _selector(reason) != IPletherOracle.PletherOracle__HistoricalParserFailure.selector
+            ) {
+                assembly ("memory-safe") {
+                    revert(add(reason, 32), mload(reason))
+                }
+            }
+            // The reverted Oracle call returned its funding to the Router; the outer refund handles it once.
+            return (OrderV3Types.PendingReason.OracleFailure, result, state.oracleCache);
+        }
         result.fee = snapshot.updateFee;
         if (!ok) {
-            return (false, result, nextCache);
+            return (OrderV3Types.PendingReason.HistoricalPriceUnavailable, result, nextCache);
         }
         result = _oracleResult(snapshot);
         _updateEngineMark(host, result);

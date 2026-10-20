@@ -155,6 +155,8 @@ interface IPletherOracle {
     error PletherOracle__ZeroPyth();
     /// @notice Thrown when a Pyth fee or update is requested with no update payloads.
     error PletherOracle__MissingUpdateData();
+    /// @notice Historical parsing failed for a reason other than a missing qualifying update.
+    error PletherOracle__HistoricalParserFailure(bytes4 selector, uint256 returndataLength);
     /// @notice Thrown when `msg.value` does not cover Pyth's quoted fee.
     /// @param provided ETH supplied in wei.
     /// @param required ETH required by Pyth in wei.
@@ -248,8 +250,9 @@ interface IPletherOracle {
     ///      the requested side by aggregate confidence, except for a frozen voluntary close; `markPrice` stays neutral.
     ///      This function reports but does not enforce close-only policy and ignores `request.targetPrice`. Successful
     ///      historical calls do not refund overpayment; supply exactly `getOrderExecutionFee`. Frozen calls refund
-    ///      overpayment. If a nonreverting historical parse
-    ///      is unavailable, the full quote is refunded or deferred and `ok` is false. Synchronization failures revert.
+    ///      overpayment. If Pyth reports no qualifying update in the supplied payload and the request permits it,
+    ///      the full quote is refunded or deferred and `ok` is false. This does not prove history is unavailable
+    ///      elsewhere. Other parser failures revert with `HistoricalParserFailure`; synchronization failures revert.
     /// @param refundRecipient Recipient for the Pyth-fee refund when a historical parse is unavailable.
     /// @param pythUpdateData Nonempty Pyth update or unique historical-parse payloads.
     /// @param request Commit, side, close, and unavailable-history inputs; its target price is caller-enforced.
