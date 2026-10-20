@@ -897,9 +897,9 @@ critical. Projected deposit deferrals combine the tranche-neutral
 `HousePool.canSettleDepositEntries()` pre-redemption projection with canonical redemption evidence, so residual
 pending claimants remain visible even when an epoch's queued assets are zero. The Lens does not confirm either
 tranche's activation while matured Senior funding can still change principal/HWM rounding. Junior funding protects
-accepted Senior reservations and cannot displace their activation. HousePool rechecks the exact gates after redemption funding;
-this prevents a zero-fee
-virtual-offset rounding transition from admitting deposits into newly impaired Senior accounting. The view does not
+accepted Senior reservations and cannot displace their activation. HousePool rechecks the exact gates after redemption funding.
+Senior HWM scales with net principal removed, so healthy withdrawals cannot create impairment through virtual-offset
+pricing or retained fees; conservative rounding can preserve an existing impairment. The view does not
 quote new-request capacity. The facade constructor rejects a Router whose immutable settlement pool differs from
 `Engine.pool()` and deploys a code-size sidecar whose diagnostic builders accept only the constructor-bound
 facade; its public `MONITOR()` binding remains readable, dependency bindings stay internal, and it has no setter or

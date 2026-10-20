@@ -569,6 +569,11 @@ Accounting rules:
 - the fee does not increase `protocolTreasuryBalanceUsdc`,
 - the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
 
+Senior withdrawal protection follows the actual net principal debit: for pre-withdrawal principal `P`, high-water
+mark `H`, and funded assets `A`, settlement sets `P' = P - A` and `H' = H - floor(H * A / P)`.
+This preserves healthy Senior principal/HWM equality and retains impaired protection proportionally, including
+protection for retained fees. Rounding favors the remaining protected claim; zero funding leaves both values unchanged.
+
 Async allocation dust is resolved only after every controller's entitlement is accounted for:
 
 - each controller receives a floor-rounded pro-rata allocation from the fixed epoch totals; splitting one request

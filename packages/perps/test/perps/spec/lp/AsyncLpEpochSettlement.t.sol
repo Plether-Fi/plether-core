@@ -555,7 +555,7 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         assertEq(_claimableDeposit(juniorVault, depositId, BOB), 200_000e6);
     }
 
-    function test_JuniorEntryRestoresCapacityBeforeSameCallSeniorEntry() public {
+    function test_JuniorExitPreservesCommitmentBeforeSameCallDeposits() public {
         (, uint256 juniorShares) = _fundPair(ALICE, 100_000e6, CAROL, 300_000e6);
         _setSeniorCapacity(type(uint256).max - 1, 5000);
 
@@ -571,23 +571,23 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
 
         IHousePool.LpEpochSettlementResult memory result = _settleAt(juniorDepositId);
 
-        assertGt(result.juniorFundedAssets, 0, "Junior exit must consume enough subordination to test ordering");
+        assertGt(result.juniorFundedAssets, 0, "Junior exit must consume available subordination");
         assertEq(result.juniorDepositAssets, 100_000e6, "Junior entry must execute first");
-        assertEq(result.seniorDepositAssets, 100_000e6, "restored capacity must then admit the Senior entry");
+        assertEq(result.seniorDepositAssets, 100_000e6, "the accepted Senior commitment must activate");
         assertFalse(result.entriesDeferred);
         assertEq(_claimableDeposit(juniorVault, juniorDepositId, BOB), 100_000e6);
         assertEq(_claimableDeposit(seniorVault, seniorDepositId, BOB), 100_000e6);
 
         uint256 juniorBeforeEntry = pool.juniorPrincipal() - result.juniorDepositAssets;
-        assertGt(
+        assertLe(
             pool.seniorPrincipal(),
             juniorBeforeEntry,
-            "the Senior commitment must be ratio-invalid until Junior entry restores capacity"
+            "Junior funding must protect the Senior commitment before same-call entry adds backing"
         );
         assertLe(pool.seniorPrincipal(), pool.juniorPrincipal(), "the final 50% Senior-share covenant must hold");
     }
 
-    function test_ImpairedSeniorFrozenExitScalesHwmByFundedShares() public {
+    function test_ImpairedSeniorFrozenExitScalesHwmByFundedPrincipal() public {
         (uint256 seniorShares,) = _fundPair(ALICE, 100_000e6, BOB, 100_000e6);
 
         vm.prank(address(pool));
@@ -607,14 +607,14 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         uint256 supplyBefore = seniorVault.totalSupply();
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
-        uint256 expectedHwm = hwmBefore - (hwmBefore * result.seniorFundedShares) / supplyBefore;
+        uint256 expectedHwm = hwmBefore - (hwmBefore * result.seniorFundedAssets) / principalBefore;
         uint256 noFeeAssets = (principalBefore * result.seniorFundedShares) / supplyBefore;
 
         assertGt(result.seniorFundedAssets, 0);
         assertEq(result.seniorFundedShares, seniorShares / 2);
-        assertLt(result.seniorFundedAssets, noFeeAssets, "the frozen exit fee must reduce assets, not HWM ownership");
+        assertLt(result.seniorFundedAssets, noFeeAssets, "the frozen exit fee must stay in Senior principal");
         assertEq(pool.seniorPrincipal(), principalBefore - result.seniorFundedAssets);
-        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must burn by funded-share ownership");
+        assertEq(pool.seniorHighWaterMark(), expectedHwm, "HWM must scale by the actual principal removed");
     }
 
     function test_PartialFundingAccumulatesAcrossClaims() public {

@@ -838,9 +838,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         );
         if (seniorPhase.fundedAssets > 0) {
             HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
-                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(
-                    _getWaterfallState(), seniorPhase.fundedAssets, seniorPhase.fundedShares, seniorPhase.pricingSupply
-                );
+                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(_getWaterfallState(), seniorPhase.fundedAssets);
             _setWaterfallState(nextState);
             accountedAssets -= seniorPhase.fundedAssets;
             freeUsdc -= seniorPhase.fundedAssets;

@@ -857,10 +857,11 @@ Operationally:
 - A junior-funded coupon first restores any gap between `seniorPrincipal` and `seniorHighWaterMark`. Only the
   remainder above that protected watermark increases both values, so newly compounded coupon remains protected
   after later losses.
-- The mark increases additively on deposits. When an epoch funds `fundedShares` of Senior redemptions against the
-  pre-burn Senior share supply `preBurnSupply`, it removes the same pro-rata protected claim:
-  `H' = H - floor(H * fundedShares / preBurnSupply)`. This is share-based and therefore independent of any frozen exit
-  fee or net asset payout. It resets cleanly after wipeout plus recapitalization.
+- The mark increases additively on deposits. When an epoch pays net Senior redemption assets `A` against
+  pre-withdrawal Senior principal `P`, it removes the same economic fraction of the protected claim:
+  `H' = H - floor(H * A / P)`. Retained fees remain protected. Healthy Senior stays at `H' = P - A`;
+  impaired Senior retains its protection-to-principal ratio with conservative rounding. Zero funding leaves the mark
+  unchanged, including after wipeout. Explicit recapitalization resets the mark with fresh principal.
 - Ordinary deposits into both tranches remain blocked while senior is impaired; recovery capital must arrive through explicit recapitalization or realized pool revenue.
 
 ### Senior capacity covenant

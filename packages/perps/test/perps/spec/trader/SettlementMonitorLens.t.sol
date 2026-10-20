@@ -2527,7 +2527,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertTrue(pool.canSettleDepositEntries(), "the projected and committed gates must agree");
     }
 
-    function test_SeniorRedemptionRoundingCureAllowsCommittedDepositInSameSettlement() public {
+    function test_SeniorRedemptionPreservesExistingImpairmentAndDefersCommittedDeposit() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
         pool.proposePoolConfig(config);
@@ -2544,32 +2544,28 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         usdc.burn(address(pool), pool.rawAssets() - (pool.seniorPrincipal() - 1));
         vm.prank(address(juniorVault));
         pool.reconcile();
-        assertEq(
-            pool.seniorHighWaterMark() - pool.seniorPrincipal(),
-            1,
-            "fixture must create the one-atom impairment cured by redemption rounding"
-        );
+        assertEq(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 1, "fixture must create a one-atom impairment");
         assertFalse(pool.canSettleDepositEntries());
 
         vm.warp(pool.lpEpochStart(observedEpoch));
         IHousePool.LpEpochSettlementResult memory firstPass = _settleLpEpochForTest();
         assertGt(firstPass.seniorFundedAssets, 0, "the matured Senior redemption must still be funded");
-        assertEq(firstPass.seniorDepositAssets, 1e6, "the admitted commitment should activate after impairment cures");
-        assertFalse(firstPass.entriesDeferred);
+        assertEq(firstPass.seniorDepositAssets, 0, "existing impairment must still defer the admitted commitment");
+        assertTrue(firstPass.entriesDeferred);
         assertEq(
-            pool.seniorPrincipal(),
-            pool.seniorHighWaterMark(),
-            "Senior redemption rounding must cure the one-atom impairment"
+            pool.seniorHighWaterMark() - pool.seniorPrincipal(),
+            1,
+            "conservative HWM rounding must preserve the remaining impairment"
         );
         assertEq(
             monitorLens.getSettlementStatus(observedEpoch).senior.observedDepositPendingAssets,
-            0,
-            "the committed Senior deposit should no longer be pending"
+            1e6,
+            "the committed Senior deposit should remain pending"
         );
-        assertTrue(pool.canSettleDepositEntries(), "the conservative common gate may reopen after Senior funding");
+        assertFalse(pool.canSettleDepositEntries(), "the common gate must remain closed while Senior is impaired");
     }
 
-    function test_SettlementRechecksActivationGateAfterSeniorRedemptionCreatesImpairment() public {
+    function test_SeniorVirtualOffsetRedemptionPreservesHealthyActivationGate() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
         pool.proposePoolConfig(config);
@@ -2625,11 +2621,11 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
         assertEq(result.seniorFundedShares, redeemShares);
         assertEq(result.seniorFundedAssets, seniorBootstrapAssets - 1);
-        assertEq(pool.seniorPrincipal(), 1, "virtual-offset pricing leaves one principal atom");
-        assertEq(pool.seniorHighWaterMark(), 2, "pro-rata HWM removal leaves two protected atoms");
-        assertEq(result.seniorDepositAssets, 0, "post-redemption impairment must block activation");
-        assertTrue(result.entriesDeferred);
-        assertEq(seniorVault.pendingDepositRequest(observedEpoch, BOB), 1e6);
+        assertEq(pool.seniorPrincipal(), 1 + 1e6, "one retained atom plus the activated Senior deposit");
+        assertEq(pool.seniorHighWaterMark(), pool.seniorPrincipal(), "virtual offsets must not create impairment");
+        assertEq(result.seniorDepositAssets, 1e6, "healthy Senior must permit the committed deposit to activate");
+        assertFalse(result.entriesDeferred);
+        assertEq(seniorVault.pendingDepositRequest(observedEpoch, BOB), 0);
     }
 
     function test_JuniorZeroPrincipalDoesNotFabricateACommonActivationDeferral() public {
@@ -2762,7 +2758,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(health.juniorActualShareEscrow, requestedShares - 1);
     }
 
-    function test_ValidFrozenSeniorFeeRetainedAboveHwmIsNotAHealthFault() public {
+    function test_FrozenSeniorFeeRemainsProtectedAndHealthy() public {
         _fundSenior(ALICE, 500_000e6);
         _fundJunior(BOB, 500_000e6);
         vm.warp(SATURDAY_FROZEN);
@@ -2776,7 +2772,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         engine.updateMarkPrice(100_000_000, uint64(block.timestamp));
         _settleLpEpochForTest();
 
-        assertGt(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "frozen fee should be retained by Senior");
+        assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "retained frozen fee must remain protected");
         SettlementMonitorViewTypes.SettlementHealth memory health = monitorLens.getSettlementHealth();
         assertEq(uint8(health.state), uint8(SettlementMonitorViewTypes.HealthState.Healthy));
         assertEq(health.criticalFaultMask, 0);
