@@ -7,6 +7,7 @@ import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngin
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
+import {HousePoolPendingPreviewLib} from "@plether/perps/libraries/HousePoolPendingPreviewLib.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 abstract contract HousePoolAccountingParityBase is BasePerpTest {
@@ -136,11 +137,14 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
         _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 40_000e6);
         _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 15_000e6);
 
-        // Continuation is selected before recapitalization revives principal, so this batch's revenue is ownerless.
-        ExpectedAccounting memory expected = ExpectedAccounting(40_000e6, 0, 40_000e6, 15_000e6, 0, 0);
+        // Recapitalization restores senior first; same-batch revenue then belongs to surviving junior owners.
+        ExpectedAccounting memory expected = ExpectedAccounting(40_000e6, 15_000e6, 40_000e6, 0, 0, 0);
+        assertTrue(pool.canSettleDepositEntries(), "mixed recovery must not block projected deposit settlement");
         uint256[4] memory preview = _assertPendingAccounting(expected);
-        assertEq(preview[2], 40_000e6, "only recapitalized senior assets are withdrawable");
-        assertEq(preview[3], 0, "mixed bootstrap does not assign revenue to junior");
+        assertEq(preview[2], 40_000e6, "recapitalized senior assets are withdrawable");
+        assertGt(preview[3], 0, "surviving junior owners can withdraw recovered revenue");
+        assertLe(preview[3], expected.junior, "junior withdrawals remain bounded by recovered principal");
+        assertTrue(pool.canSettleDepositEntries(), "settled recovery must not leave deposits blocked");
 
         // A second pass has zero pending buckets and must not apply the inflows again.
         bytes32 settled = _accountingHash();
@@ -162,6 +166,33 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
         stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(0));
         // Principal already exists on this pass, so residual revenue continues to junior after senior recovery.
         _assertPendingAccounting(ExpectedAccounting(40_000e6, 15_000e6, 40_000e6, 0, 0, 0));
+    }
+
+    function test_PartialMixedInflowsContinueRevenueInFirstPassAfterWipe() public {
+        _wipePrincipal();
+        _recordInflow(IHousePool.ClaimantInflowKind.Recapitalization, 40_000e6);
+        _recordInflow(IHousePool.ClaimantInflowKind.Revenue, 15_000e6);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(5000e6));
+
+        // The first pass can settle all recapitalization and only part of the revenue.
+        _assertPendingAccounting(ExpectedAccounting(40_000e6, 10_000e6, 40_000e6, 0, 0, 5000e6));
+
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(uint256(0));
+        _assertPendingAccounting(ExpectedAccounting(40_000e6, 15_000e6, 40_000e6, 0, 0, 0));
+    }
+
+    function test_MixedPendingInflowsWithoutJuniorOwnersKeepSurplusUnassigned() public pure {
+        HousePoolPendingPreviewLib.PendingAccountingState memory state;
+        state.seniorSupply = 1;
+        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory buckets =
+            HousePoolPendingPreviewLib.ClaimantPendingBuckets(40_000e6, 15_000e6);
+
+        HousePoolPendingPreviewLib.applyPendingClaimantBucketsPreview(state, buckets, buckets, false);
+
+        assertEq(state.waterfall.seniorPrincipal, 40_000e6, "recapitalization restores senior");
+        assertEq(state.waterfall.seniorHighWaterMark, 40_000e6, "recapitalization preserves its recovery target");
+        assertEq(state.waterfall.juniorPrincipal, 0, "revenue must not create ownerless junior principal");
+        assertEq(state.unassignedAssets, 15_000e6, "surplus without junior owners stays unassigned");
     }
 
     function test_StaleMarkPreviewKeepsCouponAccrualWithoutRepricingPrincipal() public {
