@@ -188,6 +188,20 @@ contract PletherOracleTest is Test {
         new PletherOracle(address(engine), address(vault), address(pyth), feedIds, weights, basePrices, inversions);
     }
 
+    function test_Constructor_RevertsOnZeroWeightWithValidTotal() public {
+        weights[0] = 0;
+        weights[1] = 1e18;
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__ZeroWeight.selector, 0));
+        _deployOracle(address(pyth));
+
+        weights[0] = 1e18;
+        weights[1] = 0;
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__ZeroWeight.selector, 1));
+        _deployOracle(address(pyth));
+    }
+
     function test_Constructor_RejectsZeroAndDuplicateFeedIds() public {
         feedIds[0] = bytes32(0);
         vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InvalidFeedId.selector, bytes32(0)));

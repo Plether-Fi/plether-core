@@ -96,14 +96,14 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     mapping(address => uint256) public override claimableEth;
 
     /// @notice Deploys an immutable Pyth basket configuration.
-    /// @dev Requires a nonzero Pyth address, at least one feed, equal array lengths, nonzero base prices, and weights
-    ///      summing exactly to `1e18`. The engine and HousePool addresses are stored without zero-address, code, or
-    ///      interface validation. Feed ids must be unique and nonzero; individual weights may be zero.
+    /// @dev Requires a nonzero Pyth address, at least one feed, equal array lengths, nonzero base prices, and nonzero
+    ///      weights summing exactly to `1e18`. The engine and HousePool addresses are stored without zero-address, code,
+    ///      or interface validation. Feed ids must be unique and nonzero.
     /// @param engine_ Engine used for cap, mark, position-side, calendar, and router-authorization state
     /// @param housePool_ HousePool used for pool-reconciliation freshness policy
     /// @param pyth_ Nonzero Pyth contract used for update and historical-parse calls
     /// @param feedIds_ Ordered Pyth feed ids included in the basket
-    /// @param quantities_ Ordered 18-decimal basket weights; must sum exactly to `1e18`
+    /// @param quantities_ Ordered nonzero 18-decimal basket weights; must sum exactly to `1e18`
     /// @param basePrices_ Ordered nonzero component base prices in 8-decimal units
     /// @param inversions_ Ordered flags selecting inverse-price normalization for each component
     constructor(
@@ -147,6 +147,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             }
             if (basePrices_[i] == 0) {
                 revert PletherOracle__ZeroBasePrice(i);
+            }
+            if (quantities_[i] == 0) {
+                revert PletherOracle__ZeroWeight(i);
             }
             totalWeight += quantities_[i];
             _acceptedPrices.push();

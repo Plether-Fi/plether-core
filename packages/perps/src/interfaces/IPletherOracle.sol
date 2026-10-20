@@ -145,6 +145,9 @@ interface IPletherOracle {
     /// @notice Thrown when a configured basket component has a zero normalization base price.
     /// @param index Zero-based component index.
     error PletherOracle__ZeroBasePrice(uint256 index);
+    /// @notice Thrown when a configured basket component has zero weight.
+    /// @param index Zero-based component index.
+    error PletherOracle__ZeroWeight(uint256 index);
     /// @notice Thrown when configured 18-decimal basket weights do not sum exactly to `1e18`.
     /// @param totalWeight Actual sum of the supplied weights.
     error PletherOracle__InvalidTotalWeight(uint256 totalWeight);
