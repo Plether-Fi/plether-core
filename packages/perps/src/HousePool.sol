@@ -313,9 +313,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Finalizes the proposed pool config after the timelock expires.
-    /// @dev Only the owner may call. Senior-rate changes require a fresh mark under the current staleness limit
-    ///      and checkpoint the old coupon rate before the new rate becomes active. Clears the pending proposal
-    ///      and emits field-specific update events for values that changed.
+    /// @dev Only the owner may call. Senior-rate changes require a fresh mark under the current pool limit and
+    ///      effective reconciliation policy, and checkpoint the old coupon rate before the new rate becomes active.
+    ///      Clears the pending proposal and emits field-specific update events for values that changed.
     function finalizePoolConfig() external onlyOwner {
         if (poolConfigActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -326,8 +326,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         PoolConfig memory currentConfig = poolConfig;
         PoolConfig memory nextConfig = pendingPoolConfig;
         if (nextConfig.seniorRateBps != currentConfig.seniorRateBps) {
-            _requireRateChangeMarkFresh(_getHousePoolStatusSnapshot());
-            _checkpointSeniorCouponBeforeRateChange();
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
+            _requireRateChangeMarkFresh(statusSnapshot);
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
+            _requireFreshMark(accountingSnapshot, statusSnapshot);
+            _reconcile(accountingSnapshot, statusSnapshot);
         }
         poolConfig = nextConfig;
         delete pendingPoolConfig;
@@ -1662,25 +1665,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (config.maxSeniorShareBps >= 10_000) {
             revert HousePool__InvalidMaxSeniorShareBps();
         }
-    }
-
-    function _checkpointSeniorCouponBeforeRateChange() internal {
-        (
-            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
-            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
-        ) = _getHousePoolSnapshots();
-        if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
-            _reconcile(accountingSnapshot);
-            return;
-        }
-        _checkpointSeniorCouponBeforePrincipalMutation();
-        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
-            HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
-            _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
-        bool allowRevenueContinuation = seniorPrincipal + juniorPrincipal != 0;
-        _applyPendingClaimantBucketsLive(settleableClaimantBuckets, claimantBuckets, allowRevenueContinuation);
     }
 
     function _juniorShareSupply() internal view returns (uint256) {
