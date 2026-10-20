@@ -9,6 +9,10 @@ neutral Engine mark before settlement, protection activation, or any excess-ETH 
 replays the unchanged accepted basket at zero fee if it still passes the selected policy. An uninitialized basket
 cannot be read or replayed.
 
+Historical order-execution components use `maxComponentPublishTimeDivergence` (5 seconds by default). Current live
+baskets use the mode-specific freshness limit for divergence; the 15-second parsing lookback also bounds their
+component gaps. See the accepted [live basket component selection limitation](SECURITY.md#known-limitation-live-basket-component-selection).
+
 The basket publish time is the newest component time so protection activation can observe a move in any component.
 Equal-time baskets cannot change the mark price. Pool reconciliation additionally requires the oldest component to
 be published in the current LP epoch before the Router may settle that epoch.
@@ -33,6 +37,8 @@ repaired from mutable Pyth storage during the freeze.
 
 Historical order resolution now pays for `parsePriceFeedUpdatesUnique` and `updatePriceFeeds` on the **same signed payload**. It checks each configured stored feed against its corresponding parsed timestamp before returning. The fill and neutral mark still come from the unique historical tick. A newer stored price never substitutes for that tick.
 
+Historical fills can use an older eligible post-commit tick without rewinding a newer cached Engine mark.
+
 This requires a fresh complete stack: the execution sidecar is immutable and the Engine's Router binding is one-time. The candidate release stays inactive. Existing positions, queues, protections, balances, claims and LP obligations are not migrated.
 
 ## Consumer integration
@@ -49,7 +55,7 @@ Public Router execution accepts no cache. Its in-memory cache starts empty and i
 
 ## Failure and compatibility rules
 
-`PletherOracle__StoredFeedBehind(feedId, storedPublishTime, requiredPublishTime)` means synchronization or cache coverage failed. Synchronization errors, insufficient fees and failed coverage revert the whole transaction, including previous batch progress. Only a reverted historical parser follows the existing unavailable-history path. Caught later item failures retain synchronized mark updates and consumed fees according to the existing lifecycle policy.
+`PletherOracle__StoredFeedBehind(feedId, storedPublishTime, requiredPublishTime)` means synchronization or cache coverage failed. Synchronization errors, insufficient fees and failed coverage revert the whole transaction, including previous batch progress. Only Pyth's exact `PriceFeedNotFoundWithinRange()` error follows the unavailable-history path; it means no qualifying update was found in the supplied payload, not that history is unavailable elsewhere. Other parser errors revert with `PletherOracle__HistoricalParserFailure`; batches stop with `OracleFailure`, preserve finalized predecessors, and refund the reverted call's funding through the Router. Caught later item failures retain synchronized mark updates and consumed fees according to the existing lifecycle policy.
 
 Import the matching release ABIs and verify chain, addresses, runtime hashes, Engine/Router/Oracle bindings and execution-config hash. The batch cache tuple now includes `oldestPublishTime`; the snapshot tuple is unchanged. The combined current fresh-stack cleanup also changes order receipt and configuration ABIs and uses V5 receipt/config hash domains. Regenerate consumers from the final release build; the request/intent domain remains V3. New deployment addresses change the configuration hash; invalidate old reviews and require fresh review plus explicit user confirmation. Keep existing worker repair and bounded UI recovery.
 
