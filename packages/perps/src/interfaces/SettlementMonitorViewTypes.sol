@@ -60,7 +60,7 @@ library SettlementMonitorViewTypes {
         UnassignedAssets,
         SeniorImpaired,
         ZeroPrincipalWithSupply,
-        SeniorCapacityUnavailable,
+        SeniorCapacityUnavailable, // Retained bit position; committed reservations no longer defer activation.
         ActivationNotConfirmed,
         DependencyUnknown,
         LpEpochSettlementPaused

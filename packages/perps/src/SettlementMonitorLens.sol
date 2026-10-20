@@ -1177,7 +1177,7 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
             status.seniorDepositDeferralMask |= gateClosedBit;
             status.juniorDepositDeferralMask |= gateClosedBit;
         }
-        if (!juniorMaturedEvidenceComplete || status.junior.maturedRedeemHeadShares != 0) {
+        if (!juniorMaturedEvidenceComplete) {
             status.seniorDepositDeferralMask |= gateClosedBit;
         }
     }
@@ -1254,18 +1254,6 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
             _readPair(address(HOUSE_POOL), HousePool.getPendingDepositTrancheState.selector, 0, false);
         if (!projectedPrincipalsOk) {
             _markDeferralDependencyUnknown(status, previewDependencyBit, 3);
-        }
-
-        {
-            (bool reservationsOk, bool reservationsWithinLimits) =
-                _readBool(address(HOUSE_POOL), HousePool.areSeniorDepositReservationsWithinLimits.selector);
-            if (!reservationsOk) {
-                _markDeferralDependencyUnknown(status, previewDependencyBit, 1);
-            } else if (!reservationsWithinLimits) {
-                status.seniorDepositDeferralMask |= _deferralBit(
-                    SettlementMonitorViewTypes.DepositDeferral.SeniorCapacityUnavailable
-                );
-            }
         }
 
         {

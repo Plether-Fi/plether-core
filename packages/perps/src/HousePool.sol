@@ -384,7 +384,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _unpause();
     }
 
-    /// @notice Holds new LP epoch clearing without pausing requests, cancellations, claims, or trading.
+    /// @notice Holds new LP epoch clearing and Senior request admission without pausing Junior requests or trading.
     /// @dev Callable by the owner or dedicated pauser. Governance alone can release the hold.
     function pauseLpEpochSettlement() external override onlyPauserOrOwner {
         if (lpEpochSettlementPaused) {
@@ -469,6 +469,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     function _canAcceptTrancheDeposits(
         bool isSenior
     ) internal view returns (bool) {
+        if (isSenior && lpEpochSettlementPaused) {
+            return false;
+        }
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
@@ -750,6 +753,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     function reserveSeniorDeposit(
         uint256 amount
     ) external override(IHousePool, IPerpsLPActions) onlySeniorVault whenNotPaused {
+        if (lpEpochSettlementPaused) {
+            revert HousePool__LpEpochSettlementPaused();
+        }
         _requireMinimumTrancheDeposit(amount);
         HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         _requireSeniorDepositCapacity(amount, ctx.pendingState.waterfall);
@@ -857,7 +863,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             juniorPhase.backlog = _hasMaturedRedeemHead(juniorVault, result.cutoffEpoch);
         } else {
             uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
-                seniorPrincipal, seniorHighWaterMark, juniorPrincipal, poolConfig.maxSeniorShareBps
+                seniorPrincipal,
+                seniorHighWaterMark,
+                juniorPrincipal,
+                reservedSeniorDepositAssetsUsdc,
+                poolConfig.maxSeniorShareBps
             );
             juniorPhase.budget = _min(freeUsdc, _min(juniorPrincipal, ratioCap));
             juniorPhase = _fundRedemptionPhase(
@@ -1021,10 +1031,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             if (epochAssets == 0) {
                 break;
             }
-            if (isSenior && !_seniorCommitmentsWithinLimits(_getWaterfallState())) {
-                break;
-            }
-
+            // Senior capacity was committed at request admission. Later coupon or limit drift closes new admission
+            // but must not veto activation of an already accepted epoch.
             // Quote the cumulative batch and mint only its marginal delta so retained-fee pricing is split-neutral.
             uint256 cumulativeShares = vault.quoteDepositFromState(
                 phase.acceptedAssets + epochAssets, phase.pricingAssets, phase.pricingSupply, feeBps
@@ -1190,7 +1198,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolWaterfallAccountingLib.WaterfallState memory state
     ) internal view returns (uint256) {
         uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
-            state.seniorPrincipal, state.seniorHighWaterMark, state.juniorPrincipal, poolConfig.maxSeniorShareBps
+            state.seniorPrincipal,
+            state.seniorHighWaterMark,
+            state.juniorPrincipal,
+            reservedSeniorDepositAssetsUsdc,
+            poolConfig.maxSeniorShareBps
         );
         return _min(freeUsdc, _min(state.juniorPrincipal, ratioCap));
     }

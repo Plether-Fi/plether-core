@@ -134,7 +134,7 @@ interface IAsyncTrancheVault is IERC7540, IERC7575Share {
         address controller
     ) external returns (uint256 shares);
 
-    /// @notice Cancels a pending deposit request and returns its escrowed assets.
+    /// @notice Cancels a Junior request or refunds a Senior commitment during a settlement hold or safety exception.
     /// @param requestId Pending deposit request epoch to cancel.
     /// @param receiver Account receiving the refunded underlying assets.
     /// @param controller Account controlling the request.

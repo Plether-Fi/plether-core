@@ -1645,7 +1645,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
     }
 
-    function test_MaturedJuniorRedemptionMakesSeniorActivationUnconfirmed() public {
+    function test_MaturedJuniorRedemptionCannotDisplaceSeniorCommitment() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
         config.maxSeniorExposureUsdc = TEST_MAX_SENIOR_EXPOSURE_USDC;
@@ -1675,11 +1675,11 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             ),
             "pre-redemption capacity remains valid"
         );
-        assertTrue(
+        assertFalse(
             _hasDeferral(
                 status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.ActivationNotConfirmed
             ),
-            "Junior funding can reduce Senior capacity before activation"
+            "Junior funding preserves the Senior commitment and cannot defer its activation"
         );
         assertFalse(
             _hasDeferral(
@@ -1689,10 +1689,10 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
-        assertGt(result.juniorFundedAssets, 0);
-        assertEq(result.seniorDepositAssets, 0);
-        assertEq(seniorVault.pendingDepositRequest(observedEpoch, BOB), reservation);
-        assertFalse(pool.areSeniorDepositReservationsWithinLimits());
+        assertEq(result.juniorFundedAssets, 0, "full-cap Senior commitment leaves no Junior exit headroom");
+        assertEq(result.seniorDepositAssets, reservation);
+        assertEq(seniorVault.claimableDepositRequest(observedEpoch, BOB), reservation);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
 
     function test_NoCodePlannerCannotReportHealthyOrCompleteConfig() public {
@@ -2394,7 +2394,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
     }
 
-    function test_UnreadableSeniorReservationGateDoesNotPoisonJuniorDeferral() public {
+    function test_UnreadableAdmissionCapacityDiagnosticDoesNotDeferCommittedDeposits() public {
         vm.mockCallRevert(
             address(pool),
             abi.encodeWithSelector(bytes4(keccak256("areSeniorDepositReservationsWithinLimits()"))),
@@ -2404,14 +2404,17 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         SettlementMonitorViewTypes.SettlementStatus memory status =
             monitorLens.getSettlementStatus(pool.currentLpEpoch());
 
-        assertTrue(
-            _hasDeferral(status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown)
+        assertFalse(
+            _hasDeferral(
+                status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown
+            ),
+            "live admission headroom is irrelevant to an accepted Senior commitment"
         );
         assertFalse(
             _hasDeferral(
                 status.juniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown
             ),
-            "senior reservation evidence is irrelevant to Junior activation"
+            "Senior admission headroom is irrelevant to Junior activation"
         );
     }
 
@@ -2524,7 +2527,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertTrue(pool.canSettleDepositEntries(), "the projected and committed gates must agree");
     }
 
-    function test_ConservativeActivationGateReopensAfterSeniorRedemptionRoundingCure() public {
+    function test_SeniorRedemptionRoundingCureAllowsCommittedDepositInSameSettlement() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
         pool.proposePoolConfig(config);
@@ -2551,7 +2554,8 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         vm.warp(pool.lpEpochStart(observedEpoch));
         IHousePool.LpEpochSettlementResult memory firstPass = _settleLpEpochForTest();
         assertGt(firstPass.seniorFundedAssets, 0, "the matured Senior redemption must still be funded");
-        assertTrue(firstPass.entriesDeferred, "tranche-specific capacity must keep the Senior deposit pending");
+        assertEq(firstPass.seniorDepositAssets, 1e6, "the admitted commitment should activate after impairment cures");
+        assertFalse(firstPass.entriesDeferred);
         assertEq(
             pool.seniorPrincipal(),
             pool.seniorHighWaterMark(),
@@ -2559,8 +2563,8 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
         assertEq(
             monitorLens.getSettlementStatus(observedEpoch).senior.observedDepositPendingAssets,
-            1e6,
-            "the independently capacity-constrained Senior deposit must remain pending"
+            0,
+            "the committed Senior deposit should no longer be pending"
         );
         assertTrue(pool.canSettleDepositEntries(), "the conservative common gate may reopen after Senior funding");
     }

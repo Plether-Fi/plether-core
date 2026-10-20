@@ -157,6 +157,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     error TrancheVault__ExceededMaxRequestRedeem(address owner, uint256 shares, uint256 maxShares);
     error TrancheVault__DepositEpochNotActive();
     error TrancheVault__DepositEpochAlreadyActive();
+    error TrancheVault__SeniorDepositCommitted();
     error TrancheVault__DepositEpochFinalized();
     error TrancheVault__DepositEpochNotFinalized();
     error TrancheVault__DepositEpochEmpty();
@@ -830,16 +831,20 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (epoch.finalized) {
             revert TrancheVault__DepositEpochFinalized();
         }
-        if (currentLpEpoch() >= requestId && !queueState.rejected && !_projectedTerminalWipe()) {
-            bool reservationsWithinLimits = !IS_SENIOR || POOL.areSeniorDepositReservationsWithinLimits();
-            if (!POOL.isSeniorImpairedAfterPendingDepositReconcile() && reservationsWithinLimits) {
-                revert TrancheVault__DepositEpochAlreadyActive();
-            }
-        }
         DepositPosition storage position = depositRequests[controller][requestId];
         assets = position.assets;
         if (assets == 0) {
             revert TrancheVault__NoPendingDeposit();
+        }
+        if (
+            (IS_SENIOR || currentLpEpoch() >= requestId) && !queueState.rejected
+                && (!IS_SENIOR || !POOL.lpEpochSettlementPaused()) && !_projectedTerminalWipe()
+                && !POOL.isSeniorImpairedAfterPendingDepositReconcile()
+        ) {
+            if (IS_SENIOR) {
+                revert TrancheVault__SeniorDepositCommitted();
+            }
+            revert TrancheVault__DepositEpochAlreadyActive();
         }
         _removeControllerDeposit(controller, requestId);
         position.assets = 0;

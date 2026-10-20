@@ -280,11 +280,12 @@ interface IHousePool {
     ) external pure returns (uint256);
 
     /// @notice Returns whether new LP epoch clearing is held by the dedicated emergency circuit breaker.
-    /// @dev Deposit and redemption requests, cancellations, and already-funded claims remain independent of this flag.
+    /// @dev Junior deposit and redemption requests and already-funded claims remain independent of this flag.
+    ///      Senior requests stop and existing Senior commitments become cancellable while the hold is active.
     function lpEpochSettlementPaused() external view returns (bool);
 
     /// @notice Activates the dedicated LP epoch settlement hold.
-    /// @dev Callable by the owner or configured pauser. Does not pause trading or LP request admission.
+    /// @dev Callable by the owner or configured pauser. Does not pause trading or Junior LP request admission.
     function pauseLpEpochSettlement() external;
 
     /// @notice Releases the dedicated LP epoch settlement hold.
@@ -341,6 +342,7 @@ interface IHousePool {
     function reservedSeniorDepositAssetsUsdc() external view returns (uint256);
 
     /// @notice Returns whether projected protected senior exposure plus all reservations fits active limits.
+    /// @dev Diagnostic for current headroom; existing firm reservations may settle after passive overage.
     /// @return Whether projected protected exposure and reservations fit the current capacity limits
     function areSeniorDepositReservationsWithinLimits() external view returns (bool);
 

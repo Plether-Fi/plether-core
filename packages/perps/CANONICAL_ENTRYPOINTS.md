@@ -200,8 +200,8 @@ by the Book's trailing payload.
   - `observableConfigDigest()`
 
   `getSettlementStatus(...)` exposes `executionPathDependencyMask` for failures that prevent route selection and a
-  broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation and reservation-limit
-  state, not new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
+  broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation gates, not
+  new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
   alert-investigation reads (roughly 6 KB returned and about 0.8–1.3 million representative `eth_call` gas); they
   expose `observationComplete` and `completeObservationDigest`. Completeness requires every Oracle dependency read,
   including the updated current-feed ABI, even for cached/no-work routing, but requires Oracle policy validity only on

@@ -373,11 +373,12 @@ governance owns the coordinator and assigns its guardian.
   Router exceed both EIP-170 and its pre-change runtime baseline.
 - HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
   It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
-  projected-wipe, Senior-impairment, or Senior-reservation escape condition, or later activation after recovery.
+  projected wipe, Senior impairment, or explicit settlement hold for a committed Senior request, or later activation
+  after recovery.
 - The independent settlement hold makes every synchronized epoch call revert before mutation, including direct
-  cached/no-position and Router atomic-refresh routes. New deposits, Senior reservations, redemptions, existing
-  cancellations, trading, recapitalization/reconciliation, and already-funded claims remain live. Deposits can
-  accumulate in escrow under unchanged cancellation rules.
+  cached/no-position and Router atomic-refresh routes. It stops new Senior requests and reservations while allowing
+  existing Senior commitments to be refunded. Junior requests, redemptions, trading,
+  recapitalization/reconciliation, and already-funded claims remain live.
 - Trader closes/reductions, liquidations, and already-funded claims are deliberately outside guardian authority.
   Redemption-request-off, a global all-LP-request freeze, corrupted-queue quarantine, emergency pricing, and a
   global protocol freeze do not exist. Actions containing the LP-entry restriction do stop new deposit requests.
@@ -692,9 +693,9 @@ Security consequences:
   account mutation is in progress. `HousePool` independently rejects or defers LP actions under its configured mark-age
   and oracle-frozen policy.
 
-Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending deposit is
-cancellable before maturity, and post-maturity cancellation remains available only under the documented
-epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions. Shares are
+Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending Junior deposit is
+cancellable before maturity, and an accepted Senior deposit is a firm commitment. Senior refunds require epoch
+rejection, projected terminal wipe, Senior impairment, or an explicit LP settlement hold. Shares are
 minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
 already activated shares. The one-hour cooldown is timestamped at that successful activation, not at claim. A claim is
 therefore an administrative transfer that propagates the source activation timestamp with
@@ -866,11 +867,12 @@ settlement snapshot:
 - trading, closes, liquidations, claims, carry, and pool accounting can change NAV,
 - governance configuration may change if an already-matured proposal is finalized,
 - oracle state and confidence can change, and
-- cancellation in one tranche or direction can change capacity available to later settlement phases.
+- cancellation in one tranche or direction can change phase budgets or pricing.
 
 Monitoring must therefore simulate current state and treat cutoff-time request totals as upper bounds. In particular,
 the conservative case assumes all redemptions remain and no helpful deposits activate. Cancelling Senior redemptions
-may expose more Junior funding, while cancelling Junior deposits may prevent a Senior deposit from fitting. Indexing,
+may expose more Junior funding, while cancelling Junior deposits can change later activation amounts or prices without
+invalidating an accepted Senior commitment. Indexing,
 alerting, sequencer publication, and transaction inclusion also consume part of the nominal five minutes, so the
 operational reaction window is shorter. `SettlementMonitorLens` reads an explicitly observed epoch so a monitor can
 keep following the closed batch after the request target rolls forward. That argument does not select what the Router
@@ -894,8 +896,8 @@ corruption degrades health without replacing a route that is still known, while 
 critical. Projected deposit deferrals combine the tranche-neutral
 `HousePool.canSettleDepositEntries()` pre-redemption projection with canonical redemption evidence, so residual
 pending claimants remain visible even when an epoch's queued assets are zero. The Lens does not confirm either
-tranche's activation while matured Senior funding can still change principal/HWM rounding, or Senior activation while
-matured Junior funding can reduce reservation capacity. HousePool rechecks the exact gates after redemption funding;
+tranche's activation while matured Senior funding can still change principal/HWM rounding. Junior funding protects
+accepted Senior reservations and cannot displace their activation. HousePool rechecks the exact gates after redemption funding;
 this prevents a zero-fee
 virtual-offset rounding transition from admitting deposits into newly impaired Senior accounting. The view does not
 quote new-request capacity. The facade constructor rejects a Router whose immutable settlement pool differs from
@@ -924,8 +926,8 @@ constraint in addition to each contract's EIP-170 runtime limit.
 Normal monitoring should poll the lighter `getSettlementStatus(observedEpoch)` view. The composite
 `getSettlementObservation(observedEpoch)` is designed for checkpoints and alert investigation: its ABI return is
 roughly 6 KB and representative `eth_call` execution is about 0.8–1.3 million gas. The Senior deposit-deferral mask
-describes whether pending activation or existing reservation limits are blocked, not how much new Senior capital can
-be admitted; use the canonical admission-capacity view for a new request.
+describes pending activation gates, not how much new Senior capital can be admitted; use the vault admission view for
+request eligibility and `HousePool.getSeniorDepositCapacity()` for mathematical headroom.
 
 `getPoolReconcileOracleStatus()` describes feeds readable at the observation block. It cannot certify a future Hermes
 payload or the fee and publish times used by a later transaction. It requires the updated
@@ -965,8 +967,9 @@ funding of already-matured redemptions. The settlement result marks entries defe
 live.
 
 The independent settlement hold blocks both funding and activation by reverting the canonical epoch transition. It
-does not block new deposit/redemption requests, Senior reservations, existing cancellation paths, reconciliation, or
-funded claims. It has no automatic expiry and only the HousePool owner can release it.
+also blocks new Senior requests and reservations and permits pending Senior commitments to be refunded. Junior
+deposit and redemption requests, reconciliation, and funded claims remain live. It has no automatic expiry and only
+the HousePool owner can release it.
 
 ### Junior maintenance-fee dilution
 
@@ -1003,19 +1006,19 @@ This removes unpaid senior-coupon debt queues while making the cost of the fixed
 
 Active protected senior exposure is `E = max(projected senior principal, projected senior high-water mark)`. Counted
 admission exposure is `C = E + R`, where `R` is the gross USDC reserved in unfinalized senior deposit epochs. The
-absolute and share admission tests use `C`, while the Junior redemption-funding covenant deliberately uses active `E`
-only.
+absolute and share admission tests use `C`, and the Junior redemption-funding covenant protects the same committed
+exposure `C`.
 Governance sets both an absolute USDC limit and a maximum share of senior-plus-junior claimant capital. The high-water
 term prevents an impaired principal balance from falsely reopening capacity while its restoration entitlement remains.
 
-Senior deposit reservations are provisional. They consume quoted headroom when requested, but the whole outstanding
-reservation book is checked again at finalization. If a timelocked cap reduction or later accounting change makes the
-book invalid, finalization remains blocked and post-maturity cancellation is unlocked so depositors can recover the
-escrowed USDC. Junior redemption funding does not lock against `R`, so a permitted fill can also invalidate the
-provisional book and make it refundable. Integrators must not present a request-time quote as guaranteed finalization.
+Senior deposit reservations are firm once accepted. They consume quoted headroom when requested and settle even if
+later coupon accrual or a cap reduction makes the current reservation book overlimit. New Senior admission then closes.
+Junior redemption funding protects `R` as well as active exposure, so it cannot consume the backing committed to
+pending Seniors. Integrators should present accepted Senior requests as binding commitments, subject to ordinary
+activation gates and the documented safety and settlement-hold refund paths.
 
-The covenant also limits Junior redemption funding; using active `E` and explicitly excluding pending reservations,
-the pool retains enough projected Junior principal that the configured Senior share still holds after the fill.
+The covenant also limits Junior redemption funding; using committed `E + R`, the pool retains enough projected Junior
+principal that the configured Senior share still holds after the fill.
 This is an LP-liquidity restriction, not an extra source of cash or a guarantee that losses cannot impair senior.
 
 Coupon, loss allocation, revenue restoration, and privileged claimant recapitalization remain higher-priority
@@ -1135,8 +1138,8 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 - senior coupon payments are capped by available junior principal,
 - governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
   reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,
-- pending senior reservations are not grandfathered against later cap or accounting changes, but become refundable if
-  they no longer fit at finalization,
+- accepted senior reservations are grandfathered against later cap or accounting changes; an explicit settlement hold,
+  projected terminal wipe, Senior impairment, or epoch rejection allows escrow recovery,
 - wallet shares remain governed by the latest applicable activation timestamp, so voluntarily combining a newer lot
   with an older wallet balance preserves the newer lot's remaining cooldown. Administrative claims do not manufacture
   a claim-time delay, and the direct route can consume an independently aged source lot without mixing it into the
