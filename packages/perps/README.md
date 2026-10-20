@@ -1240,13 +1240,19 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
 - The neutral, pre-cap basket is accepted when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`. The initial `basketMaxConfidenceRatioBps` is `10` (0.10%), equality passes, and there is no separate per-component confidence ceiling.
 - Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `LONG` opens are priced lower, `SHORT` opens are priced higher, `LONG` closes are priced higher, and `SHORT` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
-- Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.
+- Historical order-execution basket components must stay within `maxComponentPublishTimeDivergence` (5 seconds by default). Current live baskets use the mode-specific freshness limit for divergence; the 15-second live parsing lookback bounds accepted live-component gaps, including liquidation and LP epoch settlement.
 - The newest component `publishTime` is the live basket marker passed to the engine, allowing protection to react when any component advances. A different price cannot replace an equal-time mark. Pool epoch settlement also requires every component to be published after the current round-hour boundary. Historical order fills can use an older post-commit price without rewinding a newer cached engine mark.
 - Frozen-oracle close-only windows are the only regime that relaxes historical live-market settlement.
 - Protection creation, replacement, and triggering are disabled while `oracleFrozen`. A close generated before the
   freeze remains an ordinary close and may execute under the existing frozen-close policy.
 - The router's `PletherOracle` address is recoverable through `OrderRouterAdmin`'s timelocked oracle-config flow; changing the Pyth endpoint or basket arrays requires deploying a new oracle and timelocking the router onto it.
 - The execution price is clamped to `CAP_PRICE` before the slippage check so the user sees the same price the engine executes.
+
+#### Known limitation: live basket component selection
+
+A caller supplies signed Pyth updates for each feed in a current live basket. The oracle checks signatures through Pyth, per-feed publish-time ordering, freshness, confidence, and the permitted gap between component publish times. It cannot establish from those supplied updates that each component is the newest Pyth report available off-chain. A caller may therefore choose an older, still-valid signed component within the allowed window and obtain a different basket mark. This applies to live mark refresh, liquidation, and LP epoch settlement; historical order execution has its separate post-commit parse and 5-second component-gap rule.
+
+Liquidation or LP epoch settlement can consume the selected mark in the same transaction, so a later update cannot undo an action already settled. A fork test demonstrated a different accepted mark from a mixed-time basket, but did not demonstrate a wrongful liquidation, a different LP payout, or a profitable exploit. Requiring simultaneous feed timestamps would impede feeds that publish at different times; tightening the window would reduce, but not eliminate, caller choice. This remains a documented limitation of caller-supplied signed updates, with no additional protocol change planned on the current evidence.
 
 ### Frozen oracle behavior
 
@@ -1488,7 +1494,7 @@ the active deployment before constructing orders; many unit-test fixtures intent
 | Full default protection reserve | 0.20 USDC | Snapshotted trigger bounty only, funded from free settlement; linked-close bounty is zero |
 | Normal execution staleness | 60s | Normal order execution freshness |
 | Order settlement window | 15s | Historical Pyth search window after order commit |
-| Component publish divergence | 5s | Max basket-leg publish-time skew for live settlement |
+| Historical order component publish divergence | 5s | Max basket-leg publish-time skew for historical order execution; current live baskets use their mode-specific limits and a 15s parsing lookback |
 | `basketMaxConfidenceRatioBps` | 10 (0.10%) | Maximum weighted aggregate confidence relative to the neutral pre-cap basket price |
 | Adverse confidence multiplier | 2,000 (0.2x) constructor; 2,500 (0.25x) Sepolia release | Applied to live/FAD order execution and liquidation marks; waived for oracle-frozen voluntary closes |
 | Liquidation staleness | 15s | Live-market liquidation freshness |
