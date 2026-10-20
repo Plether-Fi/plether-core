@@ -21,6 +21,10 @@ interface ICfdEngineTypes {
     error CfdEngine__InvalidSettlementSidecar();
     /// @notice The proposed timelocked admin is not bound to this engine.
     error CfdEngine__InvalidAdmin();
+    /// @notice The clearinghouse settlement token does not match the engine settlement token.
+    error CfdEngine__InvalidSettlementAsset();
+    /// @notice The proposed pool has no code or is not bound to this engine and settlement token.
+    error CfdEngine__InvalidPool();
     /// @notice The current protocol-treasury account still has a clearinghouse balance and therefore cannot be replaced.
     error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
     /// @notice The account attempted to settle a zero trader-claim balance.
