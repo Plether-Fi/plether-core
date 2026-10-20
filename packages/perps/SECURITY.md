@@ -308,6 +308,8 @@ Mitigations:
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
+- Oracle deployment and Router deployment/rotation reject Pyth endpoints without deployed code; this guards against
+  empty-address misconfiguration, while governance remains responsible for selecting the correct Pyth implementation,
 - conservative weighted basket confidence propagation, a timelocked aggregate pre-cap confidence limit, and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
 - live current baskets parse signed prices for every component within a caller-independent window of at most 15

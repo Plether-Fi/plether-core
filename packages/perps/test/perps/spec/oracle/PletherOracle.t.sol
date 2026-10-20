@@ -175,6 +175,15 @@ contract PletherOracleTest is Test {
         _deployOracle(address(0));
     }
 
+    function test_Constructor_RevertsOnPythWithoutCode() public {
+        address[2] memory endpoints = [makeAddr("pythEOA"), vm.computeCreateAddress(address(this), 100_000)];
+        for (uint256 i; i < endpoints.length; ++i) {
+            assertEq(endpoints[i].code.length, 0);
+            vm.expectRevert(IPletherOracle.PletherOracle__InvalidPyth.selector);
+            _deployOracle(endpoints[i]);
+        }
+    }
+
     function test_Constructor_RevertsOnArrayLengthMismatch() public {
         bool[] memory inv = new bool[](1);
 

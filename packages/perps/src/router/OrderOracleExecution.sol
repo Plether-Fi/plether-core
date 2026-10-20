@@ -20,7 +20,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
     IPletherOracle public pletherOracle;
 
     /// @notice Binds the router oracle layer to its engine, lens, pool, and initial Plether oracle.
-    /// @dev Reverts for a zero engine lens. The oracle is validated for deployed code, nonzero Pyth,
+    /// @dev Reverts for a zero engine lens. The oracle and its nonzero Pyth endpoint must have deployed code,
     ///      and exact engine and HousePool wiring; `_housePool` itself is not independently code-checked.
     /// @param _engine Engine used for mark updates and oracle identity validation.
     /// @param _engineLens Engine lens used for open preflight reads.
@@ -51,7 +51,7 @@ abstract contract OrderOracleExecution is OrderReservationAccounting {
         }
         IPletherOracle oracle = IPletherOracle(newPletherOracle);
         try oracle.pyth() returns (IPyth pyth_) {
-            if (address(pyth_) == address(0)) {
+            if (address(pyth_) == address(0) || address(pyth_).code.length == 0) {
                 revert OrderRouter__InvalidPletherOracle();
             }
         } catch {

@@ -153,6 +153,8 @@ interface IPletherOracle {
     error PletherOracle__InvalidTotalWeight(uint256 totalWeight);
     /// @notice Thrown when deployment is attempted with the zero Pyth address.
     error PletherOracle__ZeroPyth();
+    /// @notice Thrown when the nonzero Pyth endpoint has no deployed code.
+    error PletherOracle__InvalidPyth();
     /// @notice Thrown when a Pyth fee or update is requested with no update payloads.
     error PletherOracle__MissingUpdateData();
     /// @notice Historical parsing failed for a reason other than a missing qualifying update.
