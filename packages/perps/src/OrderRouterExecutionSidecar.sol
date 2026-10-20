@@ -1039,7 +1039,10 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             return false;
         }
         uint64 commitTime = order.commitTime;
-        if (commitTime < cache.minReusableCommitTime || commitTime >= cache.publishTime) {
+        if (
+            commitTime < cache.minReusableCommitTime || commitTime >= cache.oldestPublishTime
+                || commitTime >= cache.publishTime
+        ) {
             return false;
         }
         if (cache.publishTime > block.timestamp) {

@@ -31,12 +31,14 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @param price Weighted basket price in 8-decimal units
     /// @param confidence Sum of weighted component confidence contributions in 8-decimal price units
     /// @param publishTime Newest component publish time as a Unix timestamp
+    /// @param oldestPublishTime Oldest component publish time as a Unix timestamp
     /// @param pythFee Funding allocated to Pyth operations in wei, also recorded when unavailable history refunds or
     ///        defers it; zero for cache reuse
     struct BasketPrice {
         uint256 price;
         uint256 confidence;
         uint64 publishTime;
+        uint64 oldestPublishTime;
         uint256 pythFee;
     }
 
@@ -255,7 +257,11 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
                 _requireStoredFeedCoverage(pythFeedIds[i], cache.publishTime);
             }
             basket = BasketPrice({
-                price: cache.price, confidence: cache.confidence, publishTime: cache.publishTime, pythFee: 0
+                price: cache.price,
+                confidence: cache.confidence,
+                publishTime: cache.publishTime,
+                oldestPublishTime: cache.oldestPublishTime,
+                pythFee: 0
             });
             reusedBasket = true;
         } else {
@@ -277,7 +283,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
                 minReusableCommitTime: request.commitTime,
                 price: basket.price,
                 confidence: basket.confidence,
-                publishTime: basket.publishTime
+                publishTime: basket.publishTime,
+                oldestPublishTime: basket.oldestPublishTime
             });
         }
         ok = true;
@@ -819,6 +826,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
             );
         }
         basket.publishTime = uint64(maxPublishTime);
+        basket.oldestPublishTime = uint64(minPublishTime);
     }
 
     function _snapshotFromBasket(
@@ -915,7 +923,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         if (!cache.hasHistoricalBasket) {
             return false;
         }
-        if (commitTime < cache.minReusableCommitTime || commitTime >= cache.publishTime) {
+        if (
+            commitTime < cache.minReusableCommitTime || commitTime >= cache.oldestPublishTime
+                || commitTime >= cache.publishTime
+        ) {
             return false;
         }
         if (cache.publishTime > block.timestamp) {

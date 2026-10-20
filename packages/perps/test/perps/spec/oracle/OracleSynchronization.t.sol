@@ -295,7 +295,8 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
             minReusableCommitTime: commit,
             price: 150_000_000,
             confidence: 0,
-            publishTime: commit + 1
+            publishTime: commit + 1,
+            oldestPublishTime: commit + 1
         });
         uint64 beforeMark = engine.lastMarkTime();
         (, IPletherOracle.PriceSnapshot memory supplied,) =
@@ -333,6 +334,82 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         );
         pletherOracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), _request(commit, false), cache);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
+    }
+
+    function test_BatchDoesNotReuseBasketWithPreCommitComponent() public {
+        uint64 firstCommit = uint64(block.timestamp);
+        _commit(ALICE, 0);
+        _advance(firstCommit + 3);
+        _commit(BOB, 0);
+        _advance(firstCommit + 6);
+
+        bytes[] memory historical = _pricedPayload(firstCommit + 1, firstCommit, 101_000_000);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
+        updates[0].price.publishTime = firstCommit + 5;
+        historical[0] = abi.encode(updates);
+
+        // Stored Pyth prices may already be newer than the signed historical basket being parsed.
+        bytes[] memory newer = _pricedPayload(firstCommit + 6, firstCommit + 5, 102_000_000);
+        baseMockPyth.updatePriceFeeds{value: FEE}(newer);
+
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 4 * FEE}(2, historical);
+        assertEq(result.terminalCount, 1, "second order needs its own post-commit component ticks");
+        assertEq(result.nextOrderId, 2);
+        assertEq(uint256(result.stopReason), uint256(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(engine.lastMarkPrice(), 101_000_000);
+    }
+
+    function test_OracleHelperDoesNotReuseBasketWithPreCommitComponent() public {
+        uint64 firstCommit = uint64(block.timestamp);
+        _advance(firstCommit + 6);
+        bytes[] memory historical = _pricedPayload(firstCommit + 1, firstCommit, 101_000_000);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
+        updates[0].price.publishTime = firstCommit + 5;
+        historical[0] = abi.encode(updates);
+        baseMockPyth.setAllPrices(_synchronizationFeedIds(), 102_000_000, -8, firstCommit + 6);
+
+        IPletherOracle.BatchOrderPriceCache memory cache;
+        (,, cache) = pletherOracle.updateBatchOrderExecutionPrice{value: 2 * FEE}(
+            address(this), historical, _request(firstCommit, false), cache
+        );
+        (bool ok,,) = pletherOracle.updateBatchOrderExecutionPrice{value: 2 * FEE}(
+            address(this), historical, _request(firstCommit + 3, false), cache
+        );
+        assertFalse(ok, "a later commit cannot use the older basket component");
+    }
+
+    function test_BatchReusesBasketWhenEveryComponentFollowsBothCommits() public {
+        uint64 firstCommit = uint64(block.timestamp);
+        _commit(ALICE, 0);
+        _advance(firstCommit + 3);
+        _commit(BOB, 0);
+        _advance(firstCommit + 6);
+
+        bytes[] memory historical = _pricedPayload(firstCommit + 5, firstCommit, 101_000_000);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
+        updates[0].price.publishTime = firstCommit + 4;
+        historical[0] = abi.encode(updates);
+        bytes[] memory newer = _pricedPayload(firstCommit + 6, firstCommit + 5, 102_000_000);
+        baseMockPyth.updatePriceFeeds{value: FEE}(newer);
+
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 2 * FEE}(2, historical);
+        assertEq(result.terminalCount, 2);
+        assertEq(result.nextOrderId, 0);
+        assertEq(baseMockPyth.parseUniqueCallCount(), 1, "compatible later order reuses the signed basket");
+        assertEq(engine.lastMarkPrice(), 101_000_000);
+    }
+
+    function _pricedPayload(
+        uint64 tick,
+        uint64 previous,
+        int64 price
+    ) private pure returns (bytes[] memory data) {
+        data = _payload(tick, previous);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(data[0], (MockPyth.FeedUpdate[]));
+        for (uint256 i; i < updates.length; ++i) {
+            updates[i].price.price = price;
+        }
+        data[0] = abi.encode(updates);
     }
 
     function test_InvalidHistoricalBasketRollsBackBeforeStorageUpdate() public {

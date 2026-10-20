@@ -115,13 +115,15 @@ interface IPletherOracle {
     /// @param minReusableCommitTime Earliest commit time for which the cached tick was originally proven valid.
     /// @param price Neutral, pre-cap basket price in 8-decimal units.
     /// @param confidence Aggregate basket confidence in 8-decimal price units.
-    /// @param publishTime Earliest component publish time for the cached basket.
+    /// @param publishTime Newest component publish time for the cached basket and Engine mark.
+    /// @param oldestPublishTime Oldest component publish time; a later order can reuse only if this follows its commit.
     struct BatchOrderPriceCache {
         bool hasHistoricalBasket;
         uint64 minReusableCommitTime;
         uint256 price;
         uint256 confidence;
         uint64 publishTime;
+        uint64 oldestPublishTime;
     }
 
     /// @notice Thrown when the caller is not the engine's configured order router.
