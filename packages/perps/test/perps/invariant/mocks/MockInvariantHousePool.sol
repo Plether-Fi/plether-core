@@ -22,6 +22,14 @@ contract MockInvariantHousePool is IHousePool {
         engine = _engine;
     }
 
+    function USDC() external view returns (address) {
+        return address(usdc);
+    }
+
+    function ENGINE() external view returns (address) {
+        return engine;
+    }
+
     function seedAssets(
         uint256 amountUsdc
     ) external {
