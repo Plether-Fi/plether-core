@@ -1180,6 +1180,12 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 - V1 is USDC-only cross-margin,
 - the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; settlement USDC
   is always excluded, including uncredited direct transfers, and rescue does not alter account balances or margin,
+- **LOW-6 — accepted settlement-USDC recovery limitation:** Direct USDC transfers to the clearinghouse outside its
+  deposit APIs do not credit a margin account and remain unrecoverable through the current APIs, including by the
+  owner. They are not allocated to HousePool or LPs. The clearinghouse has no aggregate credited-balance counter
+  with which to safely distinguish recoverable surplus from funds backing account obligations. USDC recovery,
+  aggregate surplus accounting, and allocation of such transfers to LPs are not planned as part of this remediation.
+  Integrations must use the supported `deposit`, `depositMargin`, or `depositFor` APIs to fund margin accounts,
 - non-USDC collateral pricing and staleness policy are intentionally out of scope.
 
 ## Emergency Procedures
