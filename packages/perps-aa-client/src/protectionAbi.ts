@@ -1535,6 +1535,11 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__TriggerPublishTimeNotAdvanced",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__Unauthorized",
     "inputs": []
   },

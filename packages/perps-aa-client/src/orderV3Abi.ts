@@ -601,6 +601,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__TriggerPublishTimeNotAdvanced",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__Unauthorized",
     "inputs": []
   },

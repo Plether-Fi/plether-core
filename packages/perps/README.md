@@ -505,7 +505,8 @@ commit open with protection
   replay the composite action and reverts without changing the existing parent or protection.
 - `createPositionProtection(...)`, `replacePositionProtection(...)`, and
   `commitOpenOrderWithProtection(...)` are nonpayable trader calls. They validate trigger geometry against the engine's
-  cached fresh neutral mark and do not ingest Pyth data.
+  cached mark's freshness and the current validated `MarkRefresh` basket. The cached mark remains the input to the
+  existing-position post-lock risk check; these calls read current Pyth storage without ingesting update data.
 - The protection trigger bounty is locked before safety is evaluated. For an existing position, the post-lock gate uses the
   Engine-configured canonical planner's V2 exact-price predicate rather than duplicating risk math. It supplies exact
   entry basis and price-risk equity of only PnL pledge (`position.margin`) plus the same-account trader claim plus exact
@@ -516,7 +517,9 @@ commit open with protection
   executes the parent. That protection trigger reservation is outside the parent request's
   `maxGrossAccountDebitUsdc`; the request's nonzero configuration hash pins their finalized Router configuration.
 - `triggerPositionProtection(...)` is a permissionless payable keeper call. It ingests current Pyth data, requires a
-  later block and publish time after arming, and cannot trigger while `oracleFrozen`.
+  later execution-chain block and a basket publish time strictly after the oracle observation used to arm, and cannot
+  trigger while `oracleFrozen`. `armedAt` remains the wall-clock arming timestamp; a successful attached parent open
+  uses the Engine's last accepted mark time as its trigger baseline without rechecking the filled threshold.
 - A valid trigger pays the trigger keeper, permanently latches the observed leg, mark, and publish time, and appends
   one full-size market-style close attempt to the ordinary global FIFO
   tail using the internal side-dependent nonbinding target sentinel (`CAP_PRICE` for a LONG close and `1` for a SHORT

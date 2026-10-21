@@ -86,6 +86,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         _setRouterConfig(config);
+        pletherOracle.updatePrice(address(this), _priceData(MARK_PRICE), IPletherOracle.PriceMode.MarkRefresh);
         test_RetryPositionProtectionClose_StaysZeroBountyAfterTriggerConfigChangeWithoutFreshFunds();
     }
 
@@ -208,6 +209,37 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_CreatePositionProtection_RejectsThresholdCrossedByCurrentOracleButNotCachedMark() public {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        uint256 cachedMark = engine.lastMarkPrice();
+        uint64 nextProtectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(BOB);
+        IPletherOracle.PriceSnapshot memory current =
+            pletherOracle.updatePrice(BOB, _priceData(LONG_TAKE_PROFIT), IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(current.markPrice, LONG_TAKE_PROFIT, "oracle must see the crossed price");
+        assertEq(engine.lastMarkPrice(), cachedMark, "direct oracle update must leave the engine mark cached");
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "crossed create must leave no protection");
+        assertEq(
+            PositionProtectionBook(address(protectionBook)).nextPositionProtectionId(),
+            nextProtectionId,
+            "crossed create must not consume an id"
+        );
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "crossed create must release bounty");
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(BOB);
+        pletherOracle.updatePrice(BOB, _priceData(MARK_PRICE), IPletherOracle.PriceMode.MarkRefresh);
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        assertEq(protectionId, nextProtectionId, "uncrossed current price should allow creation");
+    }
+
     function test_LongTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
@@ -312,7 +344,7 @@ contract PositionProtectionTest is BasePerpTest {
         oldPublishData[0] = hex"01";
 
         vm.prank(TRIGGER_KEEPER);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__SameBlockTrigger.selector);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
         protectionActions.triggerPositionProtection(protectionId, oldPublishData);
 
         PositionProtectionTypes.PositionProtectionView memory afterReverts =
@@ -327,6 +359,38 @@ contract PositionProtectionTest is BasePerpTest {
             router.getAccountReservations(ALICE).executionBountyUsdc,
             _totalProtectionBountyUsdc(),
             "timing reverts must preserve both bounties"
+        );
+    }
+
+    function test_TriggerPositionProtection_AcceptsNewOracleTickBehindArmingWallClock() public {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        uint64 observedPublishTime = engine.lastMarkTime();
+        vm.warp(block.timestamp + 5);
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        uint64 armedAt = protectionViews.getPositionProtection(protectionId).armedAt;
+        assertLt(observedPublishTime + 1, armedAt, "fixture requires oracle publication to lag arming time");
+
+        vm.roll(block.number + 1);
+        baseMockPyth.setAllPrices(
+            _basePythFeedIds(), int64(uint64(LONG_TAKE_PROFIT)), 0, int32(-8), observedPublishTime + 1
+        );
+        bytes[] memory alreadyStoredData = new bytes[](1);
+        alreadyStoredData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        uint64 linkedOrderId = protectionActions.triggerPositionProtection(protectionId, alreadyStoredData);
+
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            LONG_TAKE_PROFIT
+        );
+        assertEq(
+            protectionViews.getPositionProtection(protectionId).triggerPublishTime,
+            observedPublishTime + 1,
+            "trigger must use the newer oracle observation"
         );
     }
 
@@ -352,7 +416,7 @@ contract PositionProtectionTest is BasePerpTest {
         bytes[] memory oldPublishData = new bytes[](1);
         oldPublishData[0] = hex"01";
         vm.prank(TRIGGER_KEEPER);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__SameBlockTrigger.selector);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
         protectionActions.triggerPositionProtection(protectionId, oldPublishData);
 
         freshData = _mockUniquePythUpdateDataAt(LONG_TAKE_PROFIT, armed.armedAt + 1, armed.armedAt);
@@ -1379,6 +1443,7 @@ contract PositionProtectionTest is BasePerpTest {
         clearinghouse.releaseVpiRebateReserve(BOB, 1);
 
         uint256 freeBefore = _freeSettlementUsdc(BOB);
+        pletherOracle.updatePrice(address(this), _priceData(MARK_PRICE), IPletherOracle.PriceMode.MarkRefresh);
         vm.prank(BOB);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
@@ -1528,6 +1593,45 @@ contract PositionProtectionTest is BasePerpTest {
             replaced.triggerBountyUsdc,
             _totalProtectionBountyUsdc(),
             "replacement should retain the snapshotted reserve"
+        );
+    }
+
+    function test_ReplacePositionProtection_UsesCurrentOracleAndResetsPublishBaseline() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        PositionProtectionTypes.PositionProtectionView memory beforeReplacement =
+            protectionViews.getPositionProtection(protectionId);
+        uint256 bountyBefore = router.getAccountReservations(ALICE).executionBountyUsdc;
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(BOB);
+        IPletherOracle.PriceSnapshot memory current =
+            pletherOracle.updatePrice(BOB, _priceData(94_000_000), IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(engine.lastMarkPrice(), MARK_PRICE, "engine mark must remain cached");
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.replacePositionProtection(protectionId, _params(95_000_000, 0));
+        PositionProtectionTypes.PositionProtectionView memory afterRevert =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(afterRevert.takeProfitTriggerPrice, beforeReplacement.takeProfitTriggerPrice, "threshold unchanged");
+        assertEq(afterRevert.armedAt, beforeReplacement.armedAt, "failed replacement must not rearm");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, bountyBefore, "bounty unchanged");
+
+        vm.prank(ALICE);
+        protectionActions.replacePositionProtection(protectionId, _params(93_000_000, 0));
+        assertEq(protectionViews.getPositionProtection(protectionId).takeProfitTriggerPrice, 93_000_000);
+
+        vm.roll(block.number + 1);
+        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(92_000_000), 0, int32(-8), current.publishTime);
+        bytes[] memory samePublicationData = new bytes[](1);
+        samePublicationData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
+        protectionActions.triggerPositionProtection(protectionId, samePublicationData);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "nonadvancing publication must preserve armed protection"
         );
     }
 
@@ -2386,6 +2490,16 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(armed.size, POSITION_SIZE, "activation should bind the actual full position");
 
+        vm.roll(uint256(armed.armedBlock) + 1);
+        baseMockPyth.setAllPrices(
+            _basePythFeedIds(), int64(uint64(crossedTakeProfit)), 0, int32(-8), engine.lastMarkTime()
+        );
+        bytes[] memory fillPublicationData = new bytes[](1);
+        fillPublicationData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
+        protectionActions.triggerPositionProtection(protectionId, fillPublicationData);
+
         uint64 linkedOrderId = _triggerAt(protectionId, crossedTakeProfit);
         _assertTriggered(
             protectionId,
@@ -2393,6 +2507,41 @@ contract PositionProtectionTest is BasePerpTest {
             PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
             crossedTakeProfit
         );
+    }
+
+    function test_AttachedOpen_StageAndPendingReplacementRejectCrossedCurrentOracle() public {
+        vm.warp(block.timestamp + 1);
+        vm.prank(BOB);
+        pletherOracle.updatePrice(BOB, _priceData(LONG_TAKE_PROFIT), IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(engine.lastMarkPrice(), MARK_PRICE, "oracle update must not refresh the engine mark");
+
+        _expectAttachedOpenCommitRevert(
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector)
+        );
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(BOB);
+        pletherOracle.updatePrice(BOB, _priceData(MARK_PRICE), IPletherOracle.PriceMode.MarkRefresh);
+        OrderV3Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) =
+            protectionActions.commitOpenOrderWithProtection(request, _params(80_000_000, LONG_STOP_LOSS));
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(BOB);
+        pletherOracle.updatePrice(BOB, _priceData(LONG_TAKE_PROFIT), IPletherOracle.PriceMode.MarkRefresh);
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.replacePositionProtection(protectionId, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+
+        PositionProtectionTypes.PositionProtectionView memory pending =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(uint8(pending.status), uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen));
+        assertEq(pending.takeProfitTriggerPrice, 80_000_000, "failed replacement must preserve staged threshold");
+        assertEq(pending.parentOrderId, parentOrderId, "failed replacement must preserve parent");
+        assertEq(router.pendingOrderCounts(ALICE), 1, "failed replacement must leave parent queued");
     }
 
     function test_AttachedOpen_SlippageFailureRefundsProtectionBounties() public {

@@ -143,6 +143,8 @@ interface IOrderRouterErrors {
     error OrderRouter__PositionChanged();
     /// @notice Trigger evaluation was attempted in the block in which protection became armed.
     error OrderRouter__SameBlockTrigger();
+    /// @notice The trigger basket has not advanced beyond the oracle publication observed when protection armed.
+    error OrderRouter__TriggerPublishTimeNotAdvanced();
 
     /// @notice The EIP-150-forwardable gas remaining is below the configured minimum for an engine call.
     error OrderRouter__InsufficientGas();

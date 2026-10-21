@@ -12,7 +12,7 @@ library PositionProtectionTypes {
         None,
         /// @notice Protection is attached to a pending open and cannot trigger until that open executes.
         /// @dev A successful fill arms the protection even if its fill tick crossed a staged threshold; triggering still
-        ///      requires a valid later-block oracle publication.
+        ///      requires a later block and a basket publication newer than the mark observed when it arms.
         PendingOpen,
         /// @notice Protection is active against the account's current position.
         Armed,
