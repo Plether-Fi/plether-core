@@ -135,6 +135,7 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
+        _ensureLaterOracleTime();
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
 

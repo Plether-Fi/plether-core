@@ -119,8 +119,9 @@ contract PerpOracleHandler is Test {
         uint256 priceFuzz
     ) external {
         uint256 price = bound(priceFuzz, 0.5e8, 1.5e8);
-        // Boundary selection deliberately moves time backwards. Only that precise engine rejection is expected.
-        bool expectOutOfOrder = block.timestamp < engine.lastMarkTime();
+        // Boundary selection may move time backwards; a changed mark also needs a later timestamp.
+        bool expectOutOfOrder = block.timestamp < engine.lastMarkTime()
+            || (block.timestamp == engine.lastMarkTime() && price != engine.lastMarkPrice());
         ++markSyncAttempts;
         vm.prank(address(router));
         try engine.updateMarkPrice(price, uint64(block.timestamp)) {

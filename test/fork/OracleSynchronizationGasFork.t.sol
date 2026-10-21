@@ -57,7 +57,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         e.expectedUpdateCalls = 1;
         _setOrderEvidence(e, first, 2);
         e.liveReadChecked = true;
-        assertGt(pletherOracle.getLatestPrice(), 0);
+        _assertNoAcceptedLiveBasket();
         _emitEvidence(e, f.data);
     }
 
@@ -98,7 +98,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         e.expectedUpdateCalls = 2;
         _setOrderEvidence(e, first, 2);
         e.liveReadChecked = true;
-        assertGt(pletherOracle.getLatestPrice(), 0);
+        _assertNoAcceptedLiveBasket();
         _emitEvidence(e, data);
     }
 
@@ -127,12 +127,13 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         assertTrue(pletherOracle.isOracleFrozen(), "natural Friday boundary must freeze oracle");
         uint64 closeId = _commitScenarioOrder(SCENARIO_ALICE, true, type(uint256).max);
         _advanceScenario(boundary + 1);
-        IPletherOracle.PriceSnapshot memory expected = _expectedFrozen(uint64(boundary), closing.data);
-        ScenarioEvidence memory e = _newEvidence("frozen_close", closing.data, 5, closing.publishTimes);
-        assertEq(pletherOracle.getOrderExecutionFee(closing.data), e.quoteWei);
+        bytes[] memory emptyData = new bytes[](0);
+        IPletherOracle.PriceSnapshot memory expected = _expectedFrozen(uint64(boundary), emptyData);
+        ScenarioEvidence memory e = _newEvidence("frozen_close", emptyData, 5, opening.publishTimes);
+        assertEq(pletherOracle.getOrderExecutionFee(emptyData), 0);
         vm.expectCall(REAL_PYTH, abi.encodePacked(IPyth.parsePriceFeedUpdatesUnique.selector), uint64(0));
-        _expectStorageUpdates(closing.data, e.quoteWei, 1);
-        _executeSuccessfulSingle(closeId, closing.data, expected, true, e);
+        vm.expectCall(REAL_PYTH, abi.encodePacked(IPyth.updatePriceFeeds.selector), uint64(0));
+        _executeSuccessfulSingle(closeId, emptyData, expected, true, e);
     }
 
     function test_RealPythGas_CaughtTargetFailure() public {
@@ -168,7 +169,7 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         e.expectedUpdateCalls = 1;
         _setOrderEvidence(e, id, 1);
         e.liveReadChecked = true;
-        assertGt(pletherOracle.getLatestPrice(), 0);
+        _assertNoAcceptedLiveBasket();
         _emitEvidence(e, f.data);
     }
 
@@ -272,15 +273,26 @@ contract OracleSynchronizationGasForkTest is OracleSynchronizationScenarioBase {
         assertEq(router.nextExecuteId(), 0);
         _assertExecutedReceipt(id, SCENARIO_ALICE, expected, close);
         _assertInstalledMark(expected);
-        _completeImmediateEvidence(e, payerBefore, pythBefore, close ? 1 : 2);
+        _completeImmediateEvidence(e, payerBefore, pythBefore, close ? 0 : 2);
         e.outcome = "executed";
         e.terminalCount = 1;
         e.expectedParseCalls = close ? 0 : 1;
-        e.expectedUpdateCalls = 1;
+        e.expectedUpdateCalls = close ? 0 : 1;
         _setOrderEvidence(e, id, 1);
         e.liveReadChecked = true;
-        assertGt(pletherOracle.getLatestPrice(), 0);
+        if (close) {
+            assertEq(pletherOracle.getLatestPrice(), engine.lastMarkPrice());
+        } else {
+            _assertNoAcceptedLiveBasket();
+        }
         _emitEvidence(e, data);
+    }
+
+    function _assertNoAcceptedLiveBasket() internal {
+        (bool accepted,,) = pletherOracle.getAcceptedBasketMark();
+        assertFalse(accepted, "historical execution must not initialize the live cache");
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
+        pletherOracle.getLatestPrice();
     }
 
     function _completeImmediateEvidence(

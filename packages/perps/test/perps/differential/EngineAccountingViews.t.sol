@@ -54,8 +54,9 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         _fundTrader(trader, 10_000 * 1e6);
         _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(90_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(90_000_000, uint64(vm.getBlockTimestamp()));
 
         PerpsViewTypes.PositionView memory viewData = _publicPosition(account);
         (, uint256 positionMargin,,,,,) = engine.positions(account);

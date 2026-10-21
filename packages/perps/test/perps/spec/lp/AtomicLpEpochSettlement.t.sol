@@ -104,16 +104,18 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         uint256 assets = 10_000e6;
         uint256 requestId = _requestJuniorDeposit(ALICE, assets);
         uint256 boundary = pool.lpEpochStart(requestId);
-        vm.warp(boundary + 30);
-
-        uint64 markTimeBefore = engine.lastMarkTime();
+        vm.warp(boundary - 1);
         _setBasket(110_000_000, 0, boundary - 1);
-        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
-        router.settleLpEpoch(_emptyUpdateData());
+        router.updateMarkPrice(_emptyUpdateData());
+        uint64 markTimeBefore = engine.lastMarkTime();
+        vm.warp(boundary + 30);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector);
+        router.settleLpEpoch(new bytes[](0));
 
         assertEq(engine.lastMarkTime(), markTimeBefore, "rejected boundary mark must roll back Engine state");
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
 
+        vm.warp(boundary);
         _setBasket(110_000_000, 0, boundary);
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
@@ -167,7 +169,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
 
         uint64 markTimeBefore = engine.lastMarkTime();
         _setBasket(110_000_000, 0, boundary - 1);
-        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__PoolEpochComponentTooOld.selector);
         router.settleLpEpoch(_emptyUpdateData());
 
         assertEq(engine.lastMarkTime(), markTimeBefore, "failed boundary attempt must roll back the Engine mark");
@@ -179,7 +181,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         uint256 retryWindowId = _requestJuniorDeposit(CAROL, assets);
         assertEq(retryWindowId, rolledId, "post-failure request must not join the already-matured epoch");
 
-        router.settleLpEpoch(_emptyUpdateData());
+        router.settleLpEpoch(new bytes[](0));
 
         assertEq(juniorVault.claimableDepositRequest(imminentId, ALICE), assets);
         assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
@@ -274,7 +276,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
 
         vm.warp(boundary + 61);
         _setBasket(100_000_000, 0, boundary);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        vm.expectRevert(bytes("feed not found within range"));
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(engine.lastMarkTime(), markTimeBefore);
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), assets);
@@ -324,7 +326,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         uint256 updateCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
         uint64 markTimeBefore = engine.lastMarkTime();
         _setBasket(110_000_000, 0, boundary + 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        vm.expectRevert(bytes("feed not found within range"));
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updateCallsBefore, "future update must roll back Pyth call");
         assertEq(engine.lastMarkTime(), markTimeBefore, "future update must roll back Engine state");
@@ -337,7 +339,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
 
         updateCallsBefore = baseMockPyth.updatePriceFeedsCallCount();
         _setBasket(110_000_000, 0, boundary - 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__PriceOutOfOrder.selector);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__FeedTimeOutOfOrder.selector);
         router.settleLpEpoch(_emptyUpdateData());
         assertEq(
             baseMockPyth.updatePriceFeedsCallCount(), updateCallsBefore, "out-of-order update must roll back Pyth call"
@@ -347,7 +349,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
 
         _setBasket(110_000_000, 0, boundary);
-        router.settleLpEpoch(_emptyUpdateData());
+        router.settleLpEpoch(new bytes[](0));
         assertEq(juniorVault.pendingDepositRequest(requestId, ALICE), 0);
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
         assertEq(juniorVault.pendingDepositRequest(rolledId, BOB), assets);
@@ -371,7 +373,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         uint64 markTimeBefore = engine.lastMarkTime();
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__PublishTimeDivergence.selector);
-        router.settleLpEpoch(_emptyUpdateData());
+        router.settleLpEpoch(_basketData(100_000_000, 0, boundary, boundary + 11));
 
         assertEq(
             baseMockPyth.updatePriceFeedsCallCount(), updateCallsBefore, "divergent update must roll back Pyth call"
@@ -604,7 +606,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(120_000_000));
 
         assertFalse(pool.lpEpochSettlementPaused());
-        assertEq(baseMockPyth.updatePriceFeedsCallCount(), beforeState.pythUpdateCalls + 1);
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), beforeState.pythUpdateCalls);
         assertEq(engine.lastMarkPrice(), 120_000_000);
         assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
         assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), aliceShares / 5);
@@ -614,7 +616,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         uint256 updateCallsAfterSettlement = baseMockPyth.updatePriceFeedsCallCount();
         vm.prank(caller);
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(120_000_000));
+        router.settleLpEpoch{value: 1 ether}(new bytes[](0));
         assertEq(
             baseMockPyth.updatePriceFeedsCallCount(),
             updateCallsAfterSettlement,
@@ -667,7 +669,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         uint256 checkpointAfterSettlement = juniorVault.maintenanceFeeCheckpointBoundary();
         vm.prank(fixture.caller);
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+        router.settleLpEpoch{value: 1 ether}(new bytes[](0));
         assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), fixture.feeShares, "fee must not mint twice");
         assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointAfterSettlement);
     }
@@ -705,7 +707,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         uint256 checkpointAfterSettlement = juniorVault.maintenanceFeeCheckpointBoundary();
         vm.prank(fixture.caller);
         vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        router.settleLpEpoch{value: 1 ether}(_encodedUpdateData(100_000_000));
+        router.settleLpEpoch{value: 1 ether}(new bytes[](0));
         assertEq(juniorVault.balanceOf(MAINTENANCE_FEE_RECIPIENT), fixture.feeShares, "fee must remain single-shot");
         assertEq(juniorVault.maintenanceFeeCheckpointBoundary(), checkpointAfterSettlement);
     }
@@ -791,7 +793,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         vm.expectRevert(IHousePool.HousePool__Unauthorized.selector);
         pool.settleLpEpoch(0, 0);
 
-        router.settleLpEpoch(_emptyUpdateData());
+        router.settleLpEpoch(new bytes[](0));
         assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
     }
 
@@ -805,6 +807,9 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         _openMarkSensitivePosition();
         uint256 redeemId = _requestJuniorRedeem(ALICE, shares / 2);
 
+        vm.warp(SATURDAY_FROZEN - 16 hours);
+        assertFalse(engine.isOracleFrozen(), "pre-close refresh must occur while Pyth is live");
+        router.updateMarkPrice(_encodedUpdateData(100_000_000));
         vm.warp(SATURDAY_FROZEN);
         assertGe(pool.currentLpEpoch(), redeemId, "queued exit must be mature");
         assertTrue(engine.isOracleFrozen(), "fixture must use frozen-oracle policy");
@@ -820,7 +825,7 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
     }
 
-    function test_FrozenPosition_CachedSettlementRejectsBeyondFadAgeThenAtomicRefreshRecovers() public {
+    function test_FrozenPosition_StaleMarkFailsClosedUntilReopening() public {
         uint256 depositId = _requestJuniorDeposit(ALICE, 10_000e6);
         _warpToEpoch(depositId);
         pool.settleLpEpoch(0, 0);
@@ -839,7 +844,13 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), shares / 2);
 
         _setBasket(100_000_000, 0, block.timestamp);
+        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
         router.settleLpEpoch(_emptyUpdateData());
+        assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), shares / 2);
+
+        vm.warp(SATURDAY_FROZEN + 2 days);
+        assertFalse(engine.isOracleFrozen(), "fresh signed recovery must wait for market reopening");
+        router.settleLpEpoch(_encodedUpdateData(100_000_000));
         assertEq(juniorVault.pendingRedeemRequest(redeemId, ALICE), 0);
         assertEq(juniorVault.claimableRedeemRequest(redeemId, ALICE), shares / 2);
     }

@@ -270,10 +270,7 @@ contract PerpHandler is PerpActionHandler {
 
         priceFuzz = bound(priceFuzz, 0.3e8, 1.7e8);
 
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = abi.encode(priceFuzz);
-
-        try router.executeLiquidation(account, priceData) {
+        try router.executeLiquidation(account, _nextBlockPriceData(priceFuzz)) {
             ghost_liquidationCount++;
         } catch (bytes memory reason) {
             _classifyLiquidationRevert(reason, false);

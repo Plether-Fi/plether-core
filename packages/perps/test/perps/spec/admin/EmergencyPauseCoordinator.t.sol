@@ -81,6 +81,26 @@ contract EmergencyPauseCoordinatorTest is EmergencyPauseCoordinatorTestFixture {
         assertEq(coordinator.guardian(), address(0));
     }
 
+    function test_RenounceOwnershipRevertsAndPreservesTransfer() public {
+        vm.prank(OWNER);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        coordinator.renounceOwnership();
+        assertEq(coordinator.owner(), OWNER);
+
+        vm.prank(OWNER);
+        coordinator.transferOwnership(NEXT_OWNER);
+        vm.prank(OWNER);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        coordinator.renounceOwnership();
+        assertEq(coordinator.owner(), OWNER);
+        assertEq(coordinator.pendingOwner(), NEXT_OWNER);
+
+        vm.prank(NEXT_OWNER);
+        coordinator.acceptOwnership();
+        assertEq(coordinator.owner(), NEXT_OWNER);
+        assertEq(coordinator.pendingOwner(), address(0));
+    }
+
     function test_OwnershipTransferUsesTwoStepAcceptance() public {
         vm.prank(OWNER);
         coordinator.transferOwnership(NEXT_OWNER);

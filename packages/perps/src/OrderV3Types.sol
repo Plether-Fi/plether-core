@@ -117,12 +117,15 @@ library OrderV3Types {
         CloseOnly,
         SameBlock,
         MevBoundary,
+        /// @notice No qualifying historical update was found in the supplied payload.
         HistoricalPriceUnavailable,
         InsufficientGas,
         MarkPriceOutOfOrder,
         EngineFailure,
         ReceiptFailure,
-        CleanupLimit
+        CleanupLimit,
+        /// @notice Historical parsing failed; earlier batch items remain finalized.
+        OracleFailure
     }
 
     /// @notice Mandatory financial authority supplied with every V3 order.

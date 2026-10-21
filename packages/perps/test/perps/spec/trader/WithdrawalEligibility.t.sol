@@ -69,8 +69,9 @@ contract CarryAndMarginCheckpointWithdrawTest is BasePerpTest {
         _fundTrader(alice, 10_000 * 1e6);
         _open(account, CfdTypes.Side.LONG, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(103_800_000, uint64(block.timestamp));
+        engine.updateMarkPrice(103_800_000, uint64(vm.getBlockTimestamp()));
 
         vm.prank(alice);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
@@ -114,8 +115,9 @@ contract UnderwaterWithdrawalGuardTest is BasePerpTest {
         // The loss exceeds its isolated PnL pledge. Free settlement does not back price-risk equity,
         // so the account cannot withdraw merely because clearinghouse funds are unencumbered.
         uint256 underwaterPrice = 1.15e8;
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(underwaterPrice, uint64(block.timestamp));
+        engine.updateMarkPrice(underwaterPrice, uint64(vm.getBlockTimestamp()));
 
         uint256 chBalance = clearinghouse.balanceUsdc(aliceAccount);
         uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);

@@ -9,6 +9,7 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {SettlementMonitorViewTypes} from "@plether/perps/interfaces/SettlementMonitorViewTypes.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 contract SettlementMonitorOracleBindingMock {
@@ -164,6 +165,24 @@ abstract contract SettlementMonitorLensTestFixture is BasePerpTest {
         uint256 publishTime
     ) internal {
         baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(price)), confidence, int32(-8), publishTime);
+        if (engine.isOracleFrozen() || confidence > price * pletherOracle.basketMaxConfidenceRatioBps() / 10_000) {
+            return;
+        }
+        uint64 previous = engine.lastMarkTime();
+        if (block.timestamp <= previous) {
+            vm.warp(uint256(previous) + 1);
+            publishTime = block.timestamp;
+        }
+        bytes32[] memory ids = _basePythFeedIds();
+        MockPyth.FeedUpdate[] memory ticks = new MockPyth.FeedUpdate[](ids.length);
+        for (uint256 i; i < ids.length; ++i) {
+            ticks[i] = MockPyth.FeedUpdate(
+                ids[i], MockPyth.MockPrice(int64(uint64(price)), confidence, -8, publishTime, previous)
+            );
+        }
+        bytes[] memory data = new bytes[](1);
+        data[0] = abi.encode(ticks);
+        router.updateMarkPrice(data);
     }
 
     function _validPoolReconcileSnapshot() internal returns (IPletherOracle.PriceSnapshot memory snapshot) {

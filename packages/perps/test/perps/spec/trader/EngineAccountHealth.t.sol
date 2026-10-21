@@ -81,8 +81,9 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         _fundTrader(trader, 1040 * 1e6);
         _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(101_800_000, uint64(block.timestamp));
+        engine.updateMarkPrice(101_800_000, uint64(vm.getBlockTimestamp()));
 
         uint8 revertCode =
             engineLens.previewOpenRevertCode(account, CfdTypes.Side.LONG, 10_000 * 1e18, 20 * 1e6, 101_800_000);
@@ -125,8 +126,9 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
         _fundTrader(trader, 1040 * 1e6);
         _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 1000 * 1e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(102_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(102_000_000, uint64(vm.getBlockTimestamp()));
 
         PerpsViewTypes.PositionView memory positionView = _publicPosition(account);
         assertTrue(positionView.liquidatable, "Setup must make the existing position liquidatable before the increase");

@@ -6,6 +6,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 
 import {PythStructs} from "@plether/shared/interfaces/IPyth.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 /// @notice Caller used to prove that the Router's final ETH refund cannot reenter LP settlement.
@@ -113,6 +114,10 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
 
     uint256 internal constant FRIDAY_FAD_ONLY = 1_709_934_300;
     uint256 internal constant SATURDAY_FROZEN = 1_709_985_600;
+
+    uint256 internal stagedBasketPrice = 100_000_000;
+    uint64 internal stagedBasketConfidence;
+    uint256 internal stagedBasketTime = SETUP_TIMESTAMP;
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;
@@ -295,19 +300,37 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
         uint64 confidence,
         uint256 publishTime
     ) internal {
+        stagedBasketPrice = price;
+        stagedBasketConfidence = confidence;
+        stagedBasketTime = publishTime;
         baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(price)), confidence, int32(-8), publishTime);
     }
 
-    function _emptyUpdateData() internal pure returns (bytes[] memory updateData) {
-        updateData = new bytes[](1);
-        updateData[0] = "";
+    function _emptyUpdateData() internal view returns (bytes[] memory updateData) {
+        return _basketData(stagedBasketPrice, stagedBasketConfidence, stagedBasketTime, stagedBasketTime);
     }
 
     function _encodedUpdateData(
         uint256 price
+    ) internal view returns (bytes[] memory updateData) {
+        return _basketData(price, 0, block.timestamp, block.timestamp);
+    }
+
+    function _basketData(
+        uint256 price,
+        uint64 confidence,
+        uint256 firstTime,
+        uint256 secondTime
     ) internal pure returns (bytes[] memory updateData) {
+        bytes32[] memory ids = _basePythFeedIds();
+        MockPyth.FeedUpdate[] memory updates = new MockPyth.FeedUpdate[](ids.length);
+        for (uint256 i; i < ids.length; ++i) {
+            updates[i] = MockPyth.FeedUpdate(
+                ids[i], MockPyth.MockPrice(int64(uint64(price)), confidence, -8, i == 0 ? firstTime : secondTime, 0)
+            );
+        }
         updateData = new bytes[](1);
-        updateData[0] = abi.encode(price);
+        updateData[0] = abi.encode(updates);
     }
 
     function _settlementHoldSnapshot(

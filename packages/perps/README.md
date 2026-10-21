@@ -90,6 +90,7 @@ The frontend, backend, and keeper services live in the separate
 - [Accounting specification](ACCOUNTING_SPEC.md) — margin, carry, solvency, claims, and LP accounting.
 - [Integration guide](CANONICAL_ENTRYPOINTS.md) — supported trader, LP, keeper, and read interfaces.
 - [Order timing](ORDER_V3_TIMING.md) — order commitments, deadlines, and execution rules.
+- [Oracle synchronization](ORACLE_SYNCHRONIZATION.md) — signed basket updates, timing limits, and keeper integration.
 - [Architecture map](INTERNAL_ARCHITECTURE_MAP.md) — component boundaries and custody flows.
 - [Security model](SECURITY.md) — trust assumptions, invariants, and known limitations.
 - [Pre-audit guide](PRE_AUDIT_GUIDE.md) — review scope, policy tables, and transaction walkthroughs.
