@@ -47,6 +47,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
 
+        _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         LiquidationParityObserved memory observed = _observeLiquidationParity(account, address(this), beforeSnapshot);
@@ -78,6 +79,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
 
+        _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         LiquidationParityObserved memory observed = _observeLiquidationParity(account, address(this), beforeSnapshot);
@@ -123,6 +125,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
 
+        _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -177,6 +180,9 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         usdc.transfer(address(0xDEAD), poolAssets - 25e6);
 
         vm.warp(block.timestamp + 60 days);
+        while (engine.isOracleFrozen()) {
+            vm.warp(block.timestamp + 1 days);
+        }
         uint256 canonicalDepthBefore = pool.totalAssets();
 
         ICfdEngineTypes.LiquidationPreview memory expectedPreview =
@@ -186,6 +192,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         priceData[0] = abi.encode(uint256(195_000_000));
 
         uint256 keeperBefore = clearinghouse.balanceUsdc(address(this));
+        _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         assertEq(
@@ -225,6 +232,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(102_500_000));
 
+        _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         assertEq(snapshotBefore.executionBountyReserveUsdc, 0, "Unpaid close orders do not reserve settlement");
@@ -270,6 +278,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
+        _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         assertEq(
@@ -319,6 +328,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
+        _ensureLaterOracleTime();
         router.executeLiquidation(traderAccount, priceData);
 
         assertEq(

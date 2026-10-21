@@ -738,6 +738,7 @@ contract TimelockPauseTest is BasePerpTest {
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.98e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         router.executeLiquidation(account, pythData);
 
         (uint256 size,,,,,,) = engine.positions(account);
@@ -749,6 +750,7 @@ contract TimelockPauseTest is BasePerpTest {
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.05e8);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         router.updateMarkPrice(pythData);
 
         assertEq(engine.lastMarkPrice(), 1.05e8);

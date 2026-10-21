@@ -8,12 +8,86 @@ import {
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
+import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {IOrderRouter} from "@plether/perps/interfaces/IOrderRouter.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
+import {Vm} from "forge-std/Vm.sol";
+
+contract MarkRefundObserver {
+
+    event RefundObserved(uint64 markTime);
+
+    ICfdEngineCore private immutable ENGINE;
+
+    constructor(
+        ICfdEngineCore engine_
+    ) {
+        ENGINE = engine_;
+    }
+
+    receive() external payable {
+        emit RefundObserved(ENGINE.lastMarkTime());
+    }
+
+    function refresh(
+        IOrderRouter router,
+        bytes[] calldata data
+    ) external payable {
+        router.updateMarkPrice{value: msg.value}(data);
+    }
+
+    function liquidateBatch(
+        IPerpsKeeper router,
+        address account,
+        bytes[] calldata data
+    ) external payable {
+        address[] memory accounts = new address[](1);
+        accounts[0] = account;
+        router.executeLiquidationBatch{value: msg.value}(accounts, data);
+    }
+
+}
 
 contract OracleSynchronizationTest is OracleSynchronizationTestBase {
+
+    function test_RefreshRefundCallbackSeesInstalledMark() public {
+        uint64 tick = uint64(block.timestamp + 1);
+        _advance(tick);
+        MarkRefundObserver observer = new MarkRefundObserver(ICfdEngineCore(address(engine)));
+        vm.recordLogs();
+        observer.refresh{value: 2 * FEE}(IOrderRouter(address(router)), _payload(tick, tick - 20));
+        _assertRefundObserved(observer, tick);
+        assertEq(engine.lastMarkTime(), tick);
+    }
+
+    function test_LiquidationBatchRefundCallbackSeesInstalledMark() public {
+        uint64 tick = uint64(block.timestamp + 1);
+        _advance(tick);
+        MarkRefundObserver observer = new MarkRefundObserver(ICfdEngineCore(address(engine)));
+        vm.recordLogs();
+        observer.liquidateBatch{value: 2 * FEE}(router, ALICE, _payload(tick, tick - 20));
+        _assertRefundObserved(observer, tick);
+        assertEq(engine.lastMarkTime(), tick);
+    }
+
+    function _assertRefundObserved(
+        MarkRefundObserver observer,
+        uint64 tick
+    ) private {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topic = keccak256("RefundObserved(uint64)");
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter == address(observer) && logs[i].topics[0] == topic) {
+                assertEq(abi.decode(logs[i].data, (uint64)), tick, "callback must observe installed mark");
+                return;
+            }
+        }
+        fail("refund callback was not invoked");
+    }
 
     function test_LaterSynchronizationFailureRevertsCompletedBatchPrefix() public {
         uint64 mark = engine.lastMarkTime();
@@ -122,7 +196,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
             pletherOracle.updateOrderExecutionPrice{value: 2 * FEE}(address(this), data, _request(commit, true));
         assertTrue(ok);
         assertEq(snapshot.price, 99_980_000);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
         pletherOracle.getLatestPrice();
 
         baseMockPyth.setAllPrices(_synchronizationFeedIds(), 100_000_000, -8, commit + 2);
@@ -131,7 +205,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
             pletherOracle.updateOrderExecutionPrice{value: 2 * FEE}(address(this), data, _request(commit, true));
         assertTrue(ok);
         assertEq(snapshot.price, 99_980_000);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
         pletherOracle.getLatestPrice();
     }
 
@@ -147,7 +221,7 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         _assertCoverage(commit + 1);
     }
 
-    function test_EqualTimestampRepairsStorage() public {
+    function test_EqualTimestampRepairsHistoricalStorageWithoutBootstrappingLiveBasket() public {
         uint64 commit = uint64(block.timestamp);
         uint64 id = _commit(ALICE, 0);
         _advance(commit + 1);
@@ -155,7 +229,8 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         engine.updateMarkPrice(100_000_000, commit + 1);
         router.executeOrder{value: 2 * FEE}(id, _payload(commit + 1, commit));
         _assertCoverage(engine.lastMarkTime());
-        assertEq(pletherOracle.getLatestPrice(), 100_000_000);
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
+        pletherOracle.getLatestPrice();
     }
 
     function test_InsufficientExecutionFundingRollsBack() public {
@@ -180,6 +255,58 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         assertEq(address(baseMockPyth).balance, 0);
         assertEq(address(pletherOracle).balance, 0);
         assertEq(address(router).balance, 0);
+    }
+
+    function test_LaterParserFailurePreservesBatchPrefixAndRefundsOnlyUnspentFunding() public {
+        bytes[] memory data = _mixedBatch();
+        uint64 secondTick = uint64(block.timestamp);
+        vm.mockCallRevert(
+            address(baseMockPyth),
+            abi.encodeCall(
+                IPyth.parsePriceFeedUpdatesUnique, (data, _synchronizationFeedIds(), secondTick, secondTick)
+            ),
+            hex"e69ffece"
+        );
+        uint256 beforeBalance = address(this).balance;
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 5 * FEE}(2, data);
+        assertEq(uint256(result.stopReason), uint256(OrderV3Types.PendingReason.OracleFailure));
+        assertEq(result.terminalCount, 1);
+        assertEq(result.nextOrderId, 2);
+        assertEq(engine.lastMarkTime(), secondTick - 2, "first order's mark survives");
+        assertEq(uint256(router.lifecycleBook().lifecycleStatus(1)), uint256(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(uint256(router.lifecycleBook().lifecycleStatus(2)), uint256(OrderV3Types.LifecycleStatus.Pending));
+        (uint256 firstSize,,,,,,) = engine.positions(ALICE);
+        (uint256 secondSize,,,,,,) = engine.positions(BOB);
+        assertGt(firstSize, 0);
+        assertEq(secondSize, 0);
+        assertEq(beforeBalance - address(this).balance, 2 * FEE);
+        assertEq(address(baseMockPyth).balance, 2 * FEE);
+        assertEq(address(pletherOracle).balance, 0);
+        assertEq(address(router).balance, 0);
+
+        vm.clearMockedCalls();
+        result = router.executeOrderBatch{value: 2 * FEE}(2, data);
+        assertEq(result.terminalCount, 1, "valid retry executes the pending order");
+        assertEq(uint256(result.stopReason), uint256(OrderV3Types.PendingReason.None));
+        assertEq(uint256(router.lifecycleBook().lifecycleStatus(2)), uint256(OrderV3Types.LifecycleStatus.Executed));
+    }
+
+    function test_ParserFailureDefersRefundAtRouterWithoutDoubleRefund() public {
+        uint64 commit = uint64(block.timestamp);
+        uint64 id = _commit(ALICE, 0);
+        _advance(commit + 1);
+        vm.mockCallRevert(
+            address(baseMockPyth), abi.encodeWithSelector(IPyth.parsePriceFeedUpdatesUnique.selector), hex"e69ffece"
+        );
+        SynchronizationRefundReceiver recipient = new SynchronizationRefundReceiver(pletherOracle);
+        recipient.execute{value: 5 * FEE}(address(router), id, _payload(commit + 1, commit));
+        assertEq(router.nextExecuteId(), id);
+        assertEq(pletherOracle.claimableEth(address(recipient)), 0);
+        assertEq(routerAdmin.claimableEth(address(recipient)), 5 * FEE);
+        assertEq(address(pletherOracle).balance, 0);
+        assertEq(address(baseMockPyth).balance, 0);
+        assertEq(address(router).balance, 0);
+        assertEq(address(routerAdmin).balance, 5 * FEE);
     }
 
     function test_UnavailableHistoryDefersFullFundingAndClaimRejectsReentry() public {
@@ -221,7 +348,8 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
             minReusableCommitTime: commit,
             price: 150_000_000,
             confidence: 0,
-            publishTime: commit + 1
+            publishTime: commit + 1,
+            oldestPublishTime: commit + 1
         });
         uint64 beforeMark = engine.lastMarkTime();
         (, IPletherOracle.PriceSnapshot memory supplied,) =
@@ -259,6 +387,82 @@ contract OracleSynchronizationTest is OracleSynchronizationTestBase {
         );
         pletherOracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), _request(commit, false), cache);
         assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
+    }
+
+    function test_BatchDoesNotReuseBasketWithPreCommitComponent() public {
+        uint64 firstCommit = uint64(block.timestamp);
+        _commit(ALICE, 0);
+        _advance(firstCommit + 3);
+        _commit(BOB, 0);
+        _advance(firstCommit + 6);
+
+        bytes[] memory historical = _pricedPayload(firstCommit + 1, firstCommit, 101_000_000);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
+        updates[0].price.publishTime = firstCommit + 5;
+        historical[0] = abi.encode(updates);
+
+        // Stored Pyth prices may already be newer than the signed historical basket being parsed.
+        bytes[] memory newer = _pricedPayload(firstCommit + 6, firstCommit + 5, 102_000_000);
+        baseMockPyth.updatePriceFeeds{value: FEE}(newer);
+
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 4 * FEE}(2, historical);
+        assertEq(result.terminalCount, 1, "second order needs its own post-commit component ticks");
+        assertEq(result.nextOrderId, 2);
+        assertEq(uint256(result.stopReason), uint256(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(engine.lastMarkPrice(), 101_000_000);
+    }
+
+    function test_OracleHelperDoesNotReuseBasketWithPreCommitComponent() public {
+        uint64 firstCommit = uint64(block.timestamp);
+        _advance(firstCommit + 6);
+        bytes[] memory historical = _pricedPayload(firstCommit + 1, firstCommit, 101_000_000);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
+        updates[0].price.publishTime = firstCommit + 5;
+        historical[0] = abi.encode(updates);
+        baseMockPyth.setAllPrices(_synchronizationFeedIds(), 102_000_000, -8, firstCommit + 6);
+
+        IPletherOracle.BatchOrderPriceCache memory cache;
+        (,, cache) = pletherOracle.updateBatchOrderExecutionPrice{value: 2 * FEE}(
+            address(this), historical, _request(firstCommit, false), cache
+        );
+        (bool ok,,) = pletherOracle.updateBatchOrderExecutionPrice{value: 2 * FEE}(
+            address(this), historical, _request(firstCommit + 3, false), cache
+        );
+        assertFalse(ok, "a later commit cannot use the older basket component");
+    }
+
+    function test_BatchReusesBasketWhenEveryComponentFollowsBothCommits() public {
+        uint64 firstCommit = uint64(block.timestamp);
+        _commit(ALICE, 0);
+        _advance(firstCommit + 3);
+        _commit(BOB, 0);
+        _advance(firstCommit + 6);
+
+        bytes[] memory historical = _pricedPayload(firstCommit + 5, firstCommit, 101_000_000);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(historical[0], (MockPyth.FeedUpdate[]));
+        updates[0].price.publishTime = firstCommit + 4;
+        historical[0] = abi.encode(updates);
+        bytes[] memory newer = _pricedPayload(firstCommit + 6, firstCommit + 5, 102_000_000);
+        baseMockPyth.updatePriceFeeds{value: FEE}(newer);
+
+        OrderV3Types.BatchResult memory result = router.executeOrderBatch{value: 2 * FEE}(2, historical);
+        assertEq(result.terminalCount, 2);
+        assertEq(result.nextOrderId, 0);
+        assertEq(baseMockPyth.parseUniqueCallCount(), 1, "compatible later order reuses the signed basket");
+        assertEq(engine.lastMarkPrice(), 101_000_000);
+    }
+
+    function _pricedPayload(
+        uint64 tick,
+        uint64 previous,
+        int64 price
+    ) private pure returns (bytes[] memory data) {
+        data = _payload(tick, previous);
+        MockPyth.FeedUpdate[] memory updates = abi.decode(data[0], (MockPyth.FeedUpdate[]));
+        for (uint256 i; i < updates.length; ++i) {
+            updates[i].price.price = price;
+        }
+        data[0] = abi.encode(updates);
     }
 
     function test_InvalidHistoricalBasketRollsBackBeforeStorageUpdate() public {

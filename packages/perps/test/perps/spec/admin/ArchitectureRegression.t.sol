@@ -18,6 +18,7 @@ contract ArchitectureRegression_ReservationShielding is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(125_000_000));
 
+        _ensureLaterOracleTime();
         router.executeLiquidation(account, priceData);
 
         (uint256 size,,,,,,) = engine.positions(account);

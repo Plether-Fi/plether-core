@@ -102,8 +102,9 @@ contract EngineTerminalNavProjectionTest is BasePerpTest {
         _fundTrader(address(0xB2), 100_000 * 1e6);
         _open(bobAccount, CfdTypes.Side.SHORT, 100_000 * 1e18, 5000 * 1e6, 1.2e8, depth);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.1e8, uint64(vm.getBlockTimestamp()));
 
         int256 aliceDeltaUsdc = _accountTerminalLpPriceDelta(aliceAccount, 1.1e8);
         int256 bobDeltaUsdc = _accountTerminalLpPriceDelta(bobAccount, 1.1e8);
@@ -131,8 +132,9 @@ contract EngineTerminalNavProjectionTest is BasePerpTest {
         uint256 accountedAssetsBefore = pool.accountedAssets();
         uint256 juniorBefore = juniorVault.totalAssets();
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(1.5e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.5e8, uint64(vm.getBlockTimestamp()));
 
         int256 terminalDeltaUsdc = _terminalLpPriceDelta();
         (uint256 withdrawalSeniorNav, uint256 withdrawalJuniorNav,,) = pool.getPendingTrancheState();

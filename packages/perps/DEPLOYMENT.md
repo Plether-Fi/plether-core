@@ -8,11 +8,11 @@ The current target network is Arbitrum Sepolia with:
 - Pyth as the router oracle source
 - a separate deploy phase and bootstrap phase
 
-## Atomic oracle synchronization candidate
+## Oracle synchronization and live watermark candidate
 
-The next core release synchronizes stored Pyth feeds during historical execution and requires the new
-`getOrderExecutionFee(bytes[])` quote. Follow [Oracle synchronization](ORACLE_SYNCHRONIZATION.md) for pricing,
-refunds, gas/fork release gates, same-block coverage monitoring and the keeper/frontend handoff. Prepare a fresh
+The next core release synchronizes stored Pyth feeds during historical execution and introduces a Router-owned
+signed live basket. Follow [Oracle synchronization](ORACLE_SYNCHRONIZATION.md) for pricing, zero-fee frozen replay,
+refunds, gas/fork release gates, accepted-basket monitoring and the keeper/frontend handoff. Prepare a fresh
 complete stack, keep its manifest separate, and stop at deployed/inactive. The candidate record is
 `deployments/releases/atomic-oracle-sync-candidate/`; it is not a deployed or qualified release.
 

@@ -308,8 +308,14 @@ Mitigations:
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
+- Oracle deployment and Router deployment/rotation reject Pyth endpoints without deployed code; this guards against
+  empty-address misconfiguration, while governance remains responsible for selecting the correct Pyth implementation,
 - conservative weighted basket confidence propagation, a timelocked aggregate pre-cap confidence limit, and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
+- live current baskets parse signed prices for every component within a caller-independent window of at most 15
+  seconds; component times cannot regress, equal-time marks cannot change price, and the newest component time
+  advances the protection clock,
+- live LP epoch reconciliation also requires every component to be published after the current epoch boundary,
 - frozen-oracle regime for close liveness during genuine market closure.
 
 Risks:
@@ -517,9 +523,28 @@ Security properties:
 - batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds
   cap recipient-call gas and defer rejected refunds; a later gas-burning prepared item or refund recipient therefore
   cannot roll back an already finalized batch prefix,
-- Oracle/Pyth preparation and the resulting Engine mark update remain in the outer batch frame. A revert at that
-  boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
+- Unexpected historical parser errors stop the batch with `OracleFailure`, preserving finalized predecessors and
+  refunding the failed call's unspent funding. `HistoricalPriceUnavailable` means the supplied payload contains no
+  qualifying update for at least one feed; it does not prove no such history exists elsewhere.
+- Other Oracle/Pyth preparation failures and the resulting Engine mark update remain in the outer batch frame.
+  A revert at that boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
   `maxOrderId` and separate pre-oracle cleanup from price-dependent execution.
+
+### Known limitation: live basket component selection
+
+A caller supplies signed Pyth updates for each feed in a current live basket. The oracle checks signatures through
+Pyth, per-feed publish-time ordering, freshness, confidence, and the permitted gap between component publish times.
+It cannot establish from those supplied updates that each component is the newest Pyth report available off-chain.
+A caller may therefore choose an older, still-valid signed component within the allowed window and obtain a
+different basket mark. This applies to live mark refresh, liquidation, and LP epoch settlement; historical order
+execution has its separate post-commit parse and 5-second component-gap rule.
+
+Liquidation or LP epoch settlement can consume the selected mark in the same transaction, so a later update cannot
+undo an action already settled. A fork test demonstrated a different accepted mark from a mixed-time basket, but
+did not demonstrate a wrongful liquidation, a different LP payout, or a profitable exploit. Requiring simultaneous
+feed timestamps would impede feeds that publish at different times; tightening the window would reduce, but not
+eliminate, caller choice. This remains a documented limitation of caller-supplied signed updates, with no additional
+protocol change planned on the current evidence.
 
 ### Arbitrum and Pyth clock alignment
 
@@ -940,6 +965,10 @@ required execution path is advisory rather than an authoritative `canSettle` res
 the exact route-specific call: direct `HousePool.settleLpEpoch(uint256,uint256)` with zero ETH for `CachedMark`, or
 `OrderRouter.settleLpEpoch(bytes[])` with the exact `msg.value` for `AtomicOracleRefresh`. The selected contract and
 EVM rollback frame remain the execution authority.
+
+Cached-mark staleness is reported through `markFresh`, mark age, and the selected execution route. The legacy
+`CachedMarkStale` blocker bit is reserved and no longer emitted. The selected route enforces freshness; failures
+of its required oracle policy or dependencies remain operational blockers.
 
 ### Freshness-gated LP actions
 

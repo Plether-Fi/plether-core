@@ -31,21 +31,21 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function test_MarkSyncClassifiesBackwardTimeAndAcceptsEqualTime() public {
+    function test_MarkSyncRejectsBackwardTimeAndChangedEqualTime() public {
         handler.warpToOracleBoundary(8);
         handler.syncMarkNow(1e8);
         uint64 markTime = engine.lastMarkTime();
         handler.syncMarkNow(1.1e8);
         assertEq(engine.lastMarkTime(), markTime);
-        assertEq(engine.lastMarkPrice(), 1.1e8);
+        assertEq(engine.lastMarkPrice(), 1e8);
 
         handler.warpToOracleBoundary(0);
         handler.syncMarkNow(0.9e8);
         assertEq(engine.lastMarkTime(), markTime, "Backward rejection must preserve the mark timestamp");
-        assertEq(engine.lastMarkPrice(), 1.1e8, "Backward rejection must preserve the mark price");
+        assertEq(engine.lastMarkPrice(), 1e8, "Backward rejection must preserve the mark price");
         assertEq(handler.markSyncAttempts(), 3);
-        assertEq(handler.successfulMarkSyncs(), 2);
-        assertEq(handler.expectedOutOfOrderRejections(), 1);
+        assertEq(handler.successfulMarkSyncs(), 1);
+        assertEq(handler.expectedOutOfOrderRejections(), 2);
         _assertAllInvariants();
     }
 
