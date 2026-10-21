@@ -78,6 +78,16 @@ The release-script `frozenCloseSpreadBps` default is `50` bps (0.50%). Both cons
 The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
 `0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
 
+### Owner-funded recapitalization
+
+`CfdEngine.recapitalizePool(amountUsdc)` is an immediate, owner-only, non-reentrant recovery action.
+The engine owner approves the engine to pull USDC from its own wallet directly into the configured HousePool.
+The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
+`Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
+The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
+automatically cleared. Funding remains available with stale marks, frozen markets, and LP pause or settlement holds.
+`CfdEngineAdmin` retains its configuration-only role.
+
 ### One-time wiring
 
 These are one-time configuration setters rather than mutable governance knobs:
@@ -145,7 +155,7 @@ The owner can act immediately to:
 - pause and unpause `HousePool` LP epoch settlement independently,
 - install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
 - rotate or disable the coordinator guardian,
-- set the protocol treasury account once the previous treasury clearinghouse balance is empty,
+- set the protocol treasury account; existing balances remain withdrawable by their original accounts,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:
@@ -879,7 +889,8 @@ Security purpose:
 ### Seed and senior-capacity lifecycle gate
 
 The protocol blocks normal live operation until governance finalizes a finite absolute senior limit and a senior-share
-limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated.
+limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated. Initial trading
+activation also requires no stored or projected unassigned assets and no residual pending claimant assets.
 
 This prevents partially initialized or uncapped live state and ambiguous ownership of early revenue flows.
 

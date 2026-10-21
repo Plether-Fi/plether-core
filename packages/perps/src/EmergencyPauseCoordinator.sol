@@ -98,6 +98,11 @@ contract EmergencyPauseCoordinator is Ownable2Step {
         HOUSE_POOL = IHousePoolEmergencyAdmin(housePool);
     }
 
+    /// @notice Ownership cannot be renounced because governance must retain authority to rotate or disable the guardian.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
+    }
+
     /// @notice Changes or disables the account authorized to activate composite containment.
     /// @dev Owner only. The zero address intentionally disables the guardian without granting recovery authority.
     /// @param newGuardian New guardian account, or zero to disable guardian triggering

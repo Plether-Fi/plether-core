@@ -332,7 +332,8 @@ Rules:
 
 Required consequences:
 
-- `unassignedAssets > 0` blocks new tranche-deposit requests and activation,
+- `unassignedAssets > 0` blocks new tranche-deposit requests and deposit activation; initial trading activation also
+  rejects stored or projected unassigned assets and residual pending claimant assets,
 - a wiped tranche cannot be silently revived by an ordinary asynchronous deposit,
 - seeded ownership continuity is preferred over governance re-assignment.
 
@@ -619,6 +620,12 @@ Keep these categories separate:
 - `recordClaimantInflow(amount, Revenue, CashArrived)`: claimant-owned value where fresh cash entered the pool in this flow
 - `recordClaimantInflow(amount, Revenue, AlreadyRetained)`: claimant-owned value already retained physically by the pool and only needing ownership routing
 - `accountExcess()`: owner-governed admission of unsolicited raw pool cash into canonical assets
+
+Governance funds recapitalization through `CfdEngine.recapitalizePool(amountUsdc)`. The engine owner approves
+the engine for USDC; the call checkpoints carry at the old depth, transfers from the owner's wallet directly to
+the pool, and verifies exact receipt before recording `Recapitalization` with `CashArrived`. Transfer and recording
+are atomic. Normal reconciliation allocates the queued amount to senior restoration or unassigned assets;
+the funding call mints no LP shares and does not automatically clear degraded mode.
 
 Rules:
 
@@ -993,6 +1000,7 @@ without moving funds, and unknown failures still roll back the item for retry.
 
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
 - `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
+- rotating the treasury changes the recipient of future fees; existing balances stay with the previous account and remain withdrawable by it,
 - only cash-collected execution or liquidation fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
 - frozen-close spread is LP-owned trading revenue and never becomes treasury margin,

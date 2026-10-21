@@ -11,6 +11,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {HousePoolAccountingLib} from "@plether/perps/libraries/HousePoolAccountingLib.sol";
 import {MarginClearinghouseAccountingLib} from "@plether/perps/libraries/MarginClearinghouseAccountingLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderSettlementFloorLib} from "@plether/perps/libraries/OrderSettlementFloorLib.sol";
@@ -127,7 +128,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             engineContract.fadMaxStaleness()
         )
         .maxStaleness;
-        if (block.timestamp > lastMarkTime + maxStaleness) {
+        if (!HousePoolAccountingLib.isMarkFresh(lastMarkTime, maxStaleness, block.timestamp)) {
             return 0;
         }
 
