@@ -11,9 +11,9 @@ import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
-import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
@@ -79,7 +79,7 @@ contract RejectedOracleRefundTest is BasePerpTest {
     }
 
     /// @dev accounting; source: SECURITY.md#router-and-reservation-accounting.
-    function test_FallbackRefundMustFundPletherOracleClaimBalance() public {
+    function test_FallbackRefundMustFundRouterClaimBalance() public {
         uint256 publishTime = block.timestamp;
         uint256 pythFee = 0.01 ether;
         uint256 overpay = 0.05 ether;
@@ -95,9 +95,9 @@ contract RejectedOracleRefundTest is BasePerpTest {
 
         refundReceiver.refreshMark{value: pythFee + overpay}(router, updateData);
 
-        IPletherOracle oracle = router.pletherOracle();
-        assertEq(oracle.claimableEth(address(refundReceiver)), overpay, "failed refund should become claimable");
-        assertEq(address(oracle).balance, overpay, "fallback accounting must move the stranded ETH into PletherOracle");
+        OrderRouterAdmin routerAdmin = OrderRouterAdmin(router.admin());
+        assertEq(routerAdmin.claimableEth(address(refundReceiver)), overpay, "failed refund should become claimable");
+        assertEq(address(routerAdmin).balance, overpay, "router must custody the deferred overpayment");
     }
 
 }

@@ -6,6 +6,7 @@ import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 /// @dev Only supplies the policy views consumed by public oracle reads; no pricing implementation lives here.
 contract OracleMathPolicyFixture {
 
+    address public immutable orderRouter = msg.sender;
     uint256 public constant CAP_PRICE = 2e8;
     uint64 public constant lastMarkTime = 0;
     uint256 public constant engineMarkStalenessLimit = 60;

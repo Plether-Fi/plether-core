@@ -65,8 +65,9 @@ contract WithdrawalLpExecutionParityTest is BasePerpTest {
         _fundTrader(ACCOUNT, 20_000e6);
         _open(ACCOUNT, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
         assertGt(publicLens.getTraderAccount(ACCOUNT).withdrawableUsdc, 0);
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(110_000_000, uint64(vm.getBlockTimestamp()));
         assertEq(publicLens.getTraderAccount(ACCOUNT).withdrawableUsdc, 0, "Adverse mark invalidates prior quote");
         uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);

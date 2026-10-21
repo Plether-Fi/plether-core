@@ -13,7 +13,7 @@ SCENARIOS = {
     "historical_single": ("executed", [2], 1, 1, 2),
     "shared_basket_batch": ("executed", [2, 2], 1, 1, 2),
     "distinct_basket_batch": ("executed", [2, 2], 2, 2, 4),
-    "frozen_close": ("executed", [2], 0, 1, 1),
+    "frozen_close": ("executed", [2], 0, 0, 0),
     "caught_target_failure": ("failed", [3], 1, 1, 2),
     "unavailable_immediate": ("pending", [1], 1, 0, 0),
     "unavailable_deferred": ("pending", [1], 1, 0, 0),
@@ -230,8 +230,10 @@ def validate_scenario_records(records, manifest=None):
             raise ValueError("Evidence must use transaction isolation")
         for field in fields:
             integer(record.get(field), field)
-        if not 0 < record["callGas"] <= record["gasCap"] == GAS_CAP or not record["payloadBytes"]:
-            raise ValueError("Missing payload, invalid gas cap or exceeded keeper gas limit")
+        if not 0 < record["callGas"] <= record["gasCap"] == GAS_CAP:
+            raise ValueError("Invalid gas cap or exceeded keeper gas limit")
+        if (scenario == "frozen_close") != (record["payloadBytes"] == 0):
+            raise ValueError("Frozen close must use empty data; other scenarios need signed payload bytes")
         outcome, statuses, parses, updates, fee_multiplier = SCENARIOS[scenario]
         if record.get("outcome") != outcome or record.get("lifecycleStatuses") != statuses:
             raise ValueError("Receipt outcomes do not demonstrate the required execution progress")
@@ -279,7 +281,7 @@ def validate_scenario_records(records, manifest=None):
         if type(record.get("liveReadChecked")) is not bool:
             raise ValueError("Missing live-read evidence")
         if scenario == "historical_single" and (not record["liveReadChecked"] or not record["immediateRefundWei"]):
-            raise ValueError("Historical single must prove an eligible live read and excess refund")
+            raise ValueError("Historical single must check live-cache isolation and excess refund")
         if outcome != "pending" and (not record["markTime"] or not record["markPrice"]):
             raise ValueError("Missing synchronized mark")
         if scenario.startswith("unavailable_") and record["fundedWei"] < 2 * record["quoteWei"]:
@@ -298,7 +300,7 @@ def validate_scenario_records(records, manifest=None):
             raise ValueError("Immediate refund scenario must return all unconsumed ETH without deferred credits")
         if manifest is not None:
             fixture_name = "historicalB" if scenario == "distinct_basket_batch" else (
-                "fridayClosing" if scenario == "frozen_close" else "historicalA")
+                "fridayOpening" if scenario == "frozen_close" else "historicalA")
             fixture = manifest["fixtures"][fixture_name]["fixture"]
             expected_times = fixture["initialStoredPublishTimes"] if outcome == "pending" else fixture["publishTimes"]
             if required != expected_times:
@@ -307,7 +309,7 @@ def validate_scenario_records(records, manifest=None):
                 raise ValueError("Installed mark timestamp differs from the signed fixture")
             if outcome == "pending" and stored != fixture["initialStoredPublishTimes"]:
                 raise ValueError("Unavailable history unexpectedly changed Pyth storage")
-            payloads = fixture["updateData"][:]
+            payloads = [] if scenario == "frozen_close" else fixture["updateData"][:]
             if scenario == "distinct_basket_batch":
                 payloads += manifest["fixtures"]["historicalA"]["fixture"]["updateData"]
             if record["payloadBytes"] != sum((len(value) - 2) // 2 for value in payloads):

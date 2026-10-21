@@ -238,7 +238,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
 
         vm.warp(block.timestamp + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(110_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(110_000_000, uint64(vm.getBlockTimestamp()));
 
         PerpsViewTypes.PositionView memory viewData = _publicPosition(account);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 110_000_000);
@@ -247,7 +247,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         assertTrue(preview.liquidatable, "Liquidation preview should use current notional for maintenance threshold");
 
         vm.prank(address(router));
-        engine.liquidatePosition(account, 110_000_000, poolDepth, uint64(block.timestamp), address(this));
+        engine.liquidatePosition(account, 110_000_000, poolDepth, uint64(vm.getBlockTimestamp()), address(this));
 
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Live liquidation should agree with preview and position view");
@@ -263,6 +263,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         assertTrue(preview.liquidatable, "Setup liquidation preview should be liquidatable");
 
@@ -321,6 +322,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, keeper);
 
@@ -354,6 +356,7 @@ contract EngineExecutionParityTest is CfdEngineTestBase {
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 101_000_000);
         LiquidationParitySnapshot memory beforeSnapshot = _captureLiquidationParitySnapshot(account, keeper);
 

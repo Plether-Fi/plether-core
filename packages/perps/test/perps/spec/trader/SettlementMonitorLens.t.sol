@@ -449,6 +449,17 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
         _openMonitorPosition();
         vm.warp(pool.lpEpochStart(observedEpoch));
+        SettlementMonitorViewTypes.SettlementStatus memory stale = monitorLens.getSettlementStatus(observedEpoch);
+        assertFalse(stale.markFresh);
+        assertEq(
+            uint8(stale.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh)
+        );
+        assertFalse(
+            _hasOperationalBlocker(
+                stale.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
+            ),
+            "stale cached mark must not block an atomic refresh"
+        );
         _setCurrentBasket(110_000_000, 50_000, block.timestamp);
 
         SettlementMonitorViewTypes.SettlementStatus memory status = monitorLens.getSettlementStatus(observedEpoch);
@@ -494,13 +505,13 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             uint8(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh)
         );
         assertEq(early.status.clock.minimumAtomicPublishTime, boundary);
-        assertTrue(early.oracle.readSucceeded);
-        assertTrue(early.oracle.policyValid);
+        assertFalse(early.oracle.readSucceeded);
+        assertFalse(early.oracle.policyValid);
         assertFalse(early.oracle.publishTimeMeetsEpochFloor);
         assertTrue(
             _hasOperationalBlocker(
                 early.status.operationalBlockerMask,
-                SettlementMonitorViewTypes.OperationalBlocker.OracleBeforeEpochBoundary
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
             )
         );
         assertFalse(early.observationComplete);
@@ -544,7 +555,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(uint8(fresh.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.CachedMark));
     }
 
-    function test_FrozenStaleRecoveryDoesNotRequireCurrentRoundHourPublishFloor() public {
+    function test_FrozenStaleRecoveryRequiresFreshEngineMarkWithoutRoundHourFloor() public {
         uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
         _openMonitorPosition();
         vm.warp(SATURDAY_FROZEN);
@@ -567,16 +578,28 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
 
         SettlementMonitorViewTypes.SettlementObservation memory observation =
             monitorLens.getSettlementObservation(observedEpoch);
-        assertTrue(observation.oracle.policyValid);
-        assertEq(observation.oracle.publishTime, preBoundaryPublishTime);
-        assertTrue(observation.oracle.publishTimeMeetsEpochFloor);
+        assertFalse(observation.oracle.policyValid);
+        assertEq(observation.oracle.failureSelector, IPletherOracle.PletherOracle__StalePrice.selector);
+        assertFalse(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
+            )
+        );
+        assertTrue(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            ),
+            "the actual frozen-oracle age rejection must remain visible"
+        );
+        assertFalse(observation.oracle.publishTimeMeetsEpochFloor);
         assertFalse(
             _hasOperationalBlocker(
                 observation.status.operationalBlockerMask,
                 SettlementMonitorViewTypes.OperationalBlocker.OracleBeforeEpochBoundary
             )
         );
-        assertTrue(observation.observationComplete);
+        assertFalse(observation.observationComplete);
     }
 
     function test_RequiredInvalidOracleIsFailSoftAndNotActionable() public {
@@ -588,7 +611,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         SettlementMonitorViewTypes.OracleStatus memory oracleStatus = monitorLens.getPoolReconcileOracleStatus();
         assertFalse(oracleStatus.readSucceeded);
         assertFalse(oracleStatus.policyValid);
-        assertEq(oracleStatus.failureSelector, IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
+        assertEq(oracleStatus.failureSelector, IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
         assertTrue(oracleStatus.failureHash != bytes32(0));
         assertEq(oracleStatus.dependencyFailureMask, 0, "recognized oracle rejection is not an unreadable dependency");
 
@@ -609,7 +632,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(
             uint8(observation.health.state),
             uint8(SettlementMonitorViewTypes.HealthState.Healthy),
-            "bad current feed data is operational, not structural health corruption"
+            "uninitialized accepted basket is operational, not structural health corruption"
         );
     }
 
@@ -954,6 +977,34 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
         assertFalse(observation.observationComplete);
         assertEq(observation.completeObservationDigest, bytes32(0));
+    }
+
+    function test_InvalidInverseConfidenceIsRecognizedOraclePolicyFailure() public {
+        uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
+        _openMonitorPosition();
+        vm.warp(pool.lpEpochStart(observedEpoch));
+        vm.mockCallRevert(
+            address(router.pletherOracle()),
+            abi.encodeWithSelector(IPletherOracle.getLatestPoolReconcilePrice.selector),
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__InvalidInverseConfidence.selector,
+                BASE_PYTH_FEED_A,
+                int64(100_000_000),
+                uint64(100_000_000)
+            )
+        );
+
+        SettlementMonitorViewTypes.SettlementObservation memory observation =
+            monitorLens.getSettlementObservation(observedEpoch);
+
+        assertEq(observation.oracle.failureSelector, IPletherOracle.PletherOracle__InvalidInverseConfidence.selector);
+        assertEq(observation.oracle.dependencyFailureMask, 0, "canonical policy rejection is readable");
+        assertTrue(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            )
+        );
     }
 
     function test_WrongModeOraclePolicyErrorIsMalformedDependency() public {

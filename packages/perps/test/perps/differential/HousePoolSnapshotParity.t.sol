@@ -275,8 +275,9 @@ contract HousePoolSnapshotParityTest is HousePoolAccountingParityBase {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(80_000_000, uint64(vm.getBlockTimestamp()));
         _close(account, CfdTypes.Side.LONG, 100_000e18, 80_000_000);
 
         (uint256 pendingSenior, uint256 pendingJunior, uint256 pendingSeniorWithdraw, uint256 pendingJuniorWithdraw) =

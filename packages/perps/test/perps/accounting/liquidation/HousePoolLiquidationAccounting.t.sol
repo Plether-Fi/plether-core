@@ -30,7 +30,8 @@ contract HousePoolLiquidationAccountingTest is HousePoolTestBase {
 
         assertEq(_sideOpenInterest(CfdTypes.Side.LONG), 500_000e18, "position is live before liquidation");
 
-        vm.warp(block.timestamp + 60 days);
+        // Keep the liquidation in a live oracle window so the supplied signed price is used.
+        vm.warp(block.timestamp + 61 days);
 
         address carolAccount = carol;
         bytes[] memory pythData = new bytes[](1);

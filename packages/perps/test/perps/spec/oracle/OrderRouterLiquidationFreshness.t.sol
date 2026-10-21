@@ -9,6 +9,7 @@ import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -40,14 +41,13 @@ contract OrderRouterLiquidationFreshnessTest is OrderRouterPythTestBase {
         vm.warp(block.timestamp + 48 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2040);
         vm.warp(2050);
-        router.updateMarkPrice(empty);
+        router.updateMarkPrice(_signedCurrentData(2040));
 
         vm.warp(2056);
         vm.roll(block.number + 1);
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, new bytes[](0));
     }
 
     function test_LiquidationStaleness_UsesRouterLiquidationLimit_NotPoolMarkLimit() public {
@@ -71,11 +71,12 @@ contract OrderRouterLiquidationFreshnessTest is OrderRouterPythTestBase {
 
         address account = alice;
 
-        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000);
+        vm.warp(2000);
+        router.updateMarkPrice(_signedCurrentData(2000));
 
         vm.warp(2061);
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, new bytes[](0));
 
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
         routerConfig.liquidationStalenessLimit = 61;
@@ -85,7 +86,18 @@ contract OrderRouterLiquidationFreshnessTest is OrderRouterPythTestBase {
 
         vm.warp(2061);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionIsSolvent.selector);
-        router.executeLiquidation(account, empty);
+        router.executeLiquidation(account, new bytes[](0));
+    }
+
+    function _signedCurrentData(
+        uint64 tick
+    ) private view returns (bytes[] memory data) {
+        MockPyth.FeedUpdate[] memory updates = new MockPyth.FeedUpdate[](feedIds.length);
+        for (uint256 i; i < feedIds.length; ++i) {
+            updates[i] = MockPyth.FeedUpdate(feedIds[i], MockPyth.MockPrice(100_000_000, 0, -8, tick, 0));
+        }
+        data = new bytes[](1);
+        data[0] = abi.encode(updates);
     }
 
 }

@@ -2281,9 +2281,10 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         uint64 id
     ) internal returns (bool) {
         if (frozen) {
-            expectedExecutionPrices[id] = currentPrice;
-            expectedExecutionTimes[id] = latestAuthoredTick.publishTime;
-            currentMarkTime = vm.getBlockTimestamp();
+            expectedExecutionPrices[id] = engine.lastMarkPrice();
+            expectedExecutionTimes[id] = engine.lastMarkTime();
+            currentPrice = engine.lastMarkPrice();
+            currentMarkTime = engine.lastMarkTime();
             hasAcceptedMark = true;
             carry.advance(vm.getBlockTimestamp());
             return true;
@@ -2295,7 +2296,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         expectedExecutionPrices[id] = price;
         HistoricalTick memory tick = _historicalOrderTick(id);
         expectedExecutionTimes[id] = tick.publishTime;
-        if (tick.publishTime >= currentMarkTime) {
+        if (tick.publishTime > currentMarkTime) {
             currentPrice = price;
             currentMarkTime = tick.publishTime;
             hasAcceptedMark = true;

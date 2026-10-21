@@ -339,8 +339,11 @@ contract PerpAccountingHandler is Test {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
         uint256 price = bound(priceFuzz, 0.5e8, 1.5e8);
+        if (block.timestamp <= engine.lastMarkTime() && price != engine.lastMarkPrice()) {
+            vm.warp(uint256(engine.lastMarkTime()) + 1);
+        }
         vm.prank(address(router));
-        engine.updateMarkPrice(price, uint64(block.timestamp));
+        engine.updateMarkPrice(price, uint64(vm.getBlockTimestamp()));
     }
 
     function commitCloseOrder(

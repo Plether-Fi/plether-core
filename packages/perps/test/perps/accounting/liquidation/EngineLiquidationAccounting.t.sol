@@ -321,6 +321,7 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(50_000_000));
+        _ensureLaterOracleTime();
         vm.prank(keeper);
         router.executeLiquidation(shortAccount, priceData);
 

@@ -1051,6 +1051,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (newMarkTime < lastMarkTime) {
             return;
         }
+        if (newMarkTime == lastMarkTime && newMarkPrice != lastMarkPrice) {
+            revert CfdEngine__MarkPriceOutOfOrder();
+        }
         lastMarkPrice = newMarkPrice;
         lastMarkTime = newMarkTime;
     }
@@ -1416,8 +1419,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Updates the cached mark price without processing a trade or liquidation.
-    /// @dev Callable only by the router. Reverts for a publish time older than `lastMarkTime`; an equal timestamp is
-    ///      accepted. Advances both side carry indexes before caching the price, but does not collect position carry.
+    /// @dev Callable only by the router. An equal timestamp is accepted only for an identical clamped price.
     /// @param price Oracle price, with 8 decimals; values above `CAP_PRICE` are capped.
     /// @param publishTime Oracle publish timestamp, in Unix seconds.
     function updateMarkPrice(

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 
 contract PletherOracleEngineMock {
 
@@ -89,6 +90,35 @@ contract PletherOracleVaultMock {
         uint256 limit
     ) external {
         markStalenessLimit = limit;
+    }
+
+}
+
+/// @dev Consumes every gas unit offered to the immediate refund callback until explicitly configured to accept ETH.
+contract GasBurningOracleRefundRecipient {
+
+    bool internal burnRefundGas = true;
+    uint256 public receivedEth;
+
+    receive() external payable {
+        if (burnRefundGas) {
+            assembly ("memory-safe") {
+                for {} 1 {} { pop(gas()) }
+            }
+        }
+        receivedEth += msg.value;
+    }
+
+    function setBurnRefundGas(
+        bool burnRefundGas_
+    ) external {
+        burnRefundGas = burnRefundGas_;
+    }
+
+    function claim(
+        IPletherOracle oracle
+    ) external {
+        oracle.claimEthRefund();
     }
 
 }

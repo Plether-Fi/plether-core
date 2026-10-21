@@ -108,6 +108,8 @@ contract OrderRouterBasketValidationTest is OrderRouterPythTestBase {
         mockPyth.setPrice(FEED_B, int64(80_000_000), int32(-8), 1001);
 
         vm.warp(1001);
+        vm.prank(address(router));
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
         IPletherOracle.PriceSnapshot memory snapshot = oracle.getLatestPrice(IPletherOracle.PriceMode.MarkRefresh);
         assertEq(snapshot.price, 108_000_000, "70/30 basket should compute $1.08");
         assertEq(snapshot.markPrice, 108_000_000);
