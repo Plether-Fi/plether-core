@@ -20,4 +20,10 @@ interface IPositionProtectionViews {
         uint64 protectionId
     ) external view returns (PositionProtectionTypes.PositionProtectionView memory protection);
 
+    /// @notice Returns the trader-authorized financial ceilings retained for a protection.
+    /// @dev An unknown id returns zero-valued limits, like `getPositionProtection`.
+    function closeFinancialLimits(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.CloseFinancialLimits memory limits);
+
 }

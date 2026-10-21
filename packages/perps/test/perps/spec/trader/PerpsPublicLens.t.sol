@@ -14,6 +14,7 @@ contract PositionProtectionViewsStub is IPositionProtectionViews {
 
     mapping(address => uint64) internal activeProtectionIds;
     mapping(uint64 => PositionProtectionTypes.PositionProtectionView) internal protections;
+    mapping(uint64 => PositionProtectionTypes.CloseFinancialLimits) internal protectionCloseLimits;
 
     function positionProtectionBook() external view returns (address book) {
         return address(this);
@@ -42,6 +43,12 @@ contract PositionProtectionViewsStub is IPositionProtectionViews {
         uint64 protectionId
     ) external view returns (PositionProtectionTypes.PositionProtectionView memory protection) {
         return protections[protectionId];
+    }
+
+    function closeFinancialLimits(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.CloseFinancialLimits memory limits) {
+        return protectionCloseLimits[protectionId];
     }
 
 }

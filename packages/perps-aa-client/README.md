@@ -143,20 +143,34 @@ Committed delayed orders are binding in the current perps protocol; there is no 
 
 `buildProtectedOpenAction` builds an atomic bounded V3 opening order with TP/SL.
 `buildCreateProtectionAction`, `buildReplaceProtectionAction`, and
-`buildCancelProtectionAction` manage account-owned protection records. Every
+`buildCancelProtectionAction` manage account-owned protection records.
+`buildAmendLatchedProtectionCloseLimitsAction` lets the owner change the close
+limits of a `Latched` protection before a permissionless retry. Every
 builder targets the configured PositionProtectionBook with zero native value;
 the exported `positionProtectionBookAbi` is generated for the current source and must match the target deployment.
-Reject empty triggers, invalid uint64 protection IDs, and unbounded/closing
-requests before asking for sponsorship. Pass these plans through the same
-manifest validation and durable journaling flow as other native AA actions.
+Supply all four `bigint` fields in `params.closeLimits` for create, replace, and
+protected open: `maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`,
+`maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. The amendment builder takes
+the same `closeLimits` object. Values are uint256 ceilings in 6-decimal USDC
+units. Zero is a zero allowance; use `maxUint256` only when unlimited authority
+is intended. Builders reject missing or invalid close limits; they do not
+insert unlimited defaults. Read the current values from the Book's
+`closeFinancialLimits(uint64)` getter. The trigger bounty is reserved separately
+and paid when protection fires; the limits bound each generated close attempt,
+not a cumulative amount across retries.
+Reject empty triggers, invalid uint64 protection IDs, and invalid or closing parent-open requests before asking for
+sponsorship. Pass these plans through the same manifest validation and durable
+journaling flow as other native AA actions.
 
 The package originated from the self-hosted-AA source patch (SHA-256
 `d1c6941c03f37cc9a93b35b95dc73a876ee87dab624524ed9c4d6336022f2955`,
 base `bc8f6290c540665e4ff61328ea83a4c3d421a8d4`) with protection source
 `3472427ed15b0a478248af7d025535da349a8592`. Those references record its historical
 origins; current source and release evidence define the updated order and protection ABIs.
-Compatibility tests preserve the retained action encodings and hashes while explicitly recording
-the new order ABI. `RELEASING.md` describes the artifact compatibility gate.
+The immutable historical compatibility baseline records the old protection
+encodings and hashes. The reviewed current schema records the changed protection
+vectors and amendment action alongside the current order ABI. `RELEASING.md`
+describes the artifact compatibility gate.
 
 ## UI errors and fallback
 

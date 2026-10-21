@@ -32,7 +32,7 @@ not perps directions. Bind the intended market through the Router's verified Ora
 |-------------|--------------------|--------------|
 | Authoritative state | Live state comes from the Router, Engine, Clearinghouse, HousePool, and Oracle; permanent order identity and outcomes come from a predeployed immutable lifecycle Book whose exact bindings the Router validates | `IOrderLifecycleBook`, `PerpsPublicLens`, `PletherOracle`, Engine preview lenses |
 | Protocol meaning | Dollar-index direction, requests, policy constraints, execution regimes, terminal reasons, pending reasons, bounty disposition, and economics have an explicit machine mapping | `CfdTypes.Side`, `OrderV3Types`, `CfdOrderPolicyEvaluator` |
-| Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and synthesize a documented internal envelope | `OrderV3Types.ExecutionBounds`, `IPositionProtectionActions` |
+| Bounded authority | Fresh externally submitted bounded orders pin a deadline, modes, configuration, and inclusive financial limits; protection actions bind explicit OCO geometry and four close financial ceilings used by every generated attempt | `OrderV3Types.ExecutionBounds`, `IPositionProtectionActions` |
 | Financial policy | The evaluator reconstructs authoritative Engine state and checks the registered intent's limits before the Engine applies the transition | `CfdOrderPolicyEvaluator`, configured Engine planner |
 | Composable execution | Bounded-order submission is client-id idempotent; execution and protection triggering are permissionless; bounded calls return machine-readable results | `IPerpsTraderActions`, `IPerpsKeeper`, `IPositionProtectionActions` |
 | Verifiable outcome | The lifecycle Book proves queued-order intent and outcome; the protection Book retains OCO thresholds, trigger evidence, and parent/close linkage | `IntentRegistered`, `OrderFinalized`, `IOrderLifecycleBook.terminalOutcome`, `IPositionProtectionViews` |
@@ -294,10 +294,17 @@ because no position survives.
 
 Router-authenticated triggered and retried protection closes are the only zero-config exception. Those internal requests
 use `expectedConfigHash == bytes32(0)` as an unpinned marker, enable every execution mode, use
-`submitBy = block.timestamp` and `executionWindowSeconds = maxExecutionWindowSeconds`, set upper bounds to their integer maxima and minimum bounds to zero,
-and record the configuration actually observed at execution. They remain subject to ordinary protocol safety policy,
-but they are not a caller-selected financial envelope. This exception is unavailable through public `commitOrder`:
+`submitBy = block.timestamp` and `executionWindowSeconds = maxExecutionWindowSeconds`, and copy the four trader-selected
+`PositionProtectionParams.closeLimits` ceilings into every generated close attempt. The zero-bounty child sets
+`maxExecutionBountyUsdc = 0`; other upper bounds use their integer maxima and minimum bounds use zero. The Book retains
+the close limits at creation or attached-open staging, updates them on owner replacement, and allows the owner to amend
+them after a failed attempt becomes `Latched`. The generated order records the configuration actually observed at
+execution. The separate trigger bounty is reserved at protection creation and paid when protection fires. The
+zero-config exception is unavailable through public `commitOrder`:
 an agent-supplied fresh request with a zero configuration hash is rejected.
+These close ceilings apply to each attempt, not the aggregate across retries. If a commitment charge exceeds a
+ceiling, the trigger cannot commit until the owner replaces the `Armed` protection. An execution above a ceiling
+relatches the protection, allowing the owner to amend the limits before a permissionless retry.
 
 For `commitOpenOrderWithProtection`, the caller supplies the same nonzero direction-aware target required by an
 ordinary public order. Trigger-generated market-style closes use the internal nonbinding sentinels: `CAP_PRICE` for a

@@ -3,16 +3,34 @@ import { positionProtectionBookAbi } from "./protectionAbi.js";
 import type { PerpsActionKind, PerpsActionPlan } from "./types.js";
 
 export type ProtectedOpenRequest = ContractFunctionArgs<typeof positionProtectionBookAbi, "nonpayable", "commitOpenOrderWithProtection">[0];
+export interface CloseFinancialLimits {
+  maxExecutionNotionalUsdc: bigint;
+  maxGrossAccountDebitUsdc: bigint;
+  maxActionChargeUsdc: bigint;
+  maxExplicitFeesUsdc: bigint;
+}
+
 export interface PositionProtectionParams {
   takeProfitTriggerPrice: bigint;
   stopLossTriggerPrice: bigint;
+  closeLimits: CloseFinancialLimits;
+}
+
+function validateCloseLimits(limits: CloseFinancialLimits): void {
+  for (const field of ["maxExecutionNotionalUsdc", "maxGrossAccountDebitUsdc", "maxActionChargeUsdc", "maxExplicitFeesUsdc"] as const) {
+    const value = limits?.[field];
+    if (typeof value !== "bigint" || value < 0n || value > maxUint256) {
+      throw new Error(`Protection closeLimits.${field} must be an explicit uint256 bigint`);
+    }
+  }
 }
 
 function validateParams(params: PositionProtectionParams): void {
   const prices = [params.takeProfitTriggerPrice, params.stopLossTriggerPrice];
-  if (prices.some(price => price < 0n || price >= 1n << 256n) || prices.every(price => price === 0n)) {
+  if (prices.some(price => typeof price !== "bigint" || price < 0n || price > maxUint256) || prices.every(price => price === 0n)) {
     throw new Error("At least one valid protection trigger is required");
   }
+  validateCloseLimits(params.closeLimits);
 }
 
 function validateId(id: bigint): void {
@@ -39,6 +57,12 @@ export function buildReplaceProtectionAction(input: { account: Address; book: Ad
 export function buildCancelProtectionAction(input: { account: Address; book: Address; protectionId: bigint }): PerpsActionPlan {
   validateId(input.protectionId);
   return action("cancel-protection", input.account, input.book, encodeFunctionData({ abi: positionProtectionBookAbi, functionName: "cancelPositionProtection", args: [input.protectionId] }));
+}
+
+export function buildAmendLatchedProtectionCloseLimitsAction(input: { account: Address; book: Address; protectionId: bigint; closeLimits: CloseFinancialLimits }): PerpsActionPlan {
+  validateId(input.protectionId);
+  validateCloseLimits(input.closeLimits);
+  return action("amend-protection-close-limits", input.account, input.book, encodeFunctionData({ abi: positionProtectionBookAbi, functionName: "amendLatchedPositionProtectionCloseLimits", args: [input.protectionId, input.closeLimits] }));
 }
 
 export function buildProtectedOpenAction(input: { account: Address; book: Address; request: ProtectedOpenRequest; params: PositionProtectionParams }): PerpsActionPlan {

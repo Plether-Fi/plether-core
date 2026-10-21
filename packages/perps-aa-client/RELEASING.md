@@ -34,9 +34,17 @@ node --test scripts/perps-aa-release.test.mjs
 CI packs from a clean committed checkout, verifies the file allowlist, license,
 exports, embedded `gitHead`, and self-contained source maps, then installs the
 tarball in a temporary consumer outside Core. The consumer runs the same fixed
-compatibility vectors as the source tests, including all four protection actions
-through the native sponsorship/journaling path. Solidity consumes the same JSON
-fixture and independently checks all eleven sponsorship hashes.
+compatibility vectors as the source tests, including the changed protection
+create, replace, and protected-open encodings and the new latched-limits amendment
+action through the native sponsorship/journaling path. The immutable historical
+baseline remains a record of the prior ABI and action hashes; the reviewed current
+schema pins the new protection vectors. Solidity continues to consume the
+historical `baseline.json` fixture and independently checks its historical
+sponsorship hashes.
+
+MED-9 changes the protected-open selector and protection action calldata.
+Choose a package version higher than `0.3.0` and update the lockfile before
+merging a release of this source. The version remains `0.3.0` in this source patch.
 
 The opt-in Arbitrum Sepolia fork test must also pass before approving the first
 release. Run it with an authenticated read-only RPC if the public endpoint is
@@ -49,16 +57,15 @@ ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc \
 
 ## Publish the merged version
 
-Commit the exact stable version and lockfile; the current V5 schema source is
-`0.3.0`. Merge the reviewed Core PR first. Use the GitHub CLI for dispatch and
-monitoring, substituting the merged package version:
+Commit the new stable version and lockfile, then merge the reviewed Core PR.
+Use the GitHub CLI for dispatch and monitoring, substituting that merged version:
 
 ```bash
 gh auth status
 gh api user --jq .login
 gh api repos/Plether-Fi/plether-core/commits/master --jq .sha
 gh run list --repo Plether-Fi/plether-core --workflow publish-perps-aa-client.yml --limit 10
-gh workflow run publish-perps-aa-client.yml --repo Plether-Fi/plether-core --ref master -f version=0.3.0
+gh workflow run publish-perps-aa-client.yml --repo Plether-Fi/plether-core --ref master -f version=X.Y.Z
 ```
 
 Confirm the run's `headSha`, inspect its build/test results, then approve the
@@ -68,7 +75,7 @@ SHA-512 integrity. It performs no install, build, lifecycle scripts, or repack.
 Only that job has package-write and tag/release-write permissions.
 
 Publishing is followed by registry `gitHead`/integrity readback, an annotated
-`perps-aa-client-v0.3.0` tag at that commit, and a GitHub Release containing the
+`perps-aa-client-vX.Y.Z` tag at that commit, and a GitHub Release containing the
 integrity and commit. The package release is never marked the repository's latest
 protocol release. Use `gh run view` and `gh run watch --exit-status` for completion.
 

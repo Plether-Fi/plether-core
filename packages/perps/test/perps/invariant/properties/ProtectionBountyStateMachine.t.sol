@@ -586,7 +586,16 @@ contract ProtectionBountyStateMachineTest is BasePerpTest {
     }
 
     function _params() internal pure returns (Protection.PositionProtectionParams memory) {
-        return Protection.PositionProtectionParams(0, STOP_PRICE);
+        return Protection.PositionProtectionParams({
+            takeProfitTriggerPrice: 0,
+            stopLossTriggerPrice: STOP_PRICE,
+            closeLimits: Protection.CloseFinancialLimits({
+                maxExecutionNotionalUsdc: type(uint256).max,
+                maxGrossAccountDebitUsdc: type(uint256).max,
+                maxActionChargeUsdc: type(uint256).max,
+                maxExplicitFeesUsdc: type(uint256).max
+            })
+        });
     }
 
     function _request() internal view returns (OrderV3Types.OrderRequest memory request) {

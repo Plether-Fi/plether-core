@@ -24,16 +24,27 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
 - Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
+- A protection request must explicitly supply `PositionProtectionParams.closeLimits` with four close financial limits:
+  `maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`, `maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. Each is a
+  `uint256` ceiling in 6-decimal USDC units for future triggered or retried close attempts. Set the limits from the trader's intended
+  close policy; integrations must not assume an implicit unlimited default. Zero is a zero allowance;
+  `type(uint256).max` is an explicit unlimited allowance. The separately reserved trigger bounty is paid when the
+  protection fires; these ceilings apply to its generated close attempt.
 - Existing-position protection creation locks its trigger bounty first, then applies the canonical V2 exact-price safety
   gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
   claim; free settlement and generic action/reservation buckets do not count. Uncovered carry, an underfunded
   negative-VPI reserve, or equity at or below the stricter of initial and active normal/FAD margin rejects the action.
 - Protection management: replace a `PendingOpen` or `Armed` record with
-  `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`, or detach/cancel a
-  `PendingOpen`/`Armed` record with `PositionProtectionBook.cancelPositionProtection(uint64)`
+  `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)` to update its triggers and close
+  limits, or detach/cancel a `PendingOpen`/`Armed` record with
+  `PositionProtectionBook.cancelPositionProtection(uint64)`
 - Once a trigger is recorded, neither the owner nor a keeper may replace or cancel it. `Triggered` means one live close
   attempt; `Latched` means the irreversible trigger remains active with no live attempt and may be retried
   permissionlessly.
+- The owner may amend the close ceilings of a `Latched` protection with
+  `PositionProtectionBook.amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)` when the account has
+  no pending Router order. This changes the limits used for a future retry; it does not replace or cancel the latched
+  trigger. `PositionProtectionCloseLimitsUpdated` records each creation, replacement, or amendment of these limits.
 - Only Router-authenticated TP/SL-triggered close attempts use `expectedConfigHash == bytes32(0)` as an internal
   unpinned marker. Protected parent opens and ordinary `OrderRouter.commitOrder(...)` requests require the current
   nonzero configuration hash.
@@ -43,7 +54,8 @@ For autonomous trading-account and AI-agent integration, including bounded autho
   `TrancheView.maxWithdrawUsdc` field now means current pool-level queue-funding capacity, not synchronous holder
   withdrawal capacity.
 - Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
-  `PositionProtectionBook.getPositionProtection(uint64)`
+  `PositionProtectionBook.getPositionProtection(uint64)`. Read the retained close ceilings with
+  `PositionProtectionBook.closeFinancialLimits(uint64)`.
 - Open-ticket planning: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.quoteMaxOpen(...)`; these exclude Router
   admission, bounty-reservation, and oracle-validation checks.
 - Pre-commit close review: `CfdClosePreview.previewClose(...)`, which projects commitment carry and the new order's
@@ -181,7 +193,8 @@ by the Book's trailing payload.
 - Compact protocol status and LP/trader views: `PerpsPublicLens`
 - Retained protection status and latest-attempt linkage: `IPositionProtectionViews` on the Book returned by
   `OrderRouter.positionProtectionBook()`. `linkedOrderId` is the most recent attempt, not complete history; reconstruct
-  the one-to-many attempt set from protection events and permanent lifecycle-Book outcomes.
+  the one-to-many attempt set from protection events and permanent lifecycle-Book outcomes. Read the protection's
+  current close ceilings with `closeFinancialLimits(uint64)`.
 - Authoritative order identity and outcome reads: the independently predeployed, exactly Router-bound
   `OrderLifecycleBook` exposed by `OrderRouter.lifecycleBook()` via `IOrderLifecycleBook`. Use
   `currentExecutionConfigHash()` before constructing a request, `clientIntent(account,

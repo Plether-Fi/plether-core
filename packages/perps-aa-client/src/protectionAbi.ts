@@ -142,6 +142,46 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "function",
+    "name": "amendLatchedPositionProtectionCloseLimits",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "limits",
+        "type": "tuple",
+        "internalType": "struct PositionProtectionTypes.CloseFinancialLimits",
+        "components": [
+          {
+            "name": "maxExecutionNotionalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxGrossAccountDebitUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxActionChargeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxExplicitFeesUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "cancelPositionProtection",
     "inputs": [
       {
@@ -152,6 +192,47 @@ export const positionProtectionBookAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "closeFinancialLimits",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "limits",
+        "type": "tuple",
+        "internalType": "struct PositionProtectionTypes.CloseFinancialLimits",
+        "components": [
+          {
+            "name": "maxExecutionNotionalUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxGrossAccountDebitUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxActionChargeUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxExplicitFeesUsdc",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -280,6 +361,33 @@ export const positionProtectionBookAbi = [
             "name": "stopLossTriggerPrice",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "closeLimits",
+            "type": "tuple",
+            "internalType": "struct PositionProtectionTypes.CloseFinancialLimits",
+            "components": [
+              {
+                "name": "maxExecutionNotionalUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxGrossAccountDebitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxActionChargeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxExplicitFeesUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
           }
         ]
       }
@@ -316,6 +424,33 @@ export const positionProtectionBookAbi = [
             "name": "stopLossTriggerPrice",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "closeLimits",
+            "type": "tuple",
+            "internalType": "struct PositionProtectionTypes.CloseFinancialLimits",
+            "components": [
+              {
+                "name": "maxExecutionNotionalUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxGrossAccountDebitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxActionChargeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxExplicitFeesUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
           }
         ]
       }
@@ -533,6 +668,33 @@ export const positionProtectionBookAbi = [
             "name": "stopLossTriggerPrice",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "closeLimits",
+            "type": "tuple",
+            "internalType": "struct PositionProtectionTypes.CloseFinancialLimits",
+            "components": [
+              {
+                "name": "maxExecutionNotionalUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxGrossAccountDebitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxActionChargeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxExplicitFeesUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
           }
         ]
       }
@@ -803,6 +965,49 @@ export const positionProtectionBookAbi = [
         "type": "uint64",
         "indexed": false,
         "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionProtectionCloseLimitsUpdated",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "maxExecutionNotionalUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxGrossAccountDebitUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxActionChargeUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxExplicitFeesUsdc",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false

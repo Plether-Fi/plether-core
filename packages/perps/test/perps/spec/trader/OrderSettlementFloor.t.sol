@@ -212,6 +212,12 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
         PositionProtectionTypes.PositionProtectionParams memory params;
         params.takeProfitTriggerPrice = 90_000_000;
         params.stopLossTriggerPrice = 110_000_000;
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max
+        });
         OrderV3Types.OrderRequest memory request = _request();
         vm.prank(BOUNTY_TRADER);
         (uint64 id,) = actions.commitOpenOrderWithProtection(request, params);

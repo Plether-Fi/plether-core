@@ -15,6 +15,7 @@ import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionPro
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {ExecutionBlockNumberLib} from "@plether/perps/libraries/ExecutionBlockNumberLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 
 /// @notice Narrow engine view surface used by position-protection actions and lifecycle validation.
@@ -136,6 +137,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 size;
         uint256 takeProfitTriggerPrice;
         uint256 stopLossTriggerPrice;
+        PositionProtectionTypes.CloseFinancialLimits closeLimits;
         uint64 armedAt;
         uint64 armedBlock;
         uint256 triggerMarkPrice;
@@ -230,6 +232,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.size = position.size;
         protection.takeProfitTriggerPrice = params.takeProfitTriggerPrice;
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
+        _setCloseLimits(protection, params.closeLimits);
         _clearinghouse()
             .recordBountyReservation(
                 account, IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId, triggerBountyUsdc
@@ -240,6 +243,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         emit PositionProtectionCreated(
             protectionId, account, 0, params.takeProfitTriggerPrice, params.stopLossTriggerPrice, triggerBountyUsdc
         );
+        _emitCloseLimitsUpdated(protection);
         _emitArmed(protection);
     }
 
@@ -286,6 +290,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         _validateProtectionPrices(protection.side, markPrice, params);
         protection.takeProfitTriggerPrice = params.takeProfitTriggerPrice;
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
+        _setCloseLimits(protection, params.closeLimits);
 
         if (status == PositionProtectionTypes.PositionProtectionStatus.Armed) {
             _arm(protection);
@@ -294,9 +299,26 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         emit PositionProtectionReplaced(
             protectionId, account, params.takeProfitTriggerPrice, params.stopLossTriggerPrice
         );
+        _emitCloseLimitsUpdated(protection);
         if (status == PositionProtectionTypes.PositionProtectionStatus.Armed) {
             _emitArmed(protection);
         }
+    }
+
+    /// @inheritdoc IPositionProtectionActions
+    function amendLatchedPositionProtectionCloseLimits(
+        uint64 protectionId,
+        PositionProtectionTypes.CloseFinancialLimits calldata limits
+    ) external nonReentrant {
+        StoredProtection storage protection = _ownedActiveProtection(protectionId, msg.sender);
+        if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Latched) {
+            revert OrderRouter__ProtectionNotLatched();
+        }
+        if (IPositionProtectionRouterHost(ROUTER).pendingOrderCounts(msg.sender) != 0) {
+            revert OrderRouter__PendingOrdersExist();
+        }
+        _setCloseLimits(protection, limits);
+        _emitCloseLimitsUpdated(protection);
     }
 
     /// @inheritdoc IPositionProtectionActions
@@ -414,6 +436,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.size = size;
         protection.takeProfitTriggerPrice = params.takeProfitTriggerPrice;
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
+        _setCloseLimits(protection, params.closeLimits);
         _clearinghouse()
             .recordBountyReservation(
                 account, IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId, triggerBountyUsdc
@@ -430,6 +453,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             params.stopLossTriggerPrice,
             triggerBountyUsdc
         );
+        _emitCloseLimitsUpdated(protection);
     }
 
     /// @inheritdoc IPositionProtectionBook
@@ -462,7 +486,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         if (_activeOracle().isOracleFrozen()) {
             revert OrderRouter__ConditionalTriggerFrozen();
         }
-        if (block.number <= protection.armedBlock || publishTime <= protection.armedAt) {
+        if (ExecutionBlockNumberLib.current() <= protection.armedBlock || publishTime <= protection.armedAt) {
             revert OrderRouter__SameBlockTrigger();
         }
         _requireMatchingPosition(protection);
@@ -694,6 +718,13 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.triggeredLeg = stored.triggeredLeg;
         protection.status = stored.status;
         protection.triggerBountyUsdc = _triggerBounty(stored);
+    }
+
+    /// @inheritdoc IPositionProtectionViews
+    function closeFinancialLimits(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.CloseFinancialLimits memory limits) {
+        return _protections[protectionId].closeLimits;
     }
 
     /// @inheritdoc IPositionProtectionBook
@@ -961,8 +992,29 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         StoredProtection storage protection
     ) private {
         protection.armedAt = uint64(block.timestamp);
-        protection.armedBlock = uint64(block.number);
+        protection.armedBlock = ExecutionBlockNumberLib.current();
         protection.status = PositionProtectionTypes.PositionProtectionStatus.Armed;
+    }
+
+    function _setCloseLimits(
+        StoredProtection storage protection,
+        PositionProtectionTypes.CloseFinancialLimits memory limits
+    ) private {
+        protection.closeLimits = limits;
+    }
+
+    function _emitCloseLimitsUpdated(
+        StoredProtection storage protection
+    ) private {
+        PositionProtectionTypes.CloseFinancialLimits storage limits = protection.closeLimits;
+        emit PositionProtectionCloseLimitsUpdated(
+            protection.protectionId,
+            protection.account,
+            limits.maxExecutionNotionalUsdc,
+            limits.maxGrossAccountDebitUsdc,
+            limits.maxActionChargeUsdc,
+            limits.maxExplicitFeesUsdc
+        );
     }
 
     function _emitArmed(

@@ -7,6 +7,7 @@ export type PerpsActionKind =
   | "create-protection"
   | "replace-protection"
   | "cancel-protection"
+  | "amend-protection-close-limits"
   | "cancel-order"
   | "add-margin"
   | "withdraw"

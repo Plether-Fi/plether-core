@@ -10,6 +10,7 @@ import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterE
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {ExecutionBlockNumberLib} from "@plether/perps/libraries/ExecutionBlockNumberLib.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 
@@ -153,7 +154,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
                 marginDelta: marginDelta,
                 targetPrice: targetPrice,
                 commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+                commitBlock: ExecutionBlockNumberLib.current(),
                 orderId: orderId,
                 side: side,
                 isClose: isCloseWord != 0
@@ -432,7 +433,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
                 marginDelta: 0,
                 targetPrice: side == CfdTypes.Side.LONG ? engine.CAP_PRICE() : 1,
                 commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+                commitBlock: ExecutionBlockNumberLib.current(),
                 orderId: linkedOrderId,
                 side: side,
                 isClose: true

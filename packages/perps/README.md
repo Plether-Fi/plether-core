@@ -162,6 +162,8 @@ In practice, the compact public API is:
   - `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
   - `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`
   - `PositionProtectionBook.cancelPositionProtection(uint64)`
+  - `PositionProtectionBook.amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)` for the owner of a
+    latched protection
 - Keepers:
   - `OrderRouter.executeOrder(uint64,bytes[]) -> OrderV3Types.ExecutionResult`
   - `OrderRouter.executeOrderBatch(uint64,bytes[]) -> OrderV3Types.BatchResult`
@@ -191,6 +193,7 @@ In practice, the compact public API is:
   - `PositionProtectionBook.activePositionProtectionId(address)` /
     `PositionProtectionBook.getPositionProtection(uint64)` for canonical retained protection state. `linkedOrderId`
     is the latest attempt; combine attempt events with lifecycle outcomes for complete history.
+  - `PositionProtectionBook.closeFinancialLimits(uint64)` for the current close ceilings retained by a protection
   - `SettlementMonitorLens` for explicitly observed epoch operations, fail-soft oracle diagnostics, and bounded
     accounting/custody health checks; it is an operator/security surface, not the product API or a settlement
     authorization oracle
@@ -457,6 +460,16 @@ ordinary `OrderCommitted` and order-terminal events for every linked close attem
 
 Protection can be created against an existing position or staged in the same transaction as a new opening commitment:
 
+Every `PositionProtectionParams` must supply explicit `closeLimits` for the future triggered or retried close:
+`maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`, `maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. These are
+`uint256` ceilings in 6-decimal USDC units. The Book retains them per protection and exposes the current values through
+`closeFinancialLimits(uint64)`; callers should not rely on an implicit unlimited default. Zero is a zero allowance;
+`type(uint256).max` explicitly allows an unlimited amount. Replacing a `PendingOpen` or `Armed` protection updates both
+its trigger prices and close limits. The separately reserved trigger bounty is paid when the protection fires; these
+ceilings apply to each generated close attempt and do not cap that bounty. They are not cumulative limits across
+retries. A ceiling below the required commitment charge can prevent triggering until the owner replaces an `Armed`
+protection; a later execution above a ceiling relatches the protection, and the owner can amend the limits before retry.
+
 ```text
 commit open with protection
         |
@@ -514,6 +527,10 @@ commit open with protection
   A missing or mismatched position instead resolves the protection as `Failed` and follows ordinary paid attempt
   cleanup. The attempt is permanently retained in the lifecycle Book, while `linkedOrderId` continues to identify the
   most recent attempt.
+- The owner may call `amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)` while a protection is
+  `Latched` and the account has no pending Router order to update the limits for a future retry. This leaves the
+  irreversible trigger in place. The Book emits `PositionProtectionCloseLimitsUpdated` on creation, replacement, and
+  amendment; indexers can use the event with `closeFinancialLimits(uint64)` to track the current policy.
 - `retryPositionProtectionClose(...)` is permissionless and nonpayable. It is valid only for a `Latched` protection,
   requires that the exact protected side and size still exist and that the account has no pending Router order, does
   not refresh or re-evaluate the trigger, and appends a fresh attempt at the current FIFO tail with a new order id,
@@ -522,7 +539,8 @@ commit open with protection
   policy rather than the live/FAD historical window.
 - The attached parent is a caller-authored public V3 request with the same nonzero configuration pin and financial
   bounds as `OrderRouter.commitOrder(...)`. Triggered and retried protection close attempts are typed V3 requests
-  constructed inside the authenticated protection path; only those attempts use
+  constructed inside the authenticated protection path and use the protection's explicit close financial limits; only
+  those attempts use
   `expectedConfigHash == bytes32(0)` as an internal unpinned marker. Fresh external commits reject zero, and no external
   caller can opt an ordinary or protected-parent order out of configuration pinning.
 - Relatched failure cleanup does not automatically enqueue the replacement and pays no keeper bounty. The old
