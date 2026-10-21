@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 import {HousePoolAsyncTestBase} from "../../shared/HousePoolTestBase.sol";
@@ -67,6 +68,102 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
+    }
+
+    function test_ActivateTradingRejectsStoredUnassignedAssetsUntilAssigned() public {
+        usdc.mint(address(pool), 500e6);
+        pool.accountExcess();
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        _seedBothTranches();
+        assertEq(pool.unassignedAssets(), 500e6);
+
+        vm.expectRevert(IHousePool.HousePool__PendingBootstrap.selector);
+        pool.activateTrading();
+        assertFalse(pool.isTradingActive());
+
+        pool.assignUnassignedAssets(false, alice);
+        pool.activateTrading();
+        assertTrue(pool.canIncreaseRisk());
+    }
+
+    function test_ActivateTradingRejectsProjectedUnassignedAssets() public {
+        _seedBothTranches();
+
+        usdc.mint(address(pool), 500e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            500e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        assertEq(pool.unassignedAssets(), 0);
+
+        vm.expectRevert(IHousePool.HousePool__PendingBootstrap.selector);
+        pool.activateTrading();
+        assertFalse(pool.isTradingActive());
+
+        pool.assignUnassignedAssets(false, alice);
+        pool.activateTrading();
+        assertTrue(pool.canIncreaseRisk());
+    }
+
+    function test_ActivateTradingRejectsResidualPendingClaimantAssets() public {
+        _seedBothTranches();
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(address(pool), 3000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        vm.prank(address(engine));
+        pool.payOut(address(0xDEAD), 1000e6);
+        assertEq(pool.unassignedAssets(), 0);
+
+        vm.expectRevert(IHousePool.HousePool__PendingBootstrap.selector);
+        pool.activateTrading();
+        assertFalse(pool.isTradingActive());
+    }
+
+    function test_ActivateTradingAcceptsPendingRevenueWithSeedOwners() public {
+        _seedBothTranches();
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+
+        usdc.mint(address(pool), 3000e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        assertEq(pool.pendingTradingRevenueUsdc(), 3000e6);
+
+        pool.activateTrading();
+        assertTrue(pool.canIncreaseRisk());
+    }
+
+    function test_ActivateTradingRepeatAllowsNewOwnerlessValue() public {
+        _seedBothTranches();
+        pool.activateTrading();
+
+        usdc.mint(address(pool), 500e6);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            500e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        assertEq(pool.pendingRecapitalizationUsdc(), 500e6);
+
+        pool.activateTrading();
+        assertTrue(pool.isTradingActive());
+    }
+
+    function _seedBothTranches() internal {
+        usdc.mint(address(this), 2000e6);
+        usdc.approve(address(pool), 2000e6);
+        pool.initializeSeedPosition(false, 1000e6, address(this));
+        pool.initializeSeedPosition(true, 1000e6, address(this));
     }
 
     function test_InitializeJuniorSeed_CheckpointsPreExistingSeniorCouponWithoutChargingSeed() public {

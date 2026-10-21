@@ -7,8 +7,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 
-import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 import {CfdEngineTestBase} from "../../shared/CfdEngineTestBase.sol";
@@ -140,21 +138,27 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         clearinghouse.withdraw(treasury, fees);
     }
 
-    function test_SetProtocolTreasury_RevertsWhenCurrentTreasuryHasBalance() public {
+    function test_SetProtocolTreasury_KeepsExistingBalanceWithOldTreasury() public {
         address oldTreasury = engine.protocolTreasury();
         address newTreasury = address(0xFEE99);
 
         _fundProtocolTreasury(1e6);
-
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__ProtocolTreasuryBalanceNotEmpty.selector);
         engine.setProtocolTreasury(newTreasury);
 
-        assertEq(engine.protocolTreasury(), oldTreasury, "Treasury should not rotate while old balance remains");
-        assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
-            1e6,
-            "Existing treasury balance should remain reported"
-        );
+        assertEq(engine.protocolTreasury(), newTreasury, "Treasury should rotate despite the old balance");
+        assertEq(clearinghouse.balanceUsdc(oldTreasury), 1e6, "Old treasury retains its balance");
+        assertEq(clearinghouse.balanceUsdc(newTreasury), 0, "New treasury starts empty");
+
+        address account = address(0xFEE9A);
+        _fundTrader(account, 5000e6);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        assertEq(clearinghouse.balanceUsdc(newTreasury), 40e6, "Future fees go to the new treasury");
+        assertEq(clearinghouse.balanceUsdc(oldTreasury), 1e6, "Old balance stays with the old treasury");
+
+        uint256 oldWalletBalance = usdc.balanceOf(oldTreasury);
+        vm.prank(oldTreasury);
+        clearinghouse.withdraw(oldTreasury, 1e6);
+        assertEq(usdc.balanceOf(oldTreasury), oldWalletBalance + 1e6, "Old treasury can withdraw its balance");
     }
 
     function test_SetProtocolTreasury_AllowsRotationAfterCurrentTreasuryBalanceIsWithdrawn() public {

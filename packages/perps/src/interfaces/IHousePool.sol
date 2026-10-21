@@ -158,7 +158,7 @@ interface IHousePool {
     error HousePool__NoExcessAssets();
     /// @notice An excess sweep exceeds currently unaccounted raw USDC.
     error HousePool__ExcessAmountTooHigh();
-    /// @notice An ordinary deposit was attempted while ownerless assets still require explicit bootstrap assignment.
+    /// @notice A deposit or initial trading activation was attempted while ownerless value still requires resolution.
     error HousePool__PendingBootstrap();
     /// @notice Explicit bootstrap assignment was requested when no unassigned assets remain.
     error HousePool__NoUnassignedAssets();

@@ -127,21 +127,99 @@ contract MarkPriceStalenessTest is BasePerpTest {
     }
 
     function test_Constructor_ZeroEngineLensReverts() public {
+        _expectInvalidRouterBindings(
+            address(0), address(pool), IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector
+        );
+    }
+
+    function test_Constructor_EngineLensWithoutCodeReverts() public {
+        _expectInvalidRouterBindings(
+            address(0xBAD), address(pool), IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector
+        );
+    }
+
+    function test_Constructor_IncompatibleEngineLensReverts() public {
+        _expectInvalidRouterBindings(
+            address(usdc), address(pool), IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector
+        );
+    }
+
+    function test_Constructor_EngineLensBoundToOtherEngineReverts() public {
+        CfdEngineLens wrongLens = new CfdEngineLens(address(0xBAD));
+        _expectInvalidRouterBindings(
+            address(wrongLens), address(pool), IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector
+        );
+    }
+
+    function test_Constructor_EngineAdminAsLensReverts() public {
+        _expectInvalidRouterBindings(
+            engine.admin(), address(pool), IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector
+        );
+    }
+
+    function test_Constructor_ZeroHousePoolReverts() public {
+        _expectInvalidRouterBindings(
+            address(engineLens), address(0), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
+        );
+    }
+
+    function test_Constructor_HousePoolWithoutCodeReverts() public {
+        _expectInvalidRouterBindings(
+            address(engineLens), address(0xBAD), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
+        );
+    }
+
+    function test_Constructor_IncompatibleHousePoolReverts() public {
+        _expectInvalidRouterBindings(
+            address(engineLens), address(usdc), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
+        );
+    }
+
+    function test_Constructor_TrancheVaultAsHousePoolReverts() public {
+        _expectInvalidRouterBindings(
+            address(engineLens), address(juniorVault), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
+        );
+    }
+
+    function test_Constructor_HousePoolBoundToOtherEngineReverts() public {
+        HousePool wrongPool =
+            new HousePool(address(usdc), address(0xBAD), address(new HousePoolRedemptionMathSidecar()));
+        _expectInvalidRouterBindings(
+            address(engineLens), address(wrongPool), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
+        );
+    }
+
+    function test_Constructor_HousePoolAssetReadFailureReverts() public {
+        vm.mockCallRevert(address(pool), abi.encodeWithSignature("totalAssets()"), bytes("unavailable"));
+        _expectInvalidRouterBindings(
+            address(engineLens), address(pool), IOrderRouterErrors.OrderRouter__InvalidHousePool.selector
+        );
+    }
+
+    function _expectInvalidRouterBindings(
+        address candidateLens,
+        address candidatePool,
+        bytes4 expectedError
+    ) internal {
         _startRecordingLogs();
         PletherOracle testOracle = new PletherOracle(
-            address(engine), address(pool), address(mockPyth), feedIds, weights, bases, new bool[](2)
+            address(engine), candidatePool, address(mockPyth), feedIds, weights, bases, new bool[](2)
         );
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
         OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
-        OrderLifecycleBook lifecycleBook =
-            new OrderLifecycleBook(predictedRouter, address(engine), address(clearinghouse), address(pool));
+        OrderLifecycleBook lifecycleBook = new OrderLifecycleBook(
+            predictedRouter,
+            address(engine),
+            address(clearinghouse),
+            candidatePool == address(0) ? address(pool) : candidatePool
+        );
         OrderRouterLiquidationBatchSidecar keeperSidecar = new OrderRouterLiquidationBatchSidecar(predictedRouter);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidEngineLens.selector);
+        vm.expectRevert(expectedError);
         new OrderRouter(
             address(engine),
-            address(0),
-            address(pool),
+            candidateLens,
+            candidatePool,
             address(testOracle),
             address(keeperSidecar),
             address(evaluator),

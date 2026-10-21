@@ -21,8 +21,12 @@ interface ICfdEngineTypes {
     error CfdEngine__InvalidSettlementSidecar();
     /// @notice The proposed timelocked admin is not bound to this engine.
     error CfdEngine__InvalidAdmin();
-    /// @notice The current protocol-treasury account still has a clearinghouse balance and therefore cannot be replaced.
-    error CfdEngine__ProtocolTreasuryBalanceNotEmpty();
+    /// @notice The clearinghouse settlement token does not match the engine settlement token.
+    error CfdEngine__InvalidSettlementAsset();
+    /// @notice The proposed pool has no code or is not bound to this engine and settlement token.
+    error CfdEngine__InvalidPool();
+    /// @notice A recapitalization transfer did not increase pool custody by the requested amount.
+    error CfdEngine__UnexpectedTransferAmount(uint256 expected, uint256 received);
     /// @notice The account attempted to settle a zero trader-claim balance.
     error CfdEngine__NoTraderClaim();
     /// @notice HousePool cash cannot presently service the selected trader claim under aggregate claim priority.
@@ -123,6 +127,10 @@ interface ICfdEngineTypes {
     event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, address indexed triggeringAccount);
     /// @notice Emitted when the owner clears degraded mode after adjusted solvency recovers.
     event DegradedModeCleared();
+    /// @notice The owner funded the pool's pending claimant recapitalization without minting LP shares.
+    /// @param payer Owner wallet supplying the USDC.
+    /// @param amountUsdc Exact USDC received by the pool, in 6-decimal units.
+    event PoolRecapitalized(address indexed payer, uint256 amountUsdc);
     /// @notice Emitted when an unaffordable fresh payout becomes a senior HousePool trader claim.
     /// @param account Claim beneficiary.
     /// @param amountUsdc Claim recorded in USDC.
