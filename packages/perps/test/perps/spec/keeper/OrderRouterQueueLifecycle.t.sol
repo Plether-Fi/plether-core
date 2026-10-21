@@ -211,7 +211,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.SHORT, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         IOrderRouterAccounting.PendingOrderView[] memory alicePending = _pendingOrders(aliceAccount);
         assertEq(alicePending.length, 2, "Alice should see only her own queued orders");
@@ -232,7 +232,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.SHORT, 20_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 500 * 1e6, 1e8, false);
 
         bytes[] memory empty = _mockPythUpdateData();
         vm.roll(block.number + 1);

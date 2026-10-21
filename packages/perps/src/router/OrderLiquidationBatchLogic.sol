@@ -401,13 +401,21 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__CommitValidation(11);
         }
 
+        // Project the live position through earlier account orders before checking the requested side.
+        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
+        uint8 opposingCode = uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
+        if (queuedPosition.exists && queuedPosition.side != side) {
+            revert OrderRouter__PredictableOpenInvalid(opposingCode);
+        }
+
         uint64 commitMarkTime = engine.lastMarkTime();
         uint8 revertCode =
             host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
         if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
             revert OrderRouter__PredictableOpenInvalid(revertCode);
         }
-        if (commitMarkTime != 0) {
+        // A queued close can remove an opposing live position before this open reaches the FIFO head.
+        if (commitMarkTime != 0 && revertCode != opposingCode) {
             IPletherOracle.PolicySnapshot memory policy = host.pletherOracle().getOrderExecutionPolicy(false);
             if (!OracleFreshnessPolicyLib.isStale(commitMarkTime, policy.maxStaleness, block.timestamp)) {
                 CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =

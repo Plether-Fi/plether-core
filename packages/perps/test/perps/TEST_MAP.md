@@ -44,9 +44,9 @@ at collection; an entrant can share earlier accrued carry collected after activa
 - [Carry ownership](accounting/carry/CarryLpOwnership.t.sol)::`test_EntryPricesCollectedCarryButSharesHistoricalCarryCollectedAfterActivation`
   compares entry/exit timing with independent share arithmetic, arrears, escrow ownership, and capped-loss NAV offsets.
 - [Hardening costs](gas/OrderHardeningGas.t.sol)::`test_Gas_HardeningStaleCommit`
-  measures fresh/stale commitment, flat withdrawals with/without a funded floor, and oracle rotation under production
-  code generation; each timer stops before outcome assertions. Existing execution, batch, close and liquidation
-  benchmarks retain their labels and acceptance gates.
+  measures fresh/stale commitment, including a stale open with 31 earlier account orders, flat withdrawals
+  with/without a funded floor, and oracle rotation under production code generation; each timer stops before outcome
+  assertions. Existing execution, batch, close and liquidation benchmarks retain their labels and acceptance gates.
 
 Unless a row says otherwise, its execution lane is PR `ci`, post-merge production `ci`, and nightly/pre-audit `audit`.
 Unit/ordinary fuzz cases run once per selected profile; only `invariant_*` entrypoints have invariant depth.

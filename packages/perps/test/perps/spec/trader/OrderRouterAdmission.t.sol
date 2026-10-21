@@ -45,6 +45,49 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 500e6, 1e8, false);
     }
 
+    function test_CommitOrder_RevertsOnOpposingPositionEvenWithStaleMark() public {
+        _open(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
+        vm.warp(block.timestamp + router.pletherOracle().orderExecutionStalenessLimit() + 1);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 500e6, 1e8, false);
+    }
+
+    function test_CommitOrder_RevertsOnOpposingPositionAfterQueuedPartialClose() public {
+        _open(alice, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 5000e18, 0, 0, true);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 500e6, 1e8, false);
+    }
+
+    function test_CommitOrder_RevertsOnOpposingQueuedOpenWithoutLivePosition() public {
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8, false);
+
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__PredictableOpenInvalid.selector,
+                uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING)
+            )
+        );
+        router.commitOrder(CfdTypes.Side.SHORT, 5000e18, 500e6, 1e8, false);
+    }
+
     function test_CommitOrder_RevertsOnPredictablePositionTooSmall() public {
         _startRecordingLogs();
         vm.prank(address(router));
@@ -157,7 +200,7 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 8000 * 1e6, 1e8, false);
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 0, 0, true);
-        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
         vm.stopPrank();
 
         bytes[] memory priceData = _pythUpdateData();
