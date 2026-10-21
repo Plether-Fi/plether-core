@@ -113,6 +113,69 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(juniorVault.balanceOf(seed), juniorVault.seedShareFloor());
     }
 
+    function test_JuniorRedeemRequest_RequiresOwnSeedBeforeTradingActivation() public {
+        _assertRedeemRequestRequiresOwnSeed(false);
+    }
+
+    function test_SeniorRedeemRequest_RequiresOwnSeedBeforeTradingActivation() public {
+        _assertRedeemRequestRequiresOwnSeed(true);
+    }
+
+    function _assertRedeemRequestRequiresOwnSeed(
+        bool isSenior
+    ) internal {
+        // Quarantine assets before any shares exist, then exercise owner-controlled assignment.
+        _mintAndAccountPoolExcess(1000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        if (isSenior) {
+            // Senior assignment needs Junior backing; that seed must not unlock the unseeded Senior vault.
+            usdc.mint(address(this), 1000e6);
+            usdc.approve(address(pool), 1000e6);
+            pool.initializeSeedPosition(false, 1000e6, address(this));
+        }
+        pool.assignUnassignedAssets(isSenior, alice);
+
+        TrancheVault vault = isSenior ? seniorVault : juniorVault;
+        uint256 shares = vault.balanceOf(alice);
+        assertGt(shares, 0);
+        _finishAsyncCooldown(vault, alice);
+        vm.prank(alice);
+        vault.approve(bob, shares);
+
+        bytes memory rejection =
+            abi.encodeWithSelector(TrancheVault.TrancheVault__ExceededMaxRequestRedeem.selector, alice, shares, 0);
+        vm.expectRevert(rejection);
+        vm.prank(alice);
+        vault.requestRedeem(shares, alice, alice);
+        vm.expectRevert(rejection);
+        vm.prank(bob);
+        vault.requestRedeem(shares, alice, alice);
+
+        assertEq(vault.maxRequestRedeem(alice), 0);
+        assertEq(vault.balanceOf(alice), shares);
+        assertEq(vault.allowance(alice, bob), shares);
+        assertEq(vault.balanceOf(address(vault)), 0);
+        assertEq(vault.pendingRedeemEscrowShares(), 0);
+        assertEq(vault.redeemQueueHead(), 0);
+        assertEq(vault.controllerRedeemHead(alice), 0);
+
+        usdc.mint(address(this), 1e6);
+        usdc.approve(address(pool), 1e6);
+        pool.initializeSeedPosition(isSenior, 1e6, address(this));
+        assertEq(pool.isSeedLifecycleComplete(), isSenior, "Junior requests must not require a Senior seed");
+        assertFalse(pool.isTradingActive());
+        assertEq(vault.maxRequestRedeem(alice), shares);
+
+        vm.prank(bob);
+        uint256 requestId = vault.requestRedeem(shares, alice, alice);
+        assertEq(vault.pendingRedeemRequest(requestId, alice), shares);
+        assertEq(vault.pendingRedeemEscrowShares(), shares);
+        assertEq(vault.balanceOf(address(vault)), shares);
+        assertEq(vault.balanceOf(alice), 0);
+        assertEq(vault.allowance(alice, bob), 0);
+    }
+
     function test_SeedReceiverCannotRedeemBelowFloor() public {
         uint256 assets = 100_000e6;
         address seed = address(0xBEEF);

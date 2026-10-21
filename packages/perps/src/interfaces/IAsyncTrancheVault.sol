@@ -9,10 +9,10 @@ import {IERC7575, IERC7575Share} from "@plether/perps/interfaces/IERC7575.sol";
 ///      redeem head must be cancelled or reclaimed before standard claims advance to a later request; explicit-id claim
 ///      methods preserve deterministic epoch selection for integrations. Claim operators require controller approval;
 ///      request authorization follows ERC-7540 owner approval rules. Claims pay from vault escrow and do not depend on
-///      a later HousePool call. To prevent unsolicited dust from resetting an existing holder's whole-balance cooldown,
-///      a share-delivering claim, cancellation, or refund may use a third-party receiver only when its share balance is
-///      zero; self-receipt by the controller is always permitted. `maxDeposit` and `maxMint` are receiver-independent
-///      controller limits and therefore do not certify that a particular third-party receiver is eligible.
+///      a later HousePool call. Deposit claims and redemption cancellations/refunds require receiver == controller,
+///      including zero-share acknowledgements, so share delivery cannot impose another account's cooldown or depend
+///      on an unsolicited receiver balance. Approved operators may execute these actions for the controller.
+///      `maxDeposit` and `maxMint` report controller limits; the receiver must still be that controller.
 interface IAsyncTrancheVault is IERC7540, IERC7575Share {
 
     /// @notice Returns the epoch currently targeted by new requests and the timestamp when that target next changes.

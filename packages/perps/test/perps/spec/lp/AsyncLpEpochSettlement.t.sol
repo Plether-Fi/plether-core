@@ -200,12 +200,13 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
 
         uint256 expectedShares = _async(juniorVault).claimableDepositShares(requestId, ALICE);
         vm.expectEmit(true, true, false, true, address(juniorVault));
-        emit Deposit(ALICE, CAROL, assets, expectedShares);
+        emit Deposit(ALICE, ALICE, assets, expectedShares);
         vm.prank(OPERATOR);
-        uint256 claimedShares = _async(juniorVault).claimDeposit(requestId, assets, CAROL, ALICE);
+        uint256 claimedShares = _async(juniorVault).claimDeposit(requestId, assets, ALICE, ALICE);
 
         assertEq(claimedShares, expectedShares);
-        assertEq(juniorVault.balanceOf(CAROL), expectedShares);
+        assertEq(juniorVault.balanceOf(ALICE), expectedShares);
+        assertEq(juniorVault.balanceOf(OPERATOR), 0);
     }
 
     function test_DepositCancellationEndsAtMaturity() public {

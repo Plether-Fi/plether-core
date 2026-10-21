@@ -909,11 +909,14 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
   requires projected protected senior exposure plus any accepted senior reservations to satisfy both active limits
   against projected junior principal.
 - Risk-increasing order commits and new tranche-deposit requests stay blocked during the seed lifecycle.
+- Both wallet and claimable-deposit redemption requests require that tranche's seed receiver to be configured;
+  their request-capacity views return zero beforehand. The other tranche's seed and trading activation are not required.
 - `TrancheVault.maxRequestDeposit()` reports request capacity. ERC-4626 `maxDeposit()` / `maxMint()` report only
   activated deposit-claim capacity for the controller, independent of the eventual receiver, while
-  `previewDeposit()` / `previewMint()` revert for the asynchronous flow. A share-delivering claim, redemption
-  cancellation, or redemption refund may target another account only if that account has no existing vault shares;
-  this prevents unsolicited dust from resetting the account's whole-balance cooldown. Self-receipt is always allowed.
+  `previewDeposit()` / `previewMint()` revert for the asynchronous flow. Deposit claims, redemption cancellations,
+  and redemption refunds require `receiver == controller`, including zero-share acknowledgements. Approved operators
+  may execute these actions but must deliver to the controller. Receiver balances never determine eligibility;
+  unsolicited dust cannot block a controller's claim or force share delivery and a cooldown onto another account.
   A deposit claim sets the receiver's cooldown timestamp to the later of its current timestamp and the source epoch's
   successful activation time, so delayed claims do not restart an already elapsed cooldown and older lots cannot
   weaken a newer wallet cooldown.
