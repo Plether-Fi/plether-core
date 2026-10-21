@@ -1354,7 +1354,12 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function estimateDepositShares(
         uint256 assets
     ) public view returns (uint256) {
-        return quoteDepositFromState(assets, _depositPricingAssets(), accruedTotalSupply(), 0);
+        uint256 pricingAssets = _depositPricingAssets();
+        uint256 pricingSupply = accruedTotalSupply();
+        if (pricingAssets == 0 && pricingSupply != 0) {
+            return 0;
+        }
+        return quoteDepositFromState(assets, pricingAssets, pricingSupply, 0);
     }
 
     function estimateMintAssets(

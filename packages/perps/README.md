@@ -920,6 +920,9 @@ finite absolute limit and a share limit below `10,000` bps. Either limit may be 
   A deposit claim sets the receiver's cooldown timestamp to the later of its current timestamp and the source epoch's
   successful activation time, so delayed claims do not restart an already elapsed cooldown and older lots cannot
   weaken a newer wallet cooldown.
+- `estimateDepositShares()` returns zero when projected deposit-pricing assets are zero with surviving shares.
+  The request lens retains the pending USDC amount; terminal-wipe cancellation can return that escrow. Otherwise
+  the estimate remains indicative pricing, including for accepted Senior reservations that exhaust new-entry capacity.
 - `TrancheVault.requestDeposit()` funds LP entry through pending deposit epochs; requests are funded
   up front and reserve senior capacity when applicable. A complete pending Junior deposit is cancellable before its
   request epoch matures. An accepted Senior deposit is binding; refund requires epoch rejection, projected terminal

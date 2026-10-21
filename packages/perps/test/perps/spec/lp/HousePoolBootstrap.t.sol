@@ -65,6 +65,8 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(terminalSnapshot.terminalLpPriceDeltaUsdc, 0, "empty terminal delta must be zero");
 
         uint256 seedAssets = 1000e6;
+        assertGt(juniorVault.estimateDepositShares(seedAssets), 0, "an empty unseeded tranche is not wiped");
+        assertGt(seniorVault.estimateDepositShares(seedAssets), 0, "an empty unseeded tranche is not wiped");
         usdc.mint(address(this), seedAssets * 2);
         usdc.approve(address(pool), seedAssets * 2);
         pool.initializeSeedPosition(false, seedAssets, address(this));

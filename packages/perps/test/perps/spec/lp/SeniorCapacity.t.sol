@@ -754,6 +754,11 @@ contract SeniorCapacityTest is BasePerpTest {
         assertGt(seniorVault.estimateMintAssets(estimatedShares + 1), capacity);
 
         uint256 epochId = _requestSenior(ALICE, capacity);
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0, "the accepted request reserves all new-entry capacity");
+        assertEq(
+            seniorVault.estimateDepositShares(capacity), estimatedShares, "reserved entry still has a valid estimate"
+        );
+        assertEq(publicLens.getLpRequestState(true, epochId, ALICE).pendingDepositSharesEstimate, estimatedShares);
         IHousePool.LpEpochSettlementResult memory result = _settleAt(epochId);
         assertEq(result.seniorDepositAssets, capacity);
         uint256 maxShares = seniorVault.maxMint(ALICE);
