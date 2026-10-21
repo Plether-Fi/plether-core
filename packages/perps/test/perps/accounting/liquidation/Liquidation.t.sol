@@ -230,6 +230,7 @@ contract LiquidationTest is BasePerpTest {
 
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.startPrank(keeper);
         router.executeLiquidation(account, pythData);
         vm.stopPrank();
@@ -245,7 +246,7 @@ contract LiquidationTest is BasePerpTest {
         // The dedicated liquidation reserve was fixed at $100 from the opening notional.
         // Residual = $460 - $100 = $360.
         uint256 chBalance = clearinghouse.balanceUsdc(account);
-        assertApproxEqAbs(chBalance, 360_000_000, 1, "Alice retains equity net of the reserved liquidation charge");
+        assertApproxEqAbs(chBalance, 360_000_000, 20, "Alice retains equity net of the charge and one-second carry");
     }
 
     function test_SolventPosition_RevertsLiquidation() public {
@@ -315,14 +316,14 @@ contract LiquidationTest is BasePerpTest {
         assertEq(size, 100_000 * 1e18, "out-of-order liquidation must leave the position intact");
     }
 
-    function test_DelegatedSingleLiquidation_EqualPublishTimeRefreshesMarkAndLiquidates() public {
+    function test_DelegatedSingleLiquidation_EqualPublishTimeRetainsMarkAndLiquidates() public {
         (uint64 cachedMarkTime, bytes[] memory pythUpdateData) = _preparePublishTimeBoundaryLiquidation();
         _mockBoundaryLiquidationSnapshot(pythUpdateData, cachedMarkTime);
 
         vm.prank(keeper);
         router.executeLiquidation(alice, pythUpdateData);
 
-        assertEq(engine.lastMarkPrice(), BOUNDARY_RESOLVED_MARK_PRICE, "equal-time liquidation must refresh the mark");
+        assertEq(engine.lastMarkPrice(), BOUNDARY_CACHED_MARK_PRICE, "equal-time liquidation must retain the mark");
         assertEq(engine.lastMarkTime(), cachedMarkTime, "equal-time liquidation must preserve the mark time");
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "equal-time liquidation must remove the unsafe position");
@@ -363,6 +364,7 @@ contract LiquidationTest is BasePerpTest {
 
         uint256 poolBefore = usdc.balanceOf(address(pool));
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(keeper);
         router.executeLiquidation(account, pythData);
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
@@ -391,6 +393,7 @@ contract LiquidationTest is BasePerpTest {
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(keeper);
         router.executeLiquidation(account, pythData);
 
@@ -440,6 +443,7 @@ contract LiquidationTest is BasePerpTest {
 
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.015e8);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(keeper);
         router.executeLiquidation(account, pythData);
 

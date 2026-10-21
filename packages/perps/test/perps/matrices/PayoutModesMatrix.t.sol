@@ -66,6 +66,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(keeperAccount);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
+        _ensureLaterOracleTime();
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
 
@@ -88,6 +89,7 @@ contract PayoutModesMatrixTest is BasePerpTest {
         uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(180_000_000));
+        _ensureLaterOracleTime();
         vm.prank(address(0xA105));
         router.executeLiquidation(account, priceData);
         (uint256 remainingSize,,,,,,) = engine.positions(account);

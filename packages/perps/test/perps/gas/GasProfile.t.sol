@@ -88,12 +88,30 @@ contract ControllablePythGas {
         }
     }
 
+    function parsePriceFeedUpdates(
+        bytes[] calldata updateData,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) external view returns (PythStructs.PriceFeed[] memory priceFeeds) {
+        return _parsePriceFeedUpdates(updateData, priceIds, minPublishTime, maxPublishTime);
+    }
+
     function parsePriceFeedUpdatesUnique(
         bytes[] calldata updateData,
         bytes32[] calldata priceIds,
         uint64 minPublishTime,
         uint64 maxPublishTime
     ) external view returns (PythStructs.PriceFeed[] memory priceFeeds) {
+        return _parsePriceFeedUpdates(updateData, priceIds, minPublishTime, maxPublishTime);
+    }
+
+    function _parsePriceFeedUpdates(
+        bytes[] calldata updateData,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) private view returns (PythStructs.PriceFeed[] memory priceFeeds) {
         bool hasEncodedUpdate = updateData.length > 0 && updateData[0].length == 32;
         uint256 encodedPrice;
         if (hasEncodedUpdate) {

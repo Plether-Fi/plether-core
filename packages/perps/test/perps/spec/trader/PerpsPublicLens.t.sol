@@ -122,8 +122,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(105_000_000, uint64(vm.getBlockTimestamp()));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -151,8 +152,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(105_000_000, uint64(vm.getBlockTimestamp()));
 
         uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
@@ -195,8 +197,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(95_000_000, uint64(vm.getBlockTimestamp()));
 
         PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(account);
         assertEq(
@@ -213,8 +216,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(95_000_000, uint64(vm.getBlockTimestamp()));
         vm.warp(block.timestamp + 14 days);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
@@ -397,8 +401,9 @@ contract PerpsPublicLensTest is BasePerpTest {
 
         assertFalse(publicLens.isLiquidatable(account), "Setup should start above maintenance before carry accrues");
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(100_500_000, uint64(block.timestamp));
+        engine.updateMarkPrice(100_500_000, uint64(vm.getBlockTimestamp()));
         vm.warp(block.timestamp + 2 * 365 days);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);

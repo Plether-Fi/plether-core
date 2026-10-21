@@ -204,8 +204,9 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
         assertTrue(preview.liquidatable, "setup must make the post-settlement live position liquidatable at the cap");
 
         uint256 poolDepthUsdc = pool.totalAssets();
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(block.timestamp), address(this));
+        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(vm.getBlockTimestamp()), address(this));
 
         (uint256 sizeAfter,,,,,,) = engine.positions(TRADER);
         assertEq(sizeAfter, 0, "liquidation after claim settlement must remove the position");
@@ -357,8 +358,9 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
             address(terminalNavBook), abi.encodeCall(ITerminalNavBookV2.syncFromEngine, (KEEPER, keeperHashBefore))
         );
         uint256 poolDepthUsdc = pool.totalAssets();
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(block.timestamp), KEEPER);
+        engine.liquidatePosition(TRADER, liquidationPrice, poolDepthUsdc, uint64(vm.getBlockTimestamp()), KEEPER);
 
         (uint256 targetSizeAfter,,,,,,) = engine.positions(TRADER);
         (uint256 keeperSizeAfter,,,,,,) = engine.positions(KEEPER);
@@ -439,8 +441,11 @@ contract TerminalNavIntegrationSecurityTest is BasePerpTest {
     function _refreshMark(
         uint32 markPrice
     ) private {
+        if (markPrice != engine.lastMarkPrice()) {
+            _ensureLaterOracleTime();
+        }
         vm.prank(address(router));
-        engine.updateMarkPrice(markPrice, uint64(block.timestamp));
+        engine.updateMarkPrice(markPrice, uint64(vm.getBlockTimestamp()));
     }
 
     function _observeCurve(

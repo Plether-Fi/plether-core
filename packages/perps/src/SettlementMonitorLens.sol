@@ -1340,11 +1340,6 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
                 SettlementMonitorViewTypes.OperationalBlocker.WithdrawalsNotLive
             );
         }
-        if (validity.terminal && validity.liquidity && status.hasOpenPositions && !status.markFresh) {
-            status.operationalBlockerMask |= _operationalBit(
-                SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
-            );
-        }
         if (status.engineDegraded) {
             status.operationalBlockerMask |= _operationalBit(
                 SettlementMonitorViewTypes.OperationalBlocker.EngineDegraded

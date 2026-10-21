@@ -410,6 +410,7 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
+        _ensureLaterOracleTime();
         router.executeLiquidation(trader, priceData);
 
         assertEq(clearinghouse.balanceUsdc(address(this)), expectedKeeperCredit, "Only $5 belongs to the keeper");
@@ -539,8 +540,9 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         address traderAccount = trader;
         _fundTrader(trader, 50_000e6);
         _open(traderAccount, CfdTypes.Side.SHORT, 99_700e18, 10_000e6, 1e8);
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.2e8, uint64(vm.getBlockTimestamp()));
         pool.assignUnassignedAssets(false, alice);
         assertLt(pool.juniorPrincipal(), 100_000e6);
         assertEq(pool.unassignedAssets(), 0);

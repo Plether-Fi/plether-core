@@ -201,8 +201,9 @@ contract MarginFirstCarryTest is BasePerpTest {
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(TRADER, 100_000e18);
         vm.clearMockedCalls();
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.1e8, uint64(vm.getBlockTimestamp()));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(TRADER, 50_000e18);

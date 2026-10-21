@@ -87,6 +87,7 @@ contract LiquidationBountyForfeitureTest is BasePerpTest {
         priceData[0] = abi.encode(uint256(196_000_000));
 
         vm.roll(block.number + 1);
+        _ensureLaterOracleTime();
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
 

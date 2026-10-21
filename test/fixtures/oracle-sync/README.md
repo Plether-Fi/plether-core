@@ -15,6 +15,8 @@ The public-transaction path never reads or sends `PYTH_API_KEY`. Omitting `--sou
 
 The fixture is required, not silently skipped. It pins the fork block/hash and initial storage, six release feeds, unique-tick window, payload checksum and baseline source commit. Missing/invalid/otherwise-ineligible data cannot qualify a release. Commit the fixture and candidate, then run `scripts/run-oracle-sync-fork.py FIXTURE NEW_OUTPUT_DIRECTORY` with `ARB_SEPOLIA_RPC_URL` set. The runner executes the same test twice: baseline must reproduce the ordering failure, candidate must synchronize and preserve identical historical prices. Do not edit or replace Pyth state/code in either run.
 
+The shared regression sets the active Oracle's adverse-confidence multiplier to the release wrapper's 2,500 bps before rotating. The baseline rotation retains the wrapper setting; the current rotation copies the active Oracle policy. Equalizing that setup makes the signed historical-fill comparison meaningful across both revisions.
+
 ## V3 qualification matrix
 
 `scenarios.json` references four immutable fixtures. The historical pair contains ticks at `1790091398` and `1790091433`; the second commit cannot reuse the first basket. The full combined `bytes[]` is quoted for each new resolution. Historical settlement uses each order's own window even when execution occurs after that window.
@@ -32,6 +34,10 @@ ARB_SEPOLIA_RPC_URL=https://arbitrum-sepolia.gateway.tenderly.co \
 ```
 
 The required matrix covers historical single, shared and distinct baskets, natural frozen close, caught target failure, and immediate/deferred unavailable-history refunds. It uses the unchanged 30,000,000-gas cap and isolated Forge transaction contexts. Evidence records execution outcomes, exact ETH allocations, stored coverage and measured call gas. Call gas excludes transaction intrinsic gas and Arbitrum data fees; it is not a live transaction fee estimate.
+
+The frozen-close case replays the Friday opening Engine mark after the natural close with empty data and no Pyth parse or storage update. Its zero fee and opening publish times are deliberate; the Friday closing payload establishes the calendar boundary but is not consumed during frozen execution.
+
+`live-watermark-sep22.json` contains public Hermes timestamp responses for the same six configured feeds, pinned to the historical fixture's block and Pyth deployment. The three signed batches have publish times `1790091384`, `1790091390`, and `1790091391`. Run `forge test --offline --isolate --match-contract '^LiveBasketWatermarkForkTest$'` with `ARB_SEPOLIA_RPC_URL` set to replay initial acceptance, empty-data reuse, a skipped-first-tick rejection in real Pyth, and later advancement without mutating Pyth storage. All six feeds in these captured batches publish at the same second. Unequal feed timing, missing components, and faster-feed reuse still require separate signed-data coverage before release qualification.
 
 The supported Pyth deployment quotes `q = 0` at these captured blocks. The suite preserves that authentic fee configuration and adds a positive 1-gwei keeper surplus to exercise actual immediate and deferred RouterAdmin refunds. Evidence records whether each refund channel moved positive value. A zero Oracle allocation does not exercise a nonzero Oracle claim: those fee and liability paths are covered by the separate six-feed randomized invariant, which ranges `q` from zero to 1 gwei. These fixtures cannot establish production gas costs for nonzero Pyth fee transfers.
 

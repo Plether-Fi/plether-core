@@ -15,6 +15,22 @@ import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 
 contract OracleSynchronizationGasTest is OracleSynchronizationTestBase {
 
+    function test_Gas_SixFeedLiveRefreshUsesOneParseAndNoStorageUpdate() public {
+        uint64 previous = engine.lastMarkTime();
+        _advance(previous + 1);
+        uint256 parses = baseMockPyth.parseCallCount();
+        uint256 updates = baseMockPyth.updatePriceFeedsCallCount();
+        uint256 beforeGas = gasleft();
+        router.updateMarkPrice{value: FEE, gas: KEEPER_GAS_CAP}(_payload(previous + 1, previous));
+        emit log_named_uint("six feed live refresh gas", beforeGas - gasleft());
+        assertEq(baseMockPyth.parseCallCount(), parses + 1);
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), updates);
+        (bool accepted, uint256 price, uint64 tick) = pletherOracle.getAcceptedBasketMark();
+        assertTrue(accepted);
+        assertEq(price, engine.lastMarkPrice());
+        assertEq(tick, engine.lastMarkTime());
+    }
+
     function test_Gas_HistoricalExecutionSynchronizesAndPreservesFill() public {
         uint64 commit = uint64(block.timestamp);
         uint64 id = _commit(ALICE, 0);
@@ -36,7 +52,8 @@ contract OracleSynchronizationGasTest is OracleSynchronizationTestBase {
         assertEq(engine.lastMarkPrice(), 100_000_000);
         (,, uint256 entryPrice,,,,) = engine.positions(ALICE);
         assertEq(entryPrice, 99_980_000);
-        assertEq(pletherOracle.getLatestPrice(), 100_000_000);
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
+        pletherOracle.getLatestPrice();
         assertEq(address(pletherOracle).balance, 0);
         assertEq(address(router).balance, 0);
     }
@@ -96,7 +113,7 @@ contract OracleSynchronizationGasTest is OracleSynchronizationTestBase {
         _assertCoverage(engine.lastMarkTime());
     }
 
-    function test_Gas_FrozenCloseExecutesWithOneFee() public {
+    function test_Gas_FrozenCloseExecutesAtZeroFee() public {
         uint64 commit = uint64(block.timestamp);
         uint64 open = _commit(ALICE, 0);
         _advance(commit + 1);
@@ -113,19 +130,19 @@ contract OracleSynchronizationGasTest is OracleSynchronizationTestBase {
             router.executeOrder{value: 3 * FEE, gas: KEEPER_GAS_CAP}(close, data);
         emit log_named_uint("frozen close execution call gas", beforeGas - gasleft());
         assertEq(uint256(result.status), uint256(OrderV3Types.LifecycleStatus.Executed));
-        assertEq(beforeBalance - address(this).balance, FEE);
+        assertEq(beforeBalance - address(this).balance, 0);
         assertEq(baseMockPyth.parseUniqueCallCount(), parses);
         (uint256 size,,,,,,) = engine.positions(ALICE);
         assertEq(size, 0);
         _assertCoverage(engine.lastMarkTime());
     }
 
-    function test_Gas_FrozenUsesOnlySingleUpdate() public {
+    function test_Gas_FrozenReplaysWithoutPythUpdate() public {
         uint64 commit = uint64(block.timestamp);
         _advance(commit + 1);
         vm.mockCall(address(engine), abi.encodeWithSignature("isOracleFrozen()"), abi.encode(true));
         bytes[] memory data = _payload(commit + 1, commit);
-        assertEq(pletherOracle.getOrderExecutionFee(data), FEE);
+        assertEq(pletherOracle.getOrderExecutionFee(data), 0);
         uint256 parses = baseMockPyth.parseUniqueCallCount();
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) = pletherOracle.updateOrderExecutionPrice{
             value: FEE, gas: KEEPER_GAS_CAP
@@ -134,9 +151,9 @@ contract OracleSynchronizationGasTest is OracleSynchronizationTestBase {
         );
         assertTrue(ok);
         assertTrue(snapshot.oracleFrozen);
-        assertEq(snapshot.updateFee, FEE);
+        assertEq(snapshot.updateFee, 0);
         assertEq(baseMockPyth.parseUniqueCallCount(), parses);
-        assertEq(address(baseMockPyth).balance, FEE);
+        assertEq(address(baseMockPyth).balance, 0);
     }
 
 }

@@ -8,10 +8,9 @@ import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 
 /// @title Plether perps basket oracle interface
 /// @notice Builds a capped, mode-aware Pyth basket for perps execution, liquidation, and pool accounting.
-/// @dev Basket prices and aggregate confidence use 8 decimals. Payable update functions validate submitted Pyth data
-///      and return the resulting snapshot atomically, but do not write the engine's cached mark. Unless noted otherwise,
-///      update entrypoints are permissionless and refund ETH above Pyth's fee to the requested recipient, deferring a
-///      failed refund for later claim.
+/// @dev Basket prices and aggregate confidence use 8 decimals. Current-basket updates are Router-only and consume
+///      a complete signed Pyth basket within a bounded live window; historical order resolution remains permissionless. The Router installs
+///      returned current marks in the Engine in the same transaction.
 interface IPletherOracle {
 
     /// @notice Action whose freshness and component-timing policy is applied to a basket read.
@@ -116,13 +115,15 @@ interface IPletherOracle {
     /// @param minReusableCommitTime Earliest commit time for which the cached tick was originally proven valid.
     /// @param price Neutral, pre-cap basket price in 8-decimal units.
     /// @param confidence Aggregate basket confidence in 8-decimal price units.
-    /// @param publishTime Earliest component publish time for the cached basket.
+    /// @param publishTime Newest component publish time for the cached basket and Engine mark.
+    /// @param oldestPublishTime Oldest component publish time; a later order can reuse only if this follows its commit.
     struct BatchOrderPriceCache {
         bool hasHistoricalBasket;
         uint64 minReusableCommitTime;
         uint256 price;
         uint256 confidence;
         uint64 publishTime;
+        uint64 oldestPublishTime;
     }
 
     /// @notice Thrown when the caller is not the engine's configured order router.
@@ -144,21 +145,36 @@ interface IPletherOracle {
     /// @notice Thrown when a configured basket component has a zero normalization base price.
     /// @param index Zero-based component index.
     error PletherOracle__ZeroBasePrice(uint256 index);
+    /// @notice Thrown when a configured basket component has zero weight.
+    /// @param index Zero-based component index.
+    error PletherOracle__ZeroWeight(uint256 index);
     /// @notice Thrown when configured 18-decimal basket weights do not sum exactly to `1e18`.
     /// @param totalWeight Actual sum of the supplied weights.
     error PletherOracle__InvalidTotalWeight(uint256 totalWeight);
     /// @notice Thrown when deployment is attempted with the zero Pyth address.
     error PletherOracle__ZeroPyth();
+    /// @notice Thrown when the nonzero Pyth endpoint has no deployed code.
+    error PletherOracle__InvalidPyth();
     /// @notice Thrown when a Pyth fee or update is requested with no update payloads.
     error PletherOracle__MissingUpdateData();
+    /// @notice Historical parsing failed for a reason other than a missing qualifying update.
+    error PletherOracle__HistoricalParserFailure(bytes4 selector, uint256 returndataLength);
     /// @notice Thrown when `msg.value` does not cover Pyth's quoted fee.
     /// @param provided ETH supplied in wei.
     /// @param required ETH required by Pyth in wei.
     error PletherOracle__InsufficientFee(uint256 provided, uint256 required);
     /// @notice Thrown when a current basket predates the engine's cached mark.
-    /// @param publishTime Earliest basket component publish time.
+    /// @param publishTime Basket publish time.
     /// @param lastMarkTime Engine cached-mark publish time.
     error PletherOracle__PriceOutOfOrder(uint64 publishTime, uint64 lastMarkTime);
+    /// @notice A signed live component predates the previously accepted price for that feed.
+    error PletherOracle__FeedTimeOutOfOrder(bytes32 feedId, uint256 publishTime, uint256 acceptedPublishTime);
+    /// @notice A replay disagrees with the Engine mark at the same oracle timestamp.
+    error PletherOracle__EqualTimeMarkMismatch(uint64 publishTime, uint256 basketPrice, uint256 enginePrice);
+    /// @notice No signed live basket has been accepted yet.
+    error PletherOracle__NoAcceptedBasket();
+    /// @notice Basket feed identifiers must be distinct and nonzero.
+    error PletherOracle__InvalidFeedId(bytes32 feedId);
 
     /// @notice Stored Pyth data does not cover a parsed component or a reused historical basket.
     /// @param feedId Component whose stored timestamp is behind.
@@ -178,6 +194,8 @@ interface IPletherOracle {
     /// @param feedId Failing Pyth feed id, or zero for an internal normalization failure.
     /// @param price Raw signed Pyth price.
     error PletherOracle__InvalidPrice(bytes32 feedId, int64 price);
+    /// @notice An inverted feed's confidence interval reaches a nonpositive raw price.
+    error PletherOracle__InvalidInverseConfidence(bytes32 feedId, int64 price, uint64 confidence);
     /// @notice Thrown when the aggregate basket confidence-to-price ratio exceeds its configured limit.
     /// @param mode Action policy under which validation failed.
     /// @param basketConfidence Aggregate weighted confidence in 8-decimal basket-price units.
@@ -194,6 +212,8 @@ interface IPletherOracle {
     error PletherOracle__PublishTimeDivergence(
         PriceMode mode, uint256 minPublishTime, uint256 maxPublishTime, uint256 maxDivergence
     );
+    /// @notice A pool-reconciliation basket contains a feed published before the current LP epoch.
+    error PletherOracle__PoolEpochComponentTooOld(uint256 minPublishTime, uint256 epochStart);
     /// @notice Thrown when weighted basket construction rounds or resolves to zero.
     error PletherOracle__ZeroBasketPrice();
     /// @notice Thrown when configuration contains a zero required window or an excessive component divergence.
@@ -209,10 +229,11 @@ interface IPletherOracle {
     event EthRefundClaimed(address indexed recipient, uint256 amount);
 
     /// @notice Atomically applies oracle update data and returns the validated price snapshot for `mode`.
-    /// @dev Pays Pyth's quoted fee, validates the resulting current neutral basket under the selected freshness,
+    /// @dev Router-only. Pays one Pyth parse fee for nonempty live data, validates the accepted neutral basket under the selected freshness,
     ///      confidence, component-timing, and publish-order policy, then caps price at `engine.CAP_PRICE()`. It does not
     ///      update the engine mark. Execution callers should consume this returned snapshot instead of splitting an
-    ///      update from a later `getLatestPrice` read. ETH above Pyth's fee is refunded or deferred.
+    ///      update from a later `getLatestPrice` read. Empty data replays the accepted basket at zero fee. Frozen policy
+    ///      replays the Engine mark at zero fee. ETH above the fee is refunded or deferred.
     /// @param refundRecipient Recipient for any ETH left after paying Pyth fees
     /// @param pythUpdateData Pyth price update blobs
     /// @param mode Oracle policy mode to apply
@@ -225,13 +246,15 @@ interface IPletherOracle {
 
     /// @notice Applies order-execution update data and returns a validated execution price.
     /// @dev Outside frozen-oracle policy, resolves a unique historical basket in
-    ///      `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`. Frozen policy instead performs a
-    ///      normal Pyth update and validates the current basket with the relaxed age limit. Historical resolution also
+    ///      `(commitTime, min(commitTime + orderSettlementWindow, block.timestamp)]`. Frozen policy instead replays the
+    ///      Engine mark at zero fee under the frozen age limit. Historical resolution also
     ///      updates storage from the same payload and verifies coverage before returning. `price` is shifted against
     ///      the requested side by aggregate confidence, except for a frozen voluntary close; `markPrice` stays neutral.
     ///      This function reports but does not enforce close-only policy and ignores `request.targetPrice`. Successful
-    ///      calls do not refund overpayment; supply exactly `getOrderExecutionFee`. If a nonreverting historical parse
-    ///      is unavailable, the full quote is refunded or deferred and `ok` is false. Synchronization failures revert.
+    ///      historical calls do not refund overpayment; supply exactly `getOrderExecutionFee`. Frozen calls refund
+    ///      overpayment. If Pyth reports no qualifying update in the supplied payload and the request permits it,
+    ///      the full quote is refunded or deferred and `ok` is false. This does not prove history is unavailable
+    ///      elsewhere. Other parser failures revert with `HistoricalParserFailure`; synchronization failures revert.
     /// @param refundRecipient Recipient for the Pyth-fee refund when a historical parse is unavailable.
     /// @param pythUpdateData Nonempty Pyth update or unique historical-parse payloads.
     /// @param request Commit, side, close, and unavailable-history inputs; its target price is caller-enforced.
@@ -265,7 +288,7 @@ interface IPletherOracle {
     ) external payable returns (bool ok, PriceSnapshot memory snapshot, BatchOrderPriceCache memory nextCache);
 
     /// @notice Applies one liquidation update and returns prices reusable across many accounts.
-    /// @dev Performs one normal Pyth update, validates the current basket under liquidation policy and against the
+    /// @dev Router-only. Resolves a signed live basket or replays the frozen Engine mark under liquidation policy and against the
     ///      engine's cached-mark time, then computes both possible side-adverse prices from the same aggregate
     ///      confidence. The engine mark is not updated; excess ETH is refunded or deferred.
     /// @param refundRecipient Recipient for any ETH left after paying Pyth fees.
@@ -277,13 +300,13 @@ interface IPletherOracle {
     ) external payable returns (LiquidationBatchSnapshot memory snapshot);
 
     /// @notice Applies liquidation update data and returns a price adverse to the liquidated account.
-    /// @dev Performs a normal Pyth update, validates the current basket under liquidation policy and against the engine's
+    /// @dev Router-only. Resolves a signed live basket or replays the frozen Engine mark under liquidation policy and against the engine's
     ///      cached-mark time, then shifts price against the account's current position side. An account without a
     ///      position receives the neutral basket. The engine mark is not updated; excess ETH is refunded or deferred.
     /// @param refundRecipient Recipient for any ETH left after paying Pyth fees.
     /// @param pythUpdateData Nonempty Pyth update payloads.
     /// @param account Account whose engine position determines the adverse confidence-shift direction.
-    /// @return snapshot Adverse 8-decimal price, neutral mark, earliest publish time, fee, and policy metadata.
+    /// @return snapshot Adverse 8-decimal price, neutral mark, newest publish time, fee, and policy metadata.
     function updateLiquidationPrice(
         address refundRecipient,
         bytes[] calldata pythUpdateData,
@@ -302,9 +325,9 @@ interface IPletherOracle {
     ) external payable returns (uint256 latestPrice);
 
     /// @notice Returns the current validated oracle snapshot without applying a Pyth update.
-    /// @dev Reads Pyth's current unsafe prices, then enforces the selected age, confidence, component-timing, and
+    /// @dev Reads the last accepted live basket, or the frozen Engine mark, then enforces age, confidence, component-timing, and
     ///      publish-order policy. Both prices are the neutral capped basket and `updateFee` is zero. The call may revert
-    ///      if current feed state is invalid or stale.
+    ///      if the accepted state is absent, invalid, or stale.
     /// @param mode Oracle policy mode to apply.
     /// @return snapshot Validated neutral price, mark, publish time, zero fee, and policy metadata.
     function getLatestPrice(
@@ -354,17 +377,24 @@ interface IPletherOracle {
         OracleConfig calldata config
     ) external;
 
-    /// @notice Quotes the ETH fee required to apply `pythUpdateData`.
-    /// @dev Reverts for an empty update-data array.
+    /// @notice Quotes the ETH fee for a current signed update.
+    /// @dev Returns zero for an empty replay or frozen policy.
     /// @param pythUpdateData Nonempty Pyth price-update blobs.
     /// @return pythFee ETH fee required by Pyth, in wei.
     function getUpdateFee(
         bytes[] calldata pythUpdateData
     ) external view returns (uint256 pythFee);
 
-    /// @notice Quotes funding for a new execution basket: two Pyth fees for history, one when frozen.
+    /// @notice Last Router-accepted live basket mark before action-specific freshness checks.
+    function getAcceptedBasketMark() external view returns (bool accepted, uint256 markPrice, uint64 publishTime);
+
+    /// @notice Accepted publish time for each configured feed, in `pythFeedIds` order.
+    /// @dev Returns a zero-filled array before the first live basket. Current feed selection never reads Pyth storage.
+    function getAcceptedFeedPublishTimes() external view returns (uint256[] memory publishTimes);
+
+    /// @notice Quotes funding for a new execution basket: two Pyth fees for history, zero when frozen.
     /// @dev Historical execution pays separately for unique parsing and stored-feed synchronization. Proven Router
-    ///      batch-cache reuse requires zero funding. This quote does not predict cache reuse. Reverts for empty data.
+    ///      batch-cache reuse requires zero funding. This quote does not predict cache reuse. Live history rejects empty data.
     /// @param pythUpdateData Nonempty Pyth payloads used for both historical parsing and storage synchronization.
     /// @return executionFunding Required funding in wei under the current frozen/live policy.
     function getOrderExecutionFee(

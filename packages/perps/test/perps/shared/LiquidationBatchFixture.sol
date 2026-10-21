@@ -8,6 +8,7 @@ import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAcco
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 
 import {Vm} from "forge-std/Vm.sol";
 
@@ -77,6 +78,9 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
         _open(long, CfdTypes.Side.LONG, 100_000e18, 2000e6, NEUTRAL_PRICE);
         _open(short, CfdTypes.Side.SHORT, 100_000e18, 2000e6, NEUTRAL_PRICE);
 
+        vm.warp(SATURDAY_NOON - 90_001);
+        router.updateMarkPrice(_liveLiquidationData(NEUTRAL_PRICE));
+        uint64 precloseMarkTime = engine.lastMarkTime();
         vm.warp(SATURDAY_NOON);
         assertTrue(engine.isOracleFrozen(), "setup must use the frozen FAD oracle policy");
 
@@ -128,12 +132,26 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
         assertEq(longPrice, LONG_ADVERSE_PRICE, "long must execute above the neutral basket");
         assertEq(shortPrice, SHORT_ADVERSE_PRICE, "short must execute below the neutral basket");
         assertEq(engine.lastMarkPrice(), NEUTRAL_PRICE, "global mark must remain the neutral basket price");
-        assertEq(engine.lastMarkTime(), SATURDAY_NOON, "global mark must use the shared publish time");
+        assertEq(engine.lastMarkTime(), precloseMarkTime, "frozen liquidation must replay the final live mark");
         assertEq(
             baseMockPyth.updatePriceFeedsCallCount() - pythCallsBefore,
-            1,
-            "both directional prices must come from one Pyth update"
+            0,
+            "frozen liquidation must not update Pyth storage"
         );
+    }
+
+    function _liveLiquidationData(
+        uint256 price
+    ) internal returns (bytes[] memory data) {
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        bytes32[] memory ids = _basePythFeedIds();
+        MockPyth.FeedUpdate[] memory ticks = new MockPyth.FeedUpdate[](ids.length);
+        for (uint256 i; i < ids.length; ++i) {
+            ticks[i] = MockPyth.FeedUpdate(ids[i], MockPyth.MockPrice(int64(uint64(price)), 0, -8, block.timestamp, 0));
+        }
+        data = new bytes[](1);
+        data[0] = abi.encode(ticks);
     }
 
     function _fundAndOpenThinLong(

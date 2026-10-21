@@ -25,7 +25,7 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         address[] memory accounts = new address[](2);
         accounts[0] = ARMED_ACCOUNT;
         accounts[1] = ARMED_ACCOUNT;
-        bytes[] memory updateData = _mockPythUpdateData(DEEP_LIQUIDATION_PRICE);
+        bytes[] memory updateData = _liveProtectionData(DEEP_LIQUIDATION_PRICE);
 
         vm.prank(LIQUIDATION_KEEPER);
         uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
@@ -74,7 +74,7 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         address[] memory accounts = new address[](2);
         accounts[0] = SOLVENT_ACCOUNT;
         accounts[1] = LATER_LIQUIDATION;
-        bytes[] memory updateData = _mockPythUpdateData(LIQUIDATION_PRICE);
+        bytes[] memory updateData = _liveProtectionData(LIQUIDATION_PRICE);
 
         vm.prank(LIQUIDATION_KEEPER);
         uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, updateData);
@@ -102,7 +102,7 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         uint64 protectionId = _openAndProtect(TRIGGERED_ACCOUNT, HEALTHY_MARGIN_USDC);
         _withdrawAllFreeSettlement(TRIGGERED_ACCOUNT);
 
-        bytes[] memory triggerData = _mockPythUpdateData(LONG_STOP_LOSS);
+        bytes[] memory triggerData = _liveProtectionData(LONG_STOP_LOSS);
         vm.prank(TRIGGER_KEEPER);
         uint64 linkedOrderId = protectionActions.triggerPositionProtection(protectionId, triggerData);
         assertEq(
@@ -115,7 +115,7 @@ contract PositionProtectionLiquidationBatchTest is PositionProtectionLiquidation
         address[] memory accounts = new address[](2);
         accounts[0] = TRIGGERED_ACCOUNT;
         accounts[1] = TRIGGERED_ACCOUNT;
-        bytes[] memory liquidationData = _mockPythUpdateData(DEEP_LIQUIDATION_PRICE);
+        bytes[] memory liquidationData = _liveProtectionData(DEEP_LIQUIDATION_PRICE);
 
         vm.prank(LIQUIDATION_KEEPER);
         IPerpsKeeper(address(router)).executeLiquidationBatch(accounts, liquidationData);

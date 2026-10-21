@@ -130,8 +130,9 @@ contract ImpairedSeniorEntryTest is BasePerpTest {
         // Price rises to $1.80 → SHORT unrealized PnL = 100k * 0.8 = $80k
         // Reconcile: distributable ≈ cash - mtm, loss ≈ $80k
         // Junior absorbs $50k, senior absorbs $30k → senior = $70k, HWM = $100k
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(1.8e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.8e8, uint64(vm.getBlockTimestamp()));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -187,8 +188,9 @@ contract ImpairedTrancheAdmissionTest is BasePerpTest {
         address traderAccount = address(0xAAA);
         _open(traderAccount, CfdTypes.Side.SHORT, 100_000 * 1e18, 5000 * 1e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(1.8e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.8e8, uint64(vm.getBlockTimestamp()));
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -392,8 +394,9 @@ contract JuniorWipeoutAdmissionTest is BasePerpTest {
         _close(traderAccount, CfdTypes.Side.LONG, 50_000e18, 0);
 
         // Reconcile: loss exceeds juniorPrincipal → junior wiped to exactly 0.
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(0, uint64(block.timestamp));
+        engine.updateMarkPrice(0, uint64(vm.getBlockTimestamp()));
         vm.prank(address(juniorVault));
         pool.reconcile();
 

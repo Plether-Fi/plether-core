@@ -21,8 +21,9 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(150_000_000, uint64(vm.getBlockTimestamp()));
 
         assertEq(juniorVault.maxDeposit(attacker), 0, "no finalized request should expose claim capacity");
         assertGt(
@@ -63,12 +64,13 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
         );
 
         uint256 poolDepthUsdc = pool.totalAssets();
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.liquidatePosition(trader, 150_000_000, poolDepthUsdc, uint64(block.timestamp), keeper);
+        engine.liquidatePosition(trader, 150_000_000, poolDepthUsdc, uint64(vm.getBlockTimestamp()), keeper);
 
         vm.warp(juniorVault.depositEpochStart(epochId));
         vm.prank(address(router));
-        engine.updateMarkPrice(150_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(150_000_000, uint64(vm.getBlockTimestamp()));
         IHousePool.LpEpochSettlementResult memory settlement = _settleLpEpochForTest();
         uint256 finalizedShares = settlement.juniorDepositShares;
 

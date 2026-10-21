@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.35;
 
-import {PythStructs} from "@plether/shared/interfaces/IPyth.sol";
+import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 
 contract MockPyth {
 
@@ -24,6 +24,7 @@ contract MockPyth {
     uint256 public mockFee;
     uint256 public updatePriceFeedsCallCount;
     uint256 public parseUniqueCallCount;
+    uint256 public parseCallCount;
     // Opt-in compatibility for older perps fixtures that stage unique prices and pass empty blobs.
     // Explicit FeedUpdate[] payloads never consult the staged historical mapping.
     bool public synchronizeLegacyUniquePrices;
@@ -203,6 +204,56 @@ contract MockPyth {
         prices[id] = price;
     }
 
+    function parsePriceFeedUpdates(
+        bytes[] calldata updateData,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) external payable returns (PythStructs.PriceFeed[] memory priceFeeds) {
+        require(msg.value >= mockFee, "insufficient fee");
+        parseCallCount++;
+        bool explicitPayload = updateData.length > 0 && updateData[0].length > 32;
+        FeedUpdate[] memory updates;
+        if (explicitPayload) {
+            updates = abi.decode(updateData[0], (FeedUpdate[]));
+        }
+        bool hasEncodedUpdate = updateData.length > 0 && updateData[0].length == 32;
+        uint256 encodedPrice;
+        if (hasEncodedUpdate) {
+            encodedPrice = abi.decode(updateData[0], (uint256));
+        }
+
+        priceFeeds = new PythStructs.PriceFeed[](priceIds.length);
+        for (uint256 i; i < priceIds.length; ++i) {
+            MockPrice memory p;
+            if (explicitPayload) {
+                bool found;
+                for (uint256 j; j < updates.length; ++j) {
+                    MockPrice memory candidate = updates[j].price;
+                    if (
+                        updates[j].id == priceIds[i] && candidate.publishTime >= minPublishTime
+                            && candidate.publishTime <= maxPublishTime
+                    ) {
+                        p = candidate;
+                        found = true;
+                        break;
+                    }
+                }
+                require(found, "feed not found within range");
+            } else if (hasEncodedUpdate) {
+                p = MockPrice(int64(uint64(encodedPrice)), 0, int32(-8), maxPublishTime, 0);
+            } else if (hasUniquePrice[priceIds[i]]) {
+                p = uniquePrices[priceIds[i]];
+            } else {
+                p = prices[priceIds[i]];
+            }
+            require(p.publishTime >= minPublishTime && p.publishTime <= maxPublishTime, "outside range");
+            PythStructs.Price memory price =
+                PythStructs.Price({price: p.price, conf: p.conf, expo: p.expo, publishTime: p.publishTime});
+            priceFeeds[i] = PythStructs.PriceFeed({id: priceIds[i], price: price, emaPrice: price});
+        }
+    }
+
     function parsePriceFeedUpdatesUnique(
         bytes[] calldata updateData,
         bytes32[] calldata priceIds,
@@ -238,7 +289,9 @@ contract MockPyth {
                         break;
                     }
                 }
-                require(found, "feed not found within range");
+                if (!found) {
+                    revert IPyth.PriceFeedNotFoundWithinRange();
+                }
             } else if (hasUniquePrice[priceIds[i]]) {
                 p = uniquePrices[priceIds[i]];
             } else if (hasEncodedUpdate) {
@@ -252,8 +305,10 @@ contract MockPyth {
             } else {
                 p = prices[priceIds[i]];
             }
-            require(p.prevPublishTime < minPublishTime, "not unique");
-            require(p.publishTime >= minPublishTime && p.publishTime <= maxPublishTime, "outside range");
+            if (p.prevPublishTime >= minPublishTime || p.publishTime < minPublishTime || p.publishTime > maxPublishTime)
+            {
+                revert IPyth.PriceFeedNotFoundWithinRange();
+            }
             PythStructs.Price memory price =
                 PythStructs.Price({price: p.price, conf: p.conf, expo: p.expo, publishTime: p.publishTime});
             priceFeeds[i] = PythStructs.PriceFeed({id: priceIds[i], price: price, emaPrice: price});

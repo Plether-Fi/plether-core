@@ -19,11 +19,13 @@ from oracle_sync_evidence import (SCENARIOS, assert_unchanged, load_scenario_man
 def valid_records(quote=3):
     records = []
     for name, (outcome, statuses, parses, updates, multiplier) in SCENARIOS.items():
+        case_quote = 0 if name == "frozen_close" else quote
         surplus = 1_000_000_000
-        funded = (6 if name == "distinct_basket_batch" else 5) * quote + surplus
+        funded = (6 if name == "distinct_basket_batch" else 5) * case_quote + surplus
         record = dict(schemaVersion=1, scenarioId=name, callGas=1_000_000, gasCap=30_000_000,
-                      quoteWei=quote, surplusWei=surplus, fundedWei=funded, pythFeeDeltaWei=multiplier * quote,
-                      immediateRefundWei=funded - multiplier * quote, oracleDeferredWei=0,
+                      quoteWei=case_quote, surplusWei=surplus, fundedWei=funded,
+                      pythFeeDeltaWei=multiplier * case_quote,
+                      immediateRefundWei=funded - multiplier * case_quote, oracleDeferredWei=0,
                       routerDeferredWei=0, oracleClaimedWei=0, routerClaimedWei=0,
                       oracleCreditedWei=0, routerCreditedWei=0,
                       oracleRefundExercised=name.startswith("unavailable_") and quote > 0,
@@ -32,7 +34,8 @@ def valid_records(quote=3):
                       markTime=1, markPrice=100, storedPublishTimes=[1] * 6,
                       requiredPublishTimes=[1] * 6, lifecycleStatuses=statuses,
                       expectedParseCalls=parses, expectedUpdateCalls=updates,
-                      liveReadChecked=name == "historical_single", payloadBytes=128,
+                      liveReadChecked=name == "historical_single",
+                      payloadBytes=0 if name == "frozen_close" else 128,
                       isolationMode="transaction", isolationVerified=True,
                       executionTimestamp=2, executionBlock=2, orderIds=list(range(1, len(statuses) + 1)),
                       orderCommitTimes=[1] * len(statuses), executionDeadlines=[61] * len(statuses))
@@ -153,7 +156,7 @@ class ScenarioEvidenceTests(unittest.TestCase):
     def test_missing_live_read(self):
         records = valid_records()
         records[0]["liveReadChecked"] = False
-        with self.assertRaisesRegex(ValueError, "live read"):
+        with self.assertRaisesRegex(ValueError, "live-cache isolation"):
             validate_scenario_records(records)
 
     def test_matrix_evidence_must_match_manifest_timestamps_and_payload(self):

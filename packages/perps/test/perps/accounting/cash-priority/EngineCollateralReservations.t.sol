@@ -184,8 +184,9 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 10_000e18, 1500e6, 1e8);
         _open(counterpartyAccount, CfdTypes.Side.SHORT, 10_000e18, 50_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(0, uint64(block.timestamp));
+        engine.updateMarkPrice(0, uint64(vm.getBlockTimestamp()));
         vm.prank(address(router));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         engine.reserveCloseOrderExecutionBounty(account, 10_000e18);
@@ -227,8 +228,9 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _fundTrader(account, 5000 * 1e6);
         _open(account, CfdTypes.Side.LONG, 20_000 * 1e18, 2000 * 1e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(0, uint64(block.timestamp));
+        engine.updateMarkPrice(0, uint64(vm.getBlockTimestamp()));
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
         vm.prank(address(clearinghouse));
@@ -244,8 +246,9 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _fundTrader(trader, 10_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(102_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(102_000_000, uint64(vm.getBlockTimestamp()));
         assertEq(engine.unsettledCarryUsdc(account), 0, "Fixture must isolate exact price risk from carry");
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
@@ -336,8 +339,9 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
         _open(counterpartyAccount, CfdTypes.Side.SHORT, size, 50_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(103_000_000, uint64(vm.getBlockTimestamp()));
 
         assertEq(_freeSettlementUsdc(account), 0, "setup must fully consume free settlement");
 
@@ -358,8 +362,9 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
         _open(counterpartyAccount, CfdTypes.Side.SHORT, size, 50_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(103_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(103_000_000, uint64(vm.getBlockTimestamp()));
 
         vm.prank(address(router));
         vm.expectPartialRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);

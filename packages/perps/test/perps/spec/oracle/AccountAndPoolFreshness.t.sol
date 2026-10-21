@@ -67,8 +67,9 @@ contract StaleLpSettlementFreshnessTest is BasePerpTest {
         _open(traderAccount, CfdTypes.Side.LONG, 200_000 * 1e18, 20_000 * 1e6, 1e8);
 
         // Crash: LONG loses when oracle rises
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(1.5e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.5e8, uint64(vm.getBlockTimestamp()));
         vm.prank(address(juniorVault));
         pool.reconcile();
 

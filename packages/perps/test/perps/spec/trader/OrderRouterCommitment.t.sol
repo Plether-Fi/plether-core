@@ -67,8 +67,9 @@ contract OrderRouterCommitmentTest is OrderRouterTestBase {
 
     function test_CommitOrder_AlignedOpenStillRejectsBelowMinimumNotional() public {
         _startRecordingLogs();
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(50_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(50_000_000, uint64(vm.getBlockTimestamp()));
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11));

@@ -406,7 +406,7 @@ abstract contract OracleSynchronizationScenarioBase is BasePerpTest {
     ) internal view returns (ScenarioEvidence memory e) {
         e.scenarioId = scenario;
         e.quoteWei = IPyth(REAL_PYTH).getUpdateFee(data);
-        assertEq(pletherOracle.getOrderExecutionFee(data), pletherOracle.isOracleFrozen() ? e.quoteWei : 2 * e.quoteWei);
+        assertEq(pletherOracle.getOrderExecutionFee(data), pletherOracle.isOracleFrozen() ? 0 : 2 * e.quoteWei);
         // Authentic Sepolia Pyth can quote zero. Preserve that policy and still exercise positive Router refunds.
         e.surplusWei = SCENARIO_REFUND_SURPLUS;
         e.fundedWei = fundingMultiplier * e.quoteWei + e.surplusWei;
