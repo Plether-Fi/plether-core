@@ -1242,9 +1242,95 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 
 ## Audit Status
 
-The repository records one external pre-audit / security consultation and historical Arbitrum Sepolia deployment
-artifacts. A formal production audit remains pending. Historical deployments do not establish that the current source
-or its immutable contract stack is deployed or production-ready.
+The repository records an external pre-audit / security consultation, the scoped October 2026 finding dispositions
+below, and historical Arbitrum Sepolia deployment artifacts. A formal production audit remains pending. Historical
+deployments do not establish that the current source or its immutable contract stack is deployed or production-ready.
+
+### LP vaults, tranches and claims (October 2026)
+
+**Source:** the supplied `Plether_Labs_Audit_Report_2026-10-16.pdf`, section covering the 16 findings listed below.
+The source PDF is not checked into this repository.
+**Disposition date:** October 21, 2026.
+**Implementation:** [PR #123](https://github.com/Plether-Fi/plether-core/pull/123), runtime source through
+[`89967559`](https://github.com/Plether-Fi/plether-core/commit/899675594d1e043383e10252a8985bac2e5b6271).
+
+All 16 findings have a project disposition: **7 fixed in this branch and 9 explicitly accepted with no further code
+change planned**. These are engineering decisions, not a statement that the report author has retested or closed the
+findings. "Fixed" describes the branch implementation, not a deployment or repair of an existing immutable stack.
+
+#### Fixed findings
+
+| Finding | Implemented resolution | Commit |
+| --- | --- | --- |
+| MED-5 | Both wallet and direct claimable-deposit redemption requests require the target tranche's seed receiver. Maximum-request views agree, preventing new unseeded requests whose terminal refund would need that receiver for share dust. | `efcf629a` |
+| MED-11 | Scale the Senior high-water mark by actual net principal removed, preserving retained fees and proportional impaired recovery protection. Zero funding preserves protection; full principal funding clears it. | `9ab65f41` |
+| MED-19 | Make accepted Senior reservations binding: retain request-time limits, honor booked capacity at activation, and include pending commitments in the Junior withdrawal backing covenant. Rejection, projected wipe, Senior impairment, and an explicit settlement hold retain refund paths. | `86e3c54f` |
+| MED-27 | Require both Pool and Engine reconciliation freshness before a Senior rate change, and reconcile under the old rate before applying the new rate. | `9dbaf0c0` |
+| LOW-39 | Replace balance-dependent third-party share delivery with controller-only delivery. Unsolicited share dust cannot disable the supported controller self-delivery path. | `efcf629a` |
+| LOW-40 | The same controller-only guard prevents deposit/mint claims, redemption cancellations, and redemption-share refunds from imposing a cooldown on a third-party receiver. The guard also applies to zero-share acknowledgements. | `efcf629a` |
+| LOW-72 | Return zero deposit-share estimates when projected deposit-pricing assets are zero with surviving shares. Pending USDC stays visible and cancellable; empty bootstrap and valid accepted Senior reservations still quote normally. | `89967559` |
+
+#### Accepted findings
+
+Acceptance retains the behavior described below. It does not mean that the triggering transaction is impossible or
+that the behavior was removed by another fix.
+
+| Finding | Retained behavior and reason for acceptance |
+| --- | --- |
+| MED-24 | Zero-payout redemption epochs can consume the bounded settlement budget and require extra calls before later epochs are funded. Accepted as an operational backlog concern under regular keeper processing: the cap is 16 epochs per tranche phase, and requests in one epoch aggregate regardless of wallet count. |
+| MED-29 | In a partially funded then refundable epoch, a tiny controller's funded-share allocation can round to zero despite a positive proportional asset amount. Those assets return to the pool; terminal refundable-share dust goes to the seed receiver. Accepted as an impractical tiny-share edge case without an entitlement redesign. |
+| LOW-3 | A partial share-denominated deposit claim can revert when its rounded asset cost consumes the full remaining asset basis. Accepted because the full remainder remains claimable; integrations should favor full-remainder claims. |
+| LOW-4 | A partial asset withdrawal can revert when its rounded share cost consumes the full remaining share basis. Accepted because claiming the full funded remainder avoids this case and a revert preserves the entitlement. |
+| LOW-5 | A tiny asset-denominated deposit claim can round to zero shares and revert. Accepted because a full-remainder claim avoids this case; a failed claim does not consume the entitlement, though it can cost gas. |
+| LOW-13 | Floor-rounded deposit-share residue is burned and funded-redemption asset residue returns to the pool, benefiting remaining holders. Accepted as the deterministic dust policy; no last-claimant remainder allocation is introduced. |
+| LOW-54 | MED-11 removes the healthy-tranche discrepancy. Impaired withdrawals still retain less than one extra USDC base unit of protection per funded settlement pass relative to that step's exact proportional arithmetic. This conservative residual rounding is accepted. |
+| LOW-63 | Repricing partial redemptions from later post-burn state can produce rounding differences or residual share refunds compared with funding in one pass. Accepted at normal operating scales; freezing an epoch price would add state and change how pending shares participate in tranche economics. |
+| LOW-67 | A full-balance dust exit can have shares burned for zero assets when a larger request makes the same epoch fundable but the small controller's asset allocation rounds to zero. Accepted as dust-exit behavior; full-balance exits deliberately bypass the ordinary minimum request size. |
+
+The MED-24 acceptance assumes normal keeper operation and sufficient opportunity to process queued epochs. It does
+not guarantee Junior funding during insufficient liquidity or persistent Senior priority. LOW-54's bound is per
+funded settlement pass (`1` USDC base unit = `$0.000001`); rounding can accumulate and retain a small existing
+impairment. Share-unit value varies, so there is no universal dollar-loss bound for all MED-29/LOW-13 cases.
+For LOW-63, normal changes in profit, loss, and fees between calls are separate from rounding: unfunded shares
+continue to participate in tranche economics. See [LP allocation and dust accounting](ACCOUNTING_SPEC.md).
+
+#### Integration handoff
+
+- Present healthy accepted Senior deposits as commitments. Pending reservations can constrain Junior withdrawals;
+  later cap reductions close new admission but do not revoke existing commitments. Preserve the four refund paths.
+- Seed each tranche before admitting its redemptions; the other tranche's seed and trading activation are separate.
+- Pass `receiver == controller` for deposit/mint share claims, redemption cancellations, and share refunds, including
+  zero-share acknowledgements. Approved operators can still execute for the controller. Update custom-error decoding
+  from `TrancheVault__ThirdPartyDepositForExistingHolder` to `TrancheVault__ReceiverNotController`.
+- Funded USDC claims, pending-deposit USDC cancellations, and ordinary ERC-20 transfers retain their receiver rules.
+- Preserve pending-asset display when a wiped tranche's deposit-share estimate is zero. The lens's
+  `refundableDepositAssets` field continues to represent rejected-epoch refunds, not all cancellable pending deposits.
+  Other admission or activation gates remain separate from the estimate; booked Senior reservations still quote when
+  new-entry capacity is exhausted.
+- Adopt these runtime changes through a coherent fresh-stack deployment and updated ABIs. This PR contains no
+  live-state migration or repair of requests already queued in older non-upgradeable contracts.
+
+#### Validation record and limits
+
+The [test map](test/perps/TEST_MAP.md) identifies the changed behavior tests. PR #123 records the commands and staged
+validation history. The runs below overlap; their counts must not be added as unique test coverage.
+
+- MED-11: the retained-fee loss/recovery regression reproduced a $250 Senior shortfall before the patch. The patched
+  stage passed 130 focused tests, 71 neighboring accounting/capacity tests, and 8 production-compiler tests; healthy
+  and impaired arithmetic fuzz properties and a capacity invariant were included.
+- At `efcf629a`, the MED-5/LOW-39/LOW-40 stage passed 228 LP tests. Coverage includes both redemption admission
+  routes, rollback, post-seed admission, claim aliases, approved operators, receiver dust, zero-share acknowledgements,
+  and funded-USDC receiver freedom. Missing-seed direct-claim and zero-share allocation tests use targeted synthetic
+  fixtures alongside ordinary lifecycle tests.
+- At runtime source `89967559`, 149 focused tests passed, including projected and reconciled Senior/Junior wipes,
+  pending-asset visibility, full cancellation refunds, backing restoration, empty bootstrap, accepted reservations at
+  exhausted capacity, and accounting/settlement controls. The preceding 228-test LP run predates LOW-72.
+- Production runtime-size checks passed at `89967559`: HousePool **23,911 bytes**, TrancheVault **23,960 bytes**,
+  each below the repository's **24,000-byte** target. Changed-file formatting, diff checks, inventory checks, and the
+  test-map check passed (216 exact references).
+- No full repository suite, coverage report, live/fork deployment, or frontend/SDK end-to-end check was completed on
+  the final combined runtime source. GitHub returned no PR status checks for `89967559` when inspected on October 21,
+  2026. Local results do not establish a green CI result. The subsequent handoff update changes documentation only.
 
 ### SC Audit Studio Pre-Audit (April-May 2026)
 
