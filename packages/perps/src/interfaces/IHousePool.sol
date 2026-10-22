@@ -264,6 +264,10 @@ interface IHousePool {
     /// @return Lesser of raw pool USDC and the canonical accounted-asset ledger
     function totalAssets() external view returns (uint256);
 
+    /// @notice Cash above all current engine and pool reserves, safe to query during engine settlement.
+    /// @return Unreserved USDC available for a protocol-fee top-up.
+    function getSettlementFreeUSDC() external view returns (uint256);
+
     /// @notice Returns the terminal deficit persisted by the most recent mark-fresh reconcile.
     /// @return Last reconciled terminal deficit in 6-decimal USDC
     function terminalDeficitUsdc() external view returns (uint256);
@@ -365,6 +369,12 @@ interface IHousePool {
     /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
     /// @return Ownerless canonical assets reserved from ordinary LP withdrawals and deposits
     function unassignedAssets() external view returns (uint256);
+
+    /// @notice Unsettled recapitalization reserved from discretionary pool payouts.
+    function pendingRecapitalizationUsdc() external view returns (uint256);
+
+    /// @notice Unsettled trading revenue reserved from discretionary pool payouts.
+    function pendingTradingRevenueUsdc() external view returns (uint256);
 
     /// @notice Commits senior capacity for a delayed deposit request.
     /// @dev Callable only by the configured senior vault. The amount must fit additional capacity when reserved.

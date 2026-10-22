@@ -33,6 +33,59 @@ contract StaleRateFinalizationTest is BasePerpTest {
         assertEq(pool.seniorRateBps(), 800, "Rejected stale finalization should leave the prior coupon rate in place");
     }
 
+    function test_FinalizeSeniorRate_UsesEffectiveEngineLimitBeforeCheckpoint() public {
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.markStalenessLimit = 300;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+
+        address trader = address(0x3333);
+        _fundSenior(seniorLp, 200_000e6);
+        _fundJunior(juniorLp, 200_000e6);
+        _fundTrader(trader, 50_000e6);
+        _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
+
+        config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
+        uint256 activationTime = pool.poolConfigActivationTime();
+        vm.warp(activationTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(vm.getBlockTimestamp()));
+
+        uint256 engineLimit = engine.engineMarkStalenessLimit();
+        assertLt(engineLimit, pool.markStalenessLimit(), "Engine must have the tighter live mark limit");
+        vm.warp(vm.getBlockTimestamp() + engineLimit + 1);
+        assertFalse(engine.isFadWindow(), "Use the live mark policy");
+        assertFalse(engine.isOracleFrozen(), "Use the live mark policy");
+        assertLe(vm.getBlockTimestamp() - engine.lastMarkTime(), pool.markStalenessLimit());
+
+        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 juniorBefore = pool.juniorPrincipal();
+        uint256 couponCheckpointBefore = pool.lastSeniorCouponCheckpointTime();
+        uint256 reconcileBefore = pool.lastReconcileTime();
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        pool.finalizePoolConfig();
+
+        assertEq(pool.seniorRateBps(), 800, "A stale effective mark cannot change the rate");
+        assertEq(pool.seniorPrincipal(), seniorBefore, "A rejected finalization cannot mutate senior principal");
+        assertEq(pool.juniorPrincipal(), juniorBefore, "A rejected finalization cannot mutate junior principal");
+        assertEq(pool.lastSeniorCouponCheckpointTime(), couponCheckpointBefore, "Coupon checkpoint must not advance");
+        assertEq(pool.lastReconcileTime(), reconcileBefore, "Reconciliation must not advance");
+        assertEq(pool.poolConfigActivationTime(), activationTime, "The proposal remains available for retry");
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(vm.getBlockTimestamp()));
+        vm.warp(vm.getBlockTimestamp() + engineLimit);
+        pool.finalizePoolConfig();
+
+        assertEq(pool.seniorRateBps(), 1600, "A mark at the effective age limit permits finalization");
+        assertEq(pool.lastSeniorCouponCheckpointTime(), vm.getBlockTimestamp(), "Old-rate coupon must be checkpointed");
+        assertEq(pool.lastReconcileTime(), vm.getBlockTimestamp(), "Fresh reconciliation must complete");
+        assertEq(pool.poolConfigActivationTime(), 0, "Successful finalization consumes the proposal");
+    }
+
 }
 
 contract StaleLpSettlementCouponTest is BasePerpTest {

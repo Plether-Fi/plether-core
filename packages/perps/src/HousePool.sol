@@ -24,6 +24,7 @@ import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeni
 import {HousePoolTrancheGateLib} from "@plether/perps/libraries/HousePoolTrancheGateLib.sol";
 import {HousePoolWaterfallAccountingLib} from "@plether/perps/libraries/HousePoolWaterfallAccountingLib.sol";
 import {HousePoolWithdrawalPreviewLib} from "@plether/perps/libraries/HousePoolWithdrawalPreviewLib.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @dev Pool-only queue hooks implemented by both asynchronous tranche vaults.
 interface ITrancheVaultEpochSettlement {
@@ -318,9 +319,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Finalizes the proposed pool config after the timelock expires.
-    /// @dev Only the owner may call. Senior-rate changes require a fresh mark under both the current pool limit
-    ///      and the engine reconciliation policy, then reconcile at the old coupon rate before the new rate becomes
-    ///      active. Clears the pending proposal and emits field-specific update events for values that changed.
+    /// @dev Only the owner may call. Senior-rate changes require a fresh mark under the current pool limit and
+    ///      effective reconciliation policy, and checkpoint the old coupon rate before the new rate becomes active.
+    ///      Clears the pending proposal and emits field-specific update events for values that changed.
     function finalizePoolConfig() external onlyOwner {
         if (poolConfigActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -331,8 +332,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         PoolConfig memory currentConfig = poolConfig;
         PoolConfig memory nextConfig = pendingPoolConfig;
         if (nextConfig.seniorRateBps != currentConfig.seniorRateBps) {
-            _requireRateChangeMarkFresh(_getHousePoolStatusSnapshot());
-            _checkpointSeniorCouponBeforeRateChange();
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
+            _requireRateChangeMarkFresh(statusSnapshot);
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
+            _requireFreshMark(accountingSnapshot, statusSnapshot);
+            _reconcile(accountingSnapshot, statusSnapshot);
         }
         poolConfig = nextConfig;
         delete pendingPoolConfig;
@@ -1237,6 +1241,23 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         return _getWithdrawalSnapshot().freeUsdc;
     }
 
+    /// @inheritdoc IHousePool
+    /// @dev Reads live side aggregates because the terminal-NAV lens rejects reads during engine settlement.
+    ///      At rest, the same reserve components and withdrawal-snapshot arithmetic back `getFreeUSDC()`.
+    function getSettlementFreeUSDC() public view override returns (uint256) {
+        (uint256 longMaxProfitUsdc,,,) = ENGINE.sides(0);
+        (uint256 shortMaxProfitUsdc,,,) = ENGINE.sides(1);
+        uint256 maxLiabilityUsdc = longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
+
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot;
+        accountingSnapshot.physicalAssetsUsdc = totalAssets();
+        accountingSnapshot.maxLiabilityUsdc = maxLiabilityUsdc;
+        accountingSnapshot.traderClaimBalanceUsdc = ENGINE.totalTraderClaimBalanceUsdc();
+        accountingSnapshot.supplementalReservedUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, ENGINE.settlementBufferBps());
+        return _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets()).freeUsdc;
+    }
+
     /// @notice Returns the current stored senior principal that pool liquidity permits withdrawing.
     /// @dev Returns zero when degraded mode or the applicable mark-freshness policy disables withdrawals.
     /// @return Withdrawable senior USDC, capped by free USDC and `seniorPrincipal` (6 decimals)
@@ -1684,15 +1705,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (config.maxSeniorShareBps >= 10_000) {
             revert HousePool__InvalidMaxSeniorShareBps();
         }
-    }
-
-    function _checkpointSeniorCouponBeforeRateChange() internal {
-        (
-            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
-            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
-        ) = _getHousePoolSnapshots();
-        _requireFreshMark(accountingSnapshot, statusSnapshot);
-        _reconcile(accountingSnapshot, statusSnapshot);
     }
 
     function _juniorShareSupply() internal view returns (uint256) {
