@@ -122,4 +122,3 @@ contract GasBurningOracleRefundRecipient {
     }
 
 }
-

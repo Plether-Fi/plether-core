@@ -21,6 +21,7 @@ import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
@@ -243,6 +244,124 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             poolAssetsBefore - pool.totalAssets(),
             profitUsdc,
             "Pool should pass through the trader profit it retained against the fee"
+        );
+    }
+
+    function test_CloseFeeTopUp_DoesNotSpendPendingRecapitalization() public {
+        address account = address(0xFEE100);
+        uint256 size = 25_000e18;
+        uint256 closePrice = 99_968_000;
+        uint256 reservedRecapitalizationUsdc = 100_000e6;
+
+        _fundTrader(account, 2000e6);
+        _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
+
+        usdc.mint(address(pool), reservedRecapitalizationUsdc);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            reservedRecapitalizationUsdc,
+            IHousePool.ClaimantInflowKind.Recapitalization,
+            IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        uint256 cashToDrainUsdc = pool.totalAssets() - reservedRecapitalizationUsdc;
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), cashToDrainUsdc);
+
+        assertEq(pool.totalAssets(), reservedRecapitalizationUsdc);
+        assertEq(pool.getFreeUSDC(), 0, "Pending recapitalization reserves all pool cash");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
+        assertTrue(preview.valid, "Close remains valid with reserved pool cash");
+        assertEq(preview.realizedPnlUsdc, int256(8e6), "Setup creates the fee-offset gain");
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
+
+        _close(account, CfdTypes.Side.LONG, size, closePrice);
+
+        CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+        assertEq(pool.totalAssets(), reservedRecapitalizationUsdc, "Fee top-up must preserve pending recap cash");
+        assertEq(pool.pendingRecapitalizationUsdc(), reservedRecapitalizationUsdc);
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeUsdc - 8e6,
+            "Only directly collected fee cash reaches the treasury"
+        );
+    }
+
+    function test_CloseFeeTopUp_StopsAtDirectionalLiabilityAndBuffer() public {
+        address longAccount = address(0xFEE101);
+        address shortAccount = address(0xFEE102);
+        uint256 size = 25_000e18;
+        uint256 closePrice = 99_968_000;
+        uint256 freeForFeeUsdc = 5e6;
+
+        _fundTrader(longAccount, 2000e6);
+        _fundTrader(shortAccount, 2000e6);
+        _open(longAccount, CfdTypes.Side.LONG, size, 1000e6, 1e8);
+        _open(shortAccount, CfdTypes.Side.SHORT, size, 1000e6, 1e8);
+
+        uint256 freeBeforeDrainUsdc = pool.getFreeUSDC();
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), freeBeforeDrainUsdc - freeForFeeUsdc);
+        assertEq(pool.getFreeUSDC(), freeForFeeUsdc, "Setup leaves only five free USDC");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longAccount, size, closePrice);
+        assertTrue(preview.valid, "Close remains valid with opposite-side liability reserved");
+        assertEq(preview.realizedPnlUsdc, int256(8e6), "Setup creates the fee-offset gain");
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(longAccount);
+
+        _close(longAccount, CfdTypes.Side.LONG, size, closePrice);
+
+        CloseParityObserved memory observed = _observeCloseParity(longAccount, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+        assertEq(pool.getFreeUSDC(), 0, "Fee top-up must stop at directional liability and buffer");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeUsdc - 8e6 + freeForFeeUsdc,
+            "Treasury receives only direct collection and unreserved cash"
+        );
+    }
+
+    function test_CloseFeeTopUp_DoesNotSpendQueuedOwnerlessRevenue() public {
+        address account = address(0xFEE103);
+        uint256 size = 25_000e18;
+        uint256 closePrice = 99_968_000;
+        uint256 reservedRevenueUsdc = 100_000e6;
+
+        _fundTrader(account, 2000e6);
+        _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
+
+        usdc.burn(address(pool), pool.totalAssets());
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 0, "Setup wipes stored LP principal");
+
+        usdc.mint(address(pool), reservedRevenueUsdc);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            reservedRevenueUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        assertEq(pool.pendingTradingRevenueUsdc(), reservedRevenueUsdc);
+        assertEq(pool.getFreeUSDC(), 0, "Queued revenue reserves all cash");
+
+        ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
+        assertTrue(preview.valid, "Close remains valid after principal wipe");
+        assertEq(preview.realizedPnlUsdc, int256(8e6));
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
+
+        _close(account, CfdTypes.Side.LONG, size, closePrice);
+
+        CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
+        _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
+        assertEq(pool.totalAssets(), reservedRevenueUsdc, "Fee top-up must preserve queued revenue cash");
+        assertGe(pool.pendingTradingRevenueUsdc(), reservedRevenueUsdc, "Close revenue stays queued");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeUsdc - 8e6,
+            "Only directly collected fee cash reaches the treasury"
         );
     }
 

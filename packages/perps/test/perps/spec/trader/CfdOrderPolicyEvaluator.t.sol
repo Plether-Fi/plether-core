@@ -683,6 +683,12 @@ contract CfdOrderPolicyEvaluatorTest is Test {
         }
 
         vm.mockCall(POOL, abi.encodeWithSignature("totalAssets()"), abi.encode(2_000_000e6));
+        // Funded LP principals with no pending or unassigned reserves in this bounty-accounting scenario.
+        vm.mockCall(POOL, abi.encodeWithSignature("pendingRecapitalizationUsdc()"), abi.encode(0));
+        vm.mockCall(POOL, abi.encodeWithSignature("pendingTradingRevenueUsdc()"), abi.encode(0));
+        vm.mockCall(POOL, abi.encodeWithSignature("unassignedAssets()"), abi.encode(0));
+        vm.mockCall(POOL, abi.encodeWithSignature("seniorPrincipal()"), abi.encode(1_000_000e6));
+        vm.mockCall(POOL, abi.encodeWithSignature("juniorPrincipal()"), abi.encode(1_000_000e6));
 
         IMarginClearinghouse.PnlIsolationBuckets memory buckets = IMarginClearinghouse.PnlIsolationBuckets({
             settlementBalanceUsdc: 20_000e6,
