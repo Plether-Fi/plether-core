@@ -10,6 +10,9 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 ///      the bounded V3 commit surface; tests read oracle policy through the production `pletherOracle()` getter.
 contract LegacyOrderRouterHarness is OrderRouter {
 
+    /// @dev Foundry test marker: production size limits are checked against OrderRouter itself.
+    bool public constant IS_TEST = true;
+
     constructor(
         address engine_,
         address engineLens_,
