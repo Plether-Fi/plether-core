@@ -876,14 +876,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (seniorPhase.backlog) {
             juniorPhase.backlog = _hasMaturedRedeemHead(juniorVault, result.cutoffEpoch);
         } else {
-            uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
-                seniorPrincipal,
-                seniorHighWaterMark,
-                juniorPrincipal,
-                reservedSeniorDepositAssetsUsdc,
-                poolConfig.maxSeniorShareBps
-            );
-            juniorPhase.budget = _min(freeUsdc, _min(juniorPrincipal, ratioCap));
+            juniorPhase.budget = _juniorSettlementCapacity(freeUsdc, _getWaterfallState());
             juniorPhase = _fundRedemptionPhase(
                 juniorVault, result.cutoffEpoch, juniorPhase, _settlementFeeBps(false, statusSnapshot.oracleFrozen)
             );
