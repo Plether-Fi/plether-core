@@ -101,9 +101,9 @@ does not upgrade an existing clearinghouse or resolve the application's V3 tradi
   `b = (e + 1) * 3,600`, target `e + 1` before `b - 300` and `e + 2` at or after `b - 300`. Exact equality rolls
   forward without a cutoff-specific revert. The successful return value and event are authoritative when inclusion
   crosses the cutoff.
-- A share-delivering claim, redemption cancellation, or redemption refund may target the controller or an account with
-  no existing vault shares. This prevents unsolicited dust from resetting another holder's whole-balance cooldown;
-  `maxDeposit(controller)` and `maxMint(controller)` remain receiver-independent controller limits.
+- Deposit claims, redemption cancellations, and redemption refunds require `receiver == controller`, including
+  zero-share acknowledgements. Approved operators may execute them for the controller. Receiver eligibility does
+  not depend on its share balance; `maxDeposit(controller)` and `maxMint(controller)` report controller limits.
 - Epoch clearing is permissionless through the `requiredExecutionPath` field returned by
   `SettlementMonitorLens.getSettlementStatus(observedEpoch)`.
   `CachedMark` calls `HousePool.settleLpEpoch(uint256,uint256)` directly; `AtomicOracleRefresh` calls
@@ -200,8 +200,8 @@ by the Book's trailing payload.
   - `observableConfigDigest()`
 
   `getSettlementStatus(...)` exposes `executionPathDependencyMask` for failures that prevent route selection and a
-  broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation and reservation-limit
-  state, not new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
+  broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation gates, not
+  new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
   alert-investigation reads (roughly 6 KB returned and about 0.8–1.3 million representative `eth_call` gas); they
   expose `observationComplete` and `completeObservationDigest`. Completeness requires every Oracle dependency read,
   including the updated current-feed ABI, even for cached/no-work routing, but requires Oracle policy validity only on

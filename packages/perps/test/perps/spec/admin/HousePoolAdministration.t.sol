@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
@@ -70,6 +71,55 @@ contract HousePoolAdministrationTest is HousePoolTestBase {
         pool.finalizePoolConfig();
 
         assertEq(pool.seniorRateBps(), 1600, "Senior rate should update once freshness returns");
+    }
+
+    function test_FinalizeSeniorRate_RejectsEngineStaleMarkInsidePoolLimit() public {
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.markStalenessLimit = 300;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+
+        _fundSenior(alice, 200_000e6);
+        _fundJunior(bob, 200_000e6);
+        _fundTrader(carol, 50_000e6);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+        _open(carol, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
+
+        config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
+        uint256 activationTime = pool.poolConfigActivationTime();
+        uint256 markTime = activationTime - 120;
+        vm.warp(markTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(markTime));
+        assertEq(engine.lastMarkTime(), markTime);
+        vm.warp(activationTime);
+
+        assertEq(pool.markStalenessLimit(), 300);
+        assertEq(engine.engineMarkStalenessLimit(), 60);
+        assertEq(block.timestamp - engine.lastMarkTime(), 120);
+
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
+        uint256 seniorBefore = pool.seniorPrincipal();
+        uint256 juniorBefore = pool.juniorPrincipal();
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        pool.finalizePoolConfig();
+
+        assertEq(pool.seniorRateBps(), 800);
+        assertEq(pool.poolConfigActivationTime(), activationTime);
+        assertEq(pool.lastSeniorCouponCheckpointTime(), couponCheckpoint);
+        assertEq(pool.seniorPrincipal(), seniorBefore);
+        assertEq(pool.juniorPrincipal(), juniorBefore);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(activationTime));
+        pool.finalizePoolConfig();
+
+        assertEq(pool.seniorRateBps(), 1600);
+        assertEq(pool.lastReconcileTime(), block.timestamp);
     }
 
     function test_FinalizeSeniorRate_FreshCheckpointAccruesOldRateBeforeChange() public {

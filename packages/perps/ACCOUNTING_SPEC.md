@@ -299,9 +299,9 @@ Definition:
 - apply the exact signed `terminalLpPriceDeltaUsdc` once,
 - route the resulting distributable equity through the same Senior/Junior waterfall for both redemption and deposit
   pricing,
-- ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, a complete
-  pending request is cancellable before maturity, and post-maturity cancellation remains available only under the
-  epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions,
+- ordinary LP entry always starts with an asynchronous deposit request: assets are funded up front, Junior requests
+  are cancellable before maturity, and Senior requests commit capacity at admission. Senior refunds require epoch
+  rejection, projected terminal wipe, Senior impairment, or an explicit LP settlement hold,
 - `OrderRouter.settleLpEpoch(bytes[])` validates a `PoolReconcile` Pyth basket, installs its neutral Engine mark, and
   invokes the Router-only HousePool settlement callback in one rollback frame; with live open positions, the basket's
   earliest publish time must be at or after the current round-hour epoch boundary,
@@ -419,16 +419,16 @@ junior deposits do not count as junior subordination.
 Rules:
 
 - a pending senior request adds its gross assets to `R`, preventing parallel epochs from overbooking the same capacity,
-- finalization revalidates the complete reservation book against current accounting and the active limits before it
-  atomically releases the reservation and adds the same gross amount to active senior principal,
-- reservations are provisional rather than grandfathered: if a governance reduction, coupon, loss, or junior-capital
-  change makes the book invalid, post-maturity cancellation is enabled so owners can recover escrowed assets,
+- accepted Senior reservations are firm commitments: finalization atomically releases `R` and adds the same gross
+  amount to active senior principal without rechecking later capacity drift,
+- a governance reduction, coupon, or loss can passively move the book above current limits, closing new Senior
+  admission. A settlement hold stops new Senior requests and permits controllers to recover pending escrow; projected
+  terminal wipe, Senior impairment, and rejected epochs also permit refunds,
 - funded junior redemptions of net assets `w` must additionally preserve
-  `X * 10_000 <= Q * (X + J - w)` using active protected exposure only; reservations do not lock junior liquidity, so
-  permitted Junior funding may instead invalidate provisional reservations and make them refundable,
+  `(X + R) * 10_000 <= Q * (X + R + J - w)` using active protected exposure plus pending commitments,
 - funded Senior redemptions and Junior deposits improve capacity and may cure an overage,
-- governance reductions are prospective for active claims: existing senior shares are not burned, repriced, or forced
-  out, while new senior capacity remains zero until the state returns within both limits.
+- governance reductions are prospective for active claims and accepted reservations: neither is burned, repriced, or
+  forced out, while new Senior capacity remains zero until the state returns within both limits.
 
 The limits are admission controls, not alternate waterfall arithmetic. Junior-funded coupon, junior-first loss,
 revenue restoration, and privileged recapitalization continue under their ordinary priority rules even if they create
@@ -569,6 +569,11 @@ Accounting rules:
 - the fee does not become protocol revenue,
 - the fee does not increase `protocolTreasuryBalanceUsdc`,
 - the fee remains inside the same tranche and therefore benefits incumbent LPs of that tranche only.
+
+Senior withdrawal protection follows the actual net principal debit: for pre-withdrawal principal `P`, high-water
+mark `H`, and funded assets `A`, settlement sets `P' = P - A` and `H' = H - floor(H * A / P)`.
+This preserves healthy Senior principal/HWM equality and retains impaired protection proportionally, including
+protection for retained fees. Rounding favors the remaining protected claim; zero funding leaves both values unchanged.
 
 Async allocation dust is resolved only after every controller's entitlement is accounted for:
 

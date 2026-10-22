@@ -48,6 +48,10 @@ Deposits and redemptions use an asynchronous request, settlement, and claim proc
 available liquidity after trader claims and required reserves. Both tranches carry risk; Senior priority does
 not guarantee principal or returns.
 
+Accepted Senior deposits are binding during normal operation and reserve backing that can limit Junior withdrawals.
+Refunds remain available under the documented recovery conditions. See the
+[LP integration handoff](SECURITY.md#integration-handoff) for cancellation, seeding, share-receiver, and estimate rules.
+
 ## Main contracts
 
 | Component | Responsibility |

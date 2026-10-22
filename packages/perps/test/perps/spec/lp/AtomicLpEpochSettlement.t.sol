@@ -491,20 +491,30 @@ contract AtomicLpEpochSettlementTest is AtomicLpEpochSettlementTestFixture {
         );
     }
 
-    function test_SettlementHold_AllowsSeniorReservationAndCancellation() public {
+    function test_SettlementHold_StopsNewSeniorReservationsAndUnlocksExistingCommitment() public {
         uint256 assets = 10_000e6;
         uint256 reservedBefore = pool.reservedSeniorDepositAssetsUsdc();
 
-        pool.pauseLpEpochSettlement();
         usdc.mint(ALICE, assets);
         vm.startPrank(ALICE);
         usdc.approve(address(seniorVault), assets);
         uint256 requestId = seniorVault.requestDeposit(assets, ALICE, ALICE);
         vm.stopPrank();
 
+        vm.warp(pool.lpEpochStart(requestId));
+        pool.pauseLpEpochSettlement();
         assertTrue(pool.lpEpochSettlementPaused());
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedBefore + assets);
         assertEq(seniorVault.pendingDepositRequest(requestId, ALICE), assets);
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0);
+
+        vm.prank(address(seniorVault));
+        vm.expectRevert(IHousePool.HousePool__LpEpochSettlementPaused.selector);
+        pool.reserveSeniorDeposit(assets);
+
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__DepositsUnavailable.selector);
+        seniorVault.requestDeposit(assets, ALICE, ALICE);
 
         vm.prank(ALICE);
         assertEq(seniorVault.cancelPendingDeposit(requestId), assets);

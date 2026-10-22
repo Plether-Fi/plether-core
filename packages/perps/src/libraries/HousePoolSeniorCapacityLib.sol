@@ -6,8 +6,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 /// @title HousePoolSeniorCapacityLib
 /// @notice Pure protected-senior exposure, admission-capacity, and tranche-ratio helpers.
 /// @dev Senior exposure is the greater of current senior principal and its protected high-water mark. Accepted but
-///      unfinalized senior deposits are treated as committed exposure for senior admission; the junior-withdrawal
-///      covenant intentionally protects active exposure only because pending reservations remain refundable.
+///      unfinalized senior deposits are firm commitments and count against both senior admission and the
+///      junior-withdrawal covenant.
 library HousePoolSeniorCapacityLib {
 
     /// @notice Basis-point denominator.
@@ -59,14 +59,13 @@ library HousePoolSeniorCapacityLib {
         return committedExposure <= exposureLimit(juniorPrincipal, maxSeniorExposureUsdc, maxSeniorShareBps);
     }
 
-    /// @notice Caps junior withdrawals so remaining junior capital preserves the governed senior-share limit.
-    /// @dev The covenant protects active exposure only; pending senior reservations may instead become invalid and
-    ///      refundable. A 0-bps share permits junior withdrawals only when active exposure is zero; 10,000 bps is
-    ///      unrestricted.
+    /// @notice Caps junior withdrawals so remaining junior capital backs active and reserved senior exposure.
+    /// @dev A 0-bps share permits junior withdrawals only when committed exposure is zero; 10,000 bps is unrestricted.
     function juniorWithdrawalRatioCap(
         uint256 seniorPrincipal,
         uint256 seniorHighWaterMark,
         uint256 juniorPrincipal,
+        uint256 reservedSeniorDepositAssetsUsdc,
         uint256 maxSeniorShareBps
     ) internal pure returns (uint256) {
         if (maxSeniorShareBps >= BPS) {
@@ -74,6 +73,10 @@ library HousePoolSeniorCapacityLib {
         }
 
         uint256 exposure = protectedExposure(seniorPrincipal, seniorHighWaterMark);
+        if (reservedSeniorDepositAssetsUsdc > type(uint256).max - exposure) {
+            return 0;
+        }
+        exposure += reservedSeniorDepositAssetsUsdc;
         if (exposure == 0) {
             return juniorPrincipal;
         }

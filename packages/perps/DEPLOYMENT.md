@@ -786,10 +786,9 @@ pause trader closes/reductions or already-funded claims and does not create a gl
    is included, confirm the inclusive cutoff; covered opens remain invalid forever, including after recovery.
 4. Keep closes, liquidations, protection cancellation and valid trigger/retry/linked-attempt processing, LP redemption
    requests, existing cancellation paths, recapitalization/reconciliation, and funded claims operating. Risk-off's
-   HousePool pause blocks new deposit requests and activation. Under settlement-only, new deposits and Senior
-   reservations remain accepted but cannot activate; assets can accumulate under unchanged cancellation rules. A
-   matured pending deposit is not automatically cancellable merely because either restriction is active; use only its
-   existing escape conditions or wait for recovery. Stop settlement broadcasts while held.
+   HousePool pause blocks new deposit requests and activation. Under settlement-only, new Senior requests and
+   reservations stop, while existing Senior commitments become refundable. Junior deposit and redemption requests may
+   accumulate under their ordinary cancellation rules. Stop settlement broadcasts while held.
 5. Have the protocol incident keeper call permissionless risk-off cleanup for invalidated opens. Cleanup requires no
    Pyth payload, refunds full remaining margin and bounty to the trader's internal settlement, and pays no caller, so
    the protocol pays gas.
@@ -860,10 +859,11 @@ different route.
 `ActivationNotConfirmed` combines the projected `HousePool.canSettleDepositEntries()` common gate with canonical
 redemption evidence. The Pool view projects post-reconcile state, including residual pending claimants, while the Lens
 remains conservative when matured Senior funding can still change principal/HWM rounding before either tranche
-activates, and when matured Junior funding can reduce capacity before Senior activation. HousePool rechecks the exact
-live gates after redemption funding. Senior deposit deferrals describe pending activation and existing-reservation-limit conditions, not the
-amount that a new request may reserve; read the vault admission view or `HousePool.getSeniorDepositCapacity()` for
-new admission capacity. Use `getSettlementHealth()` for critical-fault and dependency-failure masks, and
+activates. Junior funding protects accepted Senior reservations and cannot displace their activation. HousePool
+rechecks the exact live gates after redemption funding. Senior deposit deferrals describe pending activation gates,
+not the amount that a new request may reserve; read the vault admission view for request eligibility and
+`HousePool.getSeniorDepositCapacity()` for mathematical headroom. Use `getSettlementHealth()` for critical-fault and
+dependency-failure masks, and
 `getPoolReconcileOracleStatus()` for a fail-soft view of feeds readable now. `observableConfigDigest()` and the
 composite `observationDigest` are advisory comparison aids only. `completeObservationDigest` equals that observation
 hash when `observationComplete` and is zero otherwise. Completeness requires every Oracle dependency read even on a
