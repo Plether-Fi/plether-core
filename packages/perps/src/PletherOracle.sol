@@ -272,15 +272,12 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         address refundRecipient,
         bytes[] calldata pythUpdateData
     ) external payable override nonReentrant returns (LiquidationBatchSnapshot memory snapshot) {
-        (PriceSnapshot memory neutralSnapshot, uint256 confidence) = _updateLiquidationSnapshot(pythUpdateData);
+        (PriceSnapshot memory neutralSnapshot, uint256 rawPrice, uint256 confidence) =
+            _updateLiquidationSnapshot(pythUpdateData);
         uint256 shift = _liquidationConfidenceShift(confidence);
         snapshot = LiquidationBatchSnapshot({
-            longPrice: _clampToCap(
-                _directionalLiquidationPriceFromShift(CfdTypes.Side.LONG, neutralSnapshot.price, shift)
-            ),
-            shortPrice: _clampToCap(
-                _directionalLiquidationPriceFromShift(CfdTypes.Side.SHORT, neutralSnapshot.price, shift)
-            ),
+            longPrice: _clampToCap(_directionalLiquidationPriceFromShift(CfdTypes.Side.LONG, rawPrice, shift)),
+            shortPrice: _clampToCap(_directionalLiquidationPriceFromShift(CfdTypes.Side.SHORT, rawPrice, shift)),
             markPrice: neutralSnapshot.markPrice,
             publishTime: neutralSnapshot.publishTime,
             updateFee: neutralSnapshot.updateFee
@@ -302,9 +299,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         bytes[] calldata pythUpdateData,
         address account
     ) external payable override nonReentrant returns (PriceSnapshot memory snapshot) {
+        uint256 rawPrice;
         uint256 confidence;
-        (snapshot, confidence) = _updateLiquidationSnapshot(pythUpdateData);
-        snapshot.price = _clampToCap(_adverseLiquidationPrice(account, snapshot.price, confidence));
+        (snapshot, rawPrice, confidence) = _updateLiquidationSnapshot(pythUpdateData);
+        snapshot.price = _clampToCap(_adverseLiquidationPrice(account, rawPrice, confidence));
         _refundExcess(refundRecipient, snapshot.updateFee);
     }
 
@@ -440,9 +438,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         _refundExcess(refundRecipient, pythFee);
     }
 
+    /// @dev Retains the pre-cap price for adverse liquidation shifts while keeping the neutral snapshot capped.
     function _updateLiquidationSnapshot(
         bytes[] calldata pythUpdateData
-    ) internal returns (PriceSnapshot memory snapshot, uint256 confidence) {
+    ) internal returns (PriceSnapshot memory snapshot, uint256 rawPrice, uint256 confidence) {
         uint256 pythFee = _updatePythPrice(pythUpdateData);
         PolicySnapshot memory policy = _policyForMode(PriceMode.Liquidation);
         BasketPrice memory basket = _computeLiveBasketPrice(
@@ -450,6 +449,7 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         );
         snapshot = _snapshotFromBasket(basket, policy, true);
         snapshot.updateFee = pythFee;
+        rawPrice = basket.price;
         confidence = basket.confidence;
     }
 

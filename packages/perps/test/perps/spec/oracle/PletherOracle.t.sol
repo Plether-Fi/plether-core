@@ -540,6 +540,104 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.price, 100_020_000, "liquidation should retain the adverse confidence shift");
     }
 
+    function test_Liquidation_SingleShiftsRawBasketBeforeCap() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(2500, 10);
+        engine.setPosition(1e18, CfdTypes.Side.SHORT);
+        _setLivePricesWithConfidence(200_020_000, 200_000, 990);
+
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+
+        assertEq(snapshot.price, 199_970_000, "shift the raw basket before capping");
+        assertEq(snapshot.markPrice, 200_000_000, "neutral mark stays capped");
+    }
+
+    function test_Liquidation_BatchShiftsRawBasketBeforeCap() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(2500, 10);
+        _setLivePricesWithConfidence(200_020_000, 200_000, 990);
+
+        IPletherOracle.LiquidationBatchSnapshot memory snapshot =
+            oracle.updateLiquidationBatchPrice(address(this), _pythUpdateData());
+
+        assertEq(snapshot.shortPrice, 199_970_000, "short shift uses the raw basket");
+        assertEq(snapshot.longPrice, 200_000_000, "long adverse price stays capped");
+        assertEq(snapshot.markPrice, 200_000_000, "neutral mark stays capped");
+    }
+
+    function test_Liquidation_ShortStaysCappedWhenShiftLeavesRawPriceAboveCap() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(2500, 10);
+        engine.setPosition(1e18, CfdTypes.Side.SHORT);
+        _setLivePricesWithConfidence(200_100_000, 200_000, 990);
+
+        IPletherOracle.PriceSnapshot memory single =
+            oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+        IPletherOracle.LiquidationBatchSnapshot memory batch =
+            oracle.updateLiquidationBatchPrice(address(this), _pythUpdateData());
+
+        assertEq(single.price, 200_000_000, "shifted raw price is still above the cap");
+        assertEq(batch.shortPrice, single.price, "batch must use the same cap ordering");
+    }
+
+    function testFuzz_Liquidation_SingleAndBatchMatchRawBasketPolicy(
+        uint32 priceSeed,
+        uint32 confidenceSeed,
+        uint16 multiplierSeed,
+        bool frozen
+    ) public {
+        vm.warp(1000);
+        engine.setFadDayOverride(0, frozen);
+        // Even feed values make both equally weighted contributions exact.
+        uint256 rawPrice = 2 * bound(uint256(priceSeed), 25_000_000, 150_000_000);
+        uint256 confidence = 2 * bound(uint256(confidenceSeed), 0, rawPrice / 2);
+        uint256 multiplier = bound(uint256(multiplierSeed), 0, 30_000);
+        _setLiquidationPolicy(multiplier, 10_000);
+        _setLivePricesWithConfidence(int64(uint64(rawPrice)), uint64(confidence), 990);
+        engine.setLastMark(100_000_000, 980);
+
+        uint256 shift = confidence * multiplier / 10_000;
+        uint256 neutral = rawPrice > 200_000_000 ? 200_000_000 : rawPrice;
+        uint256 expectedLong = rawPrice + shift > 200_000_000 ? 200_000_000 : rawPrice + shift;
+        uint256 expectedShort = rawPrice > shift ? rawPrice - shift : 0;
+        expectedShort = expectedShort > 200_000_000 ? 200_000_000 : expectedShort;
+        IPletherOracle.LiquidationBatchSnapshot memory batch =
+            oracle.updateLiquidationBatchPrice(address(this), _pythUpdateData());
+        assertEq(batch.longPrice, expectedLong, "long raw-price policy");
+        assertEq(batch.shortPrice, expectedShort, "short raw-price policy");
+        assertEq(batch.markPrice, neutral, "neutral cap policy");
+        assertEq(batch.publishTime, 990, "basket publication preserved");
+
+        for (uint256 i; i < 3; i++) {
+            engine.setPosition(i == 2 ? 0 : 1e18, i == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT);
+            IPletherOracle.PriceSnapshot memory single =
+                oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+            assertEq(single.price, i == 0 ? expectedLong : i == 1 ? expectedShort : neutral, "single price policy");
+            assertEq(single.markPrice, batch.markPrice, "neutral mark parity");
+            assertEq(single.publishTime, batch.publishTime, "publication parity");
+            assertEq(single.oracleFrozen, frozen, "frozen policy metadata preserved");
+        }
+        assertEq(engine.lastMarkPrice(), 100_000_000, "oracle reads do not update engine mark");
+        assertEq(engine.lastMarkTime(), 980, "oracle reads do not update engine publication");
+    }
+
+    function _setLiquidationPolicy(
+        uint256 multiplier,
+        uint256 confidenceLimitBps
+    ) internal {
+        oracle.applyConfig(
+            IPletherOracle.OracleConfig({
+                orderExecutionStalenessLimit: oracle.orderExecutionStalenessLimit(),
+                liquidationStalenessLimit: oracle.liquidationStalenessLimit(),
+                basketMaxConfidenceRatioBps: confidenceLimitBps,
+                orderSettlementWindow: oracle.orderSettlementWindow(),
+                maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+                adverseConfidenceMultiplierBps: multiplier
+            })
+        );
+    }
+
     function test_UpdatePrice_RevertsWhenPublishTimePredatesStoredMark() public {
         vm.warp(1000);
         engine.setLastMark(1e8, 995);
