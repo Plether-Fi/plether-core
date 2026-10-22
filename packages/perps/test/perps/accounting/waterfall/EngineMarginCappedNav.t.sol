@@ -100,6 +100,7 @@ contract MarginCappedMtmTest is BasePerpTest {
         bytes[] memory liqPrice = new bytes[](1);
         liqPrice[0] = abi.encode(uint256(0.5e8));
         address account = alice;
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         router.executeLiquidation(account, liqPrice);
 
         assertEq(_sideTotalMargin(CfdTypes.Side.SHORT), 0, "Short margin zero after liquidation");

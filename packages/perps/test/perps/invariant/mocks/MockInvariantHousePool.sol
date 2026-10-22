@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract MockInvariantHousePool is IHousePool {
@@ -13,6 +14,8 @@ contract MockInvariantHousePool is IHousePool {
     MockUSDC public immutable usdc;
     address public immutable engine;
     bool public lpEpochSettlementPaused;
+    uint256 public pendingRecapitalizationUsdc;
+    uint256 public pendingTradingRevenueUsdc;
 
     constructor(
         address _usdc,
@@ -20,6 +23,14 @@ contract MockInvariantHousePool is IHousePool {
     ) {
         usdc = MockUSDC(_usdc);
         engine = _engine;
+    }
+
+    function USDC() external view returns (address) {
+        return address(usdc);
+    }
+
+    function ENGINE() external view returns (address) {
+        return engine;
     }
 
     function seedAssets(
@@ -43,6 +54,18 @@ contract MockInvariantHousePool is IHousePool {
         return usdc.balanceOf(address(this));
     }
 
+    function getSettlementFreeUSDC() external view returns (uint256) {
+        ICfdEngineCore host = ICfdEngineCore(engine);
+        (uint256 longMaxProfitUsdc,,,) = host.sides(0);
+        (uint256 shortMaxProfitUsdc,,,) = host.sides(1);
+        uint256 maxLiabilityUsdc = longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
+        uint256 reservedUsdc = maxLiabilityUsdc + host.totalTraderClaimBalanceUsdc()
+            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, host.settlementBufferBps())
+            + pendingRecapitalizationUsdc + pendingTradingRevenueUsdc;
+        uint256 cashUsdc = usdc.balanceOf(address(this));
+        return cashUsdc > reservedUsdc ? cashUsdc - reservedUsdc : 0;
+    }
+
     function currentLpEpoch() external view returns (uint256) {
         return block.timestamp / 1 hours;
     }
@@ -62,11 +85,16 @@ contract MockInvariantHousePool is IHousePool {
     }
 
     function recordClaimantInflow(
-        uint256,
-        IHousePool.ClaimantInflowKind,
+        uint256 amountUsdc,
+        IHousePool.ClaimantInflowKind kind,
         IHousePool.ClaimantInflowCashMode
-    ) external view {
+    ) external {
         _requireAuthorized();
+        if (kind == IHousePool.ClaimantInflowKind.Recapitalization) {
+            pendingRecapitalizationUsdc += amountUsdc;
+        } else {
+            pendingTradingRevenueUsdc += amountUsdc;
+        }
     }
 
     function _requireAuthorized() internal view {

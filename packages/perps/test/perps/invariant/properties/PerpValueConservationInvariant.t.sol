@@ -86,8 +86,9 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
         _open(FULL_CLOSE_COUNTERPARTY, CfdTypes.Side.SHORT, 100_000e18, 50_000e6, 1e8);
 
         uint256 executionPrice = bound(executionPriceFuzz, 1.8e8, 1.99e8);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(executionPrice, uint64(block.timestamp));
+        engine.updateMarkPrice(executionPrice, uint64(vm.getBlockTimestamp()));
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(FAILED_CLOSE_KEEPER);
         bool expectSlippage = executionPriceFuzz % 2 == 0;
@@ -270,7 +271,7 @@ contract PerpValueConservationHandler is RecordedOrderReceipts {
 
         vm.warp(block.timestamp + elapsed);
         vm.prank(address(router));
-        engine.updateMarkPrice(checkpointPrice, uint64(block.timestamp));
+        engine.updateMarkPrice(checkpointPrice, uint64(vm.getBlockTimestamp()));
         uint256 minimumHistoricalCarryUsdc = _pendingIndexedCarryUsdc(CARRY_TRADER);
 
         usdc.mint(CARRY_TRADER, 1);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {HousePool} from "@plether/perps/HousePool.sol";
 import {OrderLifecycleBook} from "@plether/perps/OrderLifecycleBook.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
@@ -145,7 +146,9 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
     }
 
     function test_ConstructorRejectsRouterSettlementPoolDifferentFromEnginePool() public {
-        address wrongPool = address(0xBADF00D);
+        // Pass the router's pool checks while retaining a different pool from engine.pool().
+        address wrongPool =
+            address(new HousePool(address(usdc), address(engine), address(housePoolRedemptionMathSidecar)));
         SettlementMonitorOracleBindingMock wrongOracle =
             new SettlementMonitorOracleBindingMock(address(engine), wrongPool, address(baseMockPyth));
         OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
@@ -449,6 +452,17 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
         _openMonitorPosition();
         vm.warp(pool.lpEpochStart(observedEpoch));
+        SettlementMonitorViewTypes.SettlementStatus memory stale = monitorLens.getSettlementStatus(observedEpoch);
+        assertFalse(stale.markFresh);
+        assertEq(
+            uint8(stale.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh)
+        );
+        assertFalse(
+            _hasOperationalBlocker(
+                stale.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
+            ),
+            "stale cached mark must not block an atomic refresh"
+        );
         _setCurrentBasket(110_000_000, 50_000, block.timestamp);
 
         SettlementMonitorViewTypes.SettlementStatus memory status = monitorLens.getSettlementStatus(observedEpoch);
@@ -494,13 +508,13 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             uint8(SettlementMonitorViewTypes.ExecutionPath.AtomicOracleRefresh)
         );
         assertEq(early.status.clock.minimumAtomicPublishTime, boundary);
-        assertTrue(early.oracle.readSucceeded);
-        assertTrue(early.oracle.policyValid);
+        assertFalse(early.oracle.readSucceeded);
+        assertFalse(early.oracle.policyValid);
         assertFalse(early.oracle.publishTimeMeetsEpochFloor);
         assertTrue(
             _hasOperationalBlocker(
                 early.status.operationalBlockerMask,
-                SettlementMonitorViewTypes.OperationalBlocker.OracleBeforeEpochBoundary
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredDependencyUnknown
             )
         );
         assertFalse(early.observationComplete);
@@ -544,7 +558,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(uint8(fresh.requiredExecutionPath), uint8(SettlementMonitorViewTypes.ExecutionPath.CachedMark));
     }
 
-    function test_FrozenStaleRecoveryDoesNotRequireCurrentRoundHourPublishFloor() public {
+    function test_FrozenStaleRecoveryRequiresFreshEngineMarkWithoutRoundHourFloor() public {
         uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
         _openMonitorPosition();
         vm.warp(SATURDAY_FROZEN);
@@ -567,16 +581,28 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
 
         SettlementMonitorViewTypes.SettlementObservation memory observation =
             monitorLens.getSettlementObservation(observedEpoch);
-        assertTrue(observation.oracle.policyValid);
-        assertEq(observation.oracle.publishTime, preBoundaryPublishTime);
-        assertTrue(observation.oracle.publishTimeMeetsEpochFloor);
+        assertFalse(observation.oracle.policyValid);
+        assertEq(observation.oracle.failureSelector, IPletherOracle.PletherOracle__StalePrice.selector);
+        assertFalse(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask, SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
+            )
+        );
+        assertTrue(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            ),
+            "the actual frozen-oracle age rejection must remain visible"
+        );
+        assertFalse(observation.oracle.publishTimeMeetsEpochFloor);
         assertFalse(
             _hasOperationalBlocker(
                 observation.status.operationalBlockerMask,
                 SettlementMonitorViewTypes.OperationalBlocker.OracleBeforeEpochBoundary
             )
         );
-        assertTrue(observation.observationComplete);
+        assertFalse(observation.observationComplete);
     }
 
     function test_RequiredInvalidOracleIsFailSoftAndNotActionable() public {
@@ -588,7 +614,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         SettlementMonitorViewTypes.OracleStatus memory oracleStatus = monitorLens.getPoolReconcileOracleStatus();
         assertFalse(oracleStatus.readSucceeded);
         assertFalse(oracleStatus.policyValid);
-        assertEq(oracleStatus.failureSelector, IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector);
+        assertEq(oracleStatus.failureSelector, IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
         assertTrue(oracleStatus.failureHash != bytes32(0));
         assertEq(oracleStatus.dependencyFailureMask, 0, "recognized oracle rejection is not an unreadable dependency");
 
@@ -609,7 +635,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(
             uint8(observation.health.state),
             uint8(SettlementMonitorViewTypes.HealthState.Healthy),
-            "bad current feed data is operational, not structural health corruption"
+            "uninitialized accepted basket is operational, not structural health corruption"
         );
     }
 
@@ -954,6 +980,34 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
         assertFalse(observation.observationComplete);
         assertEq(observation.completeObservationDigest, bytes32(0));
+    }
+
+    function test_InvalidInverseConfidenceIsRecognizedOraclePolicyFailure() public {
+        uint256 observedEpoch = _requestDeposit(juniorVault, ALICE, 25_000e6);
+        _openMonitorPosition();
+        vm.warp(pool.lpEpochStart(observedEpoch));
+        vm.mockCallRevert(
+            address(router.pletherOracle()),
+            abi.encodeWithSelector(IPletherOracle.getLatestPoolReconcilePrice.selector),
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__InvalidInverseConfidence.selector,
+                BASE_PYTH_FEED_A,
+                int64(100_000_000),
+                uint64(100_000_000)
+            )
+        );
+
+        SettlementMonitorViewTypes.SettlementObservation memory observation =
+            monitorLens.getSettlementObservation(observedEpoch);
+
+        assertEq(observation.oracle.failureSelector, IPletherOracle.PletherOracle__InvalidInverseConfidence.selector);
+        assertEq(observation.oracle.dependencyFailureMask, 0, "canonical policy rejection is readable");
+        assertTrue(
+            _hasOperationalBlocker(
+                observation.status.operationalBlockerMask,
+                SettlementMonitorViewTypes.OperationalBlocker.RequiredOracleInvalid
+            )
+        );
     }
 
     function test_WrongModeOraclePolicyErrorIsMalformedDependency() public {
@@ -1645,7 +1699,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
     }
 
-    function test_MaturedJuniorRedemptionMakesSeniorActivationUnconfirmed() public {
+    function test_MaturedJuniorRedemptionCannotDisplaceSeniorCommitment() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
         config.maxSeniorExposureUsdc = TEST_MAX_SENIOR_EXPOSURE_USDC;
@@ -1675,11 +1729,11 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
             ),
             "pre-redemption capacity remains valid"
         );
-        assertTrue(
+        assertFalse(
             _hasDeferral(
                 status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.ActivationNotConfirmed
             ),
-            "Junior funding can reduce Senior capacity before activation"
+            "Junior funding preserves the Senior commitment and cannot defer its activation"
         );
         assertFalse(
             _hasDeferral(
@@ -1689,10 +1743,10 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
-        assertGt(result.juniorFundedAssets, 0);
-        assertEq(result.seniorDepositAssets, 0);
-        assertEq(seniorVault.pendingDepositRequest(observedEpoch, BOB), reservation);
-        assertFalse(pool.areSeniorDepositReservationsWithinLimits());
+        assertEq(result.juniorFundedAssets, 0, "full-cap Senior commitment leaves no Junior exit headroom");
+        assertEq(result.seniorDepositAssets, reservation);
+        assertEq(seniorVault.claimableDepositRequest(observedEpoch, BOB), reservation);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
 
     function test_NoCodePlannerCannotReportHealthyOrCompleteConfig() public {
@@ -2394,7 +2448,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         );
     }
 
-    function test_UnreadableSeniorReservationGateDoesNotPoisonJuniorDeferral() public {
+    function test_UnreadableAdmissionCapacityDiagnosticDoesNotDeferCommittedDeposits() public {
         vm.mockCallRevert(
             address(pool),
             abi.encodeWithSelector(bytes4(keccak256("areSeniorDepositReservationsWithinLimits()"))),
@@ -2404,14 +2458,17 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         SettlementMonitorViewTypes.SettlementStatus memory status =
             monitorLens.getSettlementStatus(pool.currentLpEpoch());
 
-        assertTrue(
-            _hasDeferral(status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown)
+        assertFalse(
+            _hasDeferral(
+                status.seniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown
+            ),
+            "live admission headroom is irrelevant to an accepted Senior commitment"
         );
         assertFalse(
             _hasDeferral(
                 status.juniorDepositDeferralMask, SettlementMonitorViewTypes.DepositDeferral.DependencyUnknown
             ),
-            "senior reservation evidence is irrelevant to Junior activation"
+            "Senior admission headroom is irrelevant to Junior activation"
         );
     }
 
@@ -2524,7 +2581,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertTrue(pool.canSettleDepositEntries(), "the projected and committed gates must agree");
     }
 
-    function test_ConservativeActivationGateReopensAfterSeniorRedemptionRoundingCure() public {
+    function test_SeniorRedemptionPreservesExistingImpairmentAndDefersCommittedDeposit() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
         pool.proposePoolConfig(config);
@@ -2541,31 +2598,28 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         usdc.burn(address(pool), pool.rawAssets() - (pool.seniorPrincipal() - 1));
         vm.prank(address(juniorVault));
         pool.reconcile();
-        assertEq(
-            pool.seniorHighWaterMark() - pool.seniorPrincipal(),
-            1,
-            "fixture must create the one-atom impairment cured by redemption rounding"
-        );
+        assertEq(pool.seniorHighWaterMark() - pool.seniorPrincipal(), 1, "fixture must create a one-atom impairment");
         assertFalse(pool.canSettleDepositEntries());
 
         vm.warp(pool.lpEpochStart(observedEpoch));
         IHousePool.LpEpochSettlementResult memory firstPass = _settleLpEpochForTest();
         assertGt(firstPass.seniorFundedAssets, 0, "the matured Senior redemption must still be funded");
-        assertTrue(firstPass.entriesDeferred, "tranche-specific capacity must keep the Senior deposit pending");
+        assertEq(firstPass.seniorDepositAssets, 0, "existing impairment must still defer the admitted commitment");
+        assertTrue(firstPass.entriesDeferred);
         assertEq(
-            pool.seniorPrincipal(),
-            pool.seniorHighWaterMark(),
-            "Senior redemption rounding must cure the one-atom impairment"
+            pool.seniorHighWaterMark() - pool.seniorPrincipal(),
+            1,
+            "conservative HWM rounding must preserve the remaining impairment"
         );
         assertEq(
             monitorLens.getSettlementStatus(observedEpoch).senior.observedDepositPendingAssets,
             1e6,
-            "the independently capacity-constrained Senior deposit must remain pending"
+            "the committed Senior deposit should remain pending"
         );
-        assertTrue(pool.canSettleDepositEntries(), "the conservative common gate may reopen after Senior funding");
+        assertFalse(pool.canSettleDepositEntries(), "the common gate must remain closed while Senior is impaired");
     }
 
-    function test_SettlementRechecksActivationGateAfterSeniorRedemptionCreatesImpairment() public {
+    function test_SeniorVirtualOffsetRedemptionPreservesHealthyActivationGate() public {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 0;
         pool.proposePoolConfig(config);
@@ -2621,11 +2675,11 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
         assertEq(result.seniorFundedShares, redeemShares);
         assertEq(result.seniorFundedAssets, seniorBootstrapAssets - 1);
-        assertEq(pool.seniorPrincipal(), 1, "virtual-offset pricing leaves one principal atom");
-        assertEq(pool.seniorHighWaterMark(), 2, "pro-rata HWM removal leaves two protected atoms");
-        assertEq(result.seniorDepositAssets, 0, "post-redemption impairment must block activation");
-        assertTrue(result.entriesDeferred);
-        assertEq(seniorVault.pendingDepositRequest(observedEpoch, BOB), 1e6);
+        assertEq(pool.seniorPrincipal(), 1 + 1e6, "one retained atom plus the activated Senior deposit");
+        assertEq(pool.seniorHighWaterMark(), pool.seniorPrincipal(), "virtual offsets must not create impairment");
+        assertEq(result.seniorDepositAssets, 1e6, "healthy Senior must permit the committed deposit to activate");
+        assertFalse(result.entriesDeferred);
+        assertEq(seniorVault.pendingDepositRequest(observedEpoch, BOB), 0);
     }
 
     function test_JuniorZeroPrincipalDoesNotFabricateACommonActivationDeferral() public {
@@ -2758,7 +2812,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(health.juniorActualShareEscrow, requestedShares - 1);
     }
 
-    function test_ValidFrozenSeniorFeeRetainedAboveHwmIsNotAHealthFault() public {
+    function test_FrozenSeniorFeeRemainsProtectedAndHealthy() public {
         _fundSenior(ALICE, 500_000e6);
         _fundJunior(BOB, 500_000e6);
         vm.warp(SATURDAY_FROZEN);
@@ -2772,7 +2826,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         engine.updateMarkPrice(100_000_000, uint64(block.timestamp));
         _settleLpEpochForTest();
 
-        assertGt(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "frozen fee should be retained by Senior");
+        assertEq(pool.seniorPrincipal(), pool.seniorHighWaterMark(), "retained frozen fee must remain protected");
         SettlementMonitorViewTypes.SettlementHealth memory health = monitorLens.getSettlementHealth();
         assertEq(uint8(health.state), uint8(SettlementMonitorViewTypes.HealthState.Healthy));
         assertEq(health.criticalFaultMask, 0);

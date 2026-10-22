@@ -398,8 +398,9 @@ contract OracleEthConservationHandler is Test {
         _advance(commits[0] + 1);
         _policy(closeRegime == 1, closeRegime != 0);
         uint256 parses = closeRegime == 1 ? 0 : 1;
-        uint256 funding = (parses + 1) * activeFee;
-        if (!_single(orderIds[0], _data(true), funding + excess, _expected(parses, 1, 0, 1))) {
+        uint256 updates = closeRegime == 1 ? 0 : 1;
+        uint256 funding = (parses + updates) * activeFee;
+        if (!_single(orderIds[0], _data(true), funding + excess, _expected(parses, updates, 0, 1))) {
             return;
         }
         (uint256 size,,,,,,) = engine.positions(trader);
@@ -739,7 +740,7 @@ contract OracleEthConservationHandler is Test {
     function _checkQuote(
         bytes[] memory data
     ) private {
-        if (data.length != 0 && oracle.getOrderExecutionFee(data) != activeFee * (activeFrozen ? 1 : 2)) {
+        if (data.length != 0 && oracle.getOrderExecutionFee(data) != (activeFrozen ? 0 : 2 * activeFee)) {
             _fail(16);
         }
     }

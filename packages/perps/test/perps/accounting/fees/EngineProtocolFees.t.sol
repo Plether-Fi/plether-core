@@ -8,6 +8,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -103,6 +104,49 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         );
     }
 
+    function test_OpenFeeTopUp_DoesNotSpendPendingRecapitalization() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0.0005e18;
+        _setRiskParams(params);
+
+        address longAccount = address(0xD311);
+        address shortAccount = address(0xD312);
+        uint256 size = 100_000e18;
+        uint256 reservedRecapitalizationUsdc = 1_000_000e6;
+        _fundTrader(longAccount, 20_000e6);
+        _fundTrader(shortAccount, 20_000e6);
+        _open(longAccount, CfdTypes.Side.LONG, size, 10_000e6, 1e8);
+
+        usdc.mint(address(pool), reservedRecapitalizationUsdc);
+        vm.prank(address(engine));
+        pool.recordClaimantInflow(
+            reservedRecapitalizationUsdc,
+            IHousePool.ClaimantInflowKind.Recapitalization,
+            IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        uint256 cashToDrainUsdc = pool.totalAssets() - reservedRecapitalizationUsdc;
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), cashToDrainUsdc);
+        assertEq(pool.getFreeUSDC(), 0, "Recapitalization reserves the remaining cash");
+
+        ICfdEngineTypes.OpenPreview memory preview =
+            engineLens.previewOpen(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
+        assertTrue(preview.valid, "Skew-healing open should remain valid");
+        assertGt(preview.tradeCostUsdc, 0, "Trade cost should fund part of the execution fee");
+        assertLt(uint256(preview.tradeCostUsdc), preview.executionFeeUsdc, "Setup requires a pool-funded fee shortfall");
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        _open(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
+
+        assertEq(pool.totalAssets(), reservedRecapitalizationUsdc, "Fee top-up must preserve recapitalization cash");
+        assertEq(pool.pendingRecapitalizationUsdc(), reservedRecapitalizationUsdc);
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            uint256(preview.tradeCostUsdc),
+            "Only the directly collected trade cost reaches the treasury"
+        );
+    }
+
     function test_ProtocolFees_CreditTreasuryMargin() public {
         address account = address(uint160(1));
         _fundTrader(account, 5000 * 1e6);
@@ -140,21 +184,27 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
         clearinghouse.withdraw(treasury, fees);
     }
 
-    function test_SetProtocolTreasury_RevertsWhenCurrentTreasuryHasBalance() public {
+    function test_SetProtocolTreasury_KeepsExistingBalanceWithOldTreasury() public {
         address oldTreasury = engine.protocolTreasury();
         address newTreasury = address(0xFEE99);
 
         _fundProtocolTreasury(1e6);
-
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__ProtocolTreasuryBalanceNotEmpty.selector);
         engine.setProtocolTreasury(newTreasury);
 
-        assertEq(engine.protocolTreasury(), oldTreasury, "Treasury should not rotate while old balance remains");
-        assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
-            1e6,
-            "Existing treasury balance should remain reported"
-        );
+        assertEq(engine.protocolTreasury(), newTreasury, "Treasury should rotate despite the old balance");
+        assertEq(clearinghouse.balanceUsdc(oldTreasury), 1e6, "Old treasury retains its balance");
+        assertEq(clearinghouse.balanceUsdc(newTreasury), 0, "New treasury starts empty");
+
+        address account = address(0xFEE9A);
+        _fundTrader(account, 5000e6);
+        _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
+        assertEq(clearinghouse.balanceUsdc(newTreasury), 40e6, "Future fees go to the new treasury");
+        assertEq(clearinghouse.balanceUsdc(oldTreasury), 1e6, "Old balance stays with the old treasury");
+
+        uint256 oldWalletBalance = usdc.balanceOf(oldTreasury);
+        vm.prank(oldTreasury);
+        clearinghouse.withdraw(oldTreasury, 1e6);
+        assertEq(usdc.balanceOf(oldTreasury), oldWalletBalance + 1e6, "Old treasury can withdraw its balance");
     }
 
     function test_SetProtocolTreasury_AllowsRotationAfterCurrentTreasuryBalanceIsWithdrawn() public {

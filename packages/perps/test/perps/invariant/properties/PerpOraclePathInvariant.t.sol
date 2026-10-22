@@ -42,9 +42,14 @@ contract PerpOraclePathHandler is Test {
     uint256 public refreshAttempts;
     uint256 public successfulRefreshes;
     uint256 public expectedStaleRejections;
+    uint256 public expectedParserRejections;
+    uint256 public expectedMissingMarkRejections;
     uint256 public expectedDivergenceRejections;
     uint256 public expectedZeroBasketRejections;
     uint256 public expectedOutOfOrderRejections;
+    uint256 internal acceptedTimeA;
+    uint256 internal acceptedTimeB;
+    uint256 internal acceptedBasketPrice;
     bool internal acceptEthRefunds;
 
     struct RefreshInput {
@@ -158,8 +163,8 @@ contract PerpOraclePathHandler is Test {
     ) external {
         RefreshInput memory input;
         input.price = bound(priceFuzz, 1, 3e8);
-        // Mark refresh relaxes both age and divergence only while frozen, not during a live FAD shoulder.
-        // Read configuration and calendar state, never the production freshness-policy implementation.
+        // Live signed data is bounded by both the mode staleness limit and a 15-second parse window.
+        // Frozen refreshes replay the Engine mark without parsing the supplied payload.
         uint256 limit =
             engine.isOracleFrozen() ? engine.fadMaxStaleness() : pletherOracle.orderExecutionStalenessLimit();
         uint256 age = bound(ageFuzz, 0, limit + 120);
@@ -167,7 +172,8 @@ contract PerpOraclePathHandler is Test {
         input.publishTimeA = block.timestamp > age ? block.timestamp - age : 0;
         input.publishTimeB = input.publishTimeA > divergence ? input.publishTimeA - divergence : 0;
         input.overpay = bound(overpayFuzz, 0, 0.05 ether);
-        input.expectedRevert = _expectedRefreshRevert(input, limit);
+        bool frozen = engine.isOracleFrozen();
+        input.expectedRevert = _expectedRefreshRevert(input, limit, frozen);
 
         mockPyth.setPrice(feedIds[0], int64(uint64(input.price)), int32(-8), input.publishTimeA);
         mockPyth.setPrice(feedIds[1], int64(uint64(input.price)), int32(-8), input.publishTimeB);
@@ -189,13 +195,19 @@ contract PerpOraclePathHandler is Test {
             }
 
             ++successfulRefreshes;
-            uint256 basketPrice = (input.price / 2) * 2;
-            ghostExpectedMarkPrice = basketPrice > capPrice ? capPrice : basketPrice;
-            ghostExpectedMarkTime = uint64(input.publishTimeB);
-            if (rejectRefund && input.overpay > 0) {
-                ghostPendingRefundEth += input.overpay;
+            if (!frozen) {
+                uint256 basketPrice = (input.price / 2) * 2;
+                ghostExpectedMarkPrice = basketPrice > capPrice ? capPrice : basketPrice;
+                ghostExpectedMarkTime = uint64(input.publishTimeA);
+                acceptedTimeA = input.publishTimeA;
+                acceptedTimeB = input.publishTimeB;
+                acceptedBasketPrice = basketPrice;
+            }
+            uint256 refunded = input.overpay + (frozen ? mockPyth.mockFee() : 0);
+            if (rejectRefund && refunded > 0) {
+                ghostPendingRefundEth += refunded;
             } else {
-                ghostDirectRefundEth += input.overpay;
+                ghostDirectRefundEth += refunded;
             }
         } catch (bytes memory err) {
             // Require the exact error and argument values in validation order, including ABI payload length.
@@ -205,6 +217,10 @@ contract PerpOraclePathHandler is Test {
             bytes4 selector = _revertSelector(err);
             if (selector == IPletherOracle.PletherOracle__StalePrice.selector) {
                 ++expectedStaleRejections;
+            } else if (selector == bytes4(keccak256("Error(string)"))) {
+                ++expectedParserRejections;
+            } else if (selector == IPletherOracle.PletherOracle__NoAcceptedBasket.selector) {
+                ++expectedMissingMarkRejections;
             } else if (selector == IPletherOracle.PletherOracle__PublishTimeDivergence.selector) {
                 ++expectedDivergenceRejections;
             } else if (selector == IPletherOracle.PletherOracle__ZeroBasketPrice.selector) {
@@ -217,19 +233,40 @@ contract PerpOraclePathHandler is Test {
 
     function _expectedRefreshRevert(
         RefreshInput memory input,
-        uint256 limit
+        uint256 limit,
+        bool frozen
     ) internal view returns (bytes memory) {
-        // Feed-age validation precedes basket construction; zero basket precedes cached-mark ordering.
-        for (uint256 i; i < 2; ++i) {
-            uint256 publishTime = i == 0 ? input.publishTimeA : input.publishTimeB;
-            if (block.timestamp - publishTime > limit) {
+        if (frozen) {
+            uint256 markTime = engine.lastMarkTime();
+            if (markTime == 0 || engine.lastMarkPrice() == 0) {
+                return abi.encodeWithSelector(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
+            }
+            if (block.timestamp - markTime > limit) {
                 return abi.encodeWithSelector(
                     IPletherOracle.PletherOracle__StalePrice.selector,
                     IPletherOracle.PriceMode.MarkRefresh,
-                    feedIds[i],
-                    publishTime,
+                    bytes32(0),
+                    markTime,
                     limit,
                     block.timestamp
+                );
+            }
+            return new bytes(0);
+        }
+        uint256 parseWindow = limit < 15 ? limit : 15;
+        uint256 cutoff = block.timestamp > parseWindow ? block.timestamp - parseWindow : 1;
+        for (uint256 i; i < 2; ++i) {
+            uint256 publishTime = i == 0 ? input.publishTimeA : input.publishTimeB;
+            if (publishTime < cutoff) {
+                return abi.encodeWithSignature("Error(string)", "outside range");
+            }
+        }
+        for (uint256 i; i < 2; ++i) {
+            uint256 publishTime = i == 0 ? input.publishTimeA : input.publishTimeB;
+            uint256 previousTime = i == 0 ? acceptedTimeA : acceptedTimeB;
+            if (previousTime != 0 && publishTime < previousTime) {
+                return abi.encodeWithSelector(
+                    IPletherOracle.PletherOracle__FeedTimeOutOfOrder.selector, feedIds[i], publishTime, previousTime
                 );
             }
         }
@@ -242,13 +279,32 @@ contract PerpOraclePathHandler is Test {
                 limit
             );
         }
-        if ((input.price / 2) * 2 == 0) {
+        uint256 rawBasketPrice = (input.price / 2) * 2;
+        if (rawBasketPrice == 0) {
             return abi.encodeWithSelector(IPletherOracle.PletherOracle__ZeroBasketPrice.selector);
         }
-        uint64 lastMarkTime = engine.lastMarkTime();
-        if (input.publishTimeB < lastMarkTime) {
+        if (acceptedTimeA != 0 && input.publishTimeA == acceptedTimeA && rawBasketPrice != acceptedBasketPrice) {
             return abi.encodeWithSelector(
-                IPletherOracle.PletherOracle__PriceOutOfOrder.selector, uint64(input.publishTimeB), lastMarkTime
+                IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector,
+                input.publishTimeA,
+                rawBasketPrice,
+                acceptedBasketPrice
+            );
+        }
+        uint64 lastMarkTime = engine.lastMarkTime();
+        if (input.publishTimeA < lastMarkTime) {
+            return abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__PriceOutOfOrder.selector, uint64(input.publishTimeA), lastMarkTime
+            );
+        }
+        uint256 basketPrice = (input.price / 2) * 2;
+        basketPrice = basketPrice > capPrice ? capPrice : basketPrice;
+        if (input.publishTimeA == lastMarkTime && basketPrice != engine.lastMarkPrice()) {
+            return abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__EqualTimeMarkMismatch.selector,
+                input.publishTimeA,
+                basketPrice,
+                engine.lastMarkPrice()
             );
         }
         return new bytes(0);
@@ -262,7 +318,7 @@ contract PerpOraclePathHandler is Test {
         acceptEthRefunds = true;
         uint256 pending = ghostPendingRefundEth;
         uint256 beforeBalance = address(this).balance;
-        pletherOracle.claimEthRefund();
+        routerAdmin.claimBalance();
         uint256 claimed = address(this).balance - beforeBalance;
         assertEq(claimed, pending, "claim must transfer the full stranded ETH amount");
         ghostPendingRefundEth = 0;
@@ -364,29 +420,31 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
 
     function test_RefreshLiveAgeBoundaryAndFeedValidationOrder() public {
         assertFalse(engine.isOracleFrozen());
-        uint256 limit = pletherOracle.orderExecutionStalenessLimit();
-        handler.refreshMark(1e8, limit, 0, 0, false);
-        assertEq(engine.lastMarkTime(), block.timestamp - limit);
-        handler.refreshMark(1e8, limit + 1, 0, 0, false);
-        handler.refreshMark(1e8, 0, limit + 1, 0, false);
+        handler.refreshMark(1e8, 15, 0, 0, false);
+        assertEq(engine.lastMarkTime(), block.timestamp - 15);
+        handler.refreshMark(1e8, 16, 0, 0, false);
+        handler.refreshMark(1e8, 0, 16, 0, false);
         assertEq(handler.successfulRefreshes(), 1);
-        assertEq(handler.expectedStaleRejections(), 2);
-        assertEq(handler.expectedDivergenceRejections(), 0, "Component age must fail before divergence");
+        assertEq(handler.expectedParserRejections(), 2);
+        assertEq(handler.expectedDivergenceRejections(), 0, "Signed parse bounds precede basket divergence");
         _assertAllInvariants();
     }
 
     function test_RefreshFrozenPolicyAllowsExtendedAgeAndDivergence() public {
+        vm.warp(1_772_834_340); // Friday 21:59 UTC: establish a live mark before the freeze.
+        handler.refreshMark(1e8, 0, 0, 0, false);
+        uint64 establishedMarkTime = engine.lastMarkTime();
         vm.warp(1_772_834_400); // Friday 22:00 UTC: frozen policy begins.
         assertTrue(engine.isOracleFrozen());
         uint256 frozenLimit = engine.fadMaxStaleness();
         uint256 liveLimit = pletherOracle.orderExecutionStalenessLimit();
         handler.refreshMark(1e8, 0, frozenLimit, 0, false);
-        assertEq(engine.lastMarkTime(), block.timestamp - frozenLimit);
+        assertEq(engine.lastMarkTime(), establishedMarkTime);
         handler.refreshMark(1e8, 0, liveLimit + 1, 0, false);
-        assertEq(engine.lastMarkTime(), block.timestamp - liveLimit - 1);
+        assertEq(engine.lastMarkTime(), establishedMarkTime);
         handler.refreshMark(1e8, frozenLimit + 1, 0, 0, false);
-        assertEq(handler.successfulRefreshes(), 2);
-        assertEq(handler.expectedStaleRejections(), 1);
+        assertEq(handler.successfulRefreshes(), 4);
+        assertEq(handler.expectedStaleRejections(), 0);
         _assertAllInvariants();
     }
 
@@ -394,25 +452,23 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         vm.warp(1_772_832_600); // Friday 21:30 UTC: FAD is active before the freeze.
         assertTrue(engine.isFadWindow());
         assertFalse(engine.isOracleFrozen());
-        uint256 limit = pletherOracle.orderExecutionStalenessLimit();
-        handler.refreshMark(1e8, limit + 1, 0, 0, false);
-        handler.refreshMark(1e8, limit, 0, 0, false);
+        handler.refreshMark(1e8, 16, 0, 0, false);
+        handler.refreshMark(1e8, 15, 0, 0, false);
         assertEq(handler.successfulRefreshes(), 1);
-        assertEq(handler.expectedStaleRejections(), 1);
+        assertEq(handler.expectedParserRejections(), 1);
         _assertAllInvariants();
     }
 
     function test_RefreshClassifiesZeroBasketAndOutOfOrderInValidationOrder() public {
-        uint256 limit = pletherOracle.orderExecutionStalenessLimit();
         handler.refreshMark(1e8, 0, 0, 0, false);
-        handler.refreshMark(1, 1, 0, 0, false); // Zero basket precedes an older cached-mark check.
-        handler.refreshMark(1, limit + 1, 0, 0, false); // Stale component precedes zero basket.
-        handler.refreshMark(1e8, 1, 0, 0, false);
+        handler.refreshMark(1, 1, 0, 0, false); // Component regression precedes basket validation.
+        handler.refreshMark(1, 16, 0, 0, false); // Signed parser bounds precede basket validation.
         handler.refreshMark(1, 0, 0, 0, false);
+        handler.refreshMark(2e8, 0, 0, 0, false); // Equal-time basket mutation is forbidden.
         assertEq(handler.successfulRefreshes(), 1);
-        assertEq(handler.expectedZeroBasketRejections(), 2);
-        assertEq(handler.expectedStaleRejections(), 1);
-        assertEq(handler.expectedOutOfOrderRejections(), 1);
+        assertEq(handler.expectedZeroBasketRejections(), 1);
+        assertEq(handler.expectedParserRejections(), 1);
+        assertEq(handler.expectedOutOfOrderRejections(), 2);
         _assertAllInvariants();
     }
 
@@ -482,11 +538,13 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
 
     function _assertInvariant_OracleTracksOnlyClaimableFailedRefundEth() internal view {
         assertEq(
-            router.pletherOracle().claimableEth(address(handler)),
+            OrderRouterAdmin(router.admin()).claimableEth(address(handler)),
             handler.ghostPendingRefundEth(),
-            "oracle claimable ETH must equal failed refund total"
+            "router claimable ETH must equal failed refund total"
         );
-        assertEq(address(routerAdmin).balance, 0, "router admin must not custody oracle refunds");
+        assertEq(
+            address(routerAdmin).balance, handler.ghostPendingRefundEth(), "router admin holds only deferred refunds"
+        );
     }
 
     function _assertInvariant_OracleStalenessLimitsRemainPositive() internal view {
@@ -508,7 +566,8 @@ contract PerpOraclePathInvariantTest is BasePerpTest {
         assertEq(
             handler.refreshAttempts(),
             handler.successfulRefreshes() + handler.expectedStaleRejections() + handler.expectedDivergenceRejections()
-                + handler.expectedZeroBasketRejections() + handler.expectedOutOfOrderRejections(),
+                + handler.expectedZeroBasketRejections() + handler.expectedOutOfOrderRejections()
+                + handler.expectedParserRejections() + handler.expectedMissingMarkRejections(),
             "Every completed refresh attempt must have an exact classified outcome"
         );
         _assertInvariant_MarkRefreshStateMatchesLastSuccessfulOracleUpdate();

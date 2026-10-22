@@ -427,9 +427,12 @@ Inspect `nextOrderId` even when `stopReason == None`: the call may have complete
 while a later FIFO head still exists.
 
 Each prepared order executes in an item-local rollback frame. A retryable item failure does not undo an already
-finalized prefix. Oracle/Pyth preparation and the resulting Engine mark update happen in the outer batch frame and
-remain batch-atomic, so agents that require strict progress boundaries should bound `maxOrderId` and separate
-pre-oracle cleanup from price-dependent execution.
+finalized prefix. A historical parser failure stops the batch with `OracleFailure`, preserving that prefix and
+refunding unspent ETH. `HistoricalPriceUnavailable` means at least one feed lacks a qualifying update in the supplied
+payload; fetch another payload and investigate repeated failures rather than assuming no history exists.
+Other Oracle/Pyth preparation failures and the resulting Engine mark update remain batch-atomic, so agents that
+require strict progress boundaries should bound `maxOrderId` and separate pre-oracle cleanup from price-dependent
+execution.
 
 ## Verifying what actually happened
 

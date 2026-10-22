@@ -78,6 +78,16 @@ The release-script `frozenCloseSpreadBps` default is `50` bps (0.50%). Both cons
 The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
 `0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
 
+### Owner-funded recapitalization
+
+`CfdEngine.recapitalizePool(amountUsdc)` is an immediate, owner-only, non-reentrant recovery action.
+The engine owner approves the engine to pull USDC from its own wallet directly into the configured HousePool.
+The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
+`Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
+The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
+automatically cleared. Funding remains available with stale marks, frozen markets, and LP pause or settlement holds.
+`CfdEngineAdmin` retains its configuration-only role.
+
 ### One-time wiring
 
 These are one-time configuration setters rather than mutable governance knobs:
@@ -145,7 +155,7 @@ The owner can act immediately to:
 - pause and unpause `HousePool` LP epoch settlement independently,
 - install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
 - rotate or disable the coordinator guardian,
-- set the protocol treasury account once the previous treasury clearinghouse balance is empty,
+- set the protocol treasury account; existing balances remain withdrawable by their original accounts,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:
@@ -308,8 +318,14 @@ Mitigations:
 - distinct staleness thresholds for order execution, liquidation, engine-side guards, and HousePool freshness,
 - shared normalized basket-price construction across execution paths,
 - timelocked rotation of the router's `PletherOracle` address if the Pyth endpoint or basket-feed set must be replaced,
+- Oracle deployment and Router deployment/rotation reject Pyth endpoints without deployed code; this guards against
+  empty-address misconfiguration, while governance remains responsible for selecting the correct Pyth implementation,
 - conservative weighted basket confidence propagation, a timelocked aggregate pre-cap confidence limit, and side-adverse pricing for execution, equity checks, and liquidation, except that oracle-frozen voluntary closes replace the adverse price shift with the fixed frozen-close spread,
 - component publish-time skew limits so a basket cannot mix fresh and stale legs,
+- live current baskets parse signed prices for every component within a caller-independent window of at most 15
+  seconds; component times cannot regress, equal-time marks cannot change price, and the newest component time
+  advances the protection clock,
+- live LP epoch reconciliation also requires every component to be published after the current epoch boundary,
 - frozen-oracle regime for close liveness during genuine market closure.
 
 Risks:
@@ -373,11 +389,12 @@ governance owns the coordinator and assigns its guardian.
   Router exceed both EIP-170 and its pre-change runtime baseline.
 - HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
   It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
-  projected-wipe, Senior-impairment, or Senior-reservation escape condition, or later activation after recovery.
+  projected wipe, Senior impairment, or explicit settlement hold for a committed Senior request, or later activation
+  after recovery.
 - The independent settlement hold makes every synchronized epoch call revert before mutation, including direct
-  cached/no-position and Router atomic-refresh routes. New deposits, Senior reservations, redemptions, existing
-  cancellations, trading, recapitalization/reconciliation, and already-funded claims remain live. Deposits can
-  accumulate in escrow under unchanged cancellation rules.
+  cached/no-position and Router atomic-refresh routes. It stops new Senior requests and reservations while allowing
+  existing Senior commitments to be refunded. Junior requests, redemptions, trading,
+  recapitalization/reconciliation, and already-funded claims remain live.
 - Trader closes/reductions, liquidations, and already-funded claims are deliberately outside guardian authority.
   Redemption-request-off, a global all-LP-request freeze, corrupted-queue quarantine, emergency pricing, and a
   global protocol freeze do not exist. Actions containing the LP-entry restriction do stop new deposit requests.
@@ -521,9 +538,35 @@ Security properties:
 - batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds
   cap recipient-call gas and defer rejected refunds; a later gas-burning prepared item or refund recipient therefore
   cannot roll back an already finalized batch prefix,
-- Oracle/Pyth preparation and the resulting Engine mark update remain in the outer batch frame. A revert at that
-  boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
+- Unexpected historical parser errors stop the batch with `OracleFailure`, preserving finalized predecessors and
+  refunding the failed call's unspent funding. `HistoricalPriceUnavailable` means the supplied payload contains no
+  qualifying update for at least one feed; it does not prove no such history exists elsewhere.
+- Other Oracle/Pyth preparation failures and the resulting Engine mark update remain in the outer batch frame.
+  A revert at that boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
   `maxOrderId` and separate pre-oracle cleanup from price-dependent execution.
+
+Deferred ETH belongs to the credited beneficiary. `OrderRouterAdmin.claimBalanceTo(recipient)` and
+`PletherOracle.claimEthRefundTo(recipient)` let that beneficiary send its full credit to a nonzero payable recipient,
+including when the beneficiary contract itself cannot receive ETH (LOW-62). Both debit only `msg.sender` before the
+transfer; a failed transfer reverts and preserves the credit. The existing self-claim methods remain available.
+Directed claims emit `EthRefundClaimedTo(beneficiary, recipient, amount)`; the Oracle's legacy self-claim event remains
+unchanged. A beneficiary contract must be capable of invoking the claim API to redirect its refund.
+
+### Known limitation: live basket component selection
+
+A caller supplies signed Pyth updates for each feed in a current live basket. The oracle checks signatures through
+Pyth, per-feed publish-time ordering, freshness, confidence, and the permitted gap between component publish times.
+It cannot establish from those supplied updates that each component is the newest Pyth report available off-chain.
+A caller may therefore choose an older, still-valid signed component within the allowed window and obtain a
+different basket mark. This applies to live mark refresh, liquidation, and LP epoch settlement; historical order
+execution has its separate post-commit parse and 5-second component-gap rule.
+
+Liquidation or LP epoch settlement can consume the selected mark in the same transaction, so a later update cannot
+undo an action already settled. A fork test demonstrated a different accepted mark from a mixed-time basket, but
+did not demonstrate a wrongful liquidation, a different LP payout, or a profitable exploit. Requiring simultaneous
+feed timestamps would impede feeds that publish at different times; tightening the window would reduce, but not
+eliminate, caller choice. This remains a documented limitation of caller-supplied signed updates, with no additional
+protocol change planned on the current evidence.
 
 ### Arbitrum and Pyth clock alignment
 
@@ -696,9 +739,9 @@ Security consequences:
   account mutation is in progress. `HousePool` independently rejects or defers LP actions under its configured mark-age
   and oracle-frozen policy.
 
-Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending deposit is
-cancellable before maturity, and post-maturity cancellation remains available only under the documented
-epoch rejection, projected terminal-wipe, Senior-impairment, or Senior-reservation escape conditions. Shares are
+Ordinary LP entry remains asynchronous: assets are funded into request escrow, a complete pending Junior deposit is
+cancellable before maturity, and an accepted Senior deposit is a firm commitment. Senior refunds require epoch
+rejection, projected terminal wipe, Senior impairment, or an explicit LP settlement hold. Shares are
 minted only after synchronized `HousePool` settlement fixes the batch price. ERC-4626 `deposit` and `mint` only claim
 already activated shares. The one-hour cooldown is timestamped at that successful activation, not at claim. A claim is
 therefore an administrative transfer that propagates the source activation timestamp with
@@ -851,7 +894,8 @@ Security purpose:
 ### Seed and senior-capacity lifecycle gate
 
 The protocol blocks normal live operation until governance finalizes a finite absolute senior limit and a senior-share
-limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated.
+limit below 100%, both tranche seeds exist within those limits, and trading is explicitly activated. Initial trading
+activation also requires no stored or projected unassigned assets and no residual pending claimant assets.
 
 This prevents partially initialized or uncapped live state and ambiguous ownership of early revenue flows.
 
@@ -870,11 +914,12 @@ settlement snapshot:
 - trading, closes, liquidations, claims, carry, and pool accounting can change NAV,
 - governance configuration may change if an already-matured proposal is finalized,
 - oracle state and confidence can change, and
-- cancellation in one tranche or direction can change capacity available to later settlement phases.
+- cancellation in one tranche or direction can change phase budgets or pricing.
 
 Monitoring must therefore simulate current state and treat cutoff-time request totals as upper bounds. In particular,
 the conservative case assumes all redemptions remain and no helpful deposits activate. Cancelling Senior redemptions
-may expose more Junior funding, while cancelling Junior deposits may prevent a Senior deposit from fitting. Indexing,
+may expose more Junior funding, while cancelling Junior deposits can change later activation amounts or prices without
+invalidating an accepted Senior commitment. Indexing,
 alerting, sequencer publication, and transaction inclusion also consume part of the nominal five minutes, so the
 operational reaction window is shorter. `SettlementMonitorLens` reads an explicitly observed epoch so a monitor can
 keep following the closed batch after the request target rolls forward. That argument does not select what the Router
@@ -898,10 +943,10 @@ corruption degrades health without replacing a route that is still known, while 
 critical. Projected deposit deferrals combine the tranche-neutral
 `HousePool.canSettleDepositEntries()` pre-redemption projection with canonical redemption evidence, so residual
 pending claimants remain visible even when an epoch's queued assets are zero. The Lens does not confirm either
-tranche's activation while matured Senior funding can still change principal/HWM rounding, or Senior activation while
-matured Junior funding can reduce reservation capacity. HousePool rechecks the exact gates after redemption funding;
-this prevents a zero-fee
-virtual-offset rounding transition from admitting deposits into newly impaired Senior accounting. The view does not
+tranche's activation while matured Senior funding can still change principal/HWM rounding. Junior funding protects
+accepted Senior reservations and cannot displace their activation. HousePool rechecks the exact gates after redemption funding.
+Senior HWM scales with net principal removed, so healthy withdrawals cannot create impairment through virtual-offset
+pricing or retained fees; conservative rounding can preserve an existing impairment. The view does not
 quote new-request capacity. The facade constructor rejects a Router whose immutable settlement pool differs from
 `Engine.pool()` and deploys a code-size sidecar whose diagnostic builders accept only the constructor-bound
 facade; its public `MONITOR()` binding remains readable, dependency bindings stay internal, and it has no setter or
@@ -928,8 +973,8 @@ constraint in addition to each contract's EIP-170 runtime limit.
 Normal monitoring should poll the lighter `getSettlementStatus(observedEpoch)` view. The composite
 `getSettlementObservation(observedEpoch)` is designed for checkpoints and alert investigation: its ABI return is
 roughly 6 KB and representative `eth_call` execution is about 0.8–1.3 million gas. The Senior deposit-deferral mask
-describes whether pending activation or existing reservation limits are blocked, not how much new Senior capital can
-be admitted; use the canonical admission-capacity view for a new request.
+describes pending activation gates, not how much new Senior capital can be admitted; use the vault admission view for
+request eligibility and `HousePool.getSeniorDepositCapacity()` for mathematical headroom.
 
 `getPoolReconcileOracleStatus()` describes feeds readable at the observation block. It cannot certify a future Hermes
 payload or the fee and publish times used by a later transaction. It requires the updated
@@ -944,6 +989,10 @@ required execution path is advisory rather than an authoritative `canSettle` res
 the exact route-specific call: direct `HousePool.settleLpEpoch(uint256,uint256)` with zero ETH for `CachedMark`, or
 `OrderRouter.settleLpEpoch(bytes[])` with the exact `msg.value` for `AtomicOracleRefresh`. The selected contract and
 EVM rollback frame remain the execution authority.
+
+Cached-mark staleness is reported through `markFresh`, mark age, and the selected execution route. The legacy
+`CachedMarkStale` blocker bit is reserved and no longer emitted. The selected route enforces freshness; failures
+of its required oracle policy or dependencies remain operational blockers.
 
 ### Freshness-gated LP actions
 
@@ -969,8 +1018,9 @@ funding of already-matured redemptions. The settlement result marks entries defe
 live.
 
 The independent settlement hold blocks both funding and activation by reverting the canonical epoch transition. It
-does not block new deposit/redemption requests, Senior reservations, existing cancellation paths, reconciliation, or
-funded claims. It has no automatic expiry and only the HousePool owner can release it.
+also blocks new Senior requests and reservations and permits pending Senior commitments to be refunded. Junior
+deposit and redemption requests, reconciliation, and funded claims remain live. It has no automatic expiry and only
+the HousePool owner can release it.
 
 ### Junior maintenance-fee dilution
 
@@ -1007,19 +1057,19 @@ This removes unpaid senior-coupon debt queues while making the cost of the fixed
 
 Active protected senior exposure is `E = max(projected senior principal, projected senior high-water mark)`. Counted
 admission exposure is `C = E + R`, where `R` is the gross USDC reserved in unfinalized senior deposit epochs. The
-absolute and share admission tests use `C`, while the Junior redemption-funding covenant deliberately uses active `E`
-only.
+absolute and share admission tests use `C`, and the Junior redemption-funding covenant protects the same committed
+exposure `C`.
 Governance sets both an absolute USDC limit and a maximum share of senior-plus-junior claimant capital. The high-water
 term prevents an impaired principal balance from falsely reopening capacity while its restoration entitlement remains.
 
-Senior deposit reservations are provisional. They consume quoted headroom when requested, but the whole outstanding
-reservation book is checked again at finalization. If a timelocked cap reduction or later accounting change makes the
-book invalid, finalization remains blocked and post-maturity cancellation is unlocked so depositors can recover the
-escrowed USDC. Junior redemption funding does not lock against `R`, so a permitted fill can also invalidate the
-provisional book and make it refundable. Integrators must not present a request-time quote as guaranteed finalization.
+Senior deposit reservations are firm once accepted. They consume quoted headroom when requested and settle even if
+later coupon accrual or a cap reduction makes the current reservation book overlimit. New Senior admission then closes.
+Junior redemption funding protects `R` as well as active exposure, so it cannot consume the backing committed to
+pending Seniors. Integrators should present accepted Senior requests as binding commitments, subject to ordinary
+activation gates and the documented safety and settlement-hold refund paths.
 
-The covenant also limits Junior redemption funding; using active `E` and explicitly excluding pending reservations,
-the pool retains enough projected Junior principal that the configured Senior share still holds after the fill.
+The covenant also limits Junior redemption funding; using committed `E + R`, the pool retains enough projected Junior
+principal that the configured Senior share still holds after the fill.
 This is an LP-liquidity restriction, not an extra source of cash or a guarantee that losses cannot impair senior.
 
 Coupon, loss allocation, revenue restoration, and privileged claimant recapitalization remain higher-priority
@@ -1139,12 +1189,26 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 - senior coupon payments are capped by available junior principal,
 - governance can prospectively reduce senior limits below live exposure, closing new senior entry and potentially
   reducing Junior redemption-funding capacity until the covenant is cured; it cannot force existing Senior capital out,
-- pending senior reservations are not grandfathered against later cap or accounting changes, but become refundable if
-  they no longer fit at finalization,
+- accepted senior reservations are grandfathered against later cap or accounting changes; an explicit settlement hold,
+  projected terminal wipe, Senior impairment, or epoch rejection allows escrow recovery,
 - wallet shares remain governed by the latest applicable activation timestamp, so voluntarily combining a newer lot
   with an older wallet balance preserves the newer lot's remaining cooldown. Administrative claims do not manufacture
   a claim-time delay, and the direct route can consume an independently aged source lot without mixing it into the
   wallet. Redemption cancellation or terminal refund still begins a new cooldown when shares return to a wallet.
+
+### Accepted rounding behavior
+
+- **MED-22 — position carry rounding:** Converting a position's carry-index delta to six-decimal USDC rounds down.
+  The checkpoint advances even when the result is zero, without retaining the fractional remainder. Each such
+  conversion can discard less than one USDC atom (`0.000001 USDC`). User-triggered checkpoints, including
+  zero-amount withdrawals, can therefore reduce LP carry revenue; an interval whose entire accrual is below one atom
+  contributes no collectible carry. Practical savings depend on borrow size, utilization, checkpoint frequency, and
+  transaction costs. This rounding behavior is accepted; fractional carry persistence is not planned.
+- **LOW-27 — zero-share Junior maintenance-fee checkpoints:** With a nonzero maintenance-fee rate and sufficiently
+  small raw Junior share supply, the fee for completed chargeable hours can round down to zero shares. The checkpoint
+  boundary still advances, so those hours do not accumulate toward a later fee mint. Mint/burn activity can trigger
+  these checkpoints. This possible undercollection is accepted; fractional fee persistence or deferring zero-share
+  checkpoints is not planned.
 
 ### VPI limitations
 
@@ -1161,6 +1225,14 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 ### Clearinghouse limitations
 
 - V1 is USDC-only cross-margin,
+- the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; settlement USDC
+  is always excluded, including uncredited direct transfers, and rescue does not alter account balances or margin,
+- **LOW-6 — accepted settlement-USDC recovery limitation:** Direct USDC transfers to the clearinghouse outside its
+  deposit APIs do not credit a margin account and remain unrecoverable through the current APIs, including by the
+  owner. They are not allocated to HousePool or LPs. The clearinghouse has no aggregate credited-balance counter
+  with which to safely distinguish recoverable surplus from funds backing account obligations. USDC recovery,
+  aggregate surplus accounting, and allocation of such transfers to LPs are not planned as part of this remediation.
+  Integrations must use the supported `deposit`, `depositMargin`, or `depositFor` APIs to fund margin accounts,
 - non-USDC collateral pricing and staleness policy are intentionally out of scope.
 
 ## Emergency Procedures
@@ -1243,9 +1315,95 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 
 ## Audit Status
 
-The repository records one external pre-audit / security consultation and historical Arbitrum Sepolia deployment
-artifacts. A formal production audit remains pending. Historical deployments do not establish that the current source
-or its immutable contract stack is deployed or production-ready.
+The repository records an external pre-audit / security consultation, the scoped October 2026 finding dispositions
+below, and historical Arbitrum Sepolia deployment artifacts. A formal production audit remains pending. Historical
+deployments do not establish that the current source or its immutable contract stack is deployed or production-ready.
+
+### LP vaults, tranches and claims (October 2026)
+
+**Source:** the supplied `Plether_Labs_Audit_Report_2026-10-16.pdf`, section covering the 16 findings listed below.
+The source PDF is not checked into this repository.
+**Disposition date:** October 21, 2026.
+**Implementation:** [PR #123](https://github.com/Plether-Fi/plether-core/pull/123), runtime source through
+[`89967559`](https://github.com/Plether-Fi/plether-core/commit/899675594d1e043383e10252a8985bac2e5b6271).
+
+All 16 findings have a project disposition: **7 fixed in this branch and 9 explicitly accepted with no further code
+change planned**. These are engineering decisions, not a statement that the report author has retested or closed the
+findings. "Fixed" describes the branch implementation, not a deployment or repair of an existing immutable stack.
+
+#### Fixed findings
+
+| Finding | Implemented resolution | Commit |
+| --- | --- | --- |
+| MED-5 | Both wallet and direct claimable-deposit redemption requests require the target tranche's seed receiver. Maximum-request views agree, preventing new unseeded requests whose terminal refund would need that receiver for share dust. | `efcf629a` |
+| MED-11 | Scale the Senior high-water mark by actual net principal removed, preserving retained fees and proportional impaired recovery protection. Zero funding preserves protection; full principal funding clears it. | `9ab65f41` |
+| MED-19 | Make accepted Senior reservations binding: retain request-time limits, honor booked capacity at activation, and include pending commitments in the Junior withdrawal backing covenant. Rejection, projected wipe, Senior impairment, and an explicit settlement hold retain refund paths. | `86e3c54f` |
+| MED-27 | Require both Pool and Engine reconciliation freshness before a Senior rate change, and reconcile under the old rate before applying the new rate. | `9dbaf0c0` |
+| LOW-39 | Replace balance-dependent third-party share delivery with controller-only delivery. Unsolicited share dust cannot disable the supported controller self-delivery path. | `efcf629a` |
+| LOW-40 | The same controller-only guard prevents deposit/mint claims, redemption cancellations, and redemption-share refunds from imposing a cooldown on a third-party receiver. The guard also applies to zero-share acknowledgements. | `efcf629a` |
+| LOW-72 | Return zero deposit-share estimates when projected deposit-pricing assets are zero with surviving shares. Pending USDC stays visible and cancellable; empty bootstrap and valid accepted Senior reservations still quote normally. | `89967559` |
+
+#### Accepted findings
+
+Acceptance retains the behavior described below. It does not mean that the triggering transaction is impossible or
+that the behavior was removed by another fix.
+
+| Finding | Retained behavior and reason for acceptance |
+| --- | --- |
+| MED-24 | Zero-payout redemption epochs can consume the bounded settlement budget and require extra calls before later epochs are funded. Accepted as an operational backlog concern under regular keeper processing: the cap is 16 epochs per tranche phase, and requests in one epoch aggregate regardless of wallet count. |
+| MED-29 | In a partially funded then refundable epoch, a tiny controller's funded-share allocation can round to zero despite a positive proportional asset amount. Those assets return to the pool; terminal refundable-share dust goes to the seed receiver. Accepted as an impractical tiny-share edge case without an entitlement redesign. |
+| LOW-3 | A partial share-denominated deposit claim can revert when its rounded asset cost consumes the full remaining asset basis. Accepted because the full remainder remains claimable; integrations should favor full-remainder claims. |
+| LOW-4 | A partial asset withdrawal can revert when its rounded share cost consumes the full remaining share basis. Accepted because claiming the full funded remainder avoids this case and a revert preserves the entitlement. |
+| LOW-5 | A tiny asset-denominated deposit claim can round to zero shares and revert. Accepted because a full-remainder claim avoids this case; a failed claim does not consume the entitlement, though it can cost gas. |
+| LOW-13 | Floor-rounded deposit-share residue is burned and funded-redemption asset residue returns to the pool, benefiting remaining holders. Accepted as the deterministic dust policy; no last-claimant remainder allocation is introduced. |
+| LOW-54 | MED-11 removes the healthy-tranche discrepancy. Impaired withdrawals still retain less than one extra USDC base unit of protection per funded settlement pass relative to that step's exact proportional arithmetic. This conservative residual rounding is accepted. |
+| LOW-63 | Repricing partial redemptions from later post-burn state can produce rounding differences or residual share refunds compared with funding in one pass. Accepted at normal operating scales; freezing an epoch price would add state and change how pending shares participate in tranche economics. |
+| LOW-67 | A full-balance dust exit can have shares burned for zero assets when a larger request makes the same epoch fundable but the small controller's asset allocation rounds to zero. Accepted as dust-exit behavior; full-balance exits deliberately bypass the ordinary minimum request size. |
+
+The MED-24 acceptance assumes normal keeper operation and sufficient opportunity to process queued epochs. It does
+not guarantee Junior funding during insufficient liquidity or persistent Senior priority. LOW-54's bound is per
+funded settlement pass (`1` USDC base unit = `$0.000001`); rounding can accumulate and retain a small existing
+impairment. Share-unit value varies, so there is no universal dollar-loss bound for all MED-29/LOW-13 cases.
+For LOW-63, normal changes in profit, loss, and fees between calls are separate from rounding: unfunded shares
+continue to participate in tranche economics. See [LP allocation and dust accounting](ACCOUNTING_SPEC.md).
+
+#### Integration handoff
+
+- Present healthy accepted Senior deposits as commitments. Pending reservations can constrain Junior withdrawals;
+  later cap reductions close new admission but do not revoke existing commitments. Preserve the four refund paths.
+- Seed each tranche before admitting its redemptions; the other tranche's seed and trading activation are separate.
+- Pass `receiver == controller` for deposit/mint share claims, redemption cancellations, and share refunds, including
+  zero-share acknowledgements. Approved operators can still execute for the controller. Update custom-error decoding
+  from `TrancheVault__ThirdPartyDepositForExistingHolder` to `TrancheVault__ReceiverNotController`.
+- Funded USDC claims, pending-deposit USDC cancellations, and ordinary ERC-20 transfers retain their receiver rules.
+- Preserve pending-asset display when a wiped tranche's deposit-share estimate is zero. The lens's
+  `refundableDepositAssets` field continues to represent rejected-epoch refunds, not all cancellable pending deposits.
+  Other admission or activation gates remain separate from the estimate; booked Senior reservations still quote when
+  new-entry capacity is exhausted.
+- Adopt these runtime changes through a coherent fresh-stack deployment and updated ABIs. This PR contains no
+  live-state migration or repair of requests already queued in older non-upgradeable contracts.
+
+#### Validation record and limits
+
+The [test map](test/perps/TEST_MAP.md) identifies the changed behavior tests. PR #123 records the commands and staged
+validation history. The runs below overlap; their counts must not be added as unique test coverage.
+
+- MED-11: the retained-fee loss/recovery regression reproduced a $250 Senior shortfall before the patch. The patched
+  stage passed 130 focused tests, 71 neighboring accounting/capacity tests, and 8 production-compiler tests; healthy
+  and impaired arithmetic fuzz properties and a capacity invariant were included.
+- At `efcf629a`, the MED-5/LOW-39/LOW-40 stage passed 228 LP tests. Coverage includes both redemption admission
+  routes, rollback, post-seed admission, claim aliases, approved operators, receiver dust, zero-share acknowledgements,
+  and funded-USDC receiver freedom. Missing-seed direct-claim and zero-share allocation tests use targeted synthetic
+  fixtures alongside ordinary lifecycle tests.
+- At runtime source `89967559`, 149 focused tests passed, including projected and reconciled Senior/Junior wipes,
+  pending-asset visibility, full cancellation refunds, backing restoration, empty bootstrap, accepted reservations at
+  exhausted capacity, and accounting/settlement controls. The preceding 228-test LP run predates LOW-72.
+- Production runtime-size checks passed at `89967559`: HousePool **23,911 bytes**, TrancheVault **23,960 bytes**,
+  each below the repository's **24,000-byte** target. Changed-file formatting, diff checks, inventory checks, and the
+  test-map check passed (216 exact references).
+- No full repository suite, coverage report, live/fork deployment, or frontend/SDK end-to-end check was completed on
+  the final combined runtime source. GitHub returned no PR status checks for `89967559` when inspected on October 21,
+  2026. Local results do not establish a green CI result. The subsequent handoff update changes documentation only.
 
 ### SC Audit Studio Pre-Audit (April-May 2026)
 

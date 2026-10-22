@@ -773,9 +773,9 @@ Senior deposits are also subject to an absolute exposure cap and a maximum
 Senior share of protected capital. Admission counts the larger of Senior
 principal and its high-water mark, plus all pending Senior deposit reservations.
 Only reconciled Junior principal supplies subordination; pending Junior deposits
-do not. Reservations prevent overbooking and are revalidated at activation.
-Junior redemption funding must preserve the active Senior ratio covenant,
-while a passive breach caused by coupon, losses, or a governance reduction
+do not. Accepted reservations are firm commitments and remain activatable after
+later capacity drift. Junior redemption funding must protect active and reserved
+Senior exposure under the ratio covenant, while a passive breach caused by coupon, losses, or a governance reduction
 blocks new Senior exposure without repricing existing shares. These are
 admission and liquidity controls, not changes to the waterfall.
 

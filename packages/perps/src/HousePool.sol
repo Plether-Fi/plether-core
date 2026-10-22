@@ -24,6 +24,7 @@ import {HousePoolSeniorCapacityLib} from "@plether/perps/libraries/HousePoolSeni
 import {HousePoolTrancheGateLib} from "@plether/perps/libraries/HousePoolTrancheGateLib.sol";
 import {HousePoolWaterfallAccountingLib} from "@plether/perps/libraries/HousePoolWaterfallAccountingLib.sol";
 import {HousePoolWithdrawalPreviewLib} from "@plether/perps/libraries/HousePoolWithdrawalPreviewLib.sol";
+import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 
 /// @dev Pool-only queue hooks implemented by both asynchronous tranche vaults.
 interface ITrancheVaultEpochSettlement {
@@ -258,6 +259,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     // ADMIN (set-once pattern)
     // ==========================================
 
+    /// @notice Ownership cannot be renounced because governance must retain emergency recovery authority.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
+    }
+
     /// @notice Sets the senior tranche vault address once.
     /// @dev Only the owner may call. The address cannot be zero and cannot be changed after it is set.
     /// @param _vault Senior tranche ERC4626 vault address
@@ -313,9 +319,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Finalizes the proposed pool config after the timelock expires.
-    /// @dev Only the owner may call. Senior-rate changes require a fresh mark under the current staleness limit
-    ///      and checkpoint the old coupon rate before the new rate becomes active. Clears the pending proposal
-    ///      and emits field-specific update events for values that changed.
+    /// @dev Only the owner may call. Senior-rate changes require a fresh mark under the current pool limit and
+    ///      effective reconciliation policy, and checkpoint the old coupon rate before the new rate becomes active.
+    ///      Clears the pending proposal and emits field-specific update events for values that changed.
     function finalizePoolConfig() external onlyOwner {
         if (poolConfigActivationTime == 0) {
             revert HousePool__NoProposal();
@@ -326,8 +332,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         PoolConfig memory currentConfig = poolConfig;
         PoolConfig memory nextConfig = pendingPoolConfig;
         if (nextConfig.seniorRateBps != currentConfig.seniorRateBps) {
-            _requireRateChangeMarkFresh(_getHousePoolStatusSnapshot());
-            _checkpointSeniorCouponBeforeRateChange();
+            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
+            _requireRateChangeMarkFresh(statusSnapshot);
+            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot = _getHousePoolInputSnapshot();
+            _requireFreshMark(accountingSnapshot, statusSnapshot);
+            _reconcile(accountingSnapshot, statusSnapshot);
         }
         poolConfig = nextConfig;
         delete pendingPoolConfig;
@@ -384,7 +393,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         _unpause();
     }
 
-    /// @notice Holds new LP epoch clearing without pausing requests, cancellations, claims, or trading.
+    /// @notice Holds new LP epoch clearing and Senior request admission without pausing Junior requests or trading.
     /// @dev Callable by the owner or dedicated pauser. Governance alone can release the hold.
     function pauseLpEpochSettlement() external override onlyPauserOrOwner {
         if (lpEpochSettlementPaused) {
@@ -469,6 +478,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     function _canAcceptTrancheDeposits(
         bool isSenior
     ) internal view returns (bool) {
+        if (isSenior && lpEpochSettlementPaused) {
+            return false;
+        }
         (
             HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
             HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
@@ -512,8 +524,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Enables live trading after both tranche seed positions are initialized.
-    /// @dev Only the owner may call. Requires finite governed senior limits and compliant seeded protected exposure.
-    ///      It does not itself validate oracle freshness. Repeated calls leave the flag set and emit the event again.
+    /// @dev Only the owner may call. Requires finite governed senior limits, compliant seeded protected exposure,
+    ///      and no unresolved ownerless assets on initial activation. It does not itself validate oracle freshness.
+    ///      Repeated calls leave the flag set and emit the event again.
     function activateTrading() external onlyOwner {
         if (!HousePoolSeedLifecycleLib.tradingActivationReady(seniorSeedInitialized, juniorSeedInitialized)) {
             revert HousePool__TradingActivationNotReady();
@@ -524,6 +537,14 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         if (!_seniorCommitmentsWithinLimits(ctx.pendingState.waterfall)) {
             revert HousePool__ExceedsSeniorDepositCapacity();
+        }
+        if (
+            !isTradingActive
+                && (unassignedAssets != 0
+                    || ctx.pendingState.unassignedAssets != 0
+                    || ctx.residualPendingClaimantAssets != 0)
+        ) {
+            revert HousePool__PendingBootstrap();
         }
         isTradingActive = true;
         emit TradingActivated();
@@ -710,9 +731,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
 
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot = _getHousePoolStatusSnapshot();
         _requireBootstrapOracleLive(statusSnapshot);
-        if (toSenior) {
-            _reconcile(_getHousePoolInputSnapshot());
-        }
+        _reconcile(_getHousePoolInputSnapshot());
 
         uint256 shares = ITrancheVaultBootstrap(targetVault).quoteBootstrapDeposit(amount);
         if (shares == 0) {
@@ -750,6 +769,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     function reserveSeniorDeposit(
         uint256 amount
     ) external override(IHousePool, IPerpsLPActions) onlySeniorVault whenNotPaused {
+        if (lpEpochSettlementPaused) {
+            revert HousePool__LpEpochSettlementPaused();
+        }
         _requireMinimumTrancheDeposit(amount);
         HousePoolContext memory ctx = _buildCurrentHousePoolContext();
         _requireSeniorDepositCapacity(amount, ctx.pendingState.waterfall);
@@ -832,9 +854,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         );
         if (seniorPhase.fundedAssets > 0) {
             HousePoolWaterfallAccountingLib.WaterfallState memory nextState =
-                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(
-                    _getWaterfallState(), seniorPhase.fundedAssets, seniorPhase.fundedShares, seniorPhase.pricingSupply
-                );
+                HousePoolWaterfallAccountingLib.scaleSeniorOnWithdraw(_getWaterfallState(), seniorPhase.fundedAssets);
             _setWaterfallState(nextState);
             accountedAssets -= seniorPhase.fundedAssets;
             freeUsdc -= seniorPhase.fundedAssets;
@@ -856,10 +876,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (seniorPhase.backlog) {
             juniorPhase.backlog = _hasMaturedRedeemHead(juniorVault, result.cutoffEpoch);
         } else {
-            uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
-                seniorPrincipal, seniorHighWaterMark, juniorPrincipal, poolConfig.maxSeniorShareBps
-            );
-            juniorPhase.budget = _min(freeUsdc, _min(juniorPrincipal, ratioCap));
+            juniorPhase.budget = _juniorSettlementCapacity(freeUsdc, _getWaterfallState());
             juniorPhase = _fundRedemptionPhase(
                 juniorVault, result.cutoffEpoch, juniorPhase, _settlementFeeBps(false, statusSnapshot.oracleFrozen)
             );
@@ -1021,10 +1038,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
             if (epochAssets == 0) {
                 break;
             }
-            if (isSenior && !_seniorCommitmentsWithinLimits(_getWaterfallState())) {
-                break;
-            }
-
+            // Senior capacity was committed at request admission. Later coupon or limit drift closes new admission
+            // but must not veto activation of an already accepted epoch.
             // Quote the cumulative batch and mint only its marginal delta so retained-fee pricing is split-neutral.
             uint256 cumulativeShares = vault.quoteDepositFromState(
                 phase.acceptedAssets + epochAssets, phase.pricingAssets, phase.pricingSupply, feeBps
@@ -1190,7 +1205,11 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         HousePoolWaterfallAccountingLib.WaterfallState memory state
     ) internal view returns (uint256) {
         uint256 ratioCap = HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(
-            state.seniorPrincipal, state.seniorHighWaterMark, state.juniorPrincipal, poolConfig.maxSeniorShareBps
+            state.seniorPrincipal,
+            state.seniorHighWaterMark,
+            state.juniorPrincipal,
+            reservedSeniorDepositAssetsUsdc,
+            poolConfig.maxSeniorShareBps
         );
         return _min(freeUsdc, _min(state.juniorPrincipal, ratioCap));
     }
@@ -1213,6 +1232,23 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     /// @return Free USDC available to the tranche withdrawal waterfall (6 decimals)
     function getFreeUSDC() public view returns (uint256) {
         return _getWithdrawalSnapshot().freeUsdc;
+    }
+
+    /// @inheritdoc IHousePool
+    /// @dev Reads live side aggregates because the terminal-NAV lens rejects reads during engine settlement.
+    ///      At rest, the same reserve components and withdrawal-snapshot arithmetic back `getFreeUSDC()`.
+    function getSettlementFreeUSDC() public view override returns (uint256) {
+        (uint256 longMaxProfitUsdc,,,) = ENGINE.sides(0);
+        (uint256 shortMaxProfitUsdc,,,) = ENGINE.sides(1);
+        uint256 maxLiabilityUsdc = longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
+
+        HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot;
+        accountingSnapshot.physicalAssetsUsdc = totalAssets();
+        accountingSnapshot.maxLiabilityUsdc = maxLiabilityUsdc;
+        accountingSnapshot.traderClaimBalanceUsdc = ENGINE.totalTraderClaimBalanceUsdc();
+        accountingSnapshot.supplementalReservedUsdc =
+            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, ENGINE.settlementBufferBps());
+        return _buildWithdrawalSnapshot(accountingSnapshot, unassignedAssets, _pendingClaimantBucketAssets()).freeUsdc;
     }
 
     /// @notice Returns the current stored senior principal that pool liquidity permits withdrawing.
@@ -1662,25 +1698,6 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         if (config.maxSeniorShareBps >= 10_000) {
             revert HousePool__InvalidMaxSeniorShareBps();
         }
-    }
-
-    function _checkpointSeniorCouponBeforeRateChange() internal {
-        (
-            HousePoolEngineViewTypes.HousePoolInputSnapshot memory accountingSnapshot,
-            HousePoolEngineViewTypes.HousePoolStatusSnapshot memory statusSnapshot
-        ) = _getHousePoolSnapshots();
-        if (_markIsFreshForReconcile(accountingSnapshot, statusSnapshot)) {
-            _reconcile(accountingSnapshot);
-            return;
-        }
-        _checkpointSeniorCouponBeforePrincipalMutation();
-        HousePoolAccountingLib.ReconcileSnapshot memory reconcileSnapshot =
-            HousePoolAccountingLib.buildReconcileSnapshot(accountingSnapshot);
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory claimantBuckets = _getPendingClaimantBuckets();
-        HousePoolPendingPreviewLib.ClaimantPendingBuckets memory settleableClaimantBuckets =
-            _settleablePendingClaimantBuckets(reconcileSnapshot, claimantBuckets);
-        bool allowRevenueContinuation = seniorPrincipal + juniorPrincipal != 0;
-        _applyPendingClaimantBucketsLive(settleableClaimantBuckets, claimantBuckets, allowRevenueContinuation);
     }
 
     function _juniorShareSupply() internal view returns (uint256) {

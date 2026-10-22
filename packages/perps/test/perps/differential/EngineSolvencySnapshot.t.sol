@@ -50,10 +50,14 @@ contract SolvencySnapshotRegressionTest is BasePerpTest {
         }
         vm.warp(saturdayNoon);
         vm.prank(address(router));
-        engine.updateMarkPrice(1e8, uint64(block.timestamp));
-        vm.warp(block.timestamp + 30 hours);
+        engine.updateMarkPrice(1e8, uint64(vm.getBlockTimestamp()));
+        vm.warp(vm.getBlockTimestamp() + 30 hours);
 
-        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(longAccount, 1e8);
+        uint256 frozenConfidence = 1e8 * pletherOracle.basketMaxConfidenceRatioBps() / 10_000;
+        uint256 frozenLiquidationPrice =
+            1e8 + frozenConfidence * pletherOracle.adverseConfidenceMultiplierBps() / 10_000;
+        ICfdEngineTypes.LiquidationPreview memory preview =
+            engineLens.previewLiquidation(longAccount, frozenLiquidationPrice);
         assertTrue(preview.liquidatable, "LONG majority must be liquidatable after carry drain");
 
         address keeper = address(0x999);

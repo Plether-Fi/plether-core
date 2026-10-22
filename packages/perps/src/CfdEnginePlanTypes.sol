@@ -87,6 +87,8 @@ library CfdEnginePlanTypes {
     /// @param shortSide Aggregate SHORT-side state.
     /// @param poolAssetsUsdc Gross physical assets used for planning; VPI and skew subtract aggregate trader claims.
     /// @param poolCashUsdc Physical-asset basis for open solvency and cash available for payouts and fee top-ups.
+    /// @param poolAdditionalReservedUsdc Pending claimant inflows and unassigned assets protected from fee top-ups.
+    /// @param poolQueuesTradingRevenue Whether new revenue joins the pending claimant reserve until reconciliation.
     /// @param accountBuckets Aggregate clearinghouse custody buckets for `account`.
     /// @param lockedBuckets Typed clearinghouse margin buckets for `account`.
     /// @param liquidationReserveUsdc Dedicated backing for the configured liquidation charge.
@@ -120,6 +122,8 @@ library CfdEnginePlanTypes {
 
         uint256 poolAssetsUsdc;
         uint256 poolCashUsdc;
+        uint256 poolAdditionalReservedUsdc;
+        bool poolQueuesTradingRevenue;
 
         IMarginClearinghouse.AccountUsdcBuckets accountBuckets;
         IMarginClearinghouse.LockedMarginBuckets lockedBuckets;

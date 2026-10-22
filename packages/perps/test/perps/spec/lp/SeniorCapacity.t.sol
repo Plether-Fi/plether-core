@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {HousePoolRedemptionMathSidecar} from "@plether/perps/HousePoolRedemptionMathSidecar.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
@@ -142,14 +143,24 @@ contract SeniorCapacityTest is BasePerpTest {
 
     function test_JuniorWithdrawalMathRoundsRequiredBackingUp() public pure {
         assertEq(
-            HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(5, 5, 12, 3333),
+            HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(5, 5, 12, 0, 3333),
             1,
             "ceil(5 * 6667 / 3333) must retain eleven junior units"
         );
         assertEq(
-            HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(0, 0, 12, 0),
+            HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(0, 0, 12, 0, 0),
             12,
             "zero share cap must not restrict junior when protected exposure is zero"
+        );
+        assertEq(
+            HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(5, 5, 12, 1, 3333),
+            0,
+            "a one-unit commitment consumes the last withdrawal unit"
+        );
+        assertEq(
+            HousePoolSeniorCapacityLib.juniorWithdrawalRatioCap(5, 5, 12, type(uint256).max, 3333),
+            0,
+            "overflowing committed exposure cannot reopen junior withdrawal capacity"
         );
     }
 
@@ -179,6 +190,89 @@ contract SeniorCapacityTest is BasePerpTest {
         vm.prank(ALICE);
         assertGt(seniorVault.claimDeposit(epochId, claimableAssets, ALICE, ALICE), 0);
         assertEq(pool.getSeniorDepositCapacity(), 0);
+    }
+
+    function test_CouponDriftCannotRefundOrBlockExactCapacityCommitment() public {
+        _configureAndReconcile(2000e6, 9999);
+        uint256 reservedAssets = pool.getSeniorDepositCapacity();
+        assertGt(reservedAssets, 0);
+        uint256 epochId = _requestSenior(ALICE, reservedAssets);
+        assertTrue(pool.areSeniorDepositReservationsWithinLimits());
+
+        vm.warp(block.timestamp + 1);
+        assertFalse(pool.areSeniorDepositReservationsWithinLimits(), "one second of coupon exceeds an exact cap");
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__SeniorDepositCommitted.selector);
+        seniorVault.cancelPendingDeposit(epochId);
+
+        _warpToEpoch(epochId);
+        _refreshMark();
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__SeniorDepositCommitted.selector);
+        seniorVault.cancelPendingDeposit(epochId);
+
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch(0, 0);
+        assertEq(result.seniorDepositAssets, reservedAssets);
+        assertEq(seniorVault.claimableDepositRequest(epochId, ALICE), reservedAssets);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
+        assertEq(pool.getSeniorDepositCapacity(), 0);
+    }
+
+    function test_RateChangeFreshnessCannotDisplaceFirmSeniorReservation() public {
+        _fundJunior(BOB, 200_000e6);
+
+        IHousePool.PoolConfig memory config = _currentPoolConfig();
+        config.maxSeniorExposureUsdc = 2000e6;
+        config.maxSeniorShareBps = 9999;
+        config.markStalenessLimit = 300;
+        pool.proposePoolConfig(config);
+        vm.warp(pool.poolConfigActivationTime());
+        pool.finalizePoolConfig();
+        _refreshMark();
+        vm.prank(address(seniorVault));
+        pool.reconcile();
+
+        _fundTrader(CAROL, 50_000e6);
+        _refreshMark();
+        _open(CAROL, CfdTypes.Side.LONG, 20_000e18, 5000e6, 1e8);
+
+        uint256 reservedAssets = pool.getSeniorDepositCapacity();
+        assertGt(reservedAssets, 0);
+        uint256 epochId = _requestSenior(ALICE, reservedAssets);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
+
+        config = _currentPoolConfig();
+        config.seniorRateBps = 1600;
+        pool.proposePoolConfig(config);
+        uint256 activationTime = pool.poolConfigActivationTime();
+        uint256 markTime = activationTime - 120;
+        vm.warp(markTime);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(markTime));
+        vm.warp(activationTime);
+
+        uint256 principalBefore = pool.seniorPrincipal();
+        uint256 couponCheckpoint = pool.lastSeniorCouponCheckpointTime();
+        vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
+        pool.finalizePoolConfig();
+        assertEq(pool.seniorRateBps(), 800);
+        assertEq(pool.seniorPrincipal(), principalBefore);
+        assertEq(pool.lastSeniorCouponCheckpointTime(), couponCheckpoint);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
+        assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
+
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(activationTime));
+        pool.finalizePoolConfig();
+        assertEq(pool.seniorRateBps(), 1600);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
+        assertFalse(pool.areSeniorDepositReservationsWithinLimits());
+        assertEq(pool.getSeniorDepositCapacity(), 0);
+
+        IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
+        assertEq(result.seniorDepositAssets, reservedAssets);
+        assertEq(seniorVault.claimableDepositRequest(epochId, ALICE), reservedAssets);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
 
     function test_RatioCap_ExactBoundaryUsesJuniorCapital() public {
@@ -258,7 +352,7 @@ contract SeniorCapacityTest is BasePerpTest {
         assertEq(seniorVault.maxRequestDeposit(ALICE), 0, "impaired senior remains closed despite residual capacity");
     }
 
-    function test_ReservationConsumesCapacityAndCancellationRestoresRefundAndCapacity() public {
+    function test_ReservationConsumesCapacityAndOnlySettlementHoldPermitsHealthyRefund() public {
         _configureAndReconcile(1300e6, 9999);
         uint256 initialCapacity = pool.getSeniorDepositCapacity();
         uint256 reservedAssets = 50e6;
@@ -279,6 +373,13 @@ contract SeniorCapacityTest is BasePerpTest {
         seniorVault.requestDeposit(directCapacity + 1, BOB);
         vm.stopPrank();
 
+        vm.prank(ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__SeniorDepositCommitted.selector);
+        seniorVault.cancelPendingDeposit(epochId);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), reservedAssets);
+
+        pool.pauseLpEpochSettlement();
+        assertEq(seniorVault.maxRequestDeposit(BOB), 0, "held settlement must close new Senior admission");
         vm.prank(ALICE);
         assertEq(seniorVault.cancelPendingDeposit(epochId), reservedAssets);
         assertEq(usdc.balanceOf(ALICE), reservedAssets);
@@ -321,8 +422,10 @@ contract SeniorCapacityTest is BasePerpTest {
         (uint256 epochAssets,,,,) = seniorVault.depositEpochs(epochId);
         assertEq(epochAssets, aliceAssets + bobAssets + carolAssets);
 
+        pool.pauseLpEpochSettlement();
         vm.prank(ALICE);
         seniorVault.cancelPendingDeposit(epochId);
+        pool.unpauseLpEpochSettlement();
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), bobAssets + carolAssets);
         (epochAssets,,,,) = seniorVault.depositEpochs(epochId);
         assertEq(epochAssets, bobAssets + carolAssets);
@@ -343,6 +446,7 @@ contract SeniorCapacityTest is BasePerpTest {
         _configureAndReconcile(1300e6, 9999);
         uint256 epochId = _requestSenior(ALICE, 10e6);
 
+        pool.pauseLpEpochSettlement();
         vm.startPrank(ALICE);
         seniorVault.cancelPendingDeposit(epochId);
         vm.expectRevert(TrancheVault.TrancheVault__NoPendingDeposit.selector);
@@ -373,7 +477,7 @@ contract SeniorCapacityTest is BasePerpTest {
         assertTrue(finalized);
     }
 
-    function test_GovernanceDecreaseInvalidatesReservationAndOpensActiveCancellation() public {
+    function test_GovernanceDecreaseClosesNewAdmissionButHonorsExistingReservation() public {
         _configureAndReconcile(1300e6, 9999);
         uint256 reservedAssets = 100e6;
         uint256 epochId = _requestSenior(ALICE, reservedAssets);
@@ -382,19 +486,21 @@ contract SeniorCapacityTest is BasePerpTest {
         assertGe(block.timestamp, seniorVault.depositEpochStart(epochId));
         assertFalse(pool.areSeniorDepositReservationsWithinLimits());
 
-        _refreshMark();
-        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch(0, 0);
-        assertEq(seniorVault.pendingDepositRequest(epochId, ALICE), reservedAssets);
-
+        assertEq(pool.getSeniorDepositCapacity(), 0);
         vm.prank(ALICE);
-        assertEq(seniorVault.cancelPendingDeposit(epochId), reservedAssets);
-        assertEq(usdc.balanceOf(ALICE), reservedAssets);
+        vm.expectRevert(TrancheVault.TrancheVault__SeniorDepositCommitted.selector);
+        seniorVault.cancelPendingDeposit(epochId);
+
+        _refreshMark();
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch(0, 0);
+        assertEq(result.seniorDepositAssets, reservedAssets);
+        assertEq(seniorVault.claimableDepositRequest(epochId, ALICE), reservedAssets);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
-        assertTrue(pool.areSeniorDepositReservationsWithinLimits());
+        assertGt(_protectedSenior(), pool.maxSeniorExposureUsdc());
+        assertEq(pool.getSeniorDepositCapacity(), 0);
     }
 
-    function test_JuniorDepositRestoresInvalidReservationAndAllowsFinalization() public {
+    function test_GovernanceShareReductionCannotVetoAcceptedReservation() public {
         _configureAndReconcile(10_000e6, 6000);
         uint256 epochId = _requestSenior(ALICE, 100e6);
 
@@ -402,17 +508,14 @@ contract SeniorCapacityTest is BasePerpTest {
         assertFalse(pool.areSeniorDepositReservationsWithinLimits());
 
         _refreshMark();
-        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch(0, 0);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 100e6);
-
-        _fundJunior(BOB, 200e6);
-        assertTrue(pool.areSeniorDepositReservationsWithinLimits());
+        IHousePool.LpEpochSettlementResult memory result = pool.settleLpEpoch(0, 0);
+        assertEq(result.seniorDepositAssets, 100e6);
 
         (, uint256 finalizedShares,,, bool finalized) = seniorVault.depositEpochs(epochId);
-        assertTrue(finalized, "junior-first shared settlement must restore capacity before senior entry");
+        assertTrue(finalized, "request-time admission must survive a later governance cap cut");
         assertGt(finalizedShares, 0);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
+        assertEq(pool.getSeniorDepositCapacity(), 0);
     }
 
     function test_LossAndHighWaterMarkInvalidateReservationAndAllowCancellation() public {
@@ -441,16 +544,18 @@ contract SeniorCapacityTest is BasePerpTest {
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
 
-    function test_JuniorCanWithdrawToActiveRatioBoundaryAndInvalidateReservation() public {
+    function test_JuniorWithdrawalPreservesBackingForPendingSeniorCommitment() public {
         _fundJunior(ALICE, 2000e6);
         _configureAndReconcile(10_000e6, 5000);
-        uint256 seniorEpochId = _requestSenior(BOB, 1000e6);
+        uint256 juniorCapBeforeRequest = pool.getMaxJuniorWithdraw();
+        uint256 seniorEpochId = _requestSenior(BOB, 500e6);
 
         uint256 aliceShares = juniorVault.balanceOf(ALICE);
         uint256 ownerAssets = juniorVault.estimateRedeemAssets(aliceShares);
         uint256 maxJuniorWithdraw = pool.getMaxJuniorWithdraw();
         assertGt(maxJuniorWithdraw, 0);
-        assertLt(maxJuniorWithdraw, ownerAssets, "ratio covenant should retain junior subordination");
+        assertLt(maxJuniorWithdraw, ownerAssets, "ratio covenant must retain backing for active and pending Senior");
+        assertEq(juniorCapBeforeRequest - maxJuniorWithdraw, 500e6, "reservation must reduce Junior headroom");
 
         uint256 redeemEpochId = _requestRedeem(juniorVault, ALICE, aliceShares);
         IHousePool.LpEpochSettlementResult memory result = _settleAt(redeemEpochId);
@@ -470,19 +575,9 @@ contract SeniorCapacityTest is BasePerpTest {
         assertEq(juniorVault.claimRedeem(redeemEpochId, claimableShares, ALICE, ALICE), claimableAssets);
         vm.stopPrank();
 
-        assertLe(_protectedSenior(), pool.juniorPrincipal() + 1, "active 50% covenant must remain intact");
-        assertFalse(
-            pool.areSeniorDepositReservationsWithinLimits(),
-            "provisional reservation may become invalid after a covenant-safe junior withdrawal"
-        );
-
-        _warpToEpoch(seniorEpochId);
-        _refreshMark();
-        vm.expectRevert(IHousePool.HousePool__NoLpEpochProgress.selector);
-        pool.settleLpEpoch(0, 0);
-
-        vm.prank(BOB);
-        seniorVault.cancelPendingDeposit(seniorEpochId);
+        assertEq(result.seniorDepositAssets, 500e6, "Junior funding cannot displace committed Senior entry");
+        assertEq(seniorVault.claimableDepositRequest(seniorEpochId, BOB), 500e6);
+        assertLe(_protectedSenior(), pool.juniorPrincipal(), "committed 50% covenant must remain intact");
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
     }
 
@@ -659,6 +754,11 @@ contract SeniorCapacityTest is BasePerpTest {
         assertGt(seniorVault.estimateMintAssets(estimatedShares + 1), capacity);
 
         uint256 epochId = _requestSenior(ALICE, capacity);
+        assertEq(seniorVault.maxRequestDeposit(ALICE), 0, "the accepted request reserves all new-entry capacity");
+        assertEq(
+            seniorVault.estimateDepositShares(capacity), estimatedShares, "reserved entry still has a valid estimate"
+        );
+        assertEq(publicLens.getLpRequestState(true, epochId, ALICE).pendingDepositSharesEstimate, estimatedShares);
         IHousePool.LpEpochSettlementResult memory result = _settleAt(epochId);
         assertEq(result.seniorDepositAssets, capacity);
         uint256 maxShares = seniorVault.maxMint(ALICE);

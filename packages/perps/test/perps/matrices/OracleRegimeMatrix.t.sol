@@ -8,6 +8,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 
 contract OracleRegimeMatrixTest is BasePerpTest {
 
@@ -91,19 +92,32 @@ contract OracleRegimeMatrixTest is BasePerpTest {
             assertTrue(engine.degradedMode());
             usdc.mint(address(pool), cash);
         }
-        vm.warp(regime == 0 ? BEFORE_FAD - 1 hours : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 1801);
+        uint256 liquidationTime = regime == 0 ? BEFORE_FAD - 1 hours : regime == 1 ? BEFORE_FAD + 1 : BEFORE_FAD + 1801;
+        vm.warp(liquidationTime);
         uint256 ageLimit = regime == 2 ? engine.fadMaxStaleness() : pletherOracle.liquidationStalenessLimit();
         uint256 age = boundary == 0 ? 0 : ageLimit + boundary - 2;
-        baseMockPyth.setAllPrices(_basePythFeedIds(), 150_000_000, -8, block.timestamp - age);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = ""; // Do not refresh timestamps while exercising age boundaries.
-        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT, 150_000_000);
+        bytes[] memory priceData;
+        if (regime == 2) {
+            uint256 precloseTime = boundary == 0 ? BEFORE_FAD : liquidationTime - age;
+            vm.warp(precloseTime);
+            router.updateMarkPrice(_signedLiveData(150_000_000, uint64(precloseTime)));
+            vm.warp(liquidationTime);
+            priceData = new bytes[](0);
+        } else {
+            priceData = _signedLiveData(150_000_000, uint64(liquidationTime - age));
+        }
+        uint256 executionPrice = regime == 2 ? 150_030_000 : 150_000_000;
+        ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(ACCOUNT, executionPrice);
         assertTrue(preview.liquidatable, "Every row starts with an actually liquidatable position");
         uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
         uint256 cashBefore = usdc.balanceOf(address(pool));
         if (boundary == 3) {
-            vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+            if (regime == 2) {
+                vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
+            } else {
+                vm.expectRevert(bytes("feed not found within range"));
+            }
         }
         vm.prank(KEEPER);
         router.executeLiquidation(ACCOUNT, priceData);
@@ -228,6 +242,19 @@ contract OracleRegimeMatrixTest is BasePerpTest {
             assertEq(usdc.balanceOf(address(clearinghouse)), before_.custody - frozenSpread);
             assertEq(usdc.balanceOf(address(pool)), before_.poolCash + frozenSpread);
         }
+    }
+
+    function _signedLiveData(
+        uint256 price,
+        uint64 tick
+    ) private pure returns (bytes[] memory data) {
+        bytes32[] memory ids = _basePythFeedIds();
+        MockPyth.FeedUpdate[] memory updates = new MockPyth.FeedUpdate[](ids.length);
+        for (uint256 i; i < ids.length; ++i) {
+            updates[i] = MockPyth.FeedUpdate(ids[i], MockPyth.MockPrice(int64(uint64(price)), 0, -8, tick, 0));
+        }
+        data = new bytes[](1);
+        data[0] = abi.encode(updates);
     }
 
 }

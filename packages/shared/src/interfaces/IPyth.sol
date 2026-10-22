@@ -23,6 +23,9 @@ library PythStructs {
 /// @notice Minimal interface for reading Pyth price feeds.
 interface IPyth {
 
+    /// @notice The supplied data contains no qualifying update for at least one requested feed.
+    error PriceFeedNotFoundWithinRange();
+
     /// @notice Returns the price without staleness checks.
     /// @param id The Pyth price feed ID.
     /// @return price The price data.
@@ -44,6 +47,14 @@ interface IPyth {
     function updatePriceFeeds(
         bytes[] calldata updateData
     ) external payable;
+
+    /// @notice Parses signed prices for every requested feed within the publish-time range.
+    function parsePriceFeedUpdates(
+        bytes[] calldata updateData,
+        bytes32[] calldata priceIds,
+        uint64 minPublishTime,
+        uint64 maxPublishTime
+    ) external payable returns (PythStructs.PriceFeed[] memory priceFeeds);
 
     /// @notice Parses the first price update for each feed in a publish-time range.
     /// @dev Pyth guarantees the returned update is unique in the requested range:

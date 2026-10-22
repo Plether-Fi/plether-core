@@ -573,9 +573,13 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                 protectionId := calldataload(sub(calldatasize(), 32))
             }
         }
-        IPletherOracle.PriceSnapshot memory snapshot = host.pletherOracle().updatePrice{value: msg.value}(
-            refundRecipient, pythUpdateData, IPletherOracle.PriceMode.MarkRefresh
-        );
+        IPletherOracle oracle = host.pletherOracle();
+        uint256 pythFee = oracle.getUpdateFee(pythUpdateData);
+        if (msg.value < pythFee) {
+            revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, pythFee);
+        }
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updatePrice{value: pythFee}(refundRecipient, pythUpdateData, IPletherOracle.PriceMode.MarkRefresh);
         ICfdEngineCore engine = host.engine();
         engine.updateMarkPrice(snapshot.markPrice, snapshot.publishTime);
         if (isProtectionTrigger) {
@@ -588,6 +592,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                 plan.account, refundRecipient, plan.triggerBountyUsdc, snapshot.markPrice, snapshot.publishTime
             );
         }
+        _sendEth(host.admin(), refundRecipient, msg.value - pythFee);
     }
 
     /// @dev Registers a protocol-native close intent before its independently revertible Router queue write.
@@ -679,12 +684,18 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         _requireDelegateCall();
 
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        IPletherOracle oracle = host.pletherOracle();
+        uint256 pythFee = oracle.getUpdateFee(pythUpdateData);
+        if (msg.value < pythFee) {
+            revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, pythFee);
+        }
         IPletherOracle.PriceSnapshot memory snapshot =
-            host.pletherOracle().updateLiquidationPrice{value: msg.value}(msg.sender, pythUpdateData, account);
+            oracle.updateLiquidationPrice{value: pythFee}(msg.sender, pythUpdateData, account);
         ICfdEngineCore engine = host.engine();
-        if (snapshot.publishTime >= engine.lastMarkTime()) {
+        if (snapshot.publishTime > engine.lastMarkTime()) {
             engine.updateMarkPrice(snapshot.markPrice, snapshot.publishTime);
         }
+        _sendEth(host.admin(), msg.sender, msg.value - pythFee);
         // Read after the oracle and its refund callback: an authorized callback may advance the cutoff.
         uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
         host.executeLiquidationBatchItem(
@@ -710,10 +721,16 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         }
 
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        IPletherOracle oracle = host.pletherOracle();
+        uint256 pythFee = oracle.getUpdateFee(pythUpdateData);
+        if (msg.value < pythFee) {
+            revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, pythFee);
+        }
         IPletherOracle.LiquidationBatchSnapshot memory snapshot =
-            host.pletherOracle().updateLiquidationBatchPrice{value: msg.value}(msg.sender, pythUpdateData);
+            oracle.updateLiquidationBatchPrice{value: pythFee}(msg.sender, pythUpdateData);
         host.engine().updateMarkPrice(snapshot.markPrice, snapshot.publishTime);
-        // Honor any persistent cutoff advanced during the oracle/refund interaction.
+        _sendEth(host.admin(), msg.sender, msg.value - pythFee);
+        // Honor any persistent cutoff advanced during the refund interaction.
         uint64 riskOffCutoff = IOrderRouterEmergencyAdmin(host.admin()).riskOffOrderCutoff();
         uint256 engineGas = host.minEngineGas();
 

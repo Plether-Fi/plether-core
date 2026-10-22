@@ -114,7 +114,7 @@ contract GovernedSeniorCapacityHandler is Test {
         try pool.settleLpEpoch(0, 0) returns (IHousePool.LpEpochSettlementResult memory settled) {
             result = settled;
         } catch (bytes memory reason) {
-            // Matured work and physical cash do not guarantee a usable tranche budget or compliant reservations.
+            // Matured work and physical cash do not guarantee a usable tranche budget.
             // Keep these adversarial attempts, but classify only the protocol's explicit no-progress outcome.
             bytes4 selector;
             if (reason.length >= 4) {
@@ -131,9 +131,6 @@ contract GovernedSeniorCapacityHandler is Test {
             return;
         }
         successfulSettlements++;
-        if (result.seniorDepositAssets != 0) {
-            _recordSuccessfulSeniorAdmission();
-        }
         if (result.juniorFundedAssets != 0) {
             successfulJuniorWithdrawals += 1;
             if (!_activeSeniorRatioWithinLimit()) {
@@ -285,6 +282,9 @@ contract GovernedSeniorCapacityHandler is Test {
         uint256 refundable = vault.refundableDepositRequest(epochId, actor);
         uint256 pending = vault.pendingDepositRequest(epochId, actor);
         if (refundable == 0 && (pending == 0 || vault.currentLpEpoch() >= epochId)) {
+            return;
+        }
+        if (address(vault) == address(seniorVault) && refundable == 0) {
             return;
         }
 
@@ -649,19 +649,13 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         targetContract(address(handler));
     }
 
-    function test_CouponCapacityNoProgressThenJuniorFundingRestoresSettlement() public {
+    function test_CouponDriftCannotBlockCommittedSeniorSettlement() public {
         uint256 successfulBefore = handler.successfulSettlements();
         handler.requestSeniorDeposit(1, type(uint256).max, false);
         assertGt(pool.reservedSeniorDepositAssetsUsdc(), 0);
         handler.warpForward(90 minutes);
         assertFalse(pool.areSeniorDepositReservationsWithinLimits());
 
-        handler.settleLpEpoch();
-        assertEq(handler.expectedSettlementNoProgress(), 1);
-        assertEq(handler.successfulSettlements(), successfulBefore);
-
-        handler.requestJuniorDeposit(2, 1000e6, false);
-        handler.warpForward(90 minutes);
         handler.settleLpEpoch();
         assertEq(handler.successfulSettlements(), successfulBefore + 1);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
@@ -683,7 +677,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         assertGt(handler.successfulSeniorAdmissions(), 0, "campaign must exercise a successful senior admission");
         assertFalse(
             handler.seniorAdmissionViolation(),
-            "successful senior admission or finalization must leave active exposure plus reservations within limits"
+            "successful senior request admission must fit active exposure plus existing reservations within limits"
         );
     }
 

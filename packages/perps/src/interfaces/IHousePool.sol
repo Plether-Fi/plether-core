@@ -158,7 +158,7 @@ interface IHousePool {
     error HousePool__NoExcessAssets();
     /// @notice An excess sweep exceeds currently unaccounted raw USDC.
     error HousePool__ExcessAmountTooHigh();
-    /// @notice An ordinary deposit was attempted while ownerless assets still require explicit bootstrap assignment.
+    /// @notice A deposit or initial trading activation was attempted while ownerless value still requires resolution.
     error HousePool__PendingBootstrap();
     /// @notice Explicit bootstrap assignment was requested when no unassigned assets remain.
     error HousePool__NoUnassignedAssets();
@@ -264,6 +264,10 @@ interface IHousePool {
     /// @return Lesser of raw pool USDC and the canonical accounted-asset ledger
     function totalAssets() external view returns (uint256);
 
+    /// @notice Cash above all current engine and pool reserves, safe to query during engine settlement.
+    /// @return Unreserved USDC available for a protocol-fee top-up.
+    function getSettlementFreeUSDC() external view returns (uint256);
+
     /// @notice Returns the terminal deficit persisted by the most recent mark-fresh reconcile.
     /// @return Last reconciled terminal deficit in 6-decimal USDC
     function terminalDeficitUsdc() external view returns (uint256);
@@ -280,11 +284,12 @@ interface IHousePool {
     ) external pure returns (uint256);
 
     /// @notice Returns whether new LP epoch clearing is held by the dedicated emergency circuit breaker.
-    /// @dev Deposit and redemption requests, cancellations, and already-funded claims remain independent of this flag.
+    /// @dev Junior deposit and redemption requests and already-funded claims remain independent of this flag.
+    ///      Senior requests stop and existing Senior commitments become cancellable while the hold is active.
     function lpEpochSettlementPaused() external view returns (bool);
 
     /// @notice Activates the dedicated LP epoch settlement hold.
-    /// @dev Callable by the owner or configured pauser. Does not pause trading or LP request admission.
+    /// @dev Callable by the owner or configured pauser. Does not pause trading or Junior LP request admission.
     function pauseLpEpochSettlement() external;
 
     /// @notice Releases the dedicated LP epoch settlement hold.
@@ -341,6 +346,7 @@ interface IHousePool {
     function reservedSeniorDepositAssetsUsdc() external view returns (uint256);
 
     /// @notice Returns whether projected protected senior exposure plus all reservations fits active limits.
+    /// @dev Diagnostic for current headroom; existing firm reservations may settle after passive overage.
     /// @return Whether projected protected exposure and reservations fit the current capacity limits
     function areSeniorDepositReservationsWithinLimits() external view returns (bool);
 
@@ -363,6 +369,12 @@ interface IHousePool {
     /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
     /// @return Ownerless canonical assets reserved from ordinary LP withdrawals and deposits
     function unassignedAssets() external view returns (uint256);
+
+    /// @notice Unsettled recapitalization reserved from discretionary pool payouts.
+    function pendingRecapitalizationUsdc() external view returns (uint256);
+
+    /// @notice Unsettled trading revenue reserved from discretionary pool payouts.
+    function pendingTradingRevenueUsdc() external view returns (uint256);
 
     /// @notice Commits senior capacity for a delayed deposit request.
     /// @dev Callable only by the configured senior vault. The amount must fit additional capacity when reserved.

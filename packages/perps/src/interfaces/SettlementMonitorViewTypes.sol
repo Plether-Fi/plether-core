@@ -28,6 +28,7 @@ library SettlementMonitorViewTypes {
     /// @notice Indexes for `SettlementStatus.operationalBlockerMask`.
     enum OperationalBlocker {
         WithdrawalsNotLive,
+        /// @notice Reserved legacy bit. Staleness is reported by markFresh/mark age and execution-path selection.
         CachedMarkStale,
         EngineDegraded,
         RequiredOracleInvalid,
@@ -60,7 +61,7 @@ library SettlementMonitorViewTypes {
         UnassignedAssets,
         SeniorImpaired,
         ZeroPrincipalWithSupply,
-        SeniorCapacityUnavailable,
+        SeniorCapacityUnavailable, // Retained bit position; committed reservations no longer defer activation.
         ActivationNotConfirmed,
         DependencyUnknown,
         LpEpochSettlementPaused

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
@@ -42,6 +43,51 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         _setRouterConfig(config);
         assertEq(router.pletherOracle().basketMaxConfidenceRatioBps(), 9999);
         assertEq(router.pletherOracle().adverseConfidenceMultiplierBps(), 10_000);
+    }
+
+    function test_OracleRotation_RejectsPythWithoutCodeAndPreservesProposal() public {
+        PletherOracle candidate = _newOracle();
+        _proposeRotation(address(candidate));
+        uint256 activationTime = routerAdmin.oracleConfigActivationTime();
+        vm.warp(activationTime);
+        uint64 versionBefore = routerAdmin.activeConfigVersion();
+        IPletherOracle.OracleConfig memory policy = _readPolicy(pletherOracle);
+        address[3] memory endpoints = [address(0), makeAddr("pythEOA"), vm.computeCreateAddress(address(this), 100_000)];
+        for (uint256 i; i < endpoints.length; ++i) {
+            assertEq(endpoints[i].code.length, 0);
+            vm.mockCall(
+                address(candidate), abi.encodeWithSelector(IPletherOracle.pyth.selector), abi.encode(endpoints[i])
+            );
+            vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+            routerAdmin.finalizeOracleConfig();
+            _assertRotationUnchanged(address(candidate), activationTime, versionBefore, policy);
+        }
+        vm.clearMockedCalls();
+        routerAdmin.finalizeOracleConfig();
+        assertEq(address(router.pletherOracle()), address(candidate));
+        assertEq(routerAdmin.activeConfigVersion(), versionBefore + 1);
+    }
+
+    function test_RouterConstructor_RejectsPythWithoutCode() public {
+        address keeperSidecar = router.liquidationBatchSidecar();
+        address executionSidecar = router.executionSidecar();
+        address lifecycleBook = address(router.lifecycleBook());
+        vm.mockCall(
+            address(pletherOracle),
+            abi.encodeWithSelector(IPletherOracle.pyth.selector),
+            abi.encode(makeAddr("pythEOA"))
+        );
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        new OrderRouter(
+            address(engine),
+            address(engineLens),
+            address(pool),
+            address(pletherOracle),
+            keeperSidecar,
+            address(policyEvaluator),
+            executionSidecar,
+            lifecycleBook
+        );
     }
 
     function test_OracleConfigTimelock_RotatesPythBasket() public {

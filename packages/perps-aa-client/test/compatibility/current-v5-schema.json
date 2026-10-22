@@ -1,6 +1,6 @@
 {
   "schema": "current-v5",
-  "protectionAbiHash": "0xadd60778aff2fd881be9cec4e538b1fab8cf6fa993325644a8bd6dcd7e70ca9f",
+  "protectionAbiHash": "0xafd88cca6ee4fda8240b775bb6ae20a01c7669323d833d6b89d8b2b9f3cd6c03",
   "historicalProtectionAbiHash": "0x37e477e7c96661f80e5772d081c17346aef81f354c9a392668bdbea2aa2dd967",
   "historicalOrderLifecycleV4AbiHash": "0x4ec225b250a1e35e6ea9159e9e5b67f2caa959acc9f755d388cd7afe465d4335",
   "positionProtectionCreatedTopic0": "0xf8b87acf7dd7a499d91309bae85c5a4f684cfff775b4d1b1f78234d7c21ba795",
@@ -8,7 +8,7 @@
     "closePreviewV3Abi": "0xd8f3c37a51bde4c7d945841798faad2bf13c960fdc8c08e89baa742344e170d9",
     "committedOrderV3Abi": "0x970faf1caded2ecf190f42a433d07d507995368560036f9763d7a4f9ed7e4c7f",
     "orderLifecycleV5Abi": "0xa4821f2be10d49f4d04dab7fbaf005f3864683ddbe692420715c45bf0ff185db",
-    "orderRouterV3Abi": "0x983173fa72c7fa6c456eb78e3ed79152df49a4ab7c6bf6f327cd32e711bb01a0"
+    "orderRouterV3Abi": "0x3af4b71d292c9aa28059d26312939456043f3f223e85f9a0b2e43f9862daa3ac"
   },
   "protectionActions": [
     {

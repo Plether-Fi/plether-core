@@ -1280,6 +1280,11 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__InvalidHousePool",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__InvalidKeeperSidecar",
     "inputs": []
   },
@@ -1586,6 +1591,11 @@ export const positionProtectionBookAbi = [
   {
     "type": "error",
     "name": "PositionProtectionBook__InvalidTerminalReason",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PositionProtectionBook__OracleMarkAhead",
     "inputs": []
   },
   {

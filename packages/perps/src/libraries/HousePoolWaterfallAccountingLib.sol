@@ -109,24 +109,23 @@ library HousePoolWaterfallAccountingLib {
         }
     }
 
-    /// @notice Removes funded senior principal and the redeemed shares' pro-rata high-water-mark entitlement.
-    /// @dev Callers must supply `fundedAssetsUsdc <= state.seniorPrincipal`, nonzero `preBurnSupply`, and
-    ///      `fundedShares <= preBurnSupply`. Arithmetic rejects an excessive principal debit or HWM reduction, but does
-    ///      not independently validate the share bound. The removed HWM entitlement rounds down; junior is unchanged.
+    /// @notice Removes senior principal and the same economic fraction of its high-water-mark entitlement.
+    /// @dev Callers must supply `fundedAssetsUsdc <= state.seniorPrincipal`. The removed HWM rounds down,
+    ///      preserving remaining protection conservatively. Zero funding preserves even a wiped-out Senior's HWM.
+    ///      Retained fees stay protected, and junior is unchanged.
     /// @param state Waterfall state before withdrawal.
     /// @param fundedAssetsUsdc Net senior principal funded in 6-decimal USDC.
-    /// @param fundedShares Senior shares funded and burned by the vault.
-    /// @param preBurnSupply Senior share supply before the vault burns `fundedShares`.
     /// @return nextState State with reduced senior principal and HWM entitlement.
     function scaleSeniorOnWithdraw(
         WaterfallState memory state,
-        uint256 fundedAssetsUsdc,
-        uint256 fundedShares,
-        uint256 preBurnSupply
+        uint256 fundedAssetsUsdc
     ) internal pure returns (WaterfallState memory nextState) {
         nextState = state;
+        if (fundedAssetsUsdc == 0) {
+            return nextState;
+        }
         nextState.seniorHighWaterMark -= Math.mulDiv(
-            state.seniorHighWaterMark, fundedShares, preBurnSupply, Math.Rounding.Floor
+            state.seniorHighWaterMark, fundedAssetsUsdc, state.seniorPrincipal, Math.Rounding.Floor
         );
         nextState.seniorPrincipal -= fundedAssetsUsdc;
     }

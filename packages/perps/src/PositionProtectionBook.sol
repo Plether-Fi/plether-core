@@ -172,6 +172,8 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     error PositionProtectionBook__InvalidHostResponse();
     /// @notice The Router supplied a reason that cannot represent a failed retryable close attempt.
     error PositionProtectionBook__InvalidTerminalReason();
+    /// @notice The accepted live basket has not been installed as the Engine mark.
+    error PositionProtectionBook__OracleMarkAhead();
 
     modifier onlyRouter() {
         _requireRouter();
@@ -560,22 +562,15 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             }
             if (terminalStatus == IOrderRouterAccounting.OrderStatus.Executed) {
                 _requireMatchingPosition(parentProtection);
-                // A historical fill may precede the current cached mark. Do not fetch live feeds here: an invalid
-                // current basket must not roll back an otherwise successful parent execution.
+                if (!_acceptedMarkInstalled()) {
+                    _failPendingParent(parentProtection);
+                    return;
+                }
                 _arm(parentProtection, ENGINE.lastMarkTime());
                 _emitArmed(parentProtection);
                 return;
             }
-
-            delete _activeProtectionIds[account];
-            parentProtection.status = PositionProtectionTypes.PositionProtectionStatus.Failed;
-            uint256 refundUsdc = _takeUnpaidBounties(parentProtection);
-            emit PositionProtectionTerminal(
-                protectionId, account, 0, PositionProtectionTypes.PositionProtectionStatus.Failed
-            );
-            if (refundUsdc != 0) {
-                _clearinghouse().unlockReservedSettlement(account, refundUsdc);
-            }
+            _failPendingParent(parentProtection);
             return;
         }
 
@@ -852,6 +847,32 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         IPletherOracle.PriceSnapshot memory current = oracle.getLatestPrice(IPletherOracle.PriceMode.MarkRefresh);
         currentMarkPrice = current.markPrice;
         currentPublishTime = current.publishTime;
+        if (!_acceptedMarkInstalled()) {
+            revert PositionProtectionBook__OracleMarkAhead();
+        }
+    }
+
+    function _acceptedMarkInstalled() private view returns (bool) {
+        (bool accepted, uint256 acceptedPrice, uint64 acceptedTime) = _activeOracle().getAcceptedBasketMark();
+        if (!accepted) {
+            return true;
+        }
+        uint64 markTime = ENGINE.lastMarkTime();
+        return acceptedTime < markTime || (acceptedTime == markTime && acceptedPrice == ENGINE.lastMarkPrice());
+    }
+
+    function _failPendingParent(
+        StoredProtection storage protection
+    ) private {
+        delete _activeProtectionIds[protection.account];
+        protection.status = PositionProtectionTypes.PositionProtectionStatus.Failed;
+        uint256 refundUsdc = _takeUnpaidBounties(protection);
+        emit PositionProtectionTerminal(
+            protection.protectionId, protection.account, 0, PositionProtectionTypes.PositionProtectionStatus.Failed
+        );
+        if (refundUsdc != 0) {
+            _clearinghouse().unlockReservedSettlement(protection.account, refundUsdc);
+        }
     }
 
     function _validateProtectionPrices(

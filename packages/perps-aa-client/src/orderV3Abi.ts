@@ -346,6 +346,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__InvalidHousePool",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__InvalidKeeperSidecar",
     "inputs": []
   },

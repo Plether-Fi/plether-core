@@ -4,10 +4,13 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Focused coverage for settlement-aged cooldowns and direct deposit-escrow redemption.
 contract ClaimableDepositRedeemTest is BasePerpTest {
+
+    using stdStorage for StdStorage;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
@@ -142,6 +145,41 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
     function test_DirectRouteRejectsZeroController() public {
         vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
         juniorVault.requestRedeemFromClaimableDeposit(1, 1, address(0));
+    }
+
+    function test_DirectRouteRequiresSeedAndPreservesEntitlementOnRevert() public {
+        uint256 assets = 10_000e6;
+        uint256 shares = 10_000e9;
+        uint256 requestId = _requestDeposit(ALICE, assets);
+        _finalizeDepositAt(requestId, shares, pool.lpEpochStart(requestId));
+        vm.warp(block.timestamp + juniorVault.DEPOSIT_COOLDOWN());
+
+        // Defensive synthetic state: ordinary deposits cannot activate before canonical seeding.
+        // Clear only the receiver to exercise the direct route's independent request admission guard.
+        address receiver = juniorVault.seedReceiver();
+        stdstore.target(address(juniorVault)).sig("seedReceiver()").checked_write(address(0));
+        vm.expectRevert(TrancheVault.TrancheVault__InvalidSeedPosition.selector);
+        vm.prank(ALICE);
+        juniorVault.requestRedeemFromClaimableDeposit(requestId, shares, ALICE);
+
+        assertEq(juniorVault.maxRequestRedeemFromClaimableDeposit(requestId, ALICE), 0);
+        assertEq(juniorVault.claimableDepositShares(requestId, ALICE), shares);
+        assertEq(juniorVault.claimableDepositRequest(requestId, ALICE), assets);
+        assertEq(juniorVault.depositClaimEscrowShares(), shares);
+        assertEq(juniorVault.balanceOf(address(juniorVault)), shares);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
+        assertEq(juniorVault.redeemQueueHead(), 0);
+        assertEq(juniorVault.controllerRedeemHead(ALICE), 0);
+
+        stdstore.target(address(juniorVault)).sig("seedReceiver()").checked_write(receiver);
+        assertEq(juniorVault.maxRequestRedeemFromClaimableDeposit(requestId, ALICE), shares);
+        vm.prank(ALICE);
+        uint256 redeemRequestId = juniorVault.requestRedeemFromClaimableDeposit(requestId, shares, ALICE);
+        assertEq(juniorVault.claimableDepositShares(requestId, ALICE), 0);
+        assertEq(juniorVault.depositClaimEscrowShares(), 0);
+        assertEq(juniorVault.pendingRedeemRequest(redeemRequestId, ALICE), shares);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), shares);
+        assertEq(juniorVault.balanceOf(address(juniorVault)), shares);
     }
 
     function test_DirectRouteRejectsZeroShares() public {

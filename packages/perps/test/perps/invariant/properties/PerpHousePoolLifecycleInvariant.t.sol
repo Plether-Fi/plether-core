@@ -186,11 +186,15 @@ contract PerpHousePoolLifecycleHandler is Test {
         vm.prank(owner);
         try pool.activateTrading() {}
         catch (bytes memory reason) {
-            if (
-                !withinCapacity
-                    && _revertSelector(reason) == IHousePool.HousePool__ExceedsSeniorDepositCapacity.selector
-            ) {
+            bytes4 selector = _revertSelector(reason);
+            if (!withinCapacity && selector == IHousePool.HousePool__ExceedsSeniorDepositCapacity.selector) {
                 ghostActivationCapacityRejections++;
+            } else if (selector == IHousePool.HousePool__PendingBootstrap.selector) {
+                assertTrue(
+                    pool.unassignedAssets() != 0 || pool.pendingRecapitalizationUsdc() != 0
+                        || pool.pendingTradingRevenueUsdc() != 0,
+                    "PendingBootstrap requires unresolved value"
+                );
             } else {
                 _rethrow(reason);
             }
