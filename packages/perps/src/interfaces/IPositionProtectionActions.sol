@@ -42,6 +42,20 @@ interface IPositionProtectionActions {
         uint64 protectionId
     ) external;
 
+    /// @notice Atomically cancels the caller's armed protection and commits a bounded full-position close.
+    /// @dev Releases the unused trigger bounty without checkpointing carry before ordinary close admission, which
+    ///      collects and bounds all commitment carry. Any commitment failure rolls back
+    ///      cancellation and refund. Available during frozen markets and Router pause; execution still follows FIFO
+    ///      and the supplied bounds. Only a fresh client id is accepted. Once queued, the close is an ordinary order:
+    ///      its later failure or expiry does not restore protection. Pending-open, triggered and latched records reject.
+    /// @param protectionId Armed protection owned by the caller and matching the current full position.
+    /// @param request Caller-authored full close with matching side, current nonzero config hash, and financial bounds.
+    /// @return orderId Newly committed ordinary close identifier.
+    function cancelPositionProtectionAndCommitClose(
+        uint64 protectionId,
+        OrderV3Types.OrderRequest calldata request
+    ) external returns (uint64 orderId);
+
     /// @notice Permissionlessly evaluates an armed protection and queues its full-position market close when met.
     /// @dev The generated close joins the ordinary global FIFO tail and inherits normal oracle timing and expiry.
     /// @param protectionId Armed protection to evaluate.

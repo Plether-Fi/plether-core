@@ -155,9 +155,23 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || request.isClose) {
-            revert OrderRouter__Unauthorized();
-        }
+        _requireProtectionHost(host, account, request.isClose);
+        return _commitOrder(host, account, request, true);
+    }
+
+    /// @notice Commits a caller-authored bounded close after the Book atomically cancels armed protection.
+    function commitProtectedClose(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 triggerBountyRefundUsdc
+    ) external returns (uint64 orderId) {
+        _requireDelegateCall();
+        IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        _requireProtectionHost(host, account, !request.isClose);
+        // The Book has taken the trigger-bounty classification. Release it without a carry checkpoint so all
+        // commitment carry is collected, bounded and recorded by the ordinary close path below.
+        IMarginClearinghouse(host.engine().clearinghouse())
+            .releaseReservedExecutionBountyToSource(account, triggerBountyRefundUsdc);
         return _commitOrder(host, account, request, true);
     }
 
@@ -172,9 +186,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0) {
-            revert OrderRouter__Unauthorized();
-        }
+        _requireProtectionHost(host, account, size == 0);
 
         orderId = host.nextCommitId();
         OrderV3Types.OrderRequest memory request = _protectionCloseRequest(host, protectionId, side, size);
@@ -789,6 +801,17 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             return LiquidationBatchResult.SkippedSolvent;
         }
         return LiquidationBatchResult.Failed;
+    }
+
+    /// @dev Shared authentication for protection-only commitments; callers also validate delegate context.
+    function _requireProtectionHost(
+        IOrderLiquidationBatchHost host,
+        address account,
+        bool invalidRequest
+    ) private view {
+        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || invalidRequest) {
+            revert OrderRouter__Unauthorized();
+        }
     }
 
     function _requireDelegateCall() private view {

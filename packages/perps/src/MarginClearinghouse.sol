@@ -710,10 +710,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit RiskOffOrderReservesRefunded(account, releasedMarginUsdc, refundableBountyUsdc);
     }
 
-    /// @notice Releases a settled execution bounty back to the same account that funded it.
+    /// @notice Releases a settled order or protection-trigger bounty back to the same account that funded it.
     /// @dev Callable only by the Engine-reported Router. Unlike the general Engine bounty-credit path, this exact
     ///      self-transfer changes only the reserved classification and deliberately skips carry checkpointing. The
-    ///      Router must first take the clearinghouse bounty record so the protected-reserve floor remains exact.
+    ///      Router or its protection Book must first take the clearinghouse bounty record so the protected-reserve
+    ///      floor remains exact. Atomic protection cancellation uses this before bounded close carry collection.
     /// @param account Account whose bounty classification is released to free settlement.
     /// @param executionBountyUsdc Exact bounty amount in six-decimal USDC units.
     function releaseReservedExecutionBountyToSource(

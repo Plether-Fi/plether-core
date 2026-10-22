@@ -38,6 +38,12 @@ For autonomous trading-account and AI-agent integration, including bounded autho
   `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)` to update its triggers and close
   limits, or detach/cancel a `PendingOpen`/`Armed` record with
   `PositionProtectionBook.cancelPositionProtection(uint64)`
+- Atomic owner exit: `PositionProtectionBook.cancelPositionProtectionAndCommitClose(uint64,OrderV3Types.OrderRequest)`
+  cancels only an `Armed` protection and queues a fresh ordinary full close matching its current side and size.
+  Commitment failure rolls back cancellation and the trigger-bounty refund. It is available in live and frozen
+  markets; supply the current nonzero config hash, explicit financial bounds, target, and allowed execution modes.
+  Successful commitment permanently cancels protection; subsequent close failure or expiry does not restore it.
+  Recover the order id by client-intent lookup rather than replaying this composite action.
 - Once a trigger is recorded, neither the owner nor a keeper may replace or cancel it. `Triggered` means one live close
   attempt; `Latched` means the irreversible trigger remains active with no live attempt and may be retried
   permissionlessly.

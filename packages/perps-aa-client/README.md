@@ -162,6 +162,27 @@ Reject empty triggers, invalid uint64 protection IDs, and invalid or closing par
 sponsorship. Pass these plans through the same manifest validation and durable
 journaling flow as other native AA actions.
 
+`buildCancelProtectionAndCloseAction({ account, book, protectionId, request })`
+encodes one nonpayable `cancelPositionProtectionAndCommitClose` call to the Book,
+with action kind `cancel-protection-and-close`. Supply the complete bounded V3
+close request, including a fresh nonreserved client ID, the current nonzero
+configuration hash, and the live position's side and full size. The builder
+preserves every request field and exposes `submitBy` as `submissionDeadline` for
+sponsorship. It rejects invalid IDs, nonpositive or non-lot-aligned sizes,
+nonzero margin or settlement floors, invalid timing, and execution mode masks
+outside 1–7; financial ceilings remain explicit and are never widened.
+
+The Book requires the caller to own an `Armed` protection for the current
+position and requires a full close on the same side. These state checks,
+client-ID freshness, and configuration freshness require an onchain read or
+simulation before signing; the pure builder cannot establish them. The supplied
+`account` is smart-account metadata, and that account must execute the call.
+Cancellation and the trigger-bounty refund revert together if the new close
+cannot be queued. After successful queueing the protection stays cancelled even
+if the close later fails or expires. Exact replay of the composite action is
+rejected. Use this builder only with a compatible Book deployment and sponsor
+policy that supports the new action.
+
 The package originated from the self-hosted-AA source patch (SHA-256
 `d1c6941c03f37cc9a93b35b95dc73a876ee87dab624524ed9c4d6336022f2955`,
 base `bc8f6290c540665e4ff61328ea83a4c3d421a8d4`) with protection source

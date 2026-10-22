@@ -101,6 +101,20 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return uint64(_delegateToKeeperSidecar());
     }
 
+    /// @notice Book-only host for a caller-authored full close after atomic protection cancellation.
+    /// @dev Uses ordinary bounded-request admission and lifecycle accounting; the Book enforces ownership,
+    ///      armed status, exact full-position matching and freshness of the returned order id.
+    function commitProtectedClose(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 triggerBountyRefundUsdc
+    ) external nonReentrant returns (uint64 orderId) {
+        account;
+        request;
+        triggerBountyRefundUsdc;
+        return uint64(_delegateToKeeperSidecar());
+    }
+
     /// @notice Queues a fresh close attempt for an already-latched position protection.
     /// @dev Only the immutable protection Book may call this entrypoint. The Book tracks the durable trigger and its
     ///      attempt history; delegated logic creates fresh lifecycle evidence and appends an ordinary

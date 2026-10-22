@@ -89,13 +89,19 @@ interface IPositionProtectionRouterHost {
 
 }
 
-/// @notice Book-only bounded-order surface for atomically attaching protection to a newly committed open.
+/// @notice Book-only bounded-order surface for attached opens and atomic protection cancellation with a full close.
 /// @dev The Router authenticates this explicit-account host call by requiring this immutable Book as caller.
 interface IPositionProtectionOrderCommitHost {
 
     function commitProtectedOpen(
         address account,
         OrderV3Types.OrderRequest calldata request
+    ) external returns (uint64 orderId);
+
+    function commitProtectedClose(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 triggerBountyRefundUsdc
     ) external returns (uint64 orderId);
 
 }
@@ -331,6 +337,36 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         (address refundAccount, uint256 refundUsdc) = _cancel(msg.sender, protectionId);
         if (refundUsdc != 0) {
             _clearinghouse().unlockReservedSettlement(refundAccount, refundUsdc);
+        }
+    }
+
+    /// @inheritdoc IPositionProtectionActions
+    function cancelPositionProtectionAndCommitClose(
+        uint64 protectionId,
+        OrderV3Types.OrderRequest calldata request
+    ) external nonReentrant returns (uint64 orderId) {
+        StoredProtection storage protection = _ownedActiveProtection(protectionId, msg.sender);
+        if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Armed) {
+            revert OrderRouter__ProtectionNotArmed();
+        }
+        _requireMatchingPosition(protection);
+        if (!request.isClose) {
+            revert OrderRouter__NotCloseOrder();
+        }
+        if (request.side != protection.side || request.sizeDelta != protection.size) {
+            revert OrderRouter__PositionChanged();
+        }
+        IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
+        if (router.pendingOrderCounts(msg.sender) != 0) {
+            revert OrderRouter__PendingOrdersExist();
+        }
+
+        (address refundAccount, uint256 refundUsdc) = _cancel(msg.sender, protectionId);
+        uint64 expectedOrderId = router.nextCommitId();
+        orderId = IPositionProtectionOrderCommitHost(ROUTER).commitProtectedClose(refundAccount, request, refundUsdc);
+        // A historical exact replay must not cancel protection without committing a new exit.
+        if (orderId != expectedOrderId) {
+            revert PositionProtectionBook__InvalidHostResponse();
         }
     }
 

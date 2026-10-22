@@ -32,6 +32,11 @@ cannot be cancelled by the trader. Positions must be closed before switching sid
 
 Optional take-profit and stop-loss protection can submit a full-position close when triggered. Execution still
 passes through the order queue, so a trigger does not guarantee an immediate close or a particular price.
+Owners can cancel armed protection and queue a bounded full close atomically with
+`cancelPositionProtectionAndCommitClose`. If commitment fails, protection and its bounty reserve remain intact.
+Once committed, the manual close follows ordinary queue and execution rules; later failure or expiry does not
+restore protection. This exit remains available during frozen markets, Router pause, and degraded mode.
+
 Positions that no longer meet margin requirements can be liquidated.
 
 If the pool cannot immediately pay realized profits, the unpaid amount becomes a trader claim that can be

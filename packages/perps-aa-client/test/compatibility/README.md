@@ -43,3 +43,13 @@ rename and amendment-builder export. It also checks the current ABI hashes,
 protection tuple fields, and current preview/receipt shapes. The historical
 fixture remains immutable. A future ABI or export change requires a new
 reviewed golden, not an automatic fixture rewrite.
+
+The MED-30 source change adds `buildCancelProtectionAndCloseAction` and a sixth
+current protection action vector for the single nonpayable
+`cancelPositionProtectionAndCommitClose(uint64,OrderRequest)` Book call. The
+current Book ABI hash, complete calldata, sponsorship hash, and UserOperation
+hash cover the new action; the test also checks that its request tuple matches
+the existing bounded V3 request. Its native sponsorship path retains the
+signature, durable journal, and submission ordering checks. The five existing
+current protection vectors and `baseline.json` are preserved. This source
+update does not publish a package or deploy a compatible Book.

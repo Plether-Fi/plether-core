@@ -121,6 +121,14 @@ action. Cancelling a `PendingOpen` protection detaches and refunds the protectio
 already-committed parent order. An already `Triggered` close attempt is binding; `Latched` means the trigger remains
 binding but no attempt is live.
 
+For an owner-directed full exit, use `cancelPositionProtectionAndCommitClose(protectionId, OrderRequest)` to cancel
+an `Armed` protection and submit its matching full close atomically, including during frozen markets. Provide a fresh
+client id and the ordinary complete bounded close request, including a current nonzero config hash and intentionally
+chosen allowed modes. Failed commitment leaves protection and its bounty reserve intact. Successful commitment
+permanently cancels protection and creates an ordinary FIFO close; later failure or expiry does not restore automation.
+The composite call rejects historical exact replays. Read `clientIntent(account, clientOrderId)` to recover a previously
+committed order rather than resubmitting the composite action.
+
 ### Authoritative order reads
 
 Use the predeployed, Router-validated `IOrderLifecycleBook`, not a local database or deleted Router record, for

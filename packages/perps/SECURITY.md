@@ -415,7 +415,8 @@ Keepers are permissionless executors.
 The Router-created position-protection Book owns the retained OCO lifecycle and uses only narrow clearinghouse/Router
 capabilities. It is stateful and distinct from the separately predeployed `OrderRouterLiquidationBatchSidecar`.
 Router `delegatecall` uses
-that sidecar only as a stateless bytecode carrier for public/protected-open commits, mark refresh/protection-trigger resolution, single and batch
+that sidecar only as a stateless bytecode carrier for public/protected-open commits, atomic protection-cancellation
+close commits, mark refresh/protection-trigger resolution, single and batch
 liquidation, atomic-refresh LP-epoch settlement, and the active-oracle forwarding step inside an authenticated Router
 configuration finalization. The Router retains admin authentication and applies its storage fields in the original
 before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
@@ -428,6 +429,18 @@ through the exactly Router-bound keeper sidecar or Router-only Book retry hooks 
 Fresh external V3 commits reject a zero hash and remain bound to the exact digest they supplied. Internal protection
 close attempts skip only config-digest equality; their typed execution modes, deadlines, financial policy, lifecycle
 evidence, and observed receipt digest remain enforced.
+
+An owner may atomically replace an `Armed` protection with a caller-authored full close through
+`cancelPositionProtectionAndCommitClose`. Ownership, armed status, exact live side/size, and an empty account queue
+are checked before cancellation. The Router releases the unused trigger bounty without checkpointing carry before
+ordinary close commitment. All commitment carry is then collected and recorded by the canonical close path, including
+its gross-debit and action-charge bounds; any commitment failure rolls back the entire operation. The Book-only
+Router host preserves public V3 admission,
+configuration pinning, timing, mode and financial bounds. A returned historical replay id is rejected, so cancellation
+cannot succeed without a fresh close. This path is available during frozen markets, Router pause, and degraded mode,
+but does not bypass any execution limit. The resulting ordinary close has no protection-attempt marker; its later
+failure or expiry does not rearm protection. Pending-open, triggered, and latched protections cannot use this action.
+New automatic triggers still require live oracle policy and a publication newer than arming.
 
 Triggering is irreversible. `Triggered` means the Book has exactly one current live child; `Latched` means the trigger
 evidence and account trade lock remain but no child is live. A non-liquidation terminal child failure relatches only

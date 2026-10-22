@@ -195,6 +195,134 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "function",
+    "name": "cancelPositionProtectionAndCommitClose",
+    "inputs": [
+      {
+        "name": "protectionId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "request",
+        "type": "tuple",
+        "internalType": "struct OrderV3Types.OrderRequest",
+        "components": [
+          {
+            "name": "clientOrderId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "side",
+            "type": "uint8",
+            "internalType": "enum CfdTypes.Side"
+          },
+          {
+            "name": "sizeDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "marginDelta",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "targetPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isClose",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "bounds",
+            "type": "tuple",
+            "internalType": "struct OrderV3Types.ExecutionBounds",
+            "components": [
+              {
+                "name": "submitBy",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "executionWindowSeconds",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "allowedExecutionModes",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "expectedConfigHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "maxExecutionBountyUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxExecutionNotionalUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxGrossAccountDebitUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxActionChargeUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxExplicitFeesUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxPostPositionSize",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "minPostSettlementBalanceUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "minPostPositionEquityUsdc",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "maxPostLeverageBps",
+                "type": "uint32",
+                "internalType": "uint32"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "orderId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "closeFinancialLimits",
     "inputs": [
       {

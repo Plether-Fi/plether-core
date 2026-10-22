@@ -1,5 +1,6 @@
 import { encodeFunctionData, getAddress, maxUint256, type Address, type ContractFunctionArgs } from "viem";
 import { positionProtectionBookAbi } from "./protectionAbi.js";
+import type { OrderRequestV3 } from "./orderV3.js";
 import type { PerpsActionKind, PerpsActionPlan } from "./types.js";
 
 export type ProtectedOpenRequest = ContractFunctionArgs<typeof positionProtectionBookAbi, "nonpayable", "commitOpenOrderWithProtection">[0];
@@ -34,7 +35,7 @@ function validateParams(params: PositionProtectionParams): void {
 }
 
 function validateId(id: bigint): void {
-  if (id <= 0n || id >= 1n << 64n) throw new Error("Invalid protection ID");
+  if (typeof id !== "bigint" || id <= 0n || id >= 1n << 64n) throw new Error("Invalid protection ID");
 }
 
 function action(kind: PerpsActionKind, account: Address, book: Address, data: `0x${string}`): PerpsActionPlan {
@@ -57,6 +58,46 @@ export function buildReplaceProtectionAction(input: { account: Address; book: Ad
 export function buildCancelProtectionAction(input: { account: Address; book: Address; protectionId: bigint }): PerpsActionPlan {
   validateId(input.protectionId);
   return action("cancel-protection", input.account, input.book, encodeFunctionData({ abi: positionProtectionBookAbi, functionName: "cancelPositionProtection", args: [input.protectionId] }));
+}
+
+/**
+ * Atomically cancels an Armed protection and queues the caller's bounded full close.
+ * Ownership, protection status, live side/size, client-ID freshness and the current
+ * configuration are checked onchain; this pure builder does not read account state.
+ */
+export function buildCancelProtectionAndCloseAction(input: { account: Address; book: Address; protectionId: bigint; request: OrderRequestV3 }): PerpsActionPlan {
+  validateId(input.protectionId);
+  const { request } = input;
+  if (request.isClose !== true || request.marginDelta !== 0n ||
+      typeof request.sizeDelta !== "bigint" || request.sizeDelta <= 0n || request.sizeDelta > maxUint256 ||
+      request.sizeDelta % (100n * 10n ** 18n) !== 0n) {
+    throw new Error("A protection close requires a positive lot-aligned size and zero marginDelta.");
+  }
+  const { bounds } = request;
+  if ((request.side !== 0 && request.side !== 1) ||
+      typeof request.targetPrice !== "bigint" || request.targetPrice <= 0n || request.targetPrice > maxUint256 ||
+      !/^0x[0-9a-f]{64}$/i.test(request.clientOrderId) || /^0x0{64}$/i.test(request.clientOrderId) ||
+      request.clientOrderId.toLowerCase().startsWith("0x504c455448455221") ||
+      !/^0x[0-9a-f]{64}$/i.test(bounds.expectedConfigHash) || /^0x0{64}$/i.test(bounds.expectedConfigHash) ||
+      typeof bounds.submitBy !== "bigint" || bounds.submitBy <= 0n || bounds.submitBy >= 1n << 64n ||
+      !Number.isInteger(bounds.executionWindowSeconds) || bounds.executionWindowSeconds <= 0 || bounds.executionWindowSeconds > 3600 ||
+      !Number.isInteger(bounds.allowedExecutionModes) || bounds.allowedExecutionModes < 1 || bounds.allowedExecutionModes > 7 ||
+      !Number.isInteger(bounds.maxPostLeverageBps) || bounds.maxPostLeverageBps <= 0 || bounds.maxPostLeverageBps > 0xffff_ffff) {
+    throw new Error("Protection cancellation and close requires a fresh bounded V3 closing request.");
+  }
+  if (bounds.minPostSettlementBalanceUsdc !== 0n) {
+    throw new Error("A protection close requires a zero settlement balance floor.");
+  }
+  for (const field of ["maxExecutionBountyUsdc", "maxExecutionNotionalUsdc", "maxGrossAccountDebitUsdc",
+    "maxActionChargeUsdc", "maxExplicitFeesUsdc", "maxPostPositionSize", "minPostPositionEquityUsdc"] as const) {
+    const value = bounds[field];
+    if (typeof value !== "bigint" || value < 0n || value > maxUint256) {
+      throw new Error(`Protection close bounds.${field} must be an explicit uint256 bigint`);
+    }
+  }
+  return Object.freeze({ ...action("cancel-protection-and-close", input.account, input.book, encodeFunctionData({
+    abi: positionProtectionBookAbi, functionName: "cancelPositionProtectionAndCommitClose", args: [input.protectionId, request],
+  })), submissionDeadline: bounds.submitBy });
 }
 
 export function buildAmendLatchedProtectionCloseLimitsAction(input: { account: Address; book: Address; protectionId: bigint; closeLimits: CloseFinancialLimits }): PerpsActionPlan {

@@ -57,6 +57,12 @@ export function actions(client) {
         minPostPositionEquityUsdc: 500000n, maxPostLeverageBps: 100000 },
     } }),
     client.buildAmendLatchedProtectionCloseLimitsAction({ account, book, protectionId: 42n, closeLimits }),
+    client.buildCancelProtectionAndCloseAction({ account, book, protectionId: 42n, request: {
+      clientOrderId: word('ef'), side: 1, sizeDelta: 200n * 10n ** 18n, marginDelta: 0n, targetPrice: 80000000n, isClose: true,
+      bounds: { submitBy: 1900000000n, executionWindowSeconds: 60, allowedExecutionModes: 7, expectedConfigHash: word('cd'),
+        maxExecutionBountyUsdc: 0n, ...closeLimits, maxPostPositionSize: 0n, minPostSettlementBalanceUsdc: 0n,
+        minPostPositionEquityUsdc: 500000n, maxPostLeverageBps: 100000 },
+    } }),
   ]
 }
 
@@ -102,10 +108,10 @@ export async function assertCompatibility(client, fixture, currentSchema) {
     'Immutable historical protection ABI baseline changed')
   assert.equal(fixture.actions.length, 11, 'Immutable historical action baseline changed')
   // The immutable 0.2 baseline guards unaffected action calldata and hashes.
-  // MED-9 protection encodings and the V5 receipt/view are reviewed current-schema breaks.
+  // MED-9/MED-30 protection actions and the V5 receipt/view are reviewed current-schema changes.
   const expectedExports = fixture.exports.filter(name => name !== 'hashOrderReceiptV4')
-    .concat('hashOrderReceiptV5', 'buildAmendLatchedProtectionCloseLimitsAction').sort()
-  assert.deepEqual(current.exports, expectedExports, 'Only the reviewed current-receipt and amendment exports may change')
+    .concat('hashOrderReceiptV5', 'buildAmendLatchedProtectionCloseLimitsAction', 'buildCancelProtectionAndCloseAction').sort()
+  assert.deepEqual(current.exports, expectedExports, 'Only the reviewed current-receipt and protection exports may change')
   assert.deepEqual(current.envelope, fixture.envelope, 'Native sponsorship envelope changed')
   assert.deepEqual(current.actions.slice(0, 7), fixture.actions.slice(0, 7),
     'Retained non-protection action calldata or sponsorship hashes changed')
@@ -134,6 +140,12 @@ export async function assertCompatibility(client, fixture, currentSchema) {
   }
   requireCloseLimitsTuple(bookFunction('closeFinancialLimits').outputs[0])
   requireCloseLimitsTuple(bookFunction('amendLatchedPositionProtectionCloseLimits').inputs[1])
+  const cancelAndClose = bookFunction('cancelPositionProtectionAndCommitClose')
+  assert.equal(cancelAndClose.stateMutability, 'nonpayable', 'Atomic protection close must carry no native value')
+  assert.equal(cancelAndClose.inputs.length, 2, 'Atomic protection close must bind one protection ID and one request')
+  assert.equal(cancelAndClose.inputs[0].type, 'uint64', 'Atomic protection close ID type changed')
+  assert.deepEqual(cancelAndClose.inputs[1], bookFunction('commitOpenOrderWithProtection').inputs[0],
+    'Atomic protection close must preserve the complete bounded V3 request tuple')
   for (const [name, abi] of Object.entries({
     closePreviewV3Abi: client.closePreviewV3Abi,
     committedOrderV3Abi: client.committedOrderV3Abi,
@@ -174,7 +186,7 @@ export async function assertCompatibility(client, fixture, currentSchema) {
   const finalEnvelope = client.normalizePaymasterResponse(response())
   const stubEnvelope = client.normalizePaymasterResponse(response('00'))
   // Every protection action traverses the hardened native-sponsorship path.
-  for (const action of actions(client).slice(-5)) {
+  for (const action of actions(client).slice(7)) {
     let journaled
     const events = []
     const input = {
