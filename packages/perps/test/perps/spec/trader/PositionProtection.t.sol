@@ -287,6 +287,52 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_ShortProtection_ZeroAdjustedPricePreservesAttemptAndAllowsExpiryRetry() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, SHORT_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, SHORT_TAKE_PROFIT);
+        CfdTypes.Order memory order = _orderRecord(linkedOrderId).core;
+        uint256 balanceBefore = _settlementBalance(ALICE);
+        uint256 keeperBefore = _settlementBalance(EXECUTION_KEEPER);
+        uint256 markBefore = engine.lastMarkPrice();
+        uint64 markTimeBefore = engine.lastMarkTime();
+        vm.warp(uint256(order.commitTime) + 1);
+        vm.roll(block.number + 1);
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), 1_000_000_000_000, 1_000_000_000, -8, order.commitTime + 1, order.commitTime
+        );
+        bytes[] memory data = new bytes[](1);
+        data[0] = hex"01";
+
+        vm.prank(EXECUTION_KEEPER);
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        router.executeOrder(linkedOrderId, data);
+
+        assertEq(router.nextExecuteId(), linkedOrderId, "invalid observation leaves the close queued");
+        assertEq(router.pendingOrderCounts(ALICE), 1, "attempt remains pending");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "protection remains active");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "invalid observation does not terminalize or relatch the attempt"
+        );
+        (uint256 size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, POSITION_SIZE, "position unchanged");
+        assertEq(_settlementBalance(ALICE), balanceBefore, "trader balance unchanged");
+        assertEq(_settlementBalance(EXECUTION_KEEPER), keeperBefore, "no keeper payout");
+        assertEq(engine.lastMarkPrice(), markBefore, "engine mark unchanged");
+        assertEq(engine.lastMarkTime(), markTimeBefore, "engine publication unchanged");
+
+        _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        bytes[] memory retryData = _mockPythUpdateData(SHORT_TAKE_PROFIT);
+        vm.roll(uint256(_orderRecord(retryOrderId).core.commitBlock) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryOrderId, retryData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "positive-price retry executes");
+        (size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, 0, "retry closes the protected short");
+    }
+
     function test_ShortStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, 0, SHORT_STOP_LOSS);

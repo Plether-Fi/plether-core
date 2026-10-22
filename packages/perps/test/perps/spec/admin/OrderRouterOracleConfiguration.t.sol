@@ -22,6 +22,28 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
 
     using stdStorage for StdStorage;
 
+    function test_RouterConfig_RejectsConfidenceThatCanConsumeWholePrice() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        uint256[3] memory ratios = [uint256(10_000), 4000, type(uint256).max];
+        uint256[3] memory multipliers = [uint256(10_000), 30_000, type(uint256).max];
+        for (uint256 i; i < ratios.length; i++) {
+            config.basketMaxConfidenceRatioBps = ratios[i];
+            config.adverseConfidenceMultiplierBps = multipliers[i];
+            vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__InvalidConfidenceRatio.selector);
+            routerAdmin.proposeRouterConfig(config);
+            assertEq(routerAdmin.routerConfigActivationTime(), 0, "invalid proposal must not be staged");
+        }
+    }
+
+    function test_RouterConfig_FinalizesStrictPositiveConfidenceBoundary() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.basketMaxConfidenceRatioBps = 9999;
+        config.adverseConfidenceMultiplierBps = 10_000;
+        _setRouterConfig(config);
+        assertEq(router.pletherOracle().basketMaxConfidenceRatioBps(), 9999);
+        assertEq(router.pletherOracle().adverseConfidenceMultiplierBps(), 10_000);
+    }
+
     function test_OracleConfigTimelock_RotatesPythBasket() public {
         _startRecordingLogs();
         MockPyth newPyth = new MockPyth();

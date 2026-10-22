@@ -1260,6 +1260,14 @@ The router is configured with a `PletherOracle` contract. The oracle instance ow
   mark. Use `policyValid` and the configured ratio for monitoring; do not reinterpret that post-cap quotient as an
   independent oracle-policy proof.
 - The neutral, pre-cap basket is accepted when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`. The initial `basketMaxConfidenceRatioBps` is `10` (0.10%), equality passes, and there is no separate per-component confidence ceiling.
+- Confidence policy is checked both when proposed and when applied to an oracle: the ratio is at most `10_000` bps,
+  the multiplier is at most `30_000` bps, and their product must be strictly below `100_000_000`. This keeps the
+  maximum adjustment below the raw basket price. Either factor may be zero.
+- Successful order execution quotes must be positive. Because order pricing adjusts a capped base using raw-basket
+  confidence, an above-cap observation can still exhaust that base; single, fresh-batch, and cached-batch pricing
+  reject it with `PletherOracle__ZeroExecutionPrice`. The execution call rolls back and the order remains pending
+  for an acceptable observation or normal expiry and protection retry. No zero-price fill or artificial price floor
+  is introduced; frozen voluntary closes retain their unshifted price.
 - Opening orders and live/FAD-only closing orders use the adverse side of the confidence interval for the trader's side: `LONG` opens are priced lower, `SHORT` opens are priced higher, `LONG` closes are priced higher, and `SHORT` closes are priced lower. Oracle-frozen voluntary closes instead use the unshifted validated basket price and pay the fixed frozen-close spread.
 - Liquidation checks also use the side-adverse confidence-adjusted mark for the liquidated account.
 - Component publish times must stay within `maxComponentPublishTimeDivergence`; if one basket leg is too far from the others, live opens are blocked rather than mixing fresh and stale components.

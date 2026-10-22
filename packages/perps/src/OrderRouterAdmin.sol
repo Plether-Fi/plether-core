@@ -5,6 +5,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {OracleConfidencePolicyLib} from "@plether/perps/libraries/OracleConfidencePolicyLib.sol";
 
 /// @title OrderRouterAdmin
 /// @notice Timelocked two-step owner administration for router queue, bounty, oracle, gas, and pause settings.
@@ -28,8 +29,6 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
     /// @notice Upper bound for the permitted execution window at commit time.
     uint256 internal constant MAX_EXECUTION_WINDOW_SECONDS_LIMIT = 1 hours;
-    /// @notice Upper bound for the adverse confidence multiplier in basis points (3x).
-    uint256 internal constant MAX_CONFIDENCE_MULTIPLIER_BPS = 30_000;
 
     /// @notice Router host controlled by this admin.
     IOrderRouterAdminHost public immutable router;
@@ -58,7 +57,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     error OrderRouterAdmin__InvalidMaxExecutionWindowSeconds();
     /// @notice A staleness, settlement-window, or component-divergence limit is inconsistent or zero.
     error OrderRouterAdmin__InvalidStalenessLimit();
-    /// @notice A confidence ratio or adverse-confidence multiplier exceeds its allowed bound.
+    /// @notice Confidence limits exceed their bounds or permit a full-price adverse adjustment.
     error OrderRouterAdmin__InvalidConfidenceRatio();
     /// @notice An open-notional, open-bounty, or protection-trigger bounty setting violates its bounds.
     error OrderRouterAdmin__InvalidExecutionBounty();
@@ -331,15 +330,14 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         }
     }
 
-    /// @notice Validates confidence ratio and adverse multiplier basis-point bounds.
+    /// @notice Validates confidence bounds and requires their combined adjustment to remain below the raw price.
     /// @param config Candidate router configuration.
     function _validateConfidenceConfig(
         IOrderRouterAdminHost.RouterConfig memory config
     ) private pure {
-        if (
-            config.basketMaxConfidenceRatioBps > 10_000
-                || config.adverseConfidenceMultiplierBps > MAX_CONFIDENCE_MULTIPLIER_BPS
-        ) {
+        if (!OracleConfidencePolicyLib.isValidConfig(
+                config.basketMaxConfidenceRatioBps, config.adverseConfidenceMultiplierBps
+            )) {
             revert OrderRouterAdmin__InvalidConfidenceRatio();
         }
     }

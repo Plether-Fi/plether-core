@@ -452,6 +452,69 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.price, 100_020_000, "live close should retain the adverse confidence shift");
     }
 
+    function test_OrderExecution_RejectsZeroAdjustedPriceInSingleAndFreshBatch() public {
+        vm.warp(1000);
+        // Default confidence policy passes, but its adjustment consumes the capped execution base.
+        _setHistoricalPricesWithConfidence(1_000_000_000_000, 1_000_000_000);
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
+        bytes[] memory data = _pythUpdateData();
+        IPletherOracle.BatchOrderPriceCache memory cache;
+
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateOrderExecutionPrice(address(this), data, request);
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateBatchOrderExecutionPrice(address(this), data, request, cache);
+        assertEq(pyth.parseUniqueCallCount(), 0, "rejection rolls back parsing");
+        assertEq(pyth.updatePriceFeedsCallCount(), 0, "rejection rolls back synchronization");
+
+        // A larger adjustment must also reject instead of underflowing or producing a zero fill.
+        _setHistoricalPricesWithConfidence(1_000_000_010_000, 1_000_000_010);
+        request = _orderRequest(CfdTypes.Side.LONG, false);
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateOrderExecutionPrice(address(this), data, request);
+    }
+
+    function test_OrderExecution_ReusedCacheRejectsZeroDownwardPrice() public {
+        vm.warp(1000);
+        _setHistoricalPricesWithConfidence(1_000_000_000_000, 1_000_000_000);
+        IPletherOracle.BatchOrderPriceCache memory emptyCache;
+        // An upward execution can produce a valid cached basket whose downward price is unpriceable.
+        (,, IPletherOracle.BatchOrderPriceCache memory cache) = oracle.updateBatchOrderExecutionPrice(
+            address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true), emptyCache
+        );
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
+        assertEq(pyth.parseUniqueCallCount(), 1, "cache reuse never parses again");
+
+        cache.price = 0;
+        cache.confidence = 0;
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
+    }
+
+    function test_OrderExecution_AllowsSmallestPositivePriceAndCacheReuse() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(9999, 10_000);
+        _setHistoricalPricesWithConfidence(2, 2);
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
+        (bool ok, IPletherOracle.PriceSnapshot memory single) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), request);
+        assertTrue(ok);
+        assertEq(single.price, 1, "positive lower boundary remains executable");
+        assertEq(single.markPrice, 2, "neutral mark remains unadjusted");
+        IPletherOracle.BatchOrderPriceCache memory emptyCache;
+        (, IPletherOracle.PriceSnapshot memory batch, IPletherOracle.BatchOrderPriceCache memory cache) =
+            oracle.updateBatchOrderExecutionPrice(address(this), _pythUpdateData(), request, emptyCache);
+        (, IPletherOracle.PriceSnapshot memory reused,) =
+            oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
+        assertEq(batch.price, single.price, "fresh batch parity");
+        assertEq(reused.price, single.price, "cache parity");
+        assertEq(reused.publishTime, single.publishTime, "publication preserved");
+        assertEq(reused.updateFee, 0, "cache reuse has no fee");
+    }
+
     function test_FadOnlyClose_RetainsAdverseConfidenceAdjustment() public {
         vm.warp(1000);
         engine.setFadWindow(true);
@@ -591,9 +654,11 @@ contract PletherOracleTest is Test {
         engine.setFadDayOverride(0, frozen);
         // Even feed values make both equally weighted contributions exact.
         uint256 rawPrice = 2 * bound(uint256(priceSeed), 25_000_000, 150_000_000);
-        uint256 confidence = 2 * bound(uint256(confidenceSeed), 0, rawPrice / 2);
         uint256 multiplier = bound(uint256(multiplierSeed), 0, 30_000);
-        _setLiquidationPolicy(multiplier, 10_000);
+        uint256 confidenceLimitBps = multiplier == 0 ? 10_000 : 99_999_999 / multiplier;
+        confidenceLimitBps = confidenceLimitBps > 10_000 ? 10_000 : confidenceLimitBps;
+        uint256 confidence = 2 * bound(uint256(confidenceSeed), 0, rawPrice * confidenceLimitBps / 20_000);
+        _setLiquidationPolicy(multiplier, confidenceLimitBps);
         _setLivePricesWithConfidence(int64(uint64(rawPrice)), uint64(confidence), 990);
         engine.setLastMark(100_000_000, 980);
 
@@ -606,6 +671,7 @@ contract PletherOracleTest is Test {
             oracle.updateLiquidationBatchPrice(address(this), _pythUpdateData());
         assertEq(batch.longPrice, expectedLong, "long raw-price policy");
         assertEq(batch.shortPrice, expectedShort, "short raw-price policy");
+        assertGt(batch.shortPrice, 0, "accepted confidence policy preserves positive liquidation prices");
         assertEq(batch.markPrice, neutral, "neutral cap policy");
         assertEq(batch.publishTime, 990, "basket publication preserved");
 
@@ -667,6 +733,36 @@ contract PletherOracleTest is Test {
         assertEq(oracle.orderExecutionStalenessLimit(), 120, "router can apply config");
         assertEq(oracle.liquidationStalenessLimit(), 30, "liquidation limit");
         assertEq(oracle.basketMaxConfidenceRatioBps(), 500, "confidence bps");
+    }
+
+    function test_ApplyConfig_RejectsUnsafeConfidencePolicyAtomically() public {
+        uint256[5] memory ratios = [uint256(10_000), 4000, 10_001, 0, type(uint256).max];
+        uint256[5] memory multipliers = [uint256(10_000), 30_000, 0, 30_001, type(uint256).max];
+        for (uint256 i; i < ratios.length; i++) {
+            IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
+                orderExecutionStalenessLimit: 120,
+                liquidationStalenessLimit: 30,
+                basketMaxConfidenceRatioBps: ratios[i],
+                orderSettlementWindow: 15,
+                maxComponentPublishTimeDivergence: 5,
+                adverseConfidenceMultiplierBps: multipliers[i]
+            });
+            vm.expectRevert(IPletherOracle.PletherOracle__InvalidConfidenceConfig.selector);
+            oracle.applyConfig(config);
+            assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "rejected ratio unchanged");
+            assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "rejected multiplier unchanged");
+            assertEq(oracle.orderExecutionStalenessLimit(), 60, "other settings unchanged");
+        }
+    }
+
+    function test_ApplyConfig_AcceptsStrictBoundaryAndZeroFactors() public {
+        _setLiquidationPolicy(10_000, 9999);
+        _setLiquidationPolicy(30_000, 3333);
+        _setLiquidationPolicy(0, 10_000);
+        assertEq(oracle.basketMaxConfidenceRatioBps(), 10_000);
+        _setLiquidationPolicy(30_000, 0);
+        assertEq(oracle.adverseConfidenceMultiplierBps(), 30_000);
+        assertEq(oracle.basketMaxConfidenceRatioBps(), 0);
     }
 
     function test_ApplyConfig_DeployerCannotBypassRouter() public {
