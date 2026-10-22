@@ -30,7 +30,8 @@ For autonomous trading-account and AI-agent integration, including bounded autho
   close policy; integrations must not assume an implicit unlimited default. Zero is a zero allowance;
   `type(uint256).max` is an explicit unlimited allowance. The separately reserved trigger bounty is paid when the
   protection fires; these ceilings apply to its generated close attempt.
-- Existing-position protection creation locks its trigger bounty first, then applies the canonical V2 exact-price safety
+- Existing-position protection creation is available in degraded mode; Router pause and frozen-oracle restrictions still apply.
+  Creation locks its trigger bounty first, then applies the canonical V2 exact-price safety
   gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
   claim; free settlement and generic action/reservation buckets do not count. Uncovered carry, an underfunded
   negative-VPI reserve, or equity at or below the stricter of initial and active normal/FAD margin rejects the action.

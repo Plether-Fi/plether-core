@@ -218,9 +218,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 triggerBountyUsdc
     ) private returns (uint64 protectionId) {
         _validateProtectionCommitAllowed();
-        if (ENGINE.degradedMode()) {
-            revert OrderRouter__DegradedMode();
-        }
         _requireProtectionAccountAvailable(account, 0);
         _validateBountySnapshot(triggerBountyUsdc);
 

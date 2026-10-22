@@ -455,6 +455,10 @@ position terminally fails it with the same zero-bounty outcome. Retry requires t
 creates a fresh zero Order record without another trader debit. The former retained-bounty disposition is absent from
 the current enum; archived decoders remain necessary for older receipts.
 
+Existing-position protection creation remains available in degraded mode because it adds no exposure. Router pause,
+frozen-oracle policy, freshness, position/queue checks, and post-lock collateral admission still apply. Attached opening
+orders retain the ordinary degraded-mode restriction on new risk.
+
 When existing-position protection locks its trigger bounty, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
 duplicating it. Inputs use `positionEntryCostUsdcAtoms`; price collateral is only `position.margin` (the PnL pledge) plus

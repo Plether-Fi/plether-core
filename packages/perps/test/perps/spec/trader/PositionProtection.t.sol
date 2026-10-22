@@ -100,23 +100,85 @@ contract PositionProtectionTest is BasePerpTest {
         new PositionProtectionBook(address(router), address(0));
     }
 
-    function test_CreatePositionProtection_RejectsNoPositionAndDegradedMode() public {
-        _startRecordingLogs();
-        vm.prank(ALICE);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
-        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+    function test_CreatePositionProtection_RejectsNoPositionIncludingDegradedMode() public {
+        for (uint256 i; i < 2; ++i) {
+            stdstore.target(address(engine)).sig("degradedMode()").checked_write(i != 0);
+            vm.prank(ALICE);
+            vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
+            protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+            assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "failed creation releases reserve");
+        }
+    }
 
+    function test_CreatePositionProtection_DegradedLongCanArmAndTrigger() public {
+        _assertDegradedPositionCanArmAndTrigger(CfdTypes.Side.LONG);
+    }
+
+    function test_CreatePositionProtection_DegradedShortCanArmAndTrigger() public {
+        _assertDegradedPositionCanArmAndTrigger(CfdTypes.Side.SHORT);
+    }
+
+    function _assertDegradedPositionCanArmAndTrigger(
+        CfdTypes.Side side
+    ) internal {
+        _refreshMark(95_000_000);
+        _open(ALICE, side, POSITION_SIZE, POSITION_MARGIN_USDC, 95_000_000);
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(ALICE);
+        uint256 triggerPrice = side == CfdTypes.Side.LONG ? LONG_TAKE_PROFIT : SHORT_TAKE_PROFIT;
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(triggerPrice, 0));
+        PositionProtectionTypes.PositionProtectionView memory protection =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(uint8(protection.status), uint8(PositionProtectionTypes.PositionProtectionStatus.Armed));
+        assertEq(protection.size, sizeBefore, "protects the entire existing position");
+        assertEq(uint8(protection.side), uint8(side));
+        assertEq(router.pendingOrderCounts(ALICE), 0, "arming creates no ordinary order");
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore - _totalProtectionBountyUsdc(), "bounty remains funded");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, _totalProtectionBountyUsdc());
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(ALICE);
+        assertEq(sizeAfter, sizeBefore, "arming does not expand exposure");
+        assertEq(marginAfter, marginBefore, "arming preserves pledged margin");
+        assertTrue(engine.degradedMode(), "arming must not clear containment");
+
+        uint64 attemptId = _triggerAt(protectionId, triggerPrice);
+        assertEq(protectionViews.getPositionProtection(protectionId).linkedOrderId, attemptId);
+        assertEq(router.pendingCloseSize(ALICE), sizeBefore, "new protection can queue a full close");
+        assertTrue(engine.degradedMode(), "trigger must not clear containment");
+    }
+
+    function test_CreatePositionProtection_DegradedRetainsPauseFreshnessAndFrozenGuards() public {
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
-
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        routerAdmin.pause();
         vm.prank(ALICE);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__DegradedMode.selector);
-        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        routerAdmin.unpause();
 
-        assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            0,
-            "failed protection creation must roll back both bounty locks"
+        vm.warp(uint256(engine.lastMarkTime()) + pletherOracle.orderExecutionStalenessLimit() + 1);
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionMarkTooStale.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+
+        vm.warp(FRIDAY_FAD_START + 3 hours);
+        assertTrue(engine.isOracleFrozen());
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ConditionalTriggerFrozen.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "rejections release temporary reserve");
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "rejections roll back carry and lock");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0);
+    }
+
+    function test_AttachedOpen_DegradedStillRejectsNewExposure() public {
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        _expectAttachedOpenCommitRevert(
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__DegradedMode.selector)
         );
     }
 
@@ -1797,6 +1859,16 @@ contract PositionProtectionTest is BasePerpTest {
     }
 
     function test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroUsdcAboveBoundary() public {
+        _assertInitialMarginBoundary(false);
+    }
+
+    function test_PostLockRisk_DegradedRetainsInitialMarginBoundary() public {
+        _assertInitialMarginBoundary(true);
+    }
+
+    function _assertInitialMarginBoundary(
+        bool degraded
+    ) internal {
         _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
         RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
@@ -1805,6 +1877,8 @@ contract PositionProtectionTest is BasePerpTest {
         _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
         _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
         _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(degraded);
 
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact pledge boundary");
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom pledge surplus");

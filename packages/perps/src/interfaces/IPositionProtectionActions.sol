@@ -9,7 +9,8 @@ interface IPositionProtectionActions {
 
     /// @notice Arms one OCO protection against the caller's existing full position.
     /// @dev At least one trigger must be enabled. The caller must have no other protection or ordinary pending order.
-    ///      Creation reserves the protection-trigger bounty and validates trigger geometry against the cached fresh mark.
+    ///      Creation reserves the protection-trigger bounty and validates trigger geometry against the accepted fresh basket.
+    ///      Existing-position creation remains available in degraded mode, subject to the same post-lock risk checks.
     ///      Router pause blocks creation and replacement; cancellation, triggering, and retry remain available.
     /// @param params Direction-aware trigger prices and financial ceilings for generated closes.
     /// @return protectionId Newly assigned protection identifier.
