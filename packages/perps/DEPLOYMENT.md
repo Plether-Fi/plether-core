@@ -524,6 +524,10 @@ JUNIOR_SEED_RECEIVER=0x...
 # Keep false until the seeded verifier passes; set true only for the activation rerun.
 ACTIVATE_TRADING=false
 
+# Required on the activation rerun if the Engine mark has not yet been initialized.
+# ABI-encoded bytes[] of fresh Pyth update payloads covering the configured basket feeds.
+PYTH_UPDATE_DATA=0x...
+
 TEST_USER_RECIPIENTS=0xabc...,0xdef...
 TEST_USER_AMOUNTS=1000000000000,500000000000
 ```
@@ -542,6 +546,10 @@ Notes:
   RouterAdmin and HousePool, and is already installed as both pausers. It fails closed rather than repairing partial
   or cross-deployment coordinator wiring.
 - `TEST_USER_RECIPIENTS` and `TEST_USER_AMOUNTS` must have the same length.
+- With `ACTIVATE_TRADING=true`, bootstrap uses `PYTH_UPDATE_DATA` to refresh an unset Engine mark through
+  `OrderRouter.updateMarkPrice` before enabling trading, including when trading was already activated by an earlier
+  transaction. The broadcaster pays the Pyth update fee. A rerun with an initialized mark skips the update and does
+  not require this variable.
 
 Run:
 

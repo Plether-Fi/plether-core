@@ -54,6 +54,8 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidLifecycleBook();
     /// @notice Engine execution rejected an oracle publish timestamp older than its cached mark.
     error OrderRouter__MarkPriceOutOfOrder();
+    /// @notice Admission needs a real cached oracle mark before it can price notional or keeper bounty.
+    error OrderRouter__MarkPriceUnavailable();
 
     /// @notice Execution was requested while the global FIFO queue has no live head.
     error OrderRouter__NoOrdersToExecute();

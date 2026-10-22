@@ -440,7 +440,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) private view returns (uint256 price) {
         price = engine.lastMarkPrice();
         if (price == 0) {
-            price = 1e8;
+            revert OrderRouter__MarkPriceUnavailable();
         }
         uint256 capPrice = engine.CAP_PRICE();
         return price > capPrice ? capPrice : price;

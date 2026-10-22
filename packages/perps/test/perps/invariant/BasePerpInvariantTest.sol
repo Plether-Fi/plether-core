@@ -100,6 +100,9 @@ abstract contract BasePerpInvariantTest is Test {
         if (initialHousePoolAssets > 0) {
             housePool.seedAssets(initialHousePoolAssets);
         }
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = hex"00";
+        router.updateMarkPrice(updateData);
     }
 
     function _riskParams() internal pure virtual returns (CfdTypes.RiskParams memory) {

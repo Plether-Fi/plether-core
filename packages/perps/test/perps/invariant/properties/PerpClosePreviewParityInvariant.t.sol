@@ -100,6 +100,9 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         engine.setPool(address(housePool));
         engine.setOrderRouter(address(router));
         housePool.seedAssets(100_000e6);
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = hex"00";
+        router.updateMarkPrice(updateData);
 
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 50_000e6);

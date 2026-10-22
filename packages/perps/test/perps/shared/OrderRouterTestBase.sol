@@ -205,6 +205,10 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
 
         _fundSetupJuniorWithoutMarkUpdate(bob, 1_000_000 * 1e6);
 
+        // Keep oracle timing at zero for historical-price tests, but use a real cached price for admission.
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, 0);
+
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
