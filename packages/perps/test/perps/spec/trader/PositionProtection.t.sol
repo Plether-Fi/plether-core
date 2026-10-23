@@ -1247,6 +1247,15 @@ contract PositionProtectionTest is BasePerpTest {
         vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotPending.selector);
         router.expireOrder(attemptId);
 
+        _assertProtectionRetryCloses(protectionId, attemptId, triggerPrice, oldRecordHash);
+    }
+
+    function _assertProtectionRetryCloses(
+        uint64 protectionId,
+        uint64 attemptId,
+        uint256 triggerPrice,
+        bytes32 oldRecordHash
+    ) internal {
         vm.prank(CAROL);
         uint64 retryId = protectionActions.retryPositionProtectionClose(protectionId);
         assertGt(retryId, attemptId, "fresh child identity");
