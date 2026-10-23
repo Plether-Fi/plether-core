@@ -1,130 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {
+    GasBurningOracleRefundRecipient,
+    PletherOracleEngineMock,
+    PletherOracleVaultMock
+} from "./PletherOracleMocks.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {Test} from "forge-std/Test.sol";
-
-contract PletherOracleEngineMock {
-
-    uint256 public lastMarkPrice;
-    uint64 public lastMarkTime;
-    uint256 public CAP_PRICE = 2e8;
-    bool public isFadWindow;
-    uint256 public fadMaxStaleness = 3 days;
-    uint256 public engineMarkStalenessLimit = 60;
-    address public orderRouter;
-    mapping(uint256 => bool) public fadDayOverrides;
-    uint256 internal mockPositionSize;
-    CfdTypes.Side internal mockPositionSide;
-
-    function setLastMark(
-        uint256 price,
-        uint64 publishTime
-    ) external {
-        lastMarkPrice = price;
-        lastMarkTime = publishTime;
-    }
-
-    function setCapPrice(
-        uint256 price
-    ) external {
-        CAP_PRICE = price;
-    }
-
-    function setFadWindow(
-        bool active
-    ) external {
-        isFadWindow = active;
-    }
-
-    function setOrderRouter(
-        address router
-    ) external {
-        orderRouter = router;
-    }
-
-    function setFadDayOverride(
-        uint256 dayNumber,
-        bool active
-    ) external {
-        fadDayOverrides[dayNumber] = active;
-    }
-
-    function isOracleFrozen() external view returns (bool) {
-        return fadDayOverrides[block.timestamp / 86_400];
-    }
-
-    function setPosition(
-        uint256 size,
-        CfdTypes.Side side
-    ) external {
-        mockPositionSize = size;
-        mockPositionSide = side;
-    }
-
-    function positions(
-        address
-    )
-        external
-        view
-        returns (
-            uint256 size,
-            uint256 margin,
-            uint256 entryPrice,
-            uint256 maxProfitUsdc,
-            CfdTypes.Side side,
-            uint64 lastUpdateTime,
-            int256 vpiAccrued
-        )
-    {
-        return (mockPositionSize, 0, 0, 0, mockPositionSide, 0, 0);
-    }
-
-}
-
-contract PletherOracleVaultMock {
-
-    uint256 public markStalenessLimit = 60;
-
-    function setMarkStalenessLimit(
-        uint256 limit
-    ) external {
-        markStalenessLimit = limit;
-    }
-
-}
-
-/// @dev Consumes every gas unit offered to the immediate refund callback until explicitly configured to accept ETH.
-contract GasBurningOracleRefundRecipient {
-
-    bool internal burnRefundGas = true;
-    uint256 public receivedEth;
-
-    receive() external payable {
-        if (burnRefundGas) {
-            assembly ("memory-safe") {
-                for {} 1 {} { pop(gas()) }
-            }
-        }
-        receivedEth += msg.value;
-    }
-
-    function setBurnRefundGas(
-        bool burnRefundGas_
-    ) external {
-        burnRefundGas = burnRefundGas_;
-    }
-
-    function claim(
-        IPletherOracle oracle
-    ) external {
-        oracle.claimEthRefund();
-    }
-
-}
 
 contract PletherOracleTest is Test {
 
@@ -208,9 +95,10 @@ contract PletherOracleTest is Test {
         assertEq(address(oracle).balance, 0, "the oracle must not retain claimed ETH");
     }
 
-    function test_GetLatestPrice_IsViewOnlyAndUsesCurrentStoredPythPrice() public {
+    function test_GetLatestPrice_IsViewOnlyAndUsesAcceptedBasket() public {
         vm.warp(1000);
         _setBothPrices(100_000_000, 995);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
 
         IPletherOracle.PriceSnapshot memory snapshot = oracle.getLatestPrice(IPletherOracle.PriceMode.MarkRefresh);
 
@@ -223,6 +111,7 @@ contract PletherOracleTest is Test {
         vm.warp(1000);
         pyth.setPrice(FEED_A, int64(100_000_000), uint64(80_000), int32(-8), 995);
         pyth.setPrice(FEED_B, int64(100_000_000), uint64(40_000), int32(-8), 995);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
 
         (IPletherOracle.PriceSnapshot memory snapshot, uint256 confidence) = oracle.getLatestPoolReconcilePrice();
         IPletherOracle.PriceSnapshot memory existingSnapshot =
@@ -240,9 +129,11 @@ contract PletherOracleTest is Test {
     }
 
     function test_GetLatestPoolReconcilePrice_PreservesPoolReconcileValidationErrors() public {
-        vm.warp(1000);
+        vm.warp(970);
         vault.setMarkStalenessLimit(30);
         _setBothPrices(100_000_000, 969);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+        vm.warp(1000);
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -260,11 +151,12 @@ contract PletherOracleTest is Test {
     function test_ReportInterface_ReturnsLatestPriceOnly() public {
         vm.warp(1000);
         _setBothPrices(100_000_000, 995);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
 
         uint256 latestPrice = oracle.getLatestPrice();
         assertEq(latestPrice, 1e8, "latest price view");
 
-        latestPrice = oracle.updatePrice(address(this), _pythUpdateData());
+        latestPrice = oracle.updatePrice(address(this), new bytes[](0));
         assertEq(latestPrice, 1e8, "latest price update");
     }
 
@@ -283,6 +175,15 @@ contract PletherOracleTest is Test {
         _deployOracle(address(0));
     }
 
+    function test_Constructor_RevertsOnPythWithoutCode() public {
+        address[2] memory endpoints = [makeAddr("pythEOA"), vm.computeCreateAddress(address(this), 100_000)];
+        for (uint256 i; i < endpoints.length; ++i) {
+            assertEq(endpoints[i].code.length, 0);
+            vm.expectRevert(IPletherOracle.PletherOracle__InvalidPyth.selector);
+            _deployOracle(endpoints[i]);
+        }
+    }
+
     function test_Constructor_RevertsOnArrayLengthMismatch() public {
         bool[] memory inv = new bool[](1);
 
@@ -297,6 +198,31 @@ contract PletherOracleTest is Test {
         new PletherOracle(address(engine), address(vault), address(pyth), feedIds, weights, basePrices, inversions);
     }
 
+    function test_Constructor_RevertsOnZeroWeightWithValidTotal() public {
+        weights[0] = 0;
+        weights[1] = 1e18;
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__ZeroWeight.selector, 0));
+        _deployOracle(address(pyth));
+
+        weights[0] = 1e18;
+        weights[1] = 0;
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__ZeroWeight.selector, 1));
+        _deployOracle(address(pyth));
+    }
+
+    function test_Constructor_RejectsZeroAndDuplicateFeedIds() public {
+        feedIds[0] = bytes32(0);
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InvalidFeedId.selector, bytes32(0)));
+        _deployOracle(address(pyth));
+
+        feedIds[0] = FEED_A;
+        feedIds[1] = FEED_A;
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InvalidFeedId.selector, FEED_A));
+        _deployOracle(address(pyth));
+    }
+
     function test_Constructor_RevertsOnInvalidTotalWeight() public {
         weights[1] = 0.4e18;
 
@@ -305,11 +231,51 @@ contract PletherOracleTest is Test {
     }
 
     function test_UpdatePrice_RevertsOnStalePrice() public {
-        vm.warp(1000);
+        vm.warp(940);
         _setBothPrices(100_000_000, 939);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        vm.warp(1000);
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.OrderExecution);
+    }
+
+    function test_CurrentUpdates_RejectNonRouterCaller() public {
+        vm.warp(1000);
+        _setBothPrices(120_000_000, 995);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
+        vm.prank(address(0xBEEF));
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__Unauthorized.selector);
+        vm.prank(address(0xBEEF));
+        oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+    }
+
+    function test_LiveUpdate_RequiresQuotedPythFee() public {
+        vm.warp(1000);
+        pyth.setFee(1 gwei);
+        _setBothPrices(120_000_000, 995);
+
+        vm.expectRevert(abi.encodeWithSelector(IPletherOracle.PletherOracle__InsufficientFee.selector, 0, 1 gwei));
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+        assertFalse(oracle.hasAcceptedBasket());
+    }
+
+    function test_FrozenCurrentUpdate_RequiresStoredMark() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__NoAcceptedBasket.selector);
+        oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.MarkRefresh);
+    }
+
+    function test_HistoricalOrderExecution_RequiresSignedPayload() public {
+        vm.warp(1000);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__MissingUpdateData.selector);
+        oracle.updateOrderExecutionPrice(address(this), new bytes[](0), _orderRequest(CfdTypes.Side.LONG, false));
     }
 
     function test_UpdatePrice_AllowsWideLowWeightComponentWhenBasketConfidenceWithinLimit() public {
@@ -363,13 +329,33 @@ contract PletherOracleTest is Test {
         oracle = _deployOracle(address(pyth));
         engine.setPosition(1e18, CfdTypes.Side.LONG);
         pyth.setPrice(FEED_A, int64(100_000_000), uint64(100_000), int32(-8), 990);
-        pyth.setPrice(FEED_B, int64(200_000_000), uint64(200_000), int32(-8), 990);
+        pyth.setPrice(FEED_B, int64(200_000_000), uint64(100_000), int32(-8), 990);
 
         IPletherOracle.PriceSnapshot memory snapshot =
             oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
 
         assertEq(snapshot.markPrice, 100_000_000, "normalized basket price");
-        assertEq(snapshot.price, 100_020_000, "aggregate confidence should be 100,000 before the 20% shift");
+        assertEq(snapshot.price, 100_015_002, "inverse confidence uses the upper transformed endpoint");
+    }
+
+    function test_HistoricalOrderRejectsInvertedConfidenceAboveBasketLimit() public {
+        vm.warp(1000);
+        inversions[1] = true;
+        basePrices[1] = 50_000_000;
+        oracle = _deployOracle(address(pyth));
+        pyth.setUniquePrice(FEED_A, 100_000_000, 0, -8, 995, 990);
+        pyth.setUniquePrice(FEED_B, 200_000_000, 400_000, -8, 995, 990);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector,
+                IPletherOracle.PriceMode.OrderExecution,
+                uint256(100_200),
+                uint256(100_000_000),
+                uint256(10)
+            )
+        );
+        oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, false));
     }
 
     function testFuzz_BasketAcceptsWhenBothComponentsAreWithinLimit(
@@ -402,30 +388,36 @@ contract PletherOracleTest is Test {
     }
 
     function test_LiquidationMode_UsesStricterStalenessThanOrderExecution() public {
-        vm.warp(1000);
+        vm.warp(985);
         _setBothPrices(100_000_000, 984);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        vm.warp(1000);
 
         IPletherOracle.PriceSnapshot memory orderSnapshot =
-            oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+            oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.OrderExecution);
         assertEq(orderSnapshot.price, 1e8, "order mode accepts 16 second old price");
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.Liquidation);
+        oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.Liquidation);
     }
 
-    function test_FrozenWindow_RevertsWhenFeedPublishTimesDivergeTooFar() public {
+    function test_FrozenWindow_IgnoresStoredFeedDivergenceAndReplaysEngineMark() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
         pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__PublishTimeDivergence.selector);
-        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.OrderExecution);
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.OrderExecution);
+        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.price, 100_000_000);
     }
 
-    function test_OracleFrozenClose_AllowsFeedSkewBeyondLiveLimit() public {
+    function test_OracleFrozenClose_ReplaysEngineMarkDespiteFeedSkew() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
         pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
@@ -435,12 +427,14 @@ contract PletherOracleTest is Test {
         assertTrue(ok);
         assertTrue(snapshot.oracleFrozen);
         assertEq(snapshot.maxStaleness, engine.fadMaxStaleness());
-        assertEq(snapshot.publishTime, 900);
+        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.updateFee, 0);
     }
 
-    function test_OracleFrozenBatchClose_AllowsFeedSkewBeyondLiveLimit() public {
+    function test_OracleFrozenBatchClose_ReplaysEngineMarkDespiteFeedSkew() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
         pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
         IPletherOracle.BatchOrderPriceCache memory cache;
@@ -451,31 +445,31 @@ contract PletherOracleTest is Test {
 
         assertTrue(ok);
         assertTrue(snapshot.oracleFrozen);
-        assertEq(snapshot.publishTime, 900);
+        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.updateFee, 0);
         assertFalse(nextCache.hasHistoricalBasket);
     }
 
-    function test_OracleFrozenOpen_StillRejectsFeedSkewBeyondLiveLimit() public {
+    function test_OracleFrozenOpen_ReplaysEngineMarkDespiteFeedSkew() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
         pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IPletherOracle.PletherOracle__PublishTimeDivergence.selector,
-                IPletherOracle.PriceMode.OrderExecution,
-                900,
-                1000,
-                oracle.orderExecutionStalenessLimit()
-            )
-        );
-        oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, false));
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, false));
+
+        assertTrue(ok);
+        assertTrue(snapshot.oracleFrozen);
+        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.updateFee, 0);
     }
 
     function test_FrozenLiquidation_AllowsFeedDivergenceWithinFadMaxStaleness() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 984);
         pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
         pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 984);
 
@@ -485,7 +479,7 @@ contract PletherOracleTest is Test {
         assertTrue(snapshot.oracleFrozen, "setup should use frozen oracle policy");
         assertEq(snapshot.maxStaleness, engine.fadMaxStaleness(), "liquidation should use frozen staleness");
         assertEq(snapshot.publishTime, 984, "basket should retain weakest publish time");
-        assertEq(snapshot.price, 1e8, "basket price");
+        assertEq(snapshot.price, 100_000_000, "neutral price without a position");
     }
 
     function test_LiveClose_RetainsAdverseConfidenceAdjustment() public {
@@ -500,6 +494,69 @@ contract PletherOracleTest is Test {
         assertFalse(snapshot.oracleFrozen, "live execution should not be oracle-frozen");
         assertEq(snapshot.markPrice, 100_000_000, "mark should retain the unshifted basket price");
         assertEq(snapshot.price, 100_020_000, "live close should retain the adverse confidence shift");
+    }
+
+    function test_OrderExecution_RejectsZeroAdjustedPriceInSingleAndFreshBatch() public {
+        vm.warp(1000);
+        // Default confidence policy passes, but its adjustment consumes the capped execution base.
+        _setHistoricalPricesWithConfidence(1_000_000_000_000, 1_000_000_000);
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
+        bytes[] memory data = _pythUpdateData();
+        IPletherOracle.BatchOrderPriceCache memory cache;
+
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateOrderExecutionPrice(address(this), data, request);
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateBatchOrderExecutionPrice(address(this), data, request, cache);
+        assertEq(pyth.parseUniqueCallCount(), 0, "rejection rolls back parsing");
+        assertEq(pyth.updatePriceFeedsCallCount(), 0, "rejection rolls back synchronization");
+
+        // A larger adjustment must also reject instead of underflowing or producing a zero fill.
+        _setHistoricalPricesWithConfidence(1_000_000_010_000, 1_000_000_010);
+        request = _orderRequest(CfdTypes.Side.LONG, false);
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateOrderExecutionPrice(address(this), data, request);
+    }
+
+    function test_OrderExecution_ReusedCacheRejectsZeroDownwardPrice() public {
+        vm.warp(1000);
+        _setHistoricalPricesWithConfidence(1_000_000_000_000, 1_000_000_000);
+        IPletherOracle.BatchOrderPriceCache memory emptyCache;
+        // An upward execution can produce a valid cached basket whose downward price is unpriceable.
+        (,, IPletherOracle.BatchOrderPriceCache memory cache) = oracle.updateBatchOrderExecutionPrice(
+            address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true), emptyCache
+        );
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
+
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
+        assertEq(pyth.parseUniqueCallCount(), 1, "cache reuse never parses again");
+
+        cache.price = 0;
+        cache.confidence = 0;
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
+    }
+
+    function test_OrderExecution_AllowsSmallestPositivePriceAndCacheReuse() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(9999, 10_000);
+        _setHistoricalPricesWithConfidence(2, 2);
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.SHORT, true);
+        (bool ok, IPletherOracle.PriceSnapshot memory single) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), request);
+        assertTrue(ok);
+        assertEq(single.price, 1, "positive lower boundary remains executable");
+        assertEq(single.markPrice, 2, "neutral mark remains unadjusted");
+        IPletherOracle.BatchOrderPriceCache memory emptyCache;
+        (, IPletherOracle.PriceSnapshot memory batch, IPletherOracle.BatchOrderPriceCache memory cache) =
+            oracle.updateBatchOrderExecutionPrice(address(this), _pythUpdateData(), request, emptyCache);
+        (, IPletherOracle.PriceSnapshot memory reused,) =
+            oracle.updateBatchOrderExecutionPrice(address(this), new bytes[](0), request, cache);
+        assertEq(batch.price, single.price, "fresh batch parity");
+        assertEq(reused.price, single.price, "cache parity");
+        assertEq(reused.publishTime, single.publishTime, "publication preserved");
+        assertEq(reused.updateFee, 0, "cache reuse has no fee");
     }
 
     function test_FadOnlyClose_RetainsAdverseConfidenceAdjustment() public {
@@ -520,38 +577,35 @@ contract PletherOracleTest is Test {
     function test_OracleFrozenClose_WaivesAdverseConfidenceAdjustment() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         _setLivePricesWithConfidence(100_000_000, 100_000, 990);
 
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
             oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
 
-        assertTrue(ok, "oracle-frozen close should resolve the stored Pyth basket");
+        assertTrue(ok, "oracle-frozen close should replay the Engine mark");
         assertTrue(snapshot.closeOnly, "oracle-frozen execution should be close-only");
         assertTrue(snapshot.oracleFrozen, "setup should use oracle-frozen policy");
         assertEq(snapshot.markPrice, 100_000_000, "mark should retain the unshifted basket price");
         assertEq(snapshot.price, 100_000_000, "oracle-frozen close should waive the adverse confidence shift");
     }
 
-    function test_OracleFrozenClose_StillRejectsBasketConfidenceTooWide() public {
+    function test_OracleFrozenClose_IgnoresMutablePythConfidence() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         _setLivePricesWithConfidence(100_000_000, 100_002, 990);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IPletherOracle.PletherOracle__BasketConfidenceTooWide.selector,
-                IPletherOracle.PriceMode.OrderExecution,
-                uint256(100_002),
-                uint256(100_000_000),
-                uint256(10)
-            )
-        );
-        oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
+        assertTrue(ok);
+        assertEq(snapshot.price, 100_000_000);
     }
 
     function test_OracleFrozenBatchClose_WaivesAdverseConfidenceAdjustment() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         _setLivePricesWithConfidence(100_000_000, 100_000, 990);
         IPletherOracle.BatchOrderPriceCache memory cache;
 
@@ -568,6 +622,7 @@ contract PletherOracleTest is Test {
     function test_OracleFrozenOpen_RetainsAdverseConfidenceAdjustment() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         _setLivePricesWithConfidence(100_000_000, 100_000, 990);
 
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
@@ -580,6 +635,7 @@ contract PletherOracleTest is Test {
     function test_OracleFrozenLiquidation_RetainsAdverseConfidenceAdjustment() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
         engine.setPosition(1e18, CfdTypes.Side.LONG);
         _setLivePricesWithConfidence(100_000_000, 100_000, 990);
 
@@ -590,13 +646,120 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.price, 100_020_000, "liquidation should retain the adverse confidence shift");
     }
 
+    function test_Liquidation_SingleShiftsRawBasketBeforeCap() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(2500, 10);
+        engine.setPosition(1e18, CfdTypes.Side.SHORT);
+        _setLivePricesWithConfidence(200_020_000, 200_000, 990);
+
+        IPletherOracle.PriceSnapshot memory snapshot =
+            oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+
+        assertEq(snapshot.price, 199_970_000, "shift the raw basket before capping");
+        assertEq(snapshot.markPrice, 200_000_000, "neutral mark stays capped");
+    }
+
+    function test_Liquidation_BatchShiftsRawBasketBeforeCap() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(2500, 10);
+        _setLivePricesWithConfidence(200_020_000, 200_000, 990);
+
+        IPletherOracle.LiquidationBatchSnapshot memory snapshot =
+            oracle.updateLiquidationBatchPrice(address(this), _pythUpdateData());
+
+        assertEq(snapshot.shortPrice, 199_970_000, "short shift uses the raw basket");
+        assertEq(snapshot.longPrice, 200_000_000, "long adverse price stays capped");
+        assertEq(snapshot.markPrice, 200_000_000, "neutral mark stays capped");
+    }
+
+    function test_Liquidation_ShortStaysCappedWhenShiftLeavesRawPriceAboveCap() public {
+        vm.warp(1000);
+        _setLiquidationPolicy(2500, 10);
+        engine.setPosition(1e18, CfdTypes.Side.SHORT);
+        _setLivePricesWithConfidence(200_100_000, 200_000, 990);
+
+        IPletherOracle.PriceSnapshot memory single =
+            oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+        IPletherOracle.LiquidationBatchSnapshot memory batch =
+            oracle.updateLiquidationBatchPrice(address(this), _pythUpdateData());
+
+        assertEq(single.price, 200_000_000, "shifted raw price is still above the cap");
+        assertEq(batch.shortPrice, single.price, "batch must use the same cap ordering");
+    }
+
+    function testFuzz_Liquidation_SingleAndBatchMatchRawBasketPolicy(
+        uint32 priceSeed,
+        uint32 confidenceSeed,
+        uint16 multiplierSeed,
+        bool frozen
+    ) public {
+        vm.warp(1000);
+        engine.setFadDayOverride(0, frozen);
+        // Even feed values make both equally weighted contributions exact.
+        uint256 rawPrice = 2 * bound(uint256(priceSeed), 25_000_000, 150_000_000);
+        uint256 multiplier = bound(uint256(multiplierSeed), 0, 30_000);
+        uint256 confidenceLimitBps = multiplier == 0 ? 10_000 : 99_999_999 / multiplier;
+        confidenceLimitBps = confidenceLimitBps > 10_000 ? 10_000 : confidenceLimitBps;
+        uint256 confidence = 2 * bound(uint256(confidenceSeed), 0, rawPrice * confidenceLimitBps / 20_000);
+        _setLiquidationPolicy(multiplier, confidenceLimitBps);
+        _setLivePricesWithConfidence(int64(uint64(rawPrice)), uint64(confidence), 990);
+        engine.setLastMark(100_000_000, 980);
+        if (frozen) {
+            // Frozen liquidation replays the installed mark with policy-derived confidence.
+            rawPrice = engine.lastMarkPrice();
+            confidence = rawPrice * confidenceLimitBps / 10_000;
+        }
+
+        uint256 shift = confidence * multiplier / 10_000;
+        uint256 neutral = rawPrice > 200_000_000 ? 200_000_000 : rawPrice;
+        uint256 expectedLong = rawPrice + shift > 200_000_000 ? 200_000_000 : rawPrice + shift;
+        uint256 expectedShort = rawPrice > shift ? rawPrice - shift : 0;
+        expectedShort = expectedShort > 200_000_000 ? 200_000_000 : expectedShort;
+        IPletherOracle.LiquidationBatchSnapshot memory batch =
+            oracle.updateLiquidationBatchPrice(address(this), _pythUpdateData());
+        assertEq(batch.longPrice, expectedLong, "long raw-price policy");
+        assertEq(batch.shortPrice, expectedShort, "short raw-price policy");
+        assertGt(batch.shortPrice, 0, "accepted confidence policy preserves positive liquidation prices");
+        assertEq(batch.markPrice, neutral, "neutral cap policy");
+        assertEq(batch.publishTime, frozen ? 980 : 990, "basket publication preserved");
+
+        for (uint256 i; i < 3; i++) {
+            engine.setPosition(i == 2 ? 0 : 1e18, i == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT);
+            IPletherOracle.PriceSnapshot memory single =
+                oracle.updateLiquidationPrice(address(this), _pythUpdateData(), address(0xCAFE));
+            assertEq(single.price, i == 0 ? expectedLong : i == 1 ? expectedShort : neutral, "single price policy");
+            assertEq(single.markPrice, batch.markPrice, "neutral mark parity");
+            assertEq(single.publishTime, batch.publishTime, "publication parity");
+            assertEq(single.oracleFrozen, frozen, "frozen policy metadata preserved");
+        }
+        assertEq(engine.lastMarkPrice(), 100_000_000, "oracle reads do not update engine mark");
+        assertEq(engine.lastMarkTime(), 980, "oracle reads do not update engine publication");
+    }
+
+    function _setLiquidationPolicy(
+        uint256 multiplier,
+        uint256 confidenceLimitBps
+    ) internal {
+        oracle.applyConfig(
+            IPletherOracle.OracleConfig({
+                orderExecutionStalenessLimit: oracle.orderExecutionStalenessLimit(),
+                liquidationStalenessLimit: oracle.liquidationStalenessLimit(),
+                basketMaxConfidenceRatioBps: confidenceLimitBps,
+                orderSettlementWindow: oracle.orderSettlementWindow(),
+                maxComponentPublishTimeDivergence: oracle.maxComponentPublishTimeDivergence(),
+                adverseConfidenceMultiplierBps: multiplier
+            })
+        );
+    }
+
     function test_UpdatePrice_RevertsWhenPublishTimePredatesStoredMark() public {
         vm.warp(1000);
-        engine.setLastMark(1e8, 995);
         _setBothPrices(100_000_000, 990);
+        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+        engine.setLastMark(1e8, 995);
 
         vm.expectPartialRevert(IPletherOracle.PletherOracle__PriceOutOfOrder.selector);
-        oracle.updatePrice(address(this), _pythUpdateData(), IPletherOracle.PriceMode.MarkRefresh);
+        oracle.updatePrice(address(this), new bytes[](0), IPletherOracle.PriceMode.MarkRefresh);
     }
 
     function test_ApplyConfig_OnlyConfiguredRouter() public {
@@ -621,6 +784,36 @@ contract PletherOracleTest is Test {
         assertEq(oracle.basketMaxConfidenceRatioBps(), 500, "confidence bps");
     }
 
+    function test_ApplyConfig_RejectsUnsafeConfidencePolicyAtomically() public {
+        uint256[5] memory ratios = [uint256(10_000), 4000, 10_001, 0, type(uint256).max];
+        uint256[5] memory multipliers = [uint256(10_000), 30_000, 0, 30_001, type(uint256).max];
+        for (uint256 i; i < ratios.length; i++) {
+            IPletherOracle.OracleConfig memory config = IPletherOracle.OracleConfig({
+                orderExecutionStalenessLimit: 120,
+                liquidationStalenessLimit: 30,
+                basketMaxConfidenceRatioBps: ratios[i],
+                orderSettlementWindow: 15,
+                maxComponentPublishTimeDivergence: 5,
+                adverseConfidenceMultiplierBps: multipliers[i]
+            });
+            vm.expectRevert(IPletherOracle.PletherOracle__InvalidConfidenceConfig.selector);
+            oracle.applyConfig(config);
+            assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "rejected ratio unchanged");
+            assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "rejected multiplier unchanged");
+            assertEq(oracle.orderExecutionStalenessLimit(), 60, "other settings unchanged");
+        }
+    }
+
+    function test_ApplyConfig_AcceptsStrictBoundaryAndZeroFactors() public {
+        _setLiquidationPolicy(10_000, 9999);
+        _setLiquidationPolicy(30_000, 3333);
+        _setLiquidationPolicy(0, 10_000);
+        assertEq(oracle.basketMaxConfidenceRatioBps(), 10_000);
+        _setLiquidationPolicy(30_000, 0);
+        assertEq(oracle.adverseConfidenceMultiplierBps(), 30_000);
+        assertEq(oracle.basketMaxConfidenceRatioBps(), 0);
+    }
+
     function test_ApplyConfig_DeployerCannotBypassRouter() public {
         address router = address(0xA11CE);
         engine.setOrderRouter(router);
@@ -641,6 +834,34 @@ contract PletherOracleTest is Test {
         oracle.applyConfig(config);
 
         assertEq(oracle.orderExecutionStalenessLimit(), 120, "router can apply config");
+    }
+
+    function test_ParserFailureIsNotUnavailableHistory() public {
+        vm.warp(1000);
+        IPletherOracle.OrderExecutionRequest memory request = _orderRequest(CfdTypes.Side.LONG, false);
+        bytes[5] memory errors = [
+            bytes(hex"e69ffece"), // Pyth InvalidUpdateData()
+            abi.encodeWithSignature("Panic(uint256)", uint256(0x11)),
+            bytes(""),
+            bytes(hex"45805f"), // Truncated PriceFeedNotFoundWithinRange()
+            bytes.concat(IPyth.PriceFeedNotFoundWithinRange.selector, hex"00")
+        ];
+        for (uint256 i; i < errors.length; ++i) {
+            vm.mockCallRevert(
+                address(pyth), abi.encodeWithSelector(IPyth.parsePriceFeedUpdatesUnique.selector), errors[i]
+            );
+            for (uint256 strict; strict < 2; ++strict) {
+                request.revertOnHistoricalUnavailable = strict == 1;
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        IPletherOracle.PletherOracle__HistoricalParserFailure.selector,
+                        bytes4(errors[i]),
+                        errors[i].length
+                    )
+                );
+                oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), request);
+            }
+        }
     }
 
     function _deployOracle(

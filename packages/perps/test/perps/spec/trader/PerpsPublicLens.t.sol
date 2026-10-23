@@ -6,6 +6,8 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
+import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
@@ -14,6 +16,7 @@ contract PositionProtectionViewsStub is IPositionProtectionViews {
 
     mapping(address => uint64) internal activeProtectionIds;
     mapping(uint64 => PositionProtectionTypes.PositionProtectionView) internal protections;
+    mapping(uint64 => PositionProtectionTypes.CloseFinancialLimits) internal protectionCloseLimits;
 
     function positionProtectionBook() external view returns (address book) {
         return address(this);
@@ -44,12 +47,80 @@ contract PositionProtectionViewsStub is IPositionProtectionViews {
         return protections[protectionId];
     }
 
+    function closeFinancialLimits(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.CloseFinancialLimits memory limits) {
+        return protectionCloseLimits[protectionId];
+    }
+
 }
 
 contract PerpsPublicLensTest is BasePerpTest {
 
     uint64 internal constant SATURDAY_NOON = 1_710_021_600;
     address internal constant LENS_LP = address(0x1E45);
+
+    function test_GetTraderAccount_MaxLiveStalenessDoesNotOverflow() public {
+        _assertMaxStalenessDoesNotOverflow(false);
+    }
+
+    function test_GetTraderAccount_MaxFrozenStalenessDoesNotOverflow() public {
+        _assertMaxStalenessDoesNotOverflow(true);
+    }
+
+    function _assertMaxStalenessDoesNotOverflow(
+        bool frozen
+    ) internal {
+        ICfdEngineAdminHost.EngineFreshnessConfig memory config = _engineFreshnessConfig();
+        config.engineMarkStalenessLimit = type(uint256).max;
+        config.fadMaxStaleness = type(uint256).max;
+        engineAdmin.proposeFreshnessConfig(config);
+        IHousePool.PoolConfig memory poolConfig = _currentPoolConfig();
+        poolConfig.markStalenessLimit = type(uint256).max;
+        pool.proposePoolConfig(poolConfig);
+        vm.warp(block.timestamp + 48 hours + 1);
+        engineAdmin.finalizeFreshnessConfig();
+        pool.finalizePoolConfig();
+
+        address trader = address(0xA11CE);
+        _fundTrader(trader, 50_000e6);
+        _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
+        if (frozen) {
+            vm.warp(SATURDAY_NOON);
+        }
+        assertEq(engine.isOracleFrozen(), frozen);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
+
+        uint256 withdrawable = engineAccountLens.getWithdrawableUsdc(trader);
+        assertGt(withdrawable, 0, "healthy account must retain withdrawal headroom");
+        assertEq(withdrawable, clearinghouse.getAccountUsdcBuckets(trader).freeSettlementUsdc);
+        assertEq(publicLens.getTraderAccount(trader).withdrawableUsdc, withdrawable);
+        vm.prank(trader);
+        clearinghouse.withdraw(trader, withdrawable);
+    }
+
+    function test_GetWithdrawableUsdc_PreservesFutureAndInclusiveFreshnessBoundary() public {
+        address trader = address(0xA11CE);
+        _fundTrader(trader, 50_000e6);
+        _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
+        uint64 futureMarkTime = uint64(block.timestamp + 5);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, futureMarkTime);
+
+        assertGt(engineAccountLens.getWithdrawableUsdc(trader), 0, "future cached mark retains zero age");
+        vm.prank(address(clearinghouse));
+        engine.checkWithdraw(trader);
+
+        uint256 limit = engine.engineMarkStalenessLimit();
+        if (pool.markStalenessLimit() < limit) {
+            limit = pool.markStalenessLimit();
+        }
+        vm.warp(uint256(futureMarkTime) + limit);
+        assertGt(engineAccountLens.getWithdrawableUsdc(trader), 0, "exact age limit remains fresh");
+        vm.warp(block.timestamp + 1);
+        assertEq(engineAccountLens.getWithdrawableUsdc(trader), 0, "age beyond limit is stale");
+    }
 
     function test_GetTraderAccount_UsesNetEquityAndEngineAwareWithdrawable() public {
         address trader = address(0xA11CE);
@@ -58,8 +129,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(105_000_000, uint64(vm.getBlockTimestamp()));
 
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 1);
 
@@ -87,8 +159,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(105_000_000, uint64(vm.getBlockTimestamp()));
 
         uint256 withdrawableUsdc = engineAccountLens.getWithdrawableUsdc(account);
         PerpsViewTypes.TraderAccountView memory viewData = publicLens.getTraderAccount(account);
@@ -131,8 +204,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(95_000_000, uint64(vm.getBlockTimestamp()));
 
         PerpsViewTypes.PositionView memory viewData = publicLens.getPosition(account);
         assertEq(
@@ -149,8 +223,9 @@ contract PerpsPublicLensTest is BasePerpTest {
         _fundTrader(trader, 20_000e6);
         _open(account, CfdTypes.Side.SHORT, 80_000e18, 8000e6, 1e8);
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(95_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(95_000_000, uint64(vm.getBlockTimestamp()));
         vm.warp(block.timestamp + 14 days);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);
@@ -333,8 +408,9 @@ contract PerpsPublicLensTest is BasePerpTest {
 
         assertFalse(publicLens.isLiquidatable(account), "Setup should start above maintenance before carry accrues");
 
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(100_500_000, uint64(block.timestamp));
+        engine.updateMarkPrice(100_500_000, uint64(vm.getBlockTimestamp()));
         vm.warp(block.timestamp + 2 * 365 days);
 
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = engineAccountLens.getAccountLedgerSnapshot(account);

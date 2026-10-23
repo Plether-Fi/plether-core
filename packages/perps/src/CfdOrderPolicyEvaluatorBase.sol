@@ -225,6 +225,10 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.riskParams = engine.riskParams();
 
         snapshot.poolCashUsdc = poolCashUsdc;
+        IHousePool pool = IHousePool(engine.pool());
+        snapshot.poolAdditionalReservedUsdc =
+            pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc() + pool.unassignedAssets();
+        snapshot.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         snapshot.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
         uint256 carryDepthUsdc = PositionRiskAccountingLib.computeNetPoolDepthUsdc(
             snapshot.poolCashUsdc, snapshot.totalTraderClaimBalanceUsdc

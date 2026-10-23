@@ -23,8 +23,8 @@ interface IPositionProtectionBookSource {
 /// @dev Account ids are addresses. A settlement balance is an internal claim on this contract's USDC custody;
 ///      PnL pledge, liquidation reserve, committed-order margin, and action reserve are encumbrances within that
 ///      balance, not separate token balances. The contract assumes a standard six-decimal USDC implementation and
-///      does not support fee-on-transfer accounting. The deployer owns the one-time engine wiring through
-///      `Ownable2Step`.
+///      does not support fee-on-transfer accounting. The deployer owns the one-time engine wiring and rescue of
+///      non-settlement tokens through `Ownable2Step`.
 /// @custom:security-contact contact@plether.com
 contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTransient {
 
@@ -116,6 +116,9 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @notice A required engine, recipient, or keeper address is zero.
     error MarginClearinghouse__ZeroAddress();
 
+    /// @notice Settlement tokens cannot be rescued, including unsolicited transfers.
+    error MarginClearinghouse__CannotRescueSettlementAsset();
+
     /// @notice A typed locked-margin bucket cannot cover the requested decrease.
     error MarginClearinghouse__InsufficientBucketMargin();
 
@@ -145,6 +148,12 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     /// @param asset Settlement token transferred out
     /// @param amount Amount debited and transferred, in the token's native units
     event Withdraw(address indexed account, address indexed asset, uint256 amount);
+
+    /// @notice Emitted after the owner rescues a non-settlement token.
+    /// @param token ERC-20 token rescued
+    /// @param recipient Recipient of the transfer
+    /// @param amount Requested transfer amount in the token's native units
+    event TokenRescued(address indexed token, address indexed recipient, uint256 amount);
 
     /// @notice Emitted when an account's typed locked-margin bucket increases.
     /// @dev Locking is an internal reclassification and does not itself move settlement tokens.
@@ -301,6 +310,27 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
             revert MarginClearinghouse__EngineAlreadySet();
         }
         engine = _engine;
+    }
+
+    /// @notice Rescues the full balance of an accidentally transferred non-settlement ERC-20.
+    /// @dev Owner-only. Settlement USDC is always excluded, even when sent without an account credit.
+    ///      Does not change settlement balances or margin buckets. Transfer-tax tokens may deliver less than `amount`
+    ///      emitted by `TokenRescued`.
+    /// @param token Non-settlement ERC-20 to rescue
+    /// @param recipient Nonzero address receiving the tokens
+    function rescueToken(
+        address token,
+        address recipient
+    ) external onlyOwner nonReentrant {
+        if (token == settlementAsset) {
+            revert MarginClearinghouse__CannotRescueSettlementAsset();
+        }
+        if (token == address(0) || recipient == address(0)) {
+            revert MarginClearinghouse__ZeroAddress();
+        }
+        uint256 amount = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransfer(recipient, amount);
+        emit TokenRescued(token, recipient, amount);
     }
 
     // ==========================================
@@ -680,10 +710,11 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
         emit RiskOffOrderReservesRefunded(account, releasedMarginUsdc, refundableBountyUsdc);
     }
 
-    /// @notice Releases a settled execution bounty back to the same account that funded it.
+    /// @notice Releases a settled order or protection-trigger bounty back to the same account that funded it.
     /// @dev Callable only by the Engine-reported Router. Unlike the general Engine bounty-credit path, this exact
     ///      self-transfer changes only the reserved classification and deliberately skips carry checkpointing. The
-    ///      Router must first take the clearinghouse bounty record so the protected-reserve floor remains exact.
+    ///      Router or its protection Book must first take the clearinghouse bounty record so the protected-reserve
+    ///      floor remains exact. Atomic protection cancellation uses this before bounded close carry collection.
     /// @param account Account whose bounty classification is released to free settlement.
     /// @param executionBountyUsdc Exact bounty amount in six-decimal USDC units.
     function releaseReservedExecutionBountyToSource(

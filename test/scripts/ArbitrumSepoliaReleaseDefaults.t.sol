@@ -306,6 +306,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         PletherOracle oracle = new PletherOracle(
             address(engine), address(genericPool), address(pyth), feedIds, quantities, basePrices, inversions
         );
+        CfdEngineLens engineLens = new CfdEngineLens(address(engine));
         CfdOrderPolicyEvaluator evaluator = new CfdOrderPolicyEvaluator();
         OrderRouterExecutionSidecar executionSidecar = new OrderRouterExecutionSidecar();
         uint64 routerDependencyNonce = vm.getNonce(address(this));
@@ -315,7 +316,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         OrderRouterLiquidationBatchSidecar sidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
         OrderRouter router = new OrderRouter(
             address(engine),
-            address(0xCAFE),
+            address(engineLens),
             address(genericPool),
             address(oracle),
             address(sidecar),

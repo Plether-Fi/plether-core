@@ -88,6 +88,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         bytes[] memory pythPrice = new bytes[](1);
         pythPrice[0] = abi.encode(uint256(150_000_000));
         vm.deal(other, 10 ether);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(other);
         router.executeLiquidation{value: 0}(otherAccount, pythPrice);
 

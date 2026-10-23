@@ -634,6 +634,9 @@ library CfdEnginePlanLib {
         snap.unsettledCarryUsdc = consumption.uncoveredUsdc;
         snap.poolAssetsUsdc += realizedCarryUsdc;
         snap.poolCashUsdc += realizedCarryUsdc;
+        if (snap.poolQueuesTradingRevenue) {
+            snap.poolAdditionalReservedUsdc += realizedCarryUsdc;
+        }
     }
 
     /// @notice Builds risk state for the position projected by a successful open-cost plan.
@@ -936,9 +939,9 @@ library CfdEnginePlanLib {
         delta.freshPayoutIsImmediate = !delta.pricePayoutCreatesClaim;
         delta.freshPayoutCreatesClaim = delta.pricePayoutCreatesClaim;
 
-        freePoolCashUsdc =
-        CashPriorityLib.reserveFreshPayouts(poolCashAfterCollectionsUsdc, claimsAfterPriceNettingUsdc).freeCashUsdc;
         uint256 feeTopUpUsdc = delta.executionFeeUsdc - delta.actionProtocolFeeCreditedUsdc;
+        freePoolCashUsdc =
+            _freePoolCashForProtocolFee(snap, delta, poolCashAfterCollectionsUsdc, claimsAfterPriceNettingUsdc);
         delta.protocolFeeTopUpUsdc = feeTopUpUsdc < freePoolCashUsdc ? feeTopUpUsdc : freePoolCashUsdc;
 
         if (delta.pricePayoutUsdc > 0 || delta.actionRebatePaidUsdc > 0) {
@@ -947,6 +950,30 @@ library CfdEnginePlanLib {
             delta.settlementType = CfdEnginePlanTypes.SettlementType.LOSS;
         }
         return delta;
+    }
+
+    /// @dev Mirrors HousePool's live settlement reserve after the close side delta and cash movements preceding
+    ///      the protocol-fee top-up. Fresh trader payouts and rebates retain their separate cash-priority policy.
+    function _freePoolCashForProtocolFee(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        CfdEnginePlanTypes.CloseDelta memory delta,
+        uint256 poolCashUsdc,
+        uint256 traderClaimsUsdc
+    ) private pure returns (uint256) {
+        uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiabilityAfterClose(
+            snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
+        );
+        uint256 reservedUsdc = maxLiabilityUsdc + traderClaimsUsdc
+            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, snap.settlementBufferBps)
+            + snap.poolAdditionalReservedUsdc;
+        if (snap.poolQueuesTradingRevenue) {
+            uint256 cashArrivedRevenueUsdc = delta.pricePnlPledgeConsumedUsdc + delta.actionChargeCollectedUsdc
+                - delta.actionProtocolFeeCreditedUsdc;
+            uint256 retainedRevenueUsdc =
+                delta.actionChargeWithheldUsdc - (delta.executionFeeUsdc - delta.actionProtocolFeeCreditedUsdc);
+            reservedUsdc += cashArrivedRevenueUsdc + retainedRevenueUsdc;
+        }
+        return poolCashUsdc > reservedUsdc ? poolCashUsdc - reservedUsdc : 0;
     }
 
     /// @notice Separates close action charges and rebates from price PnL and allocates the collected execution fee.

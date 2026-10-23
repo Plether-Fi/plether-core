@@ -6,6 +6,7 @@ import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdEnginePlanner} from "@plether/perps/CfdEnginePlanner.sol";
 import {CfdEngineSettlementSidecar} from "@plether/perps/CfdEngineSettlementSidecar.sol";
+import {HousePool} from "@plether/perps/HousePool.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
@@ -21,6 +22,40 @@ import {CfdEngineTestBase} from "../../shared/CfdEngineTestBase.sol";
 contract EngineConfigurationTest is CfdEngineTestBase {
 
     using stdStorage for StdStorage;
+
+    function test_ConstructorRejectsMismatchedSettlementAsset() public {
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidSettlementAsset.selector);
+        new CfdEngine(address(0xBEEF), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+    }
+
+    function test_SetPoolRejectsMismatchedSettlementAsset() public {
+        CfdEngine victim =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        HousePool wrongAssetPool =
+            new HousePool(address(0xBEEF), address(victim), address(housePoolRedemptionMathSidecar));
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidPool.selector);
+        victim.setPool(address(wrongAssetPool));
+        assertEq(address(victim.pool()), address(0));
+    }
+
+    function test_SetPoolRejectsPoolBoundToAnotherEngine() public {
+        CfdEngine victim =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidPool.selector);
+        victim.setPool(address(pool));
+        assertEq(address(victim.pool()), address(0));
+    }
+
+    function test_SetPoolRejectsNonContract() public {
+        CfdEngine victim =
+            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidPool.selector);
+        victim.setPool(address(0xBEEF));
+        assertEq(address(victim.pool()), address(0));
+    }
 
     function test_SettlementSidecar_RevertsWhenCalledDirectly() public {
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));

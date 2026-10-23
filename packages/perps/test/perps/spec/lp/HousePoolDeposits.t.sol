@@ -281,7 +281,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         uint256 requestId = _requestAsyncDeposit(juniorVault, attacker, minimumDeposit);
         _settleAsyncRequest(requestId, true);
         vm.prank(attacker);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
         juniorVault.claimDeposit(requestId, minimumDeposit, alice, attacker);
 
         vm.warp(block.timestamp + 11 minutes);
@@ -326,7 +326,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         uint256 requestId = _requestAsyncDeposit(juniorVault, helper, 10_000e6);
         _settleAsyncRequest(requestId, true);
         vm.prank(helper);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
         juniorVault.claimDeposit(requestId, 10_000e6, alice, helper);
 
         vm.warp(block.timestamp + 11 minutes);

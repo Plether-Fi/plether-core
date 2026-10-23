@@ -181,6 +181,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
     function test_SuccessRealizesOnlyTheAuthorizedPledgeCostAndSelfMayWithdrawBounty() public {
         uint256 pledge = _bountyPosition(CfdTypes.Side.LONG);
         uint256 expectedFree = _successfulCloseResidual() + 0;
+        _ensureLaterOracleTime();
         router.updateMarkPrice(_bountyPriceData(120_000_000));
         uint256 snapshot = vm.snapshotState();
         // Both branches commit the same unpaid zero-bounty close; compare its pledge and LP cash outcome.

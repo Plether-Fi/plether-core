@@ -161,7 +161,9 @@ abstract contract SourceBoundBountyFixture is BasePerpTest {
     function _bountyPriceData(
         uint256 price
     ) internal returns (bytes[] memory data) {
-        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(price)), 0, -8, block.timestamp);
+        uint256 publishTime = vm.getBlockTimestamp();
+        baseMockPyth.setAllPrices(_basePythFeedIds(), int64(uint64(price)), 0, -8, publishTime);
+        baseMockPyth.setAllUniquePrices(_basePythFeedIds(), int64(uint64(price)), 0, -8, publishTime, publishTime - 1);
         data = new bytes[](1);
         data[0] = "";
     }

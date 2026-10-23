@@ -26,14 +26,14 @@ exits**. Plether therefore provides granular breakers, not a global protocol sto
 | Control | Activation | What it stops | What remains live | Recovery |
 |---|---|---|---|---|
 | Risk-off plus LP-entry pause | `EmergencyPauseCoordinator.triggerEmergencyPause(reasonHash,evidenceHash)` by the guardian | New opens/increases, every pending open covered by the persistent cutoff, new LP deposit requests, and deposit activation | Closes, liquidations, mark refresh, redemption requests, eligible settlement/redemption funding, LP request cancellations under existing rules, and funded claims | Governance unpauses RouterAdmin and HousePool entry separately; the order cutoff never decreases |
-| LP-settlement-only hold | `EmergencyPauseCoordinator.triggerLpEpochSettlementHold(reasonHash,evidenceHash)` by the guardian | Every `HousePool.settleLpEpoch(...)` call, including direct cached/no-position and Router atomic-refresh settlement; therefore no deposit activation or new redemption funding | Trading, new deposits and Senior reservations, redemption requests, existing cancellation paths, recapitalization/reconciliation, and already-funded claims | HousePool owner calls `unpauseLpEpochSettlement()` |
+| LP-settlement-only hold | `EmergencyPauseCoordinator.triggerLpEpochSettlementHold(reasonHash,evidenceHash)` by the guardian | Every `HousePool.settleLpEpoch(...)` call and new Senior deposits/reservations | Trading, Junior deposit requests, redemption requests, refunds of existing Senior commitments, recapitalization/reconciliation, and already-funded claims | HousePool owner calls `unpauseLpEpochSettlement()` |
 | Full containment | `EmergencyPauseCoordinator.triggerFullContainment(reasonHash,evidenceHash)` by the guardian | All restrictions above in one transaction | Closes, liquidations, mark refresh, redemption requests, existing cancellations, recapitalization/reconciliation, and already-funded claims | Governance releases RouterAdmin, HousePool entry, and LP settlement separately |
 | Router risk-off pause | `OrderRouterAdmin.pause()` by its owner or configured pauser | New opens/increases; permanently invalidates pending opens through `riskOffOrderCutoff` | Closes, liquidations, mark refresh, LP settlement when not separately held, refunds, and claims | RouterAdmin owner calls `unpause()`; the historical cutoff never decreases |
 | HousePool entry pause | `HousePool.pause()` by its owner or configured pauser | New Senior and Junior deposit requests, Senior reservations, and deposit activation | Redemption requests, eligible settlement/redemption funding, reconciliation, LP request cancellations under existing rules, claims, and trading | HousePool owner calls `unpause()` |
-| HousePool settlement hold | `HousePool.pauseLpEpochSettlement()` by its owner or configured pauser | Synchronized epoch clearing: deposit activation and redemption funding | New requests, existing cancellations, reconciliation, claims, and trading | HousePool owner calls `unpauseLpEpochSettlement()` |
+| HousePool settlement hold | `HousePool.pauseLpEpochSettlement()` by its owner or configured pauser | Synchronized epoch clearing and new Senior deposits/reservations | Junior deposit requests, redemption requests, refunds of existing Senior commitments, reconciliation, claims, and trading | HousePool owner calls `unpauseLpEpochSettlement()` |
 | Engine degraded mode | Automatically latches when a close or liquidation leaves raw `E < L`, where `E = max(HousePool.totalAssets() - trader claims, 0)` and `L` is maximum directional liability | New opens, every LP epoch settlement (including deposit activation and redemption funding), and new LP entry through the pool gate | Closes, liquidations, mark refresh, recapitalization, redemption requests, and already-funded claims | Engine owner may clear it once raw `E >= L`; the separate settlement-buffer target need not be restored to clear |
 | Oracle/FAD close-only policy | Automatically derived from oracle regime and calendar | Opens in FAD or `oracleFrozen`; oracle-dependent actions also fail closed when their policy is not satisfied | Policy-valid closes, liquidations, mark refresh, and frozen-market LP settlement when not held | Automatic when a valid regime returns; configuration changes remain timelocked |
-| LP freshness/accounting gates | Automatically evaluated from canonical Engine and HousePool state | Settlement/redemption funding while withdrawals are not live; activation on stale marks, deficits, impairment, unassigned assets, or unavailable Senior capacity | Unrelated trading and claims already funded | Automatic after canonical state becomes eligible |
+| LP freshness/accounting gates | Automatically evaluated from canonical Engine and HousePool state | Settlement/redemption funding while withdrawals are not live; activation on stale marks, deficits, impairment, or unassigned assets | Unrelated trading and claims already funded | Automatic after canonical state becomes eligible |
 
 The unified incident event uses fixed bits: RouterAdmin risk-off `1`, HousePool entry pause `2`, and LP epoch
 settlement hold `4`. The restrictions requested by risk-off plus entry are `3`, while full containment requests `7`.
@@ -55,10 +55,11 @@ operations, but operators must record and monitor any partial restriction state.
 | Liquidate | Allowed | Allowed | Allowed | Liquidation remains a risk-reduction path |
 | Refresh Engine/oracle mark | Allowed | Allowed | Allowed | A valid refresh may be needed before recovery |
 | Recapitalize or reconcile | Allowed | Allowed | Allowed | These paths support investigation and recovery |
-| Request an LP deposit / reserve Senior capacity | Stopped | Allowed | Stopped | Deposits accepted during settlement hold remain escrowed and can accumulate |
+| Request a Senior deposit / reserve capacity | Stopped | Stopped | Stopped | New binding commitments cannot be created during a settlement hold |
+| Request a Junior deposit | Stopped | Allowed | Stopped | Junior escrow may accumulate while settlement is held |
 | Activate a pending LP deposit | Stopped | Stopped | Stopped | Settlement is the only activation path |
 | Claim activated deposit shares | Allowed | Allowed | Allowed | No new NAV decision occurs at claim time |
-| Cancel a pending deposit | Existing rules only | Existing rules only | Existing rules only | No breaker creates a new cancellation entitlement |
+| Cancel a pending deposit | Existing rules only | Existing Senior commitments refundable; Junior rules unchanged | Existing Senior commitments refundable; Junior rules unchanged | The settlement hold opens a Senior escrow exit |
 | Request an LP redemption | Allowed | Allowed | Allowed | Shares continue entering the epoch queue |
 | Cancel a redemption | Existing rules only | Existing rules only | Existing rules only | Maturity/funding rules remain authoritative |
 | Settle an epoch / fund redemptions | Allowed if automatic gates pass | Stopped | Stopped | Both cached and atomic-refresh routes fail while held |
@@ -84,9 +85,9 @@ evidence does not indicate compromised trading, custody, or LP request admission
 - an unknown settlement dependency that remains unreadable across independent providers and for which exact
   route-specific simulation cannot establish safety.
 
-Settlement-only is not a general response to price volatility or queue delay. It permits new deposit requests, so
-operators and frontends must disclose that assets may accumulate in escrow without an activation date and remain
-subject to existing cancellation rules.
+Settlement-only is not a general response to price volatility or queue delay. It permits new Junior deposit requests,
+so operators and frontends must disclose that Junior assets may accumulate in escrow without an activation date.
+Existing Senior commitments may be refunded while the hold remains active.
 
 ### Use risk-off plus LP-entry pause
 
@@ -220,8 +221,8 @@ settlement; it does not repair state or guarantee success.
 - **The guardian cannot stop traders from closing or reducing positions.** This is intentional. A close may still
   fail ordinary protocol checks, but no discretionary pause bit blocks it.
 - **The guardian cannot stop already-funded claims.** Deposit shares and funded redemption assets remain claimable.
-- The settlement hold stops new epoch mutations, not LP requests. Deposits and redemptions can accumulate, and no new
-  cancellation right is created. Existing cancellation rules remain authoritative.
+- The settlement hold stops new epoch mutations and Senior deposit requests, while Junior deposit and redemption
+  requests may accumulate. It permits refunds of existing Senior commitments.
 - Neither a breaker nor its release repairs accounting, oracle, custody, liquidity, or queue state or guarantees
   that a later transaction succeeds.
 - Risk-off permanently invalidates covered pending opens; cleanup remains lazy and bounded.

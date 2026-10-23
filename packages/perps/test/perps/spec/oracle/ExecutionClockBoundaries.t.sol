@@ -268,12 +268,13 @@ contract TerminalEconomicStateOracleTest is BasePerpTest {
 
     /// @dev spec; source: ACCOUNTING_SPEC.md#oracle-and-freshness-policy.
     function test_UpdateMarkPriceMustRejectOlderPublishTime() public {
+        uint64 newTime = engine.lastMarkTime() + 1;
         vm.prank(address(router));
-        engine.updateMarkPrice(1.1e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.1e8, newTime);
 
         vm.prank(address(router));
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
-        engine.updateMarkPrice(1.0e8, uint64(block.timestamp - 30));
+        engine.updateMarkPrice(1.0e8, newTime - 1);
     }
 
 }

@@ -65,6 +65,8 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(terminalSnapshot.terminalLpPriceDeltaUsdc, 0, "empty terminal delta must be zero");
 
         uint256 seedAssets = 1000e6;
+        assertGt(juniorVault.estimateDepositShares(seedAssets), 0, "an empty unseeded tranche is not wiped");
+        assertGt(seniorVault.estimateDepositShares(seedAssets), 0, "an empty unseeded tranche is not wiped");
         usdc.mint(address(this), seedAssets * 2);
         usdc.approve(address(pool), seedAssets * 2);
         pool.initializeSeedPosition(false, seedAssets, address(this));
@@ -111,6 +113,95 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         assertEq(juniorVault.seedReceiver(), seed);
         assertGt(juniorVault.seedShareFloor(), 0);
         assertEq(juniorVault.balanceOf(seed), juniorVault.seedShareFloor());
+    }
+
+    function test_JuniorRedeemRequest_RequiresOwnSeedBeforeTradingActivation() public {
+        _assertRedeemRequestRequiresOwnSeed(false);
+    }
+
+    function test_SeniorRedeemRequest_RequiresOwnSeedBeforeTradingActivation() public {
+        _assertRedeemRequestRequiresOwnSeed(true);
+    }
+
+    function _assertRedeemRequestRequiresOwnSeed(
+        bool isSenior
+    ) internal {
+        // Quarantine assets before any shares exist, then exercise owner-controlled assignment.
+        _mintAndAccountPoolExcess(1000e6);
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        if (isSenior) {
+            // Senior assignment needs Junior backing; that seed must not unlock the unseeded Senior vault.
+            usdc.mint(address(this), 1000e6);
+            usdc.approve(address(pool), 1000e6);
+            pool.initializeSeedPosition(false, 1000e6, address(this));
+        }
+        pool.assignUnassignedAssets(isSenior, alice);
+
+        TrancheVault vault = isSenior ? seniorVault : juniorVault;
+        uint256 shares = vault.balanceOf(alice);
+        assertGt(shares, 0);
+        _finishAsyncCooldown(vault, alice);
+        vm.prank(alice);
+        vault.approve(bob, shares);
+
+        bytes memory rejection =
+            abi.encodeWithSelector(TrancheVault.TrancheVault__ExceededMaxRequestRedeem.selector, alice, shares, 0);
+        vm.expectRevert(rejection);
+        vm.prank(alice);
+        vault.requestRedeem(shares, alice, alice);
+        vm.expectRevert(rejection);
+        vm.prank(bob);
+        vault.requestRedeem(shares, alice, alice);
+
+        assertEq(vault.maxRequestRedeem(alice), 0);
+        assertEq(vault.balanceOf(alice), shares);
+        assertEq(vault.allowance(alice, bob), shares);
+        assertEq(vault.balanceOf(address(vault)), 0);
+        assertEq(vault.pendingRedeemEscrowShares(), 0);
+        assertEq(vault.redeemQueueHead(), 0);
+        assertEq(vault.controllerRedeemHead(alice), 0);
+
+        usdc.mint(address(this), 1e6);
+        usdc.approve(address(pool), 1e6);
+        pool.initializeSeedPosition(isSenior, 1e6, address(this));
+        assertEq(pool.isSeedLifecycleComplete(), isSenior, "Junior requests must not require a Senior seed");
+        assertFalse(pool.isTradingActive());
+        assertEq(vault.maxRequestRedeem(alice), shares);
+
+        vm.prank(bob);
+        uint256 requestId = vault.requestRedeem(shares, alice, alice);
+        assertEq(vault.pendingRedeemRequest(requestId, alice), shares);
+        assertEq(vault.pendingRedeemEscrowShares(), shares);
+        assertEq(vault.balanceOf(address(vault)), shares);
+        assertEq(vault.balanceOf(alice), 0);
+        assertEq(vault.allowance(alice, bob), 0);
+    }
+
+    function test_InitializeJuniorSeed_QuarantinesPreviouslyAccountedExcess() public {
+        uint256 excess = 100_000e6;
+        uint256 seedAssets = 10_000e6;
+        usdc.mint(address(this), excess + seedAssets);
+        usdc.transfer(address(pool), excess);
+        pool.accountExcess();
+        assertEq(pool.unassignedAssets(), 0, "excess has not yet been reconciled");
+        assertEq(juniorVault.totalSupply(), 0, "junior has no owners before seeding");
+
+        usdc.approve(address(pool), seedAssets);
+        pool.initializeSeedPosition(false, seedAssets, alice);
+
+        assertEq(pool.accountedAssets(), excess + seedAssets);
+        assertEq(pool.unassignedAssets(), excess, "pre-seed excess must remain ownerless");
+        assertEq(pool.juniorPrincipal(), seedAssets, "only the seed deposit belongs to junior");
+        assertEq(juniorVault.totalAssets(), seedAssets);
+        assertGt(juniorVault.seedShareFloor(), 0);
+        assertEq(juniorVault.balanceOf(alice), juniorVault.seedShareFloor());
+
+        vm.prank(address(juniorVault));
+        pool.reconcile();
+        assertEq(pool.unassignedAssets(), excess, "later reconciliation must preserve the quarantine");
+        assertEq(pool.juniorPrincipal(), seedAssets);
+        assertEq(juniorVault.totalAssets(), seedAssets);
     }
 
     function test_SeedReceiverCannotRedeemBelowFloor() public {
@@ -385,6 +476,7 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(150_000_000));
+        _ensureLaterOracleTime();
         router.executeLiquidation(trader, priceData);
 
         assertEq(clearinghouse.balanceUsdc(address(this)), expectedKeeperCredit, "Only $5 belongs to the keeper");
@@ -514,8 +606,9 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
         address traderAccount = trader;
         _fundTrader(trader, 50_000e6);
         _open(traderAccount, CfdTypes.Side.SHORT, 99_700e18, 10_000e6, 1e8);
+        _ensureLaterOracleTime();
         vm.prank(address(router));
-        engine.updateMarkPrice(1.2e8, uint64(block.timestamp));
+        engine.updateMarkPrice(1.2e8, uint64(vm.getBlockTimestamp()));
         pool.assignUnassignedAssets(false, alice);
         assertLt(pool.juniorPrincipal(), 100_000e6);
         assertEq(pool.unassignedAssets(), 0);

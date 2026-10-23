@@ -80,6 +80,12 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Settlement buffer in basis points
     function settlementBufferBps() external view returns (uint256);
 
+    /// @notice Returns a live side's aggregate maximum profit and exposure during settlement.
+    /// @dev Unlike terminal-NAV snapshots, this getter is usable while an accounting mutation is in progress.
+    function sides(
+        uint256 index
+    ) external view returns (uint256 maxProfitUsdc, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
+
     /// @notice Router-facing order execution entrypoint with typed business-rule failures.
     /// @dev Callable only by the configured router. The planner computes a delta and the settlement sidecar applies
     ///      clearinghouse, pool, aggregate-side, and position mutations atomically.

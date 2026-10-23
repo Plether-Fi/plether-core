@@ -130,8 +130,9 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
 
     function test_UnhealthyPartialCloseMatchesCommitError() public {
         _openNormally(CfdTypes.Side.LONG, 20e6);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(105_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(105_000_000, uint64(vm.getBlockTimestamp()));
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, SIZE / 2);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__PartialCloseUnhealthy.selector);
         previewer.previewClose(address(engine), o, KEEPER, PRICE, _bounds());
@@ -238,8 +239,9 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
 
     function test_PartialCloseDustBoundaryMatchesRouterCommit() public {
         _openNormally(CfdTypes.Side.LONG, 20e6);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.updateMarkPrice(101_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(101_000_000, uint64(vm.getBlockTimestamp()));
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, 9 * CfdTypes.SIZE_QUANTUM);
         bytes memory err = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
         vm.expectRevert(err);
@@ -282,6 +284,7 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         (uint256 size,,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, 9 * CfdTypes.SIZE_QUANTUM);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(101_000_000, uint64(vm.getBlockTimestamp()));
         _commitParity(_order(CfdTypes.Side.LONG, size), 101_000_000, KEEPER);

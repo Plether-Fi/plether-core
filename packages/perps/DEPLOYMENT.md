@@ -8,11 +8,11 @@ The current target network is Arbitrum Sepolia with:
 - Pyth as the router oracle source
 - a separate deploy phase and bootstrap phase
 
-## Atomic oracle synchronization candidate
+## Oracle synchronization and live watermark candidate
 
-The next core release synchronizes stored Pyth feeds during historical execution and requires the new
-`getOrderExecutionFee(bytes[])` quote. Follow [Oracle synchronization](ORACLE_SYNCHRONIZATION.md) for pricing,
-refunds, gas/fork release gates, same-block coverage monitoring and the keeper/frontend handoff. Prepare a fresh
+The next core release synchronizes stored Pyth feeds during historical execution and introduces a Router-owned
+signed live basket. Follow [Oracle synchronization](ORACLE_SYNCHRONIZATION.md) for pricing, zero-fee frozen replay,
+refunds, gas/fork release gates, accepted-basket monitoring and the keeper/frontend handoff. Prepare a fresh
 complete stack, keep its manifest separate, and stop at deployed/inactive. The candidate record is
 `deployments/releases/atomic-oracle-sync-candidate/`; it is not a deployed or qualified release.
 
@@ -794,10 +794,9 @@ pause trader closes/reductions or already-funded claims and does not create a gl
    is included, confirm the inclusive cutoff; covered opens remain invalid forever, including after recovery.
 4. Keep closes, liquidations, protection cancellation and valid trigger/retry/linked-attempt processing, LP redemption
    requests, existing cancellation paths, recapitalization/reconciliation, and funded claims operating. Risk-off's
-   HousePool pause blocks new deposit requests and activation. Under settlement-only, new deposits and Senior
-   reservations remain accepted but cannot activate; assets can accumulate under unchanged cancellation rules. A
-   matured pending deposit is not automatically cancellable merely because either restriction is active; use only its
-   existing escape conditions or wait for recovery. Stop settlement broadcasts while held.
+   HousePool pause blocks new deposit requests and activation. Under settlement-only, new Senior requests and
+   reservations stop, while existing Senior commitments become refundable. Junior deposit and redemption requests may
+   accumulate under their ordinary cancellation rules. Stop settlement broadcasts while held.
 5. Have the protocol incident keeper call permissionless risk-off cleanup for invalidated opens. Cleanup requires no
    Pyth payload, refunds full remaining margin and bounty to the trader's internal settlement, and pays no caller, so
    the protocol pays gas.
@@ -868,10 +867,11 @@ different route.
 `ActivationNotConfirmed` combines the projected `HousePool.canSettleDepositEntries()` common gate with canonical
 redemption evidence. The Pool view projects post-reconcile state, including residual pending claimants, while the Lens
 remains conservative when matured Senior funding can still change principal/HWM rounding before either tranche
-activates, and when matured Junior funding can reduce capacity before Senior activation. HousePool rechecks the exact
-live gates after redemption funding. Senior deposit deferrals describe pending activation and existing-reservation-limit conditions, not the
-amount that a new request may reserve; read the vault admission view or `HousePool.getSeniorDepositCapacity()` for
-new admission capacity. Use `getSettlementHealth()` for critical-fault and dependency-failure masks, and
+activates. Junior funding protects accepted Senior reservations and cannot displace their activation. HousePool
+rechecks the exact live gates after redemption funding. Senior deposit deferrals describe pending activation gates,
+not the amount that a new request may reserve; read the vault admission view for request eligibility and
+`HousePool.getSeniorDepositCapacity()` for mathematical headroom. Use `getSettlementHealth()` for critical-fault and
+dependency-failure masks, and
 `getPoolReconcileOracleStatus()` for a fail-soft view of feeds readable now. `observableConfigDigest()` and the
 composite `observationDigest` are advisory comparison aids only. `completeObservationDigest` equals that observation
 hash when `observationComplete` and is zero otherwise. Completeness requires every Oracle dependency read even on a

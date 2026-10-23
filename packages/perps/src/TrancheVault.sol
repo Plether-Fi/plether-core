@@ -157,6 +157,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     error TrancheVault__ExceededMaxRequestRedeem(address owner, uint256 shares, uint256 maxShares);
     error TrancheVault__DepositEpochNotActive();
     error TrancheVault__DepositEpochAlreadyActive();
+    error TrancheVault__SeniorDepositCommitted();
     error TrancheVault__DepositEpochFinalized();
     error TrancheVault__DepositEpochNotFinalized();
     error TrancheVault__DepositEpochEmpty();
@@ -178,7 +179,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     error TrancheVault__MaintenanceFeeTimelockNotReady();
     error TrancheVault__NoMaintenanceFeeProposal();
     /// @dev Prevents a controller from resetting another existing holder's whole-balance cooldown with a share claim.
-    error TrancheVault__ThirdPartyDepositForExistingHolder();
+    error TrancheVault__ReceiverNotController();
 
     event DepositRequest(
         address indexed controller, address indexed owner, uint256 indexed requestId, address sender, uint256 assets
@@ -629,6 +630,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         uint256 depositRequestId,
         address controller
     ) external view override returns (uint256 maxShares) {
+        if (seedReceiver == address(0)) {
+            return 0;
+        }
         uint256 activationTime = depositEpochActivationTime[depositRequestId];
         unchecked {
             if (block.timestamp < activationTime + DEPOSIT_COOLDOWN) {
@@ -680,6 +684,10 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         uint256 shares,
         address controller
     ) internal returns (uint256 requestId) {
+        // Both request paths need a permanent receiver for any eventual refund-share dust.
+        if (seedReceiver == address(0)) {
+            revert TrancheVault__InvalidSeedPosition();
+        }
         (requestId,) = _requestEpochWindow();
         RedeemEpoch storage epoch = redeemEpochs[requestId];
         if (!redeemEpochQueueState[requestId].queued) {
@@ -830,16 +838,20 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (epoch.finalized) {
             revert TrancheVault__DepositEpochFinalized();
         }
-        if (currentLpEpoch() >= requestId && !queueState.rejected && !_projectedTerminalWipe()) {
-            bool reservationsWithinLimits = !IS_SENIOR || POOL.areSeniorDepositReservationsWithinLimits();
-            if (!POOL.isSeniorImpairedAfterPendingDepositReconcile() && reservationsWithinLimits) {
-                revert TrancheVault__DepositEpochAlreadyActive();
-            }
-        }
         DepositPosition storage position = depositRequests[controller][requestId];
         assets = position.assets;
         if (assets == 0) {
             revert TrancheVault__NoPendingDeposit();
+        }
+        if (
+            (IS_SENIOR || currentLpEpoch() >= requestId) && !queueState.rejected
+                && (!IS_SENIOR || !POOL.lpEpochSettlementPaused()) && !_projectedTerminalWipe()
+                && !POOL.isSeniorImpairedAfterPendingDepositReconcile()
+        ) {
+            if (IS_SENIOR) {
+                revert TrancheVault__SeniorDepositCommitted();
+            }
+            revert TrancheVault__DepositEpochAlreadyActive();
         }
         _removeControllerDeposit(controller, requestId);
         position.assets = 0;
@@ -911,10 +923,10 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
             revert TrancheVault__RedeemRefundUnavailable();
         }
         shares = refundableRedeemRequest(requestId, controller);
+        _requireShareReceiver(controller, receiver);
         position.refundClaimed = true;
         epoch.refundBasisClaimed += position.shares;
         if (shares != 0) {
-            _requireShareReceiver(controller, receiver);
             position.refundedShares += shares;
             epoch.refundedShares += shares;
             pendingRedeemEscrowShares -= shares;
@@ -1034,9 +1046,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         if (shares == 0 && assets != remainingAssets) {
             revert TrancheVault__ClaimSharesZero();
         }
-        if (shares != 0) {
-            _requireShareReceiver(controller, receiver);
-        }
+        _requireShareReceiver(controller, receiver);
         _consumeDepositClaim(requestId, assets, shares, receiver, controller);
     }
 
@@ -1311,7 +1321,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function maxRequestRedeem(
         address owner
     ) public view returns (uint256) {
-        if (block.timestamp < lastDepositTime[owner] + DEPOSIT_COOLDOWN) {
+        if (seedReceiver == address(0) || block.timestamp < lastDepositTime[owner] + DEPOSIT_COOLDOWN) {
             return 0;
         }
         return _unlockedOwnerShares(owner);
@@ -1344,7 +1354,12 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function estimateDepositShares(
         uint256 assets
     ) public view returns (uint256) {
-        return quoteDepositFromState(assets, _depositPricingAssets(), accruedTotalSupply(), 0);
+        uint256 pricingAssets = _depositPricingAssets();
+        uint256 pricingSupply = accruedTotalSupply();
+        if (pricingAssets == 0 && pricingSupply != 0) {
+            return 0;
+        }
+        return quoteDepositFromState(assets, pricingAssets, pricingSupply, 0);
     }
 
     function estimateMintAssets(
@@ -1598,11 +1613,10 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function _requireShareReceiver(
         address controller,
         address receiver
-    ) internal view {
-        // With one cooldown timestamp per account, accepting unsolicited dust into an existing balance would let any
-        // controller repeatedly lock that receiver's entire pre-existing balance. New receivers and self-claims are safe.
-        if (receiver != controller && balanceOf(receiver) != 0) {
-            revert TrancheVault__ThirdPartyDepositForExistingHolder();
+    ) internal pure {
+        // Keep share delivery independent of receiver balances and require the controller's authority over cooldowns.
+        if (receiver != controller) {
+            revert TrancheVault__ReceiverNotController();
         }
     }
 

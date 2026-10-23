@@ -125,6 +125,7 @@ contract SyntheticCarryCacheSettlementTest is BasePerpTest {
 
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(uint256(195_000_000));
+        _ensureLaterOracleTime();
         vm.prank(keeper);
         router.executeLiquidation(account, priceData);
 
@@ -162,7 +163,7 @@ contract CarryCollectionTimingTest is BasePerpTest {
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(address(router));
-        engine.updateMarkPrice(120_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(120_000_000, uint64(vm.getBlockTimestamp()));
         _close(account, CfdTypes.Side.LONG, 200_000e18, 120_000_000);
         uint256 markThenTradeBalance = clearinghouse.balanceUsdc(account);
 
@@ -253,7 +254,7 @@ contract HistoricalCarryCheckpointTest is BasePerpTest {
 
         vm.warp(block.timestamp + elapsed);
         vm.prank(address(router));
-        engine.updateMarkPrice(0.5e8, uint64(block.timestamp));
+        engine.updateMarkPrice(0.5e8, uint64(vm.getBlockTimestamp()));
 
         usdc.mint(trader, 1);
         vm.startPrank(trader);

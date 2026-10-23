@@ -368,9 +368,10 @@ interface IMarginClearinghouse {
         uint256 refundableBountyUsdc
     ) external returns (uint256 releasedMarginUsdc);
 
-    /// @notice Releases one consumed execution-bounty classification back to its source account.
+    /// @notice Releases one consumed order or protection-trigger bounty classification back to its source account.
     /// @dev Callable only by the Engine-reported Router. This self-executor path deliberately skips carry
-    ///      checkpointing because settlement custody does not change and the bounty returns to its source.
+    ///      checkpointing because settlement custody does not change and the bounty returns to its source. Atomic
+    ///      protection cancellation uses it before ordinary bounded close commitment collects and records carry.
     /// @param account Account whose reserved bounty becomes free settlement.
     /// @param executionBountyUsdc Exact bounty classification to release.
     function releaseReservedExecutionBountyToSource(

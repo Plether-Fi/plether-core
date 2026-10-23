@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IAsyncTrancheVault} from "@plether/perps/interfaces/IAsyncTrancheVault.sol";
 
@@ -261,6 +262,13 @@ contract AsyncTrancheVaultAllocationTest is BasePerpTest {
         assertTrue(_async().redeemRefundPending(requestId, BOB));
         assertEq(_async().refundableRedeemRequest(requestId, ALICE), 0);
         assertEq(_async().refundableRedeemRequest(requestId, BOB), 0);
+
+        vm.prank(BOB);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
+        _async().claimRedeemRefund(requestId, address(0xCA401), BOB);
+        assertTrue(
+            _async().redeemRefundPending(requestId, BOB), "rejection must preserve the zero-share acknowledgement"
+        );
 
         address seedReceiver = juniorVault.seedReceiver();
         uint256 seedBalanceBefore = juniorVault.balanceOf(seedReceiver);

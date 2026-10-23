@@ -57,7 +57,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Future oracle publication must not consume the FIFO head");
-        assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
+        assertEq(engine.lastMarkTime(), 1, "Future oracle publication must not update the cached mark");
     }
 
     function test_SameBlockExecution_ReturnsPending() public {
@@ -210,7 +210,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         assertEq(router.nextExecuteId(), 0, "Successful batch execution should clear the queue head");
     }
 
-    function test_FrozenCloseExecution_AllowsFeedPublishDivergenceWithinFadStaleness() public {
+    function test_FrozenCloseExecution_ReplaysEngineMarkDespiteFeedSkew() public {
         _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderExecutionStalenessLimit = 2 hours;
@@ -237,7 +237,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         router.executeOrder(orderId, _pythUpdateData());
 
         (uint256 sizeAfter,,,,,,) = engine.positions(aliceAccount);
-        assertEq(sizeAfter, 0, "Frozen close execution should accept feed divergence within FAD staleness");
+        assertEq(sizeAfter, 0, "Frozen close execution should use the cached mark despite feed skew");
     }
 
     function test_SingleExecute_EmptyQueueRevertsNoOrders() public {

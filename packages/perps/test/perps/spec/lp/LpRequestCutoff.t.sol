@@ -168,6 +168,7 @@ contract LpRequestCutoffTest is BasePerpTest {
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 2 * REQUEST_ASSETS);
 
         vm.warp(boundary - REQUEST_CUTOFF);
+        pool.pauseLpEpochSettlement();
         _cancelControllerBothDirections(seniorVault, DIRECT_CONTROLLER, false);
         _cancelControllerBothDirections(juniorVault, DIRECT_CONTROLLER, false);
 
@@ -202,6 +203,7 @@ contract LpRequestCutoffTest is BasePerpTest {
         _requestOneControllerAndBothDirections(seniorVault, OPERATED_CONTROLLER, true);
         _requestOneControllerAndBothDirections(juniorVault, OPERATED_CONTROLLER, true);
 
+        pool.pauseLpEpochSettlement();
         _cancelControllerBothDirections(seniorVault, DIRECT_CONTROLLER, false);
         _cancelControllerBothDirections(juniorVault, DIRECT_CONTROLLER, false);
 
@@ -210,26 +212,31 @@ contract LpRequestCutoffTest is BasePerpTest {
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), REQUEST_ASSETS);
     }
 
-    function test_LateDepositCancellationAndReplacementUseCanonicalLaterEpoch() public {
+    function test_LateJuniorReplacementAndSeniorCommitmentUseCanonicalLaterEpoch() public {
         uint256 boundary = _prepareActors();
         vm.warp(boundary - REQUEST_CUTOFF);
         uint256 canonicalRequestId = _assertCanonicalWindow(block.timestamp);
 
-        for (uint256 i; i < 2; ++i) {
-            TrancheVault vault = i == 0 ? seniorVault : juniorVault;
-            uint256 firstRequestId = _requestDeposit(vault, OPERATED_CONTROLLER, true);
-            assertEq(firstRequestId, canonicalRequestId, "late request must succeed in the rolled epoch");
-            _cancelDeposit(vault, OPERATED_CONTROLLER, firstRequestId, true);
-            assertEq(
-                _requestDeposit(vault, OPERATED_CONTROLLER, true),
-                canonicalRequestId,
-                "same-timestamp replacement must use the advertised rolled epoch"
-            );
-        }
+        uint256 seniorRequestId = _requestDeposit(seniorVault, OPERATED_CONTROLLER, true);
+        assertEq(seniorRequestId, canonicalRequestId);
+        vm.prank(OPERATOR);
+        vm.expectRevert(TrancheVault.TrancheVault__SeniorDepositCommitted.selector);
+        seniorVault.cancelPendingDeposit(seniorRequestId, OPERATED_CONTROLLER, OPERATED_CONTROLLER);
+
+        uint256 juniorRequestId = _requestDeposit(juniorVault, OPERATED_CONTROLLER, true);
+        assertEq(juniorRequestId, canonicalRequestId);
+        _cancelDeposit(juniorVault, OPERATED_CONTROLLER, juniorRequestId, true);
+        assertEq(
+            _requestDeposit(juniorVault, OPERATED_CONTROLLER, true),
+            canonicalRequestId,
+            "same-timestamp Junior replacement must use the advertised rolled epoch"
+        );
 
         vm.warp(pool.lpEpochStart(canonicalRequestId) - 1);
-        _cancelDeposit(seniorVault, OPERATED_CONTROLLER, canonicalRequestId, true);
         _cancelDeposit(juniorVault, OPERATED_CONTROLLER, canonicalRequestId, true);
+        assertEq(pool.reservedSeniorDepositAssetsUsdc(), REQUEST_ASSETS);
+        pool.pauseLpEpochSettlement();
+        _cancelDeposit(seniorVault, OPERATED_CONTROLLER, canonicalRequestId, true);
         assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
         assertEq(seniorVault.depositQueueHead(), 0);
         assertEq(juniorVault.depositQueueHead(), 0);
@@ -274,7 +281,11 @@ contract LpRequestCutoffTest is BasePerpTest {
         for (uint256 i; i < 2; ++i) {
             TrancheVault vault = i == 0 ? seniorVault : juniorVault;
             vm.prank(OPERATOR);
-            vm.expectRevert(TrancheVault.TrancheVault__DepositEpochAlreadyActive.selector);
+            vm.expectRevert(
+                i == 0
+                    ? TrancheVault.TrancheVault__SeniorDepositCommitted.selector
+                    : TrancheVault.TrancheVault__DepositEpochAlreadyActive.selector
+            );
             vault.cancelPendingDeposit(requestId, OPERATED_CONTROLLER, OPERATED_CONTROLLER);
 
             vm.prank(OPERATOR);

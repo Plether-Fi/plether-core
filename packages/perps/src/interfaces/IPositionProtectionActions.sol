@@ -9,23 +9,31 @@ interface IPositionProtectionActions {
 
     /// @notice Arms one OCO protection against the caller's existing full position.
     /// @dev At least one trigger must be enabled. The caller must have no other protection or ordinary pending order.
-    ///      Creation reserves the protection-trigger bounty and validates trigger geometry against the cached fresh mark.
+    ///      Creation reserves the protection-trigger bounty and validates trigger geometry against the accepted fresh basket.
+    ///      Existing-position creation remains available in degraded mode, subject to the same post-lock risk checks.
     ///      Router pause blocks creation and replacement; cancellation, triggering, and retry remain available.
-    /// @param params Direction-aware take-profit and stop-loss trigger prices.
+    /// @param params Direction-aware trigger prices and financial ceilings for generated closes.
     /// @return protectionId Newly assigned protection identifier.
     function createPositionProtection(
         PositionProtectionTypes.PositionProtectionParams calldata params
     ) external returns (uint64 protectionId);
 
-    /// @notice Atomically replaces the trigger prices of the caller's staged or armed protection.
+    /// @notice Atomically replaces the trigger prices and close limits of the caller's staged or armed protection.
     /// @dev Replacement retains the protection id and its snapshotted trigger-bounty reserve. Triggered and latched
     ///      protection are binding and cannot be replaced. Parent execution binds pending-open protection to the
     ///      resulting side and full size; threshold crossing at that execution tick does not prevent arming.
     /// @param protectionId Pending-open or armed protection owned by the caller.
-    /// @param params Replacement take-profit and stop-loss trigger prices.
+    /// @param params Replacement trigger prices and close financial ceilings.
     function replacePositionProtection(
         uint64 protectionId,
         PositionProtectionTypes.PositionProtectionParams calldata params
+    ) external;
+
+    /// @notice Lets the owner change close limits after a failed attempt relatches, before a fresh retry.
+    /// @dev The trigger and any terminal attempts remain recorded. A live child cannot be changed.
+    function amendLatchedPositionProtectionCloseLimits(
+        uint64 protectionId,
+        PositionProtectionTypes.CloseFinancialLimits calldata limits
     ) external;
 
     /// @notice Cancels the caller's protection before it triggers and releases its unpaid bounty reserve.
@@ -34,6 +42,20 @@ interface IPositionProtectionActions {
     function cancelPositionProtection(
         uint64 protectionId
     ) external;
+
+    /// @notice Atomically cancels the caller's armed protection and commits a bounded full-position close.
+    /// @dev Releases the unused trigger bounty without checkpointing carry before ordinary close admission, which
+    ///      collects and bounds all commitment carry. Any commitment failure rolls back
+    ///      cancellation and refund. Available during frozen markets and Router pause; execution still follows FIFO
+    ///      and the supplied bounds. Only a fresh client id is accepted. Once queued, the close is an ordinary order:
+    ///      its later failure or expiry does not restore protection. Pending-open, triggered and latched records reject.
+    /// @param protectionId Armed protection owned by the caller and matching the current full position.
+    /// @param request Caller-authored full close with matching side, current nonzero config hash, and financial bounds.
+    /// @return orderId Newly committed ordinary close identifier.
+    function cancelPositionProtectionAndCommitClose(
+        uint64 protectionId,
+        OrderV3Types.OrderRequest calldata request
+    ) external returns (uint64 orderId);
 
     /// @notice Permissionlessly evaluates an armed protection and queues its full-position market close when met.
     /// @dev The generated close joins the ordinary global FIFO tail and inherits normal oracle timing and expiry.
@@ -61,7 +83,7 @@ interface IPositionProtectionActions {
     ///      protection; only a valid later-block publication may trigger it. This is for a flat account with no orders.
     ///      The parent is a fresh public V3 intent and must satisfy the same bounded-request policy as `commitOrder`.
     /// @param request Complete caller-authored opening intent and execution bounds.
-    /// @param params Take-profit and stop-loss trigger prices staged for the resulting position.
+    /// @param params Trigger prices and close financial ceilings staged for the resulting position.
     /// @return parentOrderId Newly committed opening-order identifier.
     /// @return protectionId Newly staged protection identifier.
     function commitOpenOrderWithProtection(

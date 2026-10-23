@@ -3,10 +3,23 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
 contract CfdEnginePublishTimeRegression is BasePerpTest {
 
     uint64 internal constant SATURDAY_NOON = 1_710_021_600;
+
+    function test_EqualTimestampCannotChangeClampedMark() public {
+        uint64 tick = engine.lastMarkTime() + 1;
+        vm.startPrank(address(router));
+        engine.updateMarkPrice(100_000_000, tick);
+        engine.updateMarkPrice(100_000_000, tick);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceOutOfOrder.selector);
+        engine.updateMarkPrice(101_000_000, tick);
+        vm.stopPrank();
+        assertEq(engine.lastMarkPrice(), 100_000_000);
+        assertEq(engine.lastMarkTime(), tick);
+    }
 
     function test_FrozenWindow_RepeatedClosesCanReuseSamePublishTime() public {
         address alice = address(0xA11CE);

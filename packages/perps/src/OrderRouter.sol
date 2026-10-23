@@ -10,6 +10,7 @@ import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterE
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
 import {IPerpsTraderActions} from "@plether/perps/interfaces/IPerpsTraderActions.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {ExecutionBlockNumberLib} from "@plether/perps/libraries/ExecutionBlockNumberLib.sol";
 import {OrderHandler} from "@plether/perps/router/OrderHandler.sol";
 import {OrderRouterBase} from "@plether/perps/router/OrderRouterBase.sol";
 
@@ -100,6 +101,20 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return uint64(_delegateToKeeperSidecar());
     }
 
+    /// @notice Book-only host for a caller-authored full close after atomic protection cancellation.
+    /// @dev Uses ordinary bounded-request admission and lifecycle accounting; the Book enforces ownership,
+    ///      armed status, exact full-position matching and freshness of the returned order id.
+    function commitProtectedClose(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 triggerBountyRefundUsdc
+    ) external nonReentrant returns (uint64 orderId) {
+        account;
+        request;
+        triggerBountyRefundUsdc;
+        return uint64(_delegateToKeeperSidecar());
+    }
+
     /// @notice Queues a fresh close attempt for an already-latched position protection.
     /// @dev Only the immutable protection Book may call this entrypoint. The Book tracks the durable trigger and its
     ///      attempt history; delegated logic creates fresh lifecycle evidence and appends an ordinary
@@ -153,7 +168,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
                 marginDelta: marginDelta,
                 targetPrice: targetPrice,
                 commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+                commitBlock: ExecutionBlockNumberLib.current(),
                 orderId: orderId,
                 side: side,
                 isClose: isCloseWord != 0
@@ -180,6 +195,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return abi.decode(_delegateExecutionSidecar(), (OrderV3Types.ExecutionResult));
     }
 
+    /// @notice Recovers an expired mismatched reservation and preserves retry for a matching protected position.
+    /// @dev Recovery keeps disputed funds quarantined; protection handling precedes the terminal deletion callback.
     function expireMismatchedOrderFromSidecar(
         uint64 orderId
     ) external returns (IMarginClearinghouse.BountyRecovery memory recovery) {
@@ -189,15 +206,19 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         if (block.timestamp <= pending.timing.executionDeadline) {
             revert OrderRouter__OrderNotExpired();
         }
-        uint256 freeUsdc = lifecycleBook.isProtectionAttempt(orderId)
-            ? pending.executionBountyUsdc
-            : pending.commitment.bountyFromFreeUsdc;
+        bool protectionAttempt = lifecycleBook.isProtectionAttempt(orderId);
+        uint256 freeUsdc = protectionAttempt ? pending.executionBountyUsdc : pending.commitment.bountyFromFreeUsdc;
         recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeUsdc);
         if (recovery.freeUsdc != 0) {
             clearinghouse.releaseReservedExecutionBountyToSource(order.account, recovery.freeUsdc);
         }
         // An invalid margin ledger is left protected; expiry must not invent a release.
         try clearinghouse.releaseOrderReservationForTerminalCleanup(orderId) {} catch {}
+        if (protectionAttempt) {
+            positionProtectionBook.handleFailedProtectionAttempt(
+                orderId, order.account, OrderV3Types.TerminalReason.ExpiredReservationMismatch
+            );
+        }
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
     }
 
@@ -432,7 +453,7 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
                 marginDelta: 0,
                 targetPrice: side == CfdTypes.Side.LONG ? engine.CAP_PRICE() : 1,
                 commitTime: uint64(block.timestamp),
-                commitBlock: uint64(block.number),
+                commitBlock: ExecutionBlockNumberLib.current(),
                 orderId: linkedOrderId,
                 side: side,
                 isClose: true

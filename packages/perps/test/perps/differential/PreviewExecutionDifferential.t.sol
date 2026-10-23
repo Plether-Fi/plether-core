@@ -559,6 +559,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(trader);
         clearinghouse.withdraw(account, 100e6);
 
+        _ensureLaterOracleTime();
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         vm.assume(preview.liquidatable);
 
@@ -636,12 +637,12 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         vm.prank(address(pool));
         usdc.transfer(address(0xDEAD), poolAssets - 1);
 
+        _ensureLaterOracleTime();
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, liquidationPrice);
         vm.assume(preview.liquidatable);
 
         uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(KEEPER);
         uint256 traderClaimBefore = engine.traderClaimBalanceUsdc(account);
-        IMarginClearinghouse.AccountUsdcBuckets memory bucketsBefore = clearinghouse.getAccountUsdcBuckets(account);
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
@@ -653,8 +654,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         assertEq(sizeAfter, 0, "Illiquid liquidation should fully clear the position");
         assertEq(
             bucketsAfter.settlementBalanceUsdc,
-            bucketsBefore.settlementBalanceUsdc + preview.immediatePayoutUsdc - preview.seizedCollateralUsdc
-                - preview.keeperBountyUsdc - preview.protocolLiquidationFeeUsdc,
+            preview.settlementRetainedUsdc,
             "Illiquid liquidation preview should match the live settlement-balance mutation"
         );
         assertEq(bucketsAfter.activePositionMarginUsdc, 0, "Illiquid liquidation should clear the live position margin");
@@ -741,6 +741,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
+        _ensureLaterOracleTime();
         vm.prank(KEEPER);
         router.executeLiquidation(account, priceData);
 
@@ -782,6 +783,7 @@ contract PreviewExecutionDifferentialTest is BasePerpTest {
         bytes[] memory priceData = new bytes[](1);
         priceData[0] = abi.encode(liquidationPrice);
 
+        _ensureLaterOracleTime();
         vm.prank(KEEPER);
         router.executeLiquidation(account, priceData);
 

@@ -65,7 +65,7 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.reconcile` | either configured tranche vault | retained vault integration hook; end users enter and claim through `TrancheVault` |
 | `OrderRouter.settleLpEpoch(bytes[])` | permissionless | validates one PoolReconcile mark and atomically invokes coordinated LP entry activation and redemption funding |
 | `HousePool.settleLpEpoch(uint256,uint256)` | configured Engine `orderRouter` when positions exist outside frozen mode; otherwise permissionless | binds the Router's exact mark/time for live settlement; `(0,0)` is the mark-independent or frozen cached-mark fallback; every route reverts before mutation while the independent settlement hold is active |
-| `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold without blocking requests, reconciliation, trading, or funded claims |
+| `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold, stops new Senior requests, and permits refunds of existing Senior commitments; Junior requests, reconciliation, trading, and funded claims remain live |
 | `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
 | `TrancheVault.requestRedeemFromClaimableDeposit` | source controller or its approved operator | consumes one finalized source lot only after its activation-aged cooldown and preserves the controller on the destination redemption request; no token allowance or wallet custody is involved |
 | `TrancheVault.proposeMaintenanceFeeConfig` / `finalizeMaintenanceFeeConfig` / `cancelMaintenanceFeeConfigProposal` | current `HousePool.owner()` only, Junior vault only | 48-hour delayed configuration; finalization checkpoints the old rate/recipient before applying the new pair; no arbitrary mint or USDC-transfer authority |
@@ -73,7 +73,7 @@ Before trusting a test as a source of truth, ask:
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
 | `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, the public `MONITOR()` binding remains readable while dependency bindings stay internal, and there are no setters or delegatecall paths |
 | `EmergencyPauseCoordinator.triggerEmergencyPause` | configured guardian only | fixed Router risk-off plus LP-entry action |
-| `EmergencyPauseCoordinator.triggerLpEpochSettlementHold` | configured guardian only | fixed settlement-only action; requests and already-funded claims remain live |
+| `EmergencyPauseCoordinator.triggerLpEpochSettlementHold` | configured guardian only | fixed settlement-only action; new Senior requests stop, existing Senior commitments become refundable, and Junior requests and already-funded claims remain live |
 | `EmergencyPauseCoordinator.triggerFullContainment` | configured guardian only | fixed atomic union of Router risk-off, LP entry pause, and settlement hold |
 | `EmergencyPauseCoordinator.setGuardian` | coordinator owner only | rotate or disable containment authority; the guardian cannot rotate itself |
 | `OrderRouter.clearRiskOffOrder` | permissionless | oracle-free cleanup of one permanently invalidated open; full internal refund to trader, no clearer bounty |
@@ -118,9 +118,10 @@ Audit the prediction, transaction ordering, and post-deployment getter/code-hash
 - no user cancellation path
 - queue pointers and reservations must be unlinked exactly once
 
-A failed registered protection attempt may move its protection from `Triggered` to `Latched` and retain the execution
-bounty when the protected position still matches exactly. Permissionless retry creates a new child id at the FIFO tail;
-the old child remains terminal in the lifecycle Book.
+A failed registered protection attempt moves its protection from `Triggered` to `Latched` when the protected position
+still matches exactly. This includes expired reservation-mismatch recovery: disputed accounting remains protected,
+while the close mandate survives. Permissionless retry creates a new zero-bounty child id at the FIFO tail; the old
+child remains terminal in the lifecycle Book and no cleaner is paid for a zero-bounty attempt.
 
 ### Failure-policy table
 
@@ -340,17 +341,17 @@ Reachability note:
 - Liveness problem: independent Router and HousePool pause transactions leave a race and partial-containment window.
 - Chosen tradeoff: one immutable-bound coordinator exposes exactly three fixed actions: Router risk-off plus LP entry,
   settlement-only hold, and their atomic union. No caller-supplied mask exists. Closes, liquidations, redemption
-  requests, existing cancellation paths, recapitalization, reconciliation, and funded claims remain outside its
-  authority.
+  requests, Junior cancellation paths, recapitalization, reconciliation, and funded claims remain outside its
+  authority; a settlement hold opens the Senior refund path.
 - New risk: risk-off can deny new opens/deposits and permanently invalidates covered opens; settlement-only can defer
-  activation/funding indefinitely while new requests and deposits continue accumulating. Physical order cleanup
-  still consumes protocol-keeper gas because the trader receives the entire reserved bounty.
+  activation/funding indefinitely while Junior deposits and redemption requests continue accumulating. Physical
+  order cleanup still consumes protocol-keeper gas because the trader receives the entire reserved bounty.
 - Protecting invariant: the guardian can only add restrictions. It cannot unpause, configure, price, move funds, or
   make arbitrary calls; governance owns recovery and manual restrictions have no expiry. Lens observations and
   incident hashes remain advisory.
-- LP limitation: neither entry pause nor settlement hold unlocks a matured deposit cancellation. Existing escape
-  conditions or later activation remain necessary, and releasing a breaker neither repairs state nor guarantees a
-  successful settlement.
+- LP limitation: entry pause alone does not unlock matured deposit cancellation. A settlement hold permits refunds of
+  pending Senior commitments; Junior cancellation follows its ordinary rules. Releasing a breaker neither repairs
+  state nor guarantees a successful settlement.
 - Deliberate liveness: no discretionary action can block trader closes/reductions, liquidations, or already-funded
   deposit/redemption claims. Redemption-request-off, a global all-LP-request freeze, and corrupted-queue quarantine
   remain out of scope; actions containing the entry restriction do stop new deposit requests.
@@ -444,7 +445,7 @@ Reachability note:
   `getSettlementHealth()` critical-fault/dependency-failure masks. Within status,
   `executionPathDependencyMask` contains only read failures that prevent route selection, while
   `dependencyFailureMask` covers every unknown status input. The Senior deposit-deferral mask describes pending
-  activation and reservation-limit state rather than new-request admission capacity. Poll status routinely;
+  activation gates rather than new-request admission capacity. Poll status routinely;
   `getSettlementObservation(observedEpoch)` is a checkpoint/alert read with a roughly 6 KB ABI return and about
   0.8–1.3 million gas of representative `eth_call` execution.
 - An active successfully read LP settlement hold is intentional complete state: the explicit status flag,
@@ -456,11 +457,11 @@ Reachability note:
   and endpoint reads harden health classification but cannot replace a known canonical route; impossible canonical
   head pairs are critical. Verify `ActivationNotConfirmed` against
   `HousePool.canSettleDepositEntries()` and canonical redemption evidence. The Pool projection must include zero-asset
-  epochs that retain pending claimants; the Lens must remain conservative while matured Senior redemptions can change
-  principal/HWM rounding and while matured Junior redemptions can reduce Senior capacity. Live settlement must recheck
-  both gates after funding. Include the zero-fee rebootstrap/redemption regression that creates one-atom impairment
-  and the same-epoch Junior-redemption/Senior-reservation regression. Do not treat the view as new-request admission
-  capacity.
+  epochs that retain pending claimants; the Lens remains conservative while matured Senior redemptions can change
+  principal/HWM rounding. Junior redemption funding protects accepted Senior reservations, so it cannot displace
+  their activation. Live settlement rechecks the common and tranche gates after funding. Include the zero-fee
+  rebootstrap/redemption regression that creates one-atom impairment and the same-epoch Junior redemption versus
+  Senior reservation regression. Do not treat the view as new-request admission capacity.
 - Runtime wiring checks pin the Engine planner address and code hash, probe its carry-index and market-calendar ABIs,
   and require seed receiver/floor pairs to be consistently absent or present. Review the creation-input size regression as well as
   EIP-170 runtime sizes because the facade embeds the sidecar creation code.

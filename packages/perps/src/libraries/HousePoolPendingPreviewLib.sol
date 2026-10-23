@@ -47,6 +47,9 @@ library HousePoolPendingPreviewLib {
             applyClaimantRecapitalizationIntent(
                 state, claimantBuckets.recapitalizationUsdc, claimantIntentBuckets.recapitalizationUsdc
             );
+            // Recapitalization can restore a claimant path for revenue in this same batch.
+            allowRevenueContinuation =
+                allowRevenueContinuation || state.waterfall.seniorPrincipal + state.waterfall.juniorPrincipal != 0;
         }
         if (claimantBuckets.revenueUsdc > 0) {
             applyRevenueIntent(state, claimantBuckets.revenueUsdc, allowRevenueContinuation);

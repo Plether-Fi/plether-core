@@ -33,7 +33,7 @@ contract ExistingHolderDustDepositsTest is BasePerpTest {
         _settleLpEpochForTest();
 
         vm.startPrank(attacker);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
         juniorVault.claimDeposit(requestId, minimumDeposit, alice, attacker);
         vm.stopPrank();
     }
@@ -91,7 +91,7 @@ contract ExistingHolderTopUpTest is BasePerpTest {
         _settleLpEpochForTest();
 
         vm.startPrank(helper);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
         juniorVault.claimDeposit(requestId, 4999e6, alice, helper);
         vm.stopPrank();
     }
@@ -124,7 +124,7 @@ contract IntermediatedTopUpTest is BasePerpTest {
         _settleLpEpochForTest();
 
         vm.startPrank(attacker);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
         juniorVault.claimDeposit(requestId, 10_000e6, receiverAddr, attacker);
         vm.stopPrank();
     }
@@ -190,7 +190,7 @@ contract ThirdPartyCooldownMutationsTest is BasePerpTest {
         _settleLpEpochForTest();
 
         vm.startPrank(helper);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
         juniorVault.claimDeposit(requestId, 1000e6, alice, helper);
         vm.stopPrank();
     }
@@ -256,7 +256,7 @@ contract MaterialThirdPartyTopUpTest is BasePerpTest {
         _settleLpEpochForTest();
 
         vm.startPrank(attacker);
-        vm.expectRevert(TrancheVault.TrancheVault__ThirdPartyDepositForExistingHolder.selector);
+        vm.expectRevert(TrancheVault.TrancheVault__ReceiverNotController.selector);
         juniorVault.claimDeposit(requestId, 5000e6, alice, attacker);
         vm.stopPrank();
     }

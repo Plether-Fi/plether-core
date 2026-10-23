@@ -10,6 +10,7 @@ import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionPro
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 
 interface IDelegatedMarkRefresh {
 
@@ -74,6 +75,12 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
 
         PositionProtectionTypes.PositionProtectionParams memory params;
         params.stopLossTriggerPrice = LONG_STOP_LOSS;
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max
+        });
         vm.prank(account);
         protectionId = protectionActions.createPositionProtection(params);
     }
@@ -129,9 +136,21 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
     function _refreshMark(
         uint256 price
     ) internal {
-        bytes[] memory updateData = new bytes[](1);
-        updateData[0] = abi.encode(price);
-        router.updateMarkPrice(updateData);
+        router.updateMarkPrice(_liveProtectionData(price));
+    }
+
+    function _liveProtectionData(
+        uint256 price
+    ) internal returns (bytes[] memory data) {
+        vm.roll(block.number + 1);
+        vm.warp(block.timestamp + 1);
+        bytes32[] memory ids = _basePythFeedIds();
+        MockPyth.FeedUpdate[] memory ticks = new MockPyth.FeedUpdate[](ids.length);
+        for (uint256 i; i < ids.length; ++i) {
+            ticks[i] = MockPyth.FeedUpdate(ids[i], MockPyth.MockPrice(int64(uint64(price)), 0, -8, block.timestamp, 0));
+        }
+        data = new bytes[](1);
+        data[0] = abi.encode(ticks);
     }
 
     function _withdrawAllFreeSettlement(

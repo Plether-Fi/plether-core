@@ -132,11 +132,27 @@ contract FadStalenessTest is BasePerpTest {
 
         vm.warp(FRIDAY_18UTC);
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), FRIDAY_18UTC + 6);
+        // Install the last signed live basket before the frozen window; frozen calls replay this Engine mark.
+        vm.warp(FRIDAY_18UTC + 6);
+        router.updateMarkPrice(_livePayload(80_000_000, uint64(FRIDAY_18UTC + 6), uint64(WEDNESDAY_BEFORE + 6)));
     }
 
     function _pythUpdateData() internal pure returns (bytes[] memory updateData) {
         updateData = new bytes[](1);
         updateData[0] = "";
+    }
+
+    function _livePayload(
+        int64 price,
+        uint64 tick,
+        uint64 previous
+    ) internal view returns (bytes[] memory data) {
+        MockPyth.FeedUpdate[] memory ticks = new MockPyth.FeedUpdate[](feedIds.length);
+        for (uint256 i; i < feedIds.length; ++i) {
+            ticks[i] = MockPyth.FeedUpdate(feedIds[i], MockPyth.MockPrice(price, 0, -8, tick, previous));
+        }
+        data = new bytes[](1);
+        data[0] = abi.encode(ticks);
     }
 
     function _currentTimestamp() internal view returns (uint256 ts) {
@@ -226,6 +242,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FadWindow_ExcessStaleness_CloseGracefullyCancelled() public {
         _startRecordingLogs();
+        _setFadMaxStaleness(3600);
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -242,9 +259,10 @@ contract FadStalenessTest is BasePerpTest {
     function test_FadWindow_Liquidation_AcceptsStalePrice() public {
         _startRecordingLogs();
         address aliceAccount = alice;
-        uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 6);
+        uint64 fridayPublishTime = uint64(FRIDAY_18UTC + 7);
+        vm.warp(fridayPublishTime);
         vm.prank(address(router));
-        engine.updateMarkPrice(180_000_000, uint64(block.timestamp));
+        engine.updateMarkPrice(180_000_000, fridayPublishTime);
 
         mockPyth.setAllPrices(feedIds, int64(180_000_000), int32(-8), fridayPublishTime);
 
@@ -276,6 +294,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FadWindow_Liquidation_ExcessStaleness_Reverts() public {
         _startRecordingLogs();
+        _setFadMaxStaleness(3600);
         mockPyth.setAllPrices(feedIds, int64(86_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);
@@ -308,6 +327,7 @@ contract FadStalenessTest is BasePerpTest {
 
     function test_FadBatch_ExcessStaleness_FrozenReverts() public {
         _startRecordingLogs();
+        _setFadMaxStaleness(3600);
         mockPyth.setAllPrices(feedIds, int64(80_000_000), int32(-8), SATURDAY_NOON - 4 days);
 
         vm.warp(SATURDAY_NOON);

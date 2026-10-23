@@ -183,7 +183,11 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         snap.riskParams = _loadRiskParams(engine);
 
         // Historical carry uses live assets net of claims, even for commitment or hypothetical trade depth.
-        snap.poolCashUsdc = IHousePool(host.pool()).totalAssets();
+        IHousePool pool = IHousePool(host.pool());
+        snap.poolCashUsdc = pool.totalAssets();
+        snap.poolAdditionalReservedUsdc =
+            pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc() + pool.unassignedAssets();
+        snap.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
         snap.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
         uint256 carryDepthUsdc =
             PositionRiskAccountingLib.computeNetPoolDepthUsdc(snap.poolCashUsdc, snap.totalTraderClaimBalanceUsdc);
@@ -878,7 +882,7 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
             );
     }
 
-    /// @notice Funds an uncredited protocol fee from pool cash not reserved for outstanding trader claims.
+    /// @notice Funds an uncredited protocol fee from cash above all current pool and engine reserves.
     /// @dev The top-up is capped by both the requested shortfall and current free pool cash, then paid to the clearinghouse
     ///      and credited to the host's protocol-treasury account.
     /// @param host Bound engine settlement host.
@@ -898,9 +902,8 @@ contract CfdEngineSettlementSidecar is ICfdEngineSettlementSidecar {
         }
 
         IHousePool pool = IHousePool(host.pool());
-        CashPriorityLib.SeniorCashReservation memory reservation =
-            CashPriorityLib.reserveFreshPayouts(pool.totalAssets(), host.totalTraderClaimBalanceUsdc());
-        uint256 topUpUsdc = poolFundedUsdc < reservation.freeCashUsdc ? poolFundedUsdc : reservation.freeCashUsdc;
+        uint256 freeCashUsdc = pool.getSettlementFreeUSDC();
+        uint256 topUpUsdc = poolFundedUsdc < freeCashUsdc ? poolFundedUsdc : freeCashUsdc;
         if (topUpUsdc == 0) {
             return;
         }

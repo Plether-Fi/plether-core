@@ -323,6 +323,7 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
     ///      use current pricing because settlement rates are not fixed. Claimable and refundable fields are exact
     ///      request accounting. A rejected deposit leaves Pending and becomes refundable
     ///      until the controller or its operator cancels it and pulls the escrowed assets.
+    ///      A projected tranche wipe suppresses the deposit-share estimate while pending assets remain visible.
     /// @param isSenior True for the Senior vault and false for the Junior vault.
     /// @param requestId Shared LP epoch used as the asynchronous request id.
     /// @param controller Account that controls the request and may authorize operators.

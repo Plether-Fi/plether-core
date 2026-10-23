@@ -1177,7 +1177,7 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
             status.seniorDepositDeferralMask |= gateClosedBit;
             status.juniorDepositDeferralMask |= gateClosedBit;
         }
-        if (!juniorMaturedEvidenceComplete || status.junior.maturedRedeemHeadShares != 0) {
+        if (!juniorMaturedEvidenceComplete) {
             status.seniorDepositDeferralMask |= gateClosedBit;
         }
     }
@@ -1257,18 +1257,6 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         }
 
         {
-            (bool reservationsOk, bool reservationsWithinLimits) =
-                _readBool(address(HOUSE_POOL), HousePool.areSeniorDepositReservationsWithinLimits.selector);
-            if (!reservationsOk) {
-                _markDeferralDependencyUnknown(status, previewDependencyBit, 1);
-            } else if (!reservationsWithinLimits) {
-                status.seniorDepositDeferralMask |= _deferralBit(
-                    SettlementMonitorViewTypes.DepositDeferral.SeniorCapacityUnavailable
-                );
-            }
-        }
-
-        {
             (bool supplyOk, uint256 supply) =
                 _readUint(address(SENIOR_VAULT), ISettlementMonitorVaultView.totalSupply.selector);
             if (!supplyOk) {
@@ -1338,11 +1326,6 @@ contract SettlementMonitorLens is ISettlementMonitorLens {
         if (validity.withdrawals && !status.withdrawalsLive) {
             status.operationalBlockerMask |= _operationalBit(
                 SettlementMonitorViewTypes.OperationalBlocker.WithdrawalsNotLive
-            );
-        }
-        if (validity.terminal && validity.liquidity && status.hasOpenPositions && !status.markFresh) {
-            status.operationalBlockerMask |= _operationalBit(
-                SettlementMonitorViewTypes.OperationalBlocker.CachedMarkStale
             );
         }
         if (status.engineDegraded) {

@@ -44,8 +44,10 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidPletherOracle();
     /// @notice The supplied stateless keeper sidecar has no code or is not bound to this exact Router address.
     error OrderRouter__InvalidKeeperSidecar();
-    /// @notice The engine-lens dependency is the zero address.
+    /// @notice The engine lens has no code, lacks its binding getters, or is bound to another engine.
     error OrderRouter__InvalidEngineLens();
+    /// @notice The HousePool has no code, is bound to another engine, or lacks its binding or asset-total getter.
+    error OrderRouter__InvalidHousePool();
     /// @notice The V3 policy-evaluator dependency is zero or has no deployed code.
     error OrderRouter__InvalidPolicyEvaluator();
     /// @notice The immutable V3 execution-sidecar dependency is zero or has no deployed code.
@@ -145,6 +147,8 @@ interface IOrderRouterErrors {
     error OrderRouter__PositionChanged();
     /// @notice Trigger evaluation was attempted in the block in which protection became armed.
     error OrderRouter__SameBlockTrigger();
+    /// @notice The trigger basket has not advanced beyond the oracle publication observed when protection armed.
+    error OrderRouter__TriggerPublishTimeNotAdvanced();
 
     /// @notice The EIP-150-forwardable gas remaining is below the configured minimum for an engine call.
     error OrderRouter__InsufficientGas();
@@ -186,12 +190,22 @@ interface IOrderRouterErrors {
         uint256 triggerBountyUsdc
     );
 
-    /// @notice Emitted when a staged or armed protection's trigger prices are atomically replaced.
+    /// @notice Emitted when a staged or armed protection's trigger prices and close limits are atomically replaced.
     event PositionProtectionReplaced(
         uint64 indexed protectionId,
         address indexed account,
         uint256 takeProfitTriggerPrice,
         uint256 stopLossTriggerPrice
+    );
+
+    /// @notice Emitted when the owner sets financial ceilings for future protection close attempts.
+    event PositionProtectionCloseLimitsUpdated(
+        uint64 indexed protectionId,
+        address indexed account,
+        uint256 maxExecutionNotionalUsdc,
+        uint256 maxGrossAccountDebitUsdc,
+        uint256 maxActionChargeUsdc,
+        uint256 maxExplicitFeesUsdc
     );
 
     /// @notice Emitted when a parent open succeeds or existing-position protection becomes armed.

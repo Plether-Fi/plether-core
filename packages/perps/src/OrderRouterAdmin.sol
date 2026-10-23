@@ -5,6 +5,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
+import {OracleConfidencePolicyLib} from "@plether/perps/libraries/OracleConfidencePolicyLib.sol";
 
 /// @title OrderRouterAdmin
 /// @notice Timelocked two-step owner administration for router queue, bounty, oracle, gas, and pause settings.
@@ -28,8 +29,6 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     uint256 internal constant MAX_PRUNE_ORDERS_PER_CALL_LIMIT = 256;
     /// @notice Upper bound for the permitted execution window at commit time.
     uint256 internal constant MAX_EXECUTION_WINDOW_SECONDS_LIMIT = 1 hours;
-    /// @notice Upper bound for the adverse confidence multiplier in basis points (3x).
-    uint256 internal constant MAX_CONFIDENCE_MULTIPLIER_BPS = 30_000;
 
     /// @notice Router host controlled by this admin.
     IOrderRouterAdminHost public immutable router;
@@ -58,7 +57,7 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     error OrderRouterAdmin__InvalidMaxExecutionWindowSeconds();
     /// @notice A staleness, settlement-window, or component-divergence limit is inconsistent or zero.
     error OrderRouterAdmin__InvalidStalenessLimit();
-    /// @notice A confidence ratio or adverse-confidence multiplier exceeds its allowed bound.
+    /// @notice Confidence limits exceed their bounds or permit a full-price adverse adjustment.
     error OrderRouterAdmin__InvalidConfidenceRatio();
     /// @notice An open-notional, open-bounty, or protection-trigger bounty setting violates its bounds.
     error OrderRouterAdmin__InvalidExecutionBounty();
@@ -74,8 +73,10 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     error OrderRouterAdmin__UnauthorizedPauser();
     /// @notice The caller has no deferred ETH balance to claim.
     error OrderRouterAdmin__NothingToClaim();
-    /// @notice Transferring a claimed ETH balance to its beneficiary failed.
+    /// @notice Transferring a claimed ETH balance to its selected recipient failed.
     error OrderRouterAdmin__EthTransferFailed();
+    /// @notice The selected deferred-refund recipient is the zero address.
+    error OrderRouterAdmin__InvalidRefundRecipient();
     /// @notice A positive deferred-refund credit did not equal the ETH attached by the router.
     error OrderRouterAdmin__EthAmountMismatch();
 
@@ -105,6 +106,8 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     /// @param previousCutoff Inclusive cutoff recorded before this pause.
     /// @param newCutoff Inclusive monotonic cutoff recorded by this pause.
     event RiskOffActivated(uint64 previousCutoff, uint64 newCutoff);
+    /// @notice Emitted when a beneficiary claims its deferred ETH to a selected recipient.
+    event EthRefundClaimedTo(address indexed beneficiary, address indexed recipient, uint256 amount);
 
     /// @notice Creates an admin for a fixed router host and starts two-step ownership at `initialOwner`.
     /// @dev The Router address is not validated here; `Ownable` rejects a zero initial owner. Ownership transfers use
@@ -116,6 +119,11 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         address initialOwner
     ) Ownable(initialOwner) {
         router = IOrderRouterAdminHost(router_);
+    }
+
+    /// @notice Ownership cannot be renounced because governance must retain emergency recovery authority.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnableInvalidOwner(address(0));
     }
 
     /// @notice Restricts a function to the immutable router host.
@@ -269,12 +277,31 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
     /// @notice Claims deferred ETH refunds owed to the caller.
     /// @dev Uses checks-effects-interactions: the balance is cleared before transfer and restored if the call reverts.
     function claimBalance() external {
-        uint256 amount = claimableEth[msg.sender];
+        _claimBalance(payable(msg.sender));
+    }
+
+    /// @notice Claims the caller's full deferred ETH balance to a nonzero recipient.
+    /// @dev Only the caller's credit is debited. A failed transfer reverts and preserves the credit.
+    /// @param recipient Address receiving the caller's refund
+    function claimBalanceTo(
+        address payable recipient
+    ) external {
+        uint256 amount = _claimBalance(recipient);
+        emit EthRefundClaimedTo(msg.sender, recipient, amount);
+    }
+
+    function _claimBalance(
+        address payable recipient
+    ) private returns (uint256 amount) {
+        if (recipient == address(0)) {
+            revert OrderRouterAdmin__InvalidRefundRecipient();
+        }
+        amount = claimableEth[msg.sender];
         if (amount == 0) {
             revert OrderRouterAdmin__NothingToClaim();
         }
         claimableEth[msg.sender] = 0;
-        (bool success,) = payable(msg.sender).call{value: amount}("");
+        (bool success,) = recipient.call{value: amount}("");
         if (!success) {
             revert OrderRouterAdmin__EthTransferFailed();
         }
@@ -331,15 +358,14 @@ contract OrderRouterAdmin is Ownable2Step, Pausable {
         }
     }
 
-    /// @notice Validates confidence ratio and adverse multiplier basis-point bounds.
+    /// @notice Validates confidence bounds and requires their combined adjustment to remain below the raw price.
     /// @param config Candidate router configuration.
     function _validateConfidenceConfig(
         IOrderRouterAdminHost.RouterConfig memory config
     ) private pure {
-        if (
-            config.basketMaxConfidenceRatioBps > 10_000
-                || config.adverseConfidenceMultiplierBps > MAX_CONFIDENCE_MULTIPLIER_BPS
-        ) {
+        if (!OracleConfidencePolicyLib.isValidConfig(
+                config.basketMaxConfidenceRatioBps, config.adverseConfidenceMultiplierBps
+            )) {
             revert OrderRouterAdmin__InvalidConfidenceRatio();
         }
     }

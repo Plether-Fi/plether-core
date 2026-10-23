@@ -21,6 +21,19 @@ import {IWithdrawGuard} from "@plether/perps/interfaces/IWithdrawGuard.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 
+interface ICfdEngineClearinghouseBinding {
+
+    function settlementAsset() external view returns (address);
+
+}
+
+interface ICfdEnginePoolBinding {
+
+    function USDC() external view returns (address);
+    function ENGINE() external view returns (address);
+
+}
+
 /// @title CfdEngine
 /// @notice Canonical position ledger and execution coordinator for Plether's capped-price CFDs.
 /// @dev Orders and liquidations enter through the authorized router. Economic deltas are computed by the planner,
@@ -265,8 +278,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Initializes the immutable settlement dependencies, price cap, and initial risk configuration.
-    /// @dev The deployer becomes the two-step owner and initial protocol treasury account. The HousePool, router,
-    ///      planner, settlement sidecar, and admin must be wired separately through their one-time setters.
+    /// @dev The clearinghouse must use the same settlement token. The deployer becomes the two-step owner and initial
+    ///      protocol treasury account. The HousePool, router, planner, sidecar, and admin use one-time setters.
     /// @param _usdc Settlement token treated by the protocol as USDC with 6 decimals.
     /// @param _clearinghouse Margin clearinghouse that custodies trader balances and margin buckets.
     /// @param _capPrice Nonzero maximum supported oracle price, with 8 decimals and no greater than `type(uint32).max`.
@@ -282,6 +295,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     ) Ownable(msg.sender) {
         if (_usdc == address(0) || _clearinghouse == address(0)) {
             revert CfdEngine__ZeroAddress();
+        }
+        if (
+            _clearinghouse.code.length == 0 || ICfdEngineClearinghouseBinding(_clearinghouse).settlementAsset() != _usdc
+        ) {
+            revert CfdEngine__InvalidSettlementAsset();
         }
         if (_capPrice == 0 || _capPrice > type(uint32).max) {
             revert CfdEngine__InvalidRiskParams();
@@ -361,8 +379,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Configures the HousePool backing all positions exactly once.
-    /// @dev Callable only by the owner; this setter does not probe the supplied address for an interface binding.
-    /// @param _pool Nonzero HousePool address that provides counterparty liquidity.
+    /// @dev Callable only by the owner; the pool must use this engine and its settlement token.
+    /// @param _pool HousePool address that provides counterparty liquidity.
     function setPool(
         address _pool
     ) external onlyOwner {
@@ -371,6 +389,12 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
         if (address(pool) != address(0)) {
             revert CfdEngine__PoolAlreadySet();
+        }
+        if (
+            _pool.code.length == 0 || ICfdEnginePoolBinding(_pool).USDC() != address(USDC)
+                || ICfdEnginePoolBinding(_pool).ENGINE() != address(this)
+        ) {
+            revert CfdEngine__InvalidPool();
         }
         pool = IHousePool(_pool);
     }
@@ -416,8 +440,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Updates the clearinghouse account receiving protocol fees.
-    /// @dev Callable only by the owner. For a change, the current treasury must have a zero clearinghouse balance;
-    ///      no existing balance is migrated. Supplying the current treasury is a no-op.
+    /// @dev Callable only by the owner. Existing balances remain in their original clearinghouse accounts;
+    ///      supplying the current treasury is a no-op.
     /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
     function setProtocolTreasury(
         address treasury
@@ -425,12 +449,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (treasury == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
-        address currentTreasury = protocolTreasury;
-        if (treasury == currentTreasury) {
+        if (treasury == protocolTreasury) {
             return;
-        }
-        if (clearinghouse.balanceUsdc(currentTreasury) != 0) {
-            revert CfdEngine__ProtocolTreasuryBalanceNotEmpty();
         }
         protocolTreasury = treasury;
         emit ProtocolTreasuryUpdated(treasury);
@@ -619,6 +639,34 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         }
         _syncPositionBorrowBase(account, _positions[account]);
         _endTerminalCurveMutation(account, expectedOldHash);
+    }
+
+    /// @notice Funds non-dilutive claimant recapitalization from the engine owner's wallet.
+    /// @dev The owner must approve this engine for USDC. Checkpoints carry before changing pool depth and requires
+    ///      exact receipt before queuing recapitalization. Allocation occurs through normal pool reconciliation;
+    ///      this call mints no shares and does not clear degraded mode. Funding remains available while paused or frozen.
+    /// @param amountUsdc Nonzero USDC amount to transfer directly into the configured pool (6 decimals).
+    function recapitalizePool(
+        uint256 amountUsdc
+    ) external onlyOwner nonReentrant {
+        if (amountUsdc == 0) {
+            revert CfdEngine__ZeroAmount();
+        }
+        if (address(pool) == address(0)) {
+            revert CfdEngine__InvalidPool();
+        }
+        _advanceAllCarryIndexes(block.timestamp);
+        uint256 balanceBefore = USDC.balanceOf(address(pool));
+        USDC.safeTransferFrom(msg.sender, address(pool), amountUsdc);
+        uint256 balanceAfter = USDC.balanceOf(address(pool));
+        uint256 received = balanceAfter >= balanceBefore ? balanceAfter - balanceBefore : 0;
+        if (received != amountUsdc) {
+            revert CfdEngine__UnexpectedTransferAmount(amountUsdc, received);
+        }
+        pool.recordClaimantInflow(
+            amountUsdc, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
+        );
+        emit PoolRecapitalized(msg.sender, amountUsdc);
     }
 
     /// @notice Clears degraded mode once adjusted solvency has recovered.
@@ -1051,6 +1099,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         if (newMarkTime < lastMarkTime) {
             return;
         }
+        if (newMarkTime == lastMarkTime && newMarkPrice != lastMarkPrice) {
+            revert CfdEngine__MarkPriceOutOfOrder();
+        }
         lastMarkPrice = newMarkPrice;
         lastMarkTime = newMarkTime;
     }
@@ -1416,8 +1467,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     }
 
     /// @notice Updates the cached mark price without processing a trade or liquidation.
-    /// @dev Callable only by the router. Reverts for a publish time older than `lastMarkTime`; an equal timestamp is
-    ///      accepted. Advances both side carry indexes before caching the price, but does not collect position carry.
+    /// @dev Callable only by the router. An equal timestamp is accepted only for an identical clamped price.
     /// @param price Oracle price, with 8 decimals; values above `CAP_PRICE` are capped.
     /// @param publishTime Oracle publish timestamp, in Unix seconds.
     function updateMarkPrice(

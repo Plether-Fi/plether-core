@@ -24,16 +24,34 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Discover the immutable protection action/view surface through `OrderRouter.positionProtectionBook()`.
 - Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
-- Existing-position protection creation locks its trigger bounty first, then applies the canonical V2 exact-price safety
+- A protection request must explicitly supply `PositionProtectionParams.closeLimits` with four close financial limits:
+  `maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`, `maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. Each is a
+  `uint256` ceiling in 6-decimal USDC units for future triggered or retried close attempts. Set the limits from the trader's intended
+  close policy; integrations must not assume an implicit unlimited default. Zero is a zero allowance;
+  `type(uint256).max` is an explicit unlimited allowance. The separately reserved trigger bounty is paid when the
+  protection fires; these ceilings apply to its generated close attempt.
+- Existing-position protection creation is available in degraded mode; Router pause and frozen-oracle restrictions still apply.
+  Creation locks its trigger bounty first, then applies the canonical V2 exact-price safety
   gate through the Engine's configured planner. Price equity uses exact entry cost and only PnL pledge plus same-account
   claim; free settlement and generic action/reservation buckets do not count. Uncovered carry, an underfunded
   negative-VPI reserve, or equity at or below the stricter of initial and active normal/FAD margin rejects the action.
 - Protection management: replace a `PendingOpen` or `Armed` record with
-  `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)`, or detach/cancel a
-  `PendingOpen`/`Armed` record with `PositionProtectionBook.cancelPositionProtection(uint64)`
+  `PositionProtectionBook.replacePositionProtection(uint64,PositionProtectionParams)` to update its triggers and close
+  limits, or detach/cancel a `PendingOpen`/`Armed` record with
+  `PositionProtectionBook.cancelPositionProtection(uint64)`
+- Atomic owner exit: `PositionProtectionBook.cancelPositionProtectionAndCommitClose(uint64,OrderV3Types.OrderRequest)`
+  cancels only an `Armed` protection and queues a fresh ordinary full close matching its current side and size.
+  Commitment failure rolls back cancellation and the trigger-bounty refund. It is available in live and frozen
+  markets; supply the current nonzero config hash, explicit financial bounds, target, and allowed execution modes.
+  Successful commitment permanently cancels protection; subsequent close failure or expiry does not restore it.
+  Recover the order id by client-intent lookup rather than replaying this composite action.
 - Once a trigger is recorded, neither the owner nor a keeper may replace or cancel it. `Triggered` means one live close
   attempt; `Latched` means the irreversible trigger remains active with no live attempt and may be retried
   permissionlessly.
+- The owner may amend the close ceilings of a `Latched` protection with
+  `PositionProtectionBook.amendLatchedPositionProtectionCloseLimits(uint64,CloseFinancialLimits)` when the account has
+  no pending Router order. This changes the limits used for a future retry; it does not replace or cancel the latched
+  trigger. `PositionProtectionCloseLimitsUpdated` records each creation, replacement, or amendment of these limits.
 - Only Router-authenticated TP/SL-triggered close attempts use `expectedConfigHash == bytes32(0)` as an internal
   unpinned marker. Protected parent opens and ordinary `OrderRouter.commitOrder(...)` requests require the current
   nonzero configuration hash.
@@ -43,7 +61,8 @@ For autonomous trading-account and AI-agent integration, including bounded autho
   `TrancheView.maxWithdrawUsdc` field now means current pool-level queue-funding capacity, not synchronous holder
   withdrawal capacity.
 - Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
-  `PositionProtectionBook.getPositionProtection(uint64)`
+  `PositionProtectionBook.getPositionProtection(uint64)`. Read the retained close ceilings with
+  `PositionProtectionBook.closeFinancialLimits(uint64)`.
 - Open-ticket planning: `CfdEngineLens.previewOpen(...)` and `CfdEngineLens.quoteMaxOpen(...)`; these exclude Router
   admission, bounty-reservation, and oracle-validation checks.
 - Pre-commit close review: `CfdClosePreview.previewClose(...)`, which projects commitment carry and the new order's
@@ -101,9 +120,9 @@ does not upgrade an existing clearinghouse or resolve the application's V3 tradi
   `b = (e + 1) * 3,600`, target `e + 1` before `b - 300` and `e + 2` at or after `b - 300`. Exact equality rolls
   forward without a cutoff-specific revert. The successful return value and event are authoritative when inclusion
   crosses the cutoff.
-- A share-delivering claim, redemption cancellation, or redemption refund may target the controller or an account with
-  no existing vault shares. This prevents unsolicited dust from resetting another holder's whole-balance cooldown;
-  `maxDeposit(controller)` and `maxMint(controller)` remain receiver-independent controller limits.
+- Deposit claims, redemption cancellations, and redemption refunds require `receiver == controller`, including
+  zero-share acknowledgements. Approved operators may execute them for the controller. Receiver eligibility does
+  not depend on its share balance; `maxDeposit(controller)` and `maxMint(controller)` report controller limits.
 - Epoch clearing is permissionless through the `requiredExecutionPath` field returned by
   `SettlementMonitorLens.getSettlementStatus(observedEpoch)`.
   `CachedMark` calls `HousePool.settleLpEpoch(uint256,uint256)` directly; `AtomicOracleRefresh` calls
@@ -181,7 +200,8 @@ by the Book's trailing payload.
 - Compact protocol status and LP/trader views: `PerpsPublicLens`
 - Retained protection status and latest-attempt linkage: `IPositionProtectionViews` on the Book returned by
   `OrderRouter.positionProtectionBook()`. `linkedOrderId` is the most recent attempt, not complete history; reconstruct
-  the one-to-many attempt set from protection events and permanent lifecycle-Book outcomes.
+  the one-to-many attempt set from protection events and permanent lifecycle-Book outcomes. Read the protection's
+  current close ceilings with `closeFinancialLimits(uint64)`.
 - Authoritative order identity and outcome reads: the independently predeployed, exactly Router-bound
   `OrderLifecycleBook` exposed by `OrderRouter.lifecycleBook()` via `IOrderLifecycleBook`. Use
   `currentExecutionConfigHash()` before constructing a request, `clientIntent(account,
@@ -200,8 +220,8 @@ by the Book's trailing payload.
   - `observableConfigDigest()`
 
   `getSettlementStatus(...)` exposes `executionPathDependencyMask` for failures that prevent route selection and a
-  broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation and reservation-limit
-  state, not new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
+  broader `dependencyFailureMask`. Its Senior deposit-deferral mask describes pending activation gates, not
+  new-request admission capacity. Use status for routine polling. Composite observations are checkpoint and
   alert-investigation reads (roughly 6 KB returned and about 0.8–1.3 million representative `eth_call` gas); they
   expose `observationComplete` and `completeObservationDigest`. Completeness requires every Oracle dependency read,
   including the updated current-feed ABI, even for cached/no-work routing, but requires Oracle policy validity only on
