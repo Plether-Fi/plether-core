@@ -383,7 +383,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                             queuedPosition.exists = false;
                         }
                     }
-                } else if (!queuedPosition.exists || queuedPosition.size == 0) {
+                } else if (!queuedPosition.exists) {
                     queuedPosition.exists = true;
                     queuedPosition.side = pending.side;
                     queuedPosition.size = pending.sizeDelta;
