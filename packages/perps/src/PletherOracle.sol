@@ -507,9 +507,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         }
 
         uint256 pythFee = _updatePythPrice(pythUpdateData);
-        basket = _computeLiveBasketPrice(
-            PriceMode.OrderExecution, policy.maxStaleness, _maxPublishTimeDivergence(PriceMode.OrderExecution)
-        );
+        uint256 maxPublishTimeDivergence =
+            request.isClose ? policy.maxStaleness : _maxPublishTimeDivergence(PriceMode.OrderExecution);
+        basket = _computeLiveBasketPrice(PriceMode.OrderExecution, policy.maxStaleness, maxPublishTimeDivergence);
         basket.pythFee = pythFee;
         ok = true;
     }
