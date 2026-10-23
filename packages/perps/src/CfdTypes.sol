@@ -47,7 +47,8 @@ library CfdTypes {
     /// @param marginDelta Margin committed by an open/increase order in 6-decimal USDC; close orders require zero.
     /// @param targetPrice Direction-aware execution limit (8 decimals); production V3 commits require it nonzero.
     /// @param commitTime Unix timestamp at submission, used for expiry and post-commit oracle checks.
-    /// @param commitBlock Block number at submission, used to block same-block execution outside frozen-oracle mode.
+    /// @param commitBlock Execution-chain block number at submission (L2 on Arbitrum), used to block same-block
+    ///        execution outside frozen-oracle mode.
     /// @param orderId Monotonically increasing router order identifier.
     /// @param side Direction to open/increase or, for a close, the direction of the queued position being reduced.
     /// @param isClose Whether the intent strictly reduces an existing or earlier-queued position.
@@ -57,7 +58,7 @@ library CfdTypes {
         uint256 marginDelta; // [6 dec] Open/increase margin contribution; zero for closes
         uint256 targetPrice; // [8 dec] Slippage protection limit
         uint64 commitTime; // Timestamp of intent submission (MEV shield)
-        uint64 commitBlock; // Block number of intent submission (same-block execution shield)
+        uint64 commitBlock; // Execution-chain block of intent submission (same-block execution shield)
         uint64 orderId; // Strict FIFO execution queue ID
         Side side; // [uint8] LONG or SHORT
         bool isClose; // [bool] True if strictly closing/reducing

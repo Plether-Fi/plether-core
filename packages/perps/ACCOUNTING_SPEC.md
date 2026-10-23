@@ -1197,9 +1197,12 @@ Position-protection storage persists `None`, `PendingOpen`, `Armed`, `Triggered`
   there. Each linked close attempt is an ordinary Router order and its order events originate from the Router.
 - `PendingOpen` is attached to one binding open but remains unable to trigger.
 - Successful parent execution transitions to `Armed` atomically and snapshots the actual resulting position.
-- Trader creation, replacement, and attached-open calls are nonpayable and use the engine's cached fresh neutral mark.
-- Triggering is permissionless and payable for current Pyth data. It requires a later block and a publish time strictly
-  after arming, and is unavailable during `oracleFrozen`.
+- Trader creation, replacement, and attached-open calls are nonpayable. They require a fresh cached Engine mark and
+  validate thresholds against the current validated `MarkRefresh` basket without ingesting Pyth data. The cached mark
+  remains the existing-position post-lock risk input.
+- Triggering is permissionless and payable for current Pyth data. It requires a later execution-chain block and a
+  basket publish time strictly after the oracle-time baseline recorded at arming, and is unavailable during
+  `oracleFrozen`. A successful attached parent open uses the Engine's last accepted mark time as its baseline.
 - A valid trigger is irreversible: its leg, mark, and publish time are not changed by later price recovery or retries.
 - `Armed` and `Latched` are off queue. `Triggered` links exactly one live full-size market-style close attempt, using
   the side-dependent nonbinding target sentinel and appended at the global FIFO tail; `linkedOrderId` names the latest

@@ -8,6 +8,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {PositionProtectionBook} from "@plether/perps/PositionProtectionBook.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
@@ -86,6 +87,7 @@ contract PositionProtectionTest is BasePerpTest {
         _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         _setRouterConfig(config);
+        _refreshMark(MARK_PRICE);
         test_RetryPositionProtectionClose_StaysZeroBountyAfterTriggerConfigChangeWithoutFreshFunds();
     }
 
@@ -98,23 +100,85 @@ contract PositionProtectionTest is BasePerpTest {
         new PositionProtectionBook(address(router), address(0));
     }
 
-    function test_CreatePositionProtection_RejectsNoPositionAndDegradedMode() public {
-        _startRecordingLogs();
-        vm.prank(ALICE);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
-        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+    function test_CreatePositionProtection_RejectsNoPositionIncludingDegradedMode() public {
+        for (uint256 i; i < 2; ++i) {
+            stdstore.target(address(engine)).sig("degradedMode()").checked_write(i != 0);
+            vm.prank(ALICE);
+            vm.expectRevert(IOrderRouterErrors.OrderRouter__NoOpenPosition.selector);
+            protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+            assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "failed creation releases reserve");
+        }
+    }
 
+    function test_CreatePositionProtection_DegradedLongCanArmAndTrigger() public {
+        _assertDegradedPositionCanArmAndTrigger(CfdTypes.Side.LONG);
+    }
+
+    function test_CreatePositionProtection_DegradedShortCanArmAndTrigger() public {
+        _assertDegradedPositionCanArmAndTrigger(CfdTypes.Side.SHORT);
+    }
+
+    function _assertDegradedPositionCanArmAndTrigger(
+        CfdTypes.Side side
+    ) internal {
+        _refreshMark(95_000_000);
+        _open(ALICE, side, POSITION_SIZE, POSITION_MARGIN_USDC, 95_000_000);
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(ALICE);
+        uint256 triggerPrice = side == CfdTypes.Side.LONG ? LONG_TAKE_PROFIT : SHORT_TAKE_PROFIT;
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(triggerPrice, 0));
+        PositionProtectionTypes.PositionProtectionView memory protection =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(uint8(protection.status), uint8(PositionProtectionTypes.PositionProtectionStatus.Armed));
+        assertEq(protection.size, sizeBefore, "protects the entire existing position");
+        assertEq(uint8(protection.side), uint8(side));
+        assertEq(router.pendingOrderCounts(ALICE), 0, "arming creates no ordinary order");
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore - _totalProtectionBountyUsdc(), "bounty remains funded");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, _totalProtectionBountyUsdc());
+        (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(ALICE);
+        assertEq(sizeAfter, sizeBefore, "arming does not expand exposure");
+        assertEq(marginAfter, marginBefore, "arming preserves pledged margin");
+        assertTrue(engine.degradedMode(), "arming must not clear containment");
+
+        uint64 attemptId = _triggerAt(protectionId, triggerPrice);
+        assertEq(protectionViews.getPositionProtection(protectionId).linkedOrderId, attemptId);
+        assertEq(router.pendingCloseSize(ALICE), sizeBefore, "new protection can queue a full close");
+        assertTrue(engine.degradedMode(), "trigger must not clear containment");
+    }
+
+    function test_CreatePositionProtection_DegradedRetainsPauseFreshnessAndFrozenGuards() public {
         _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
-
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        routerAdmin.pause();
         vm.prank(ALICE);
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__DegradedMode.selector);
-        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        routerAdmin.unpause();
 
-        assertEq(
-            router.getAccountReservations(ALICE).executionBountyUsdc,
-            0,
-            "failed protection creation must roll back both bounty locks"
+        vm.warp(uint256(engine.lastMarkTime()) + pletherOracle.orderExecutionStalenessLimit() + 1);
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionMarkTooStale.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+
+        vm.warp(FRIDAY_FAD_START + 3 hours);
+        assertTrue(engine.isOracleFrozen());
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ConditionalTriggerFrozen.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "rejections release temporary reserve");
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore, "rejections roll back carry and lock");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0);
+    }
+
+    function test_AttachedOpen_DegradedStillRejectsNewExposure() public {
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        _expectAttachedOpenCommitRevert(
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__DegradedMode.selector)
         );
     }
 
@@ -208,6 +272,41 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_CreatePositionProtection_RejectsThresholdCrossedByCurrentOracleButNotCachedMark() public {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        uint256 cachedMark = engine.lastMarkPrice();
+        uint64 nextProtectionId = PositionProtectionBook(address(protectionBook)).nextPositionProtectionId();
+
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
+        vm.prank(address(router));
+        IPletherOracle.PriceSnapshot memory current =
+            pletherOracle.updatePrice(BOB, _priceData(LONG_TAKE_PROFIT), IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(current.markPrice, LONG_TAKE_PROFIT, "oracle must see the crossed price");
+        assertEq(engine.lastMarkPrice(), cachedMark, "direct oracle update must leave the engine mark cached");
+
+        vm.prank(ALICE);
+        vm.expectRevert(PositionProtectionBook.PositionProtectionBook__OracleMarkAhead.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        router.updateMarkPrice(new bytes[](0));
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "crossed create must leave no protection");
+        assertEq(
+            PositionProtectionBook(address(protectionBook)).nextPositionProtectionId(),
+            nextProtectionId,
+            "crossed create must not consume an id"
+        );
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "crossed create must release bounty");
+
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
+        router.updateMarkPrice(_livePriceData(MARK_PRICE));
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        assertEq(protectionId, nextProtectionId, "uncrossed current price should allow creation");
+    }
+
     function test_LongTakeProfit_TriggersAtEqualityAndRejectsWrongDirection() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
@@ -253,6 +352,52 @@ contract PositionProtectionTest is BasePerpTest {
             1,
             "linked close should use the canonical unbounded SHORT-close sentinel"
         );
+    }
+
+    function test_ShortProtection_ZeroAdjustedPricePreservesAttemptAndAllowsExpiryRetry() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.SHORT, SHORT_TAKE_PROFIT, 0);
+        uint64 linkedOrderId = _triggerAt(protectionId, SHORT_TAKE_PROFIT);
+        CfdTypes.Order memory order = _orderRecord(linkedOrderId).core;
+        uint256 balanceBefore = _settlementBalance(ALICE);
+        uint256 keeperBefore = _settlementBalance(EXECUTION_KEEPER);
+        uint256 markBefore = engine.lastMarkPrice();
+        uint64 markTimeBefore = engine.lastMarkTime();
+        vm.warp(uint256(order.commitTime) + 1);
+        vm.roll(block.number + 1);
+        baseMockPyth.setAllUniquePrices(
+            _basePythFeedIds(), 1_000_000_000_000, 1_000_000_000, -8, order.commitTime + 1, order.commitTime
+        );
+        bytes[] memory data = new bytes[](1);
+        data[0] = hex"01";
+
+        vm.prank(EXECUTION_KEEPER);
+        vm.expectRevert(IPletherOracle.PletherOracle__ZeroExecutionPrice.selector);
+        router.executeOrder(linkedOrderId, data);
+
+        assertEq(router.nextExecuteId(), linkedOrderId, "invalid observation leaves the close queued");
+        assertEq(router.pendingOrderCounts(ALICE), 1, "attempt remains pending");
+        assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "protection remains active");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Triggered),
+            "invalid observation does not terminalize or relatch the attempt"
+        );
+        (uint256 size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, POSITION_SIZE, "position unchanged");
+        assertEq(_settlementBalance(ALICE), balanceBefore, "trader balance unchanged");
+        assertEq(_settlementBalance(EXECUTION_KEEPER), keeperBefore, "no keeper payout");
+        assertEq(engine.lastMarkPrice(), markBefore, "engine mark unchanged");
+        assertEq(engine.lastMarkTime(), markTimeBefore, "engine publication unchanged");
+
+        _expireProtectionAttempt(linkedOrderId, EXECUTION_KEEPER);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        bytes[] memory retryData = _mockPythUpdateData(SHORT_TAKE_PROFIT);
+        vm.roll(uint256(_orderRecord(retryOrderId).core.commitBlock) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryOrderId, retryData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "positive-price retry executes");
+        (size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, 0, "retry closes the protected short");
     }
 
     function test_ShortStopLoss_TriggersAtEqualityAndRejectsWrongDirection() public {
@@ -329,6 +474,145 @@ contract PositionProtectionTest is BasePerpTest {
             _totalProtectionBountyUsdc(),
             "timing reverts must preserve both bounties"
         );
+    }
+
+    function test_TriggerPositionProtection_AcceptsNewOracleTickBehindArmingWallClock() public {
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        uint64 observedPublishTime = engine.lastMarkTime();
+        vm.warp(block.timestamp + 5);
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        uint64 armedAt = protectionViews.getPositionProtection(protectionId).armedAt;
+        assertLt(observedPublishTime + 1, armedAt, "fixture requires oracle publication to lag arming time");
+
+        vm.roll(block.number + 1);
+        baseMockPyth.setAllPrices(
+            _basePythFeedIds(), int64(uint64(LONG_TAKE_PROFIT)), 0, int32(-8), observedPublishTime + 1
+        );
+        bytes[] memory alreadyStoredData = new bytes[](1);
+        alreadyStoredData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        uint64 linkedOrderId = protectionActions.triggerPositionProtection(protectionId, alreadyStoredData);
+
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            LONG_TAKE_PROFIT
+        );
+        assertEq(
+            protectionViews.getPositionProtection(protectionId).triggerPublishTime,
+            observedPublishTime + 1,
+            "trigger must use the newer oracle observation"
+        );
+    }
+
+    function test_ArbitrumTrigger_UsesL2BlockWhileL1BlockStaysConstant() public {
+        vm.chainId(421_614);
+        _mockArbitrumBlockNumber(10_000);
+        uint256 l1Block = block.number;
+
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        PositionProtectionTypes.PositionProtectionView memory armed =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(armed.armedBlock, 10_000, "protection must store the L2 block");
+
+        vm.warp(block.timestamp + 1);
+        bytes[] memory freshData = _mockUniquePythUpdateDataAt(LONG_TAKE_PROFIT, armed.armedAt + 1, armed.armedAt);
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__SameBlockTrigger.selector);
+        protectionActions.triggerPositionProtection(protectionId, freshData);
+        assertEq(block.number, l1Block, "L1 block must remain fixed after same-L2 rejection");
+
+        _mockArbitrumBlockNumber(10_001);
+        baseMockPyth.setAllUniquePrices(_basePythFeedIds(), int64(uint64(MARK_PRICE)), 0, int32(-8), armed.armedAt, 0);
+        bytes[] memory oldPublishData = new bytes[](1);
+        oldPublishData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
+        protectionActions.triggerPositionProtection(protectionId, oldPublishData);
+
+        freshData = _mockUniquePythUpdateDataAt(LONG_TAKE_PROFIT, armed.armedAt + 1, armed.armedAt);
+        vm.prank(TRIGGER_KEEPER);
+        uint64 linkedOrderId = protectionActions.triggerPositionProtection(protectionId, freshData);
+
+        _assertTriggered(
+            protectionId,
+            linkedOrderId,
+            PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
+            LONG_TAKE_PROFIT
+        );
+        assertEq(_orderRecord(linkedOrderId).core.commitBlock, 10_001, "linked close must store the L2 block");
+        assertEq(block.number, l1Block, "trigger must not require an L1 block change");
+    }
+
+    function test_ArbitrumTriggeredClose_ExecutesInLaterL2BlockWithoutL1BlockChange() public {
+        vm.chainId(421_614);
+        _mockArbitrumBlockNumber(20_000);
+        uint256 l1Block = block.number;
+
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 armedAt = protectionViews.getPositionProtection(protectionId).armedAt;
+        vm.warp(block.timestamp + 1);
+        _mockArbitrumBlockNumber(20_001);
+        bytes[] memory triggerData = _mockUniquePythUpdateDataAt(LONG_TAKE_PROFIT, armedAt + 1, armedAt);
+        vm.prank(TRIGGER_KEEPER);
+        uint64 linkedOrderId = protectionActions.triggerPositionProtection(protectionId, triggerData);
+        assertEq(_orderRecord(linkedOrderId).core.commitBlock, 20_001, "close must commit at the trigger L2 block");
+        uint64 closeCommittedAt = _orderRecord(linkedOrderId).core.commitTime;
+
+        vm.warp(uint256(closeCommittedAt) + 1);
+        bytes[] memory executionData =
+            _mockUniquePythUpdateDataAt(LONG_TAKE_PROFIT, closeCommittedAt + 1, closeCommittedAt);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory sameBlock = router.executeOrder(linkedOrderId, executionData);
+        assertEq(
+            uint8(sameBlock.status), uint8(OrderV3Types.LifecycleStatus.Pending), "same-L2 close must remain pending"
+        );
+        assertEq(uint8(sameBlock.pendingReason), uint8(OrderV3Types.PendingReason.SameBlock));
+        assertEq(router.nextExecuteId(), linkedOrderId, "same-L2 attempt must keep the close queued");
+
+        _mockArbitrumBlockNumber(20_002);
+        vm.warp(uint256(closeCommittedAt) + 2);
+        executionData = _mockUniquePythUpdateDataAt(LONG_TAKE_PROFIT, closeCommittedAt + 2, closeCommittedAt);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory laterBlock = router.executeOrder(linkedOrderId, executionData);
+        assertEq(uint8(laterBlock.status), uint8(OrderV3Types.LifecycleStatus.Executed), "later-L2 close must execute");
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed),
+            "successful close must terminalize protection"
+        );
+        assertEq(block.number, l1Block, "close execution must not require an L1 block change");
+    }
+
+    function test_ArbitrumOrdinaryOrder_UsesL2BlockForSameBlockExecutionShield() public {
+        vm.chainId(421_614);
+        _mockArbitrumBlockNumber(30_000);
+        uint256 l1Block = block.number;
+
+        vm.prank(BOB);
+        uint64 orderId = router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        assertEq(_orderRecord(orderId).core.commitBlock, 30_000, "ordinary order must store the L2 block");
+        uint64 committedAt = _orderRecord(orderId).core.commitTime;
+
+        vm.warp(uint256(committedAt) + 1);
+        bytes[] memory executionData = _mockUniquePythUpdateDataAt(MARK_PRICE, committedAt + 1, committedAt);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory sameBlock = router.executeOrder(orderId, executionData);
+        assertEq(
+            uint8(sameBlock.status), uint8(OrderV3Types.LifecycleStatus.Pending), "same-L2 order must remain pending"
+        );
+        assertEq(uint8(sameBlock.pendingReason), uint8(OrderV3Types.PendingReason.SameBlock));
+
+        _mockArbitrumBlockNumber(30_001);
+        vm.warp(uint256(committedAt) + 2);
+        executionData = _mockUniquePythUpdateDataAt(MARK_PRICE, committedAt + 2, committedAt);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory laterBlock = router.executeOrder(orderId, executionData);
+        assertEq(uint8(laterBlock.status), uint8(OrderV3Types.LifecycleStatus.Executed), "later-L2 order must execute");
+        assertEq(block.number, l1Block, "ordinary order must execute without an L1 block change");
     }
 
     function test_TriggerUsesArmedOracleTimeWhenSignedTickPredatesWallClockArm() public {
@@ -590,6 +874,135 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.pendingOrderCounts(ALICE), 1, "double retry must not create another child");
     }
 
+    function test_ProtectionCloseLimits_PropagateToTriggeredCloseAndPermissionlessRetry() public {
+        _startRecordingLogs();
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: 12_345e6,
+            maxGrossAccountDebitUsdc: 9876e6,
+            maxActionChargeUsdc: 4321e6,
+            maxExplicitFeesUsdc: 1234e6
+        });
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(params);
+        _assertStoredCloseLimits(protectionId, params.closeLimits);
+
+        uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _assertPendingCloseLimits(firstOrderId, params.closeLimits);
+        _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        _assertStoredCloseLimits(protectionId, params.closeLimits);
+        _assertPendingCloseLimits(retryOrderId, params.closeLimits);
+    }
+
+    function test_ProtectionCloseLimits_ExcessExecutionNotionalFailsWithoutSettlingPosition() public {
+        _startRecordingLogs();
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
+        uint256 expectedNotionalUsdc = (POSITION_SIZE * LONG_TAKE_PROFIT) / 1e20;
+        params.closeLimits.maxExecutionNotionalUsdc = expectedNotionalUsdc - 1;
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(params);
+        uint64 linkedOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _assertPendingCloseLimits(linkedOrderId, params.closeLimits);
+
+        uint256 balanceBefore = clearinghouse.balanceUsdc(ALICE);
+        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(ALICE);
+        bytes[] memory executionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(linkedOrderId, executionData);
+
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "bounded close must fail");
+        assertEq(
+            uint8(result.terminalReason),
+            uint8(OrderV3Types.TerminalReason.ConstraintViolation),
+            "financial bound must cause typed failure"
+        );
+        OrderV3Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), linkedOrderId);
+        assertEq(
+            uint8(outcome.failedConstraint),
+            uint8(OrderV3Types.ConstraintKind.ExecutionNotional),
+            "receipt must identify the exceeded ceiling"
+        );
+        assertEq(
+            outcome.failureSelector,
+            ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation.selector,
+            "receipt must preserve the typed policy error"
+        );
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, POSITION_SIZE, "rejected close must leave the position open");
+        assertEq(clearinghouse.balanceUsdc(ALICE), balanceBefore, "rejected close must not debit settlement");
+        assertEq(
+            clearinghouse.actionReserveUsdc(ALICE),
+            actionReserveBefore,
+            "rejected close must not consume action reserve"
+        );
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+            "failed protected close must relatch for a trader-authorized retry"
+        );
+    }
+
+    function test_ProtectionCloseLimits_OnlyOwnerCanAmendLatchedLimitsForNextRetry() public {
+        _startRecordingLogs();
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, 0);
+        params.closeLimits.maxExecutionNotionalUsdc = 1e6;
+
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(params);
+        PositionProtectionTypes.CloseFinancialLimits memory amendedLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: 25_000e6,
+            maxGrossAccountDebitUsdc: 25_000e6,
+            maxActionChargeUsdc: 25_000e6,
+            maxExplicitFeesUsdc: 25_000e6
+        });
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotLatched.selector);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, amendedLimits);
+
+        uint64 firstOrderId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _expireProtectionAttempt(firstOrderId, EXECUTION_KEEPER);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+            "first attempt must relatch before amendment"
+        );
+
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, amendedLimits);
+        _assertStoredCloseLimits(protectionId, params.closeLimits);
+
+        vm.prank(ALICE);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, amendedLimits);
+        _assertStoredCloseLimits(protectionId, amendedLimits);
+
+        vm.prank(CAROL);
+        uint64 retryOrderId = protectionActions.retryPositionProtectionClose(protectionId);
+        _assertPendingCloseLimits(retryOrderId, amendedLimits);
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotLatched.selector);
+        protectionActions.amendLatchedPositionProtectionCloseLimits(protectionId, params.closeLimits);
+        _assertPendingCloseLimits(retryOrderId, amendedLimits);
+
+        bytes[] memory executionData = _mockPythUpdateData(LONG_TAKE_PROFIT);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryOrderId, executionData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "amended retry must execute");
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "amended retry must close the protected position");
+    }
+
     function test_RetryPositionProtectionClose_StaleOldAttemptCallbacksCannotMutateReplacement() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
@@ -757,6 +1170,242 @@ contract PositionProtectionTest is BasePerpTest {
         assertFalse(router.lifecycleBook().isProtectionAttempt(retryOrderId), "success should clear attempt marker");
         (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
         assertEq(remainingSize, 0, "successful retry should fully close the position");
+    }
+
+    function test_MismatchedProtectionExpiry_RelatchesAndRetries() public {
+        _assertMismatchedProtectionExpiry(0, 0, CfdTypes.Side.LONG);
+    }
+
+    function testFuzz_MismatchedProtectionExpiry_AllCleanupRoutes(
+        uint8 anomalySeed,
+        uint8 routeSeed,
+        bool shortSide
+    ) public {
+        _assertMismatchedProtectionExpiry(
+            uint8(bound(anomalySeed, 0, 5)),
+            uint8(bound(routeSeed, 0, 2)),
+            shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG
+        );
+    }
+
+    function _assertMismatchedProtectionExpiry(
+        uint8 anomaly,
+        uint8 route,
+        CfdTypes.Side side
+    ) internal {
+        _startRecordingLogs();
+        uint256 triggerPrice = side == CfdTypes.Side.LONG ? LONG_TAKE_PROFIT : SHORT_TAKE_PROFIT;
+        uint64 protectionId = _createSingleLegProtection(side, triggerPrice, 0);
+        uint64 attemptId = _triggerAt(protectionId, triggerPrice);
+        _damageProtectionAttemptReservation(attemptId, anomaly);
+        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ALICE)));
+        uint256 keeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+        bytes32 limitsBefore = keccak256(abi.encode(protectionViews.closeFinancialLimits(protectionId)));
+        vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        if (route == 0) {
+            router.expireOrder(attemptId);
+        } else if (route == 1) {
+            router.executeOrder(attemptId, new bytes[](0));
+        } else {
+            OrderV3Types.BatchResult memory batch = router.executeOrderBatch(attemptId, new bytes[](0));
+            assertEq(batch.terminalCount, 1, "batch removes the expired head");
+        }
+        OrderV3Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), attemptId);
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.ExpiredReservationMismatch));
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(outcome.bountyUsdc, 0, "recovery cannot fabricate a refund");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None));
+        assertEq(keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ALICE))), bucketsBefore);
+        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), keeperBefore, "no cleaner payout");
+        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), triggerKeeperBefore, "trigger paid only once");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(attemptId), "terminal lifecycle marker cleared");
+        assertEq(router.pendingOrderCounts(ALICE), 0);
+        assertEq(router.pendingCloseSize(ALICE), 0);
+        assertEq(router.accountHeadOrderId(ALICE), 0);
+        PositionProtectionTypes.PositionProtectionView memory latched =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(latched.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+            "surviving position retains retry"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId);
+        assertEq(latched.triggerMarkPrice, triggerPrice, "trigger mandate retained");
+        assertEq(keccak256(abi.encode(protectionViews.closeFinancialLimits(protectionId))), limitsBefore);
+        IMarginClearinghouse.BountyReservation memory oldRecord =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId);
+        if (anomaly >= 3) {
+            assertEq(uint8(oldRecord.state), uint8(IMarginClearinghouse.BountyReservationState.Quarantined));
+        }
+        if (anomaly == 2) {
+            assertEq(oldRecord.account, address(0xBAD), "foreign ownership remains intact");
+        }
+        bytes32 oldRecordHash = keccak256(abi.encode(oldRecord));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotPending.selector);
+        router.expireOrder(attemptId);
+
+        _assertProtectionRetryCloses(protectionId, attemptId, triggerPrice, oldRecordHash);
+    }
+
+    function _assertProtectionRetryCloses(
+        uint64 protectionId,
+        uint64 attemptId,
+        uint256 triggerPrice,
+        bytes32 oldRecordHash
+    ) internal {
+        vm.prank(CAROL);
+        uint64 retryId = protectionActions.retryPositionProtectionClose(protectionId);
+        assertGt(retryId, attemptId, "fresh child identity");
+        assertEq(
+            keccak256(abi.encode(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId))),
+            oldRecordHash,
+            "retry does not rewrite disputed old record"
+        );
+        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, retryId).amountUsdc, 0);
+        vm.prank(address(router));
+        protectionBook.afterOrderTerminal(attemptId, ALICE, IOrderRouterAccounting.OrderStatus.Failed);
+        assertEq(
+            protectionViews.getPositionProtection(protectionId).linkedOrderId,
+            retryId,
+            "stale callback cannot remove retry"
+        );
+        bytes[] memory retryData = _mockPythUpdateData(triggerPrice);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryId, retryData);
+        assertEq(
+            uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "retry can close unchanged position"
+        );
+        (uint256 remaining,,,,,,) = engine.positions(ALICE);
+        assertEq(remaining, 0);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed)
+        );
+    }
+
+    function testFuzz_MismatchedProtectionExpiry_ChangedPositionStillFails(
+        uint8 changeSeed
+    ) public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 attemptId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint256 change = bound(changeSeed, 0, 2);
+        // Model an out-of-band size/side change through the trusted Engine test helper.
+        _close(ALICE, CfdTypes.Side.LONG, change == 0 ? POSITION_SIZE / 2 : POSITION_SIZE, LONG_TAKE_PROFIT);
+        if (change == 2) {
+            _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT);
+        }
+        _damageProtectionAttemptReservation(attemptId, 0);
+        vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
+        router.expireOrder(attemptId);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed)
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0);
+        assertEq(router.pendingOrderCounts(ALICE), 0);
+        assertEq(router.pendingCloseSize(ALICE), 0);
+        assertEq(
+            uint8(_verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), attemptId).reason),
+            uint8(OrderV3Types.TerminalReason.ExpiredReservationMismatch)
+        );
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotFound.selector);
+        protectionActions.retryPositionProtectionClose(protectionId);
+    }
+
+    function test_MismatchedProtectionExpiry_ReceiptFailureRollsBackRelatchAndCleanup() public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 attemptId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _damageProtectionAttemptReservation(attemptId, 3);
+        vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
+        bytes32 beforeState = _protectionRecoveryStateHash(protectionId, attemptId);
+        vm.mockCallRevert(
+            address(router.lifecycleBook()),
+            abi.encodeWithSelector(IOrderLifecycleBook.finalize.selector),
+            bytes("forced receipt failure")
+        );
+        vm.expectRevert(bytes("forced receipt failure"));
+        router.expireOrder(attemptId);
+        vm.clearMockedCalls();
+        assertEq(
+            _protectionRecoveryStateHash(protectionId, attemptId),
+            beforeState,
+            "receipt failure restores all lifecycle and accounting state"
+        );
+        assertTrue(router.lifecycleBook().isProtectionAttempt(attemptId));
+        router.expireOrder(attemptId);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched)
+        );
+        _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), attemptId);
+    }
+
+    function _protectionRecoveryStateHash(
+        uint64 protectionId,
+        uint64 attemptId
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                protectionViews.getPositionProtection(protectionId),
+                protectionViews.activePositionProtectionId(ALICE),
+                _orderRecord(attemptId),
+                router.lifecycleBook().pendingIntent(attemptId),
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId),
+                clearinghouse.getAccountUsdcBuckets(ALICE),
+                router.pendingOrderCounts(ALICE),
+                router.pendingCloseSize(ALICE),
+                router.nextExecuteId(),
+                router.accountHeadOrderId(ALICE),
+                router.globalTailOrderId()
+            )
+        );
+    }
+
+    // Synthetic corruption tests recovery behavior; these fixtures do not imply public callers can corrupt the ledger.
+    function _damageProtectionAttemptReservation(
+        uint64 attemptId,
+        uint8 anomaly
+    ) internal {
+        vm.record();
+        clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId);
+        (bytes32[] memory slots,) = vm.accesses(address(clearinghouse));
+        if (anomaly == 0) {
+            vm.prank(address(router));
+            clearinghouse.takeBountyReservation(ALICE, IMarginClearinghouse.BountyKind.Order, attemptId);
+        } else if (anomaly == 1) {
+            vm.store(address(clearinghouse), slots[0], bytes32(0));
+            vm.store(address(clearinghouse), bytes32(uint256(slots[0]) + 1), bytes32(0));
+        } else if (anomaly == 2) {
+            uint256 word = uint256(vm.load(address(clearinghouse), slots[0]));
+            vm.store(
+                address(clearinghouse),
+                slots[0],
+                bytes32((word & ~uint256(type(uint160).max)) | uint160(address(0xBAD)))
+            );
+        } else if (anomaly == 3) {
+            bytes32 fundingSlot = bytes32(uint256(slots[0]) + 1);
+            vm.store(
+                address(clearinghouse),
+                fundingSlot,
+                bytes32(uint256(vm.load(address(clearinghouse), fundingSlot)) + (uint256(1) << 8))
+            );
+        } else if (anomaly == 4) {
+            vm.record();
+            router.lifecycleBook().pendingIntent(attemptId);
+            (bytes32[] memory intentSlots,) = vm.accesses(address(router.lifecycleBook()));
+            vm.store(address(router.lifecycleBook()), bytes32(uint256(intentSlots[0]) + 3), bytes32(uint256(1)));
+        } else {
+            vm.store(
+                address(clearinghouse),
+                slots[0],
+                bytes32(uint256(vm.load(address(clearinghouse), slots[0])) + (uint256(1) << 160))
+            );
+        }
     }
 
     function test_FailedProtectionAttempt_PositionMismatchFailsAndPaysCleanerExactlyOnce() public {
@@ -1018,7 +1667,444 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "reservation view after cancel");
     }
 
+    function test_CancelAndCommitClose_LongLiveExecutes() public {
+        _assertCancelAndCommitCloseExecutes(CfdTypes.Side.LONG, false);
+    }
+
+    function test_CancelAndCommitClose_ShortLiveExecutes() public {
+        _assertCancelAndCommitCloseExecutes(CfdTypes.Side.SHORT, false);
+    }
+
+    function test_CancelAndCommitClose_LongFrozenUsesAllowedStaleQuote() public {
+        _assertCancelAndCommitCloseExecutes(CfdTypes.Side.LONG, true);
+    }
+
+    function test_CancelAndCommitClose_ShortFrozenUsesAllowedStaleQuote() public {
+        _assertCancelAndCommitCloseExecutes(CfdTypes.Side.SHORT, true);
+    }
+
+    function test_CancelAndCommitClose_HostRejectsDirectSidecarAndForeignDelegateCalls() public {
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        bytes memory callData = abi.encodeCall(router.commitProtectedClose, (ALICE, request, uint256(0)));
+        bytes memory unauthorized = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        address sidecar = router.liquidationBatchSidecar();
+        (bool directSuccess, bytes memory directRevert) = sidecar.call(callData);
+        assertFalse(directSuccess, "direct sidecar call forbidden");
+        assertEq(directRevert, unauthorized, "direct sidecar caller must fail binding");
+        (bool foreignSuccess, bytes memory foreignRevert) = sidecar.delegatecall(callData);
+        assertFalse(foreignSuccess, "foreign delegatecall forbidden");
+        assertEq(foreignRevert, unauthorized, "foreign delegate context must fail binding");
+    }
+
+    function test_CancelAndCommitClose_PreservesBoundedIntentAndFifo() public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        vm.prank(BOB);
+        router.commitOrder(CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, 0, false);
+        uint64 head = router.nextExecuteId();
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.targetPrice = 105_000_000;
+        request.bounds.allowedExecutionModes = 1;
+        request.bounds.executionWindowSeconds = 37;
+        request.bounds.maxExecutionBountyUsdc = 0;
+        request.bounds.maxExecutionNotionalUsdc = 12_345e6;
+        request.bounds.maxGrossAccountDebitUsdc = 678e6;
+        request.bounds.maxActionChargeUsdc = 123e6;
+        request.bounds.maxExplicitFeesUsdc = 45e6;
+        request.bounds.maxPostPositionSize = 0;
+        request.bounds.minPostPositionEquityUsdc = 19e6;
+        request.bounds.maxPostLeverageBps = 1;
+        uint64 nextBefore = router.nextCommitId();
+        uint256 refund = protectionViews.getPositionProtection(protectionId).triggerBountyUsdc;
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 keeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+
+        vm.prank(ALICE);
+        uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+
+        assertEq(orderId, nextBefore, "fresh ordinary order id");
+        assertEq(router.nextCommitId(), nextBefore + 1, "one new id");
+        assertEq(router.nextExecuteId(), head, "foreign FIFO head retained");
+        assertEq(router.globalTailOrderId(), orderId, "manual close joins FIFO tail");
+        assertEq(_orderRecord(head).nextGlobalOrderId, orderId, "head links to close");
+        assertEq(_orderRecord(orderId).prevGlobalOrderId, head, "close links to head");
+        OrderV3Types.PendingIntent memory pending = router.lifecycleBook().pendingIntent(orderId);
+        assertEq(pending.account, ALICE, "caller account retained");
+        assertEq(pending.clientOrderId, request.clientOrderId, "public client id retained");
+        assertEq(pending.intentHash, router.lifecycleBook().hashOrderRequest(ALICE, request), "request hash retained");
+        assertEq(keccak256(abi.encode(pending.bounds)), keccak256(abi.encode(request.bounds)), "all bounds retained");
+        assertEq(router.lifecycleBook().clientIntent(ALICE, request.clientOrderId).orderId, orderId, "client id bound");
+        CfdTypes.Order memory order = _orderRecord(orderId).core;
+        assertEq(order.targetPrice, request.targetPrice, "target retained");
+        assertEq(order.sizeDelta, POSITION_SIZE, "full size retained");
+        assertEq(order.marginDelta, 0, "close has no margin delta");
+        assertTrue(order.isClose, "ordinary reduce-only close");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(orderId), "manual close has no trigger-attempt marker");
+        assertEq(router.pendingOrderCounts(ALICE), 1, "exactly one close");
+        assertEq(router.pendingCloseSize(ALICE), POSITION_SIZE, "full close reserved");
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore + refund, "trigger reserve refunded");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, 0, "zero-bounty close");
+        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), keeperBefore, "manual exit pays no trigger bounty");
+        _assertManualExitProtectionCancelled(protectionId);
+
+        bytes[] memory updateData = _mockPythUpdateData(95_000_000);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotQueueHead.selector);
+        router.executeOrder(orderId, updateData);
+    }
+
+    function test_CancelAndCommitClose_RejectsUnauthorizedAndMalformedPositionRequest() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        vm.prank(BOB);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+
+        request.isClose = false;
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__NotCloseOrder.selector)
+        );
+        request.isClose = true;
+        request.side = CfdTypes.Side.SHORT;
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
+        );
+        request.side = CfdTypes.Side.LONG;
+        request.sizeDelta = POSITION_SIZE / 2;
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
+        );
+        request.sizeDelta = POSITION_SIZE + 100e18;
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
+        );
+        request.sizeDelta = POSITION_SIZE;
+        request.marginDelta = 1;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CloseWithPositiveMargin.selector)
+        );
+    }
+
+    function test_CancelAndCommitClose_RejectsChangedOrMissingLivePosition() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        _close(ALICE, CfdTypes.Side.LONG, POSITION_SIZE / 2, MARK_PRICE);
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
+        );
+        _close(ALICE, CfdTypes.Side.LONG, POSITION_SIZE / 2, MARK_PRICE);
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
+        );
+        _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PositionChanged.selector)
+        );
+    }
+
+    function test_CancelAndCommitClose_RejectsPendingOrdersWithoutMutation() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        vm.mockCall(
+            address(router), abi.encodeWithSignature("pendingOrderCounts(address)", ALICE), abi.encode(uint256(1))
+        );
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__PendingOrdersExist.selector)
+        );
+        vm.clearMockedCalls();
+    }
+
+    function test_CancelAndCommitClose_RejectsPendingOpenTriggeredLatchedAndCancelled() public {
+        _startRecordingLogs();
+        OrderV3Types.OrderRequest memory openRequest =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        vm.prank(ALICE);
+        (uint64 parentId, uint64 pendingId) =
+            protectionActions.commitOpenOrderWithProtection(openRequest, _params(LONG_TAKE_PROFIT, 0));
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        _expectCancelAndCommitCloseRevert(
+            pendingId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ProtectionNotArmed.selector)
+        );
+        vm.prank(ALICE);
+        protectionActions.cancelPositionProtection(pendingId);
+        _expectCancelAndCommitCloseRevert(
+            pendingId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ProtectionNotFound.selector)
+        );
+        bytes[] memory openData = _mockPythUpdateData(MARK_PRICE);
+        router.executeOrder(parentId, openData);
+        _refreshMark(MARK_PRICE);
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+        uint64 attemptId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ProtectionNotArmed.selector)
+        );
+        _expireProtectionAttempt(attemptId, EXECUTION_KEEPER);
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ProtectionNotArmed.selector)
+        );
+    }
+
+    function test_CancelAndCommitClose_InvalidCommitRollsBackCancellationAndRefund() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        bytes32 configHash = request.bounds.expectedConfigHash;
+        request.bounds.expectedConfigHash = bytes32(0);
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__ExecutionConfigMismatch.selector, bytes32(0), configHash
+            )
+        );
+        request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.targetPrice = 0;
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ZeroTargetPrice.selector)
+        );
+        request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.clientOrderId = bytes32(0);
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ZeroClientOrderId.selector)
+        );
+        request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.allowedExecutionModes = 0;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__InvalidExecutionModeMask.selector)
+        );
+        request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.submitBy = uint64(block.timestamp - 1);
+        _expectCancelAndCommitCloseRevert(
+            protectionId, request, abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__InvalidSubmitBy.selector)
+        );
+        request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.executionWindowSeconds = 0;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__InvalidExecutionWindow.selector)
+        );
+        request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.maxPostLeverageBps = 0;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ZeroPostLeverageBound.selector)
+        );
+    }
+
+    function test_CancelAndCommitClose_StaleConfigRollsBackCancellationAndRefund() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        bytes32 previousConfig = router.lifecycleBook().currentExecutionConfigHash();
+        _setRouterConfig(_routerConfig());
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        bytes32 currentConfig = request.bounds.expectedConfigHash;
+        assertTrue(previousConfig != currentConfig, "configuration must have changed");
+        request.bounds.expectedConfigHash = previousConfig;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(
+                IOrderRouterErrors.OrderRouter__ExecutionConfigMismatch.selector, previousConfig, currentConfig
+            )
+        );
+    }
+
+    function test_CancelAndCommitClose_HistoricalReplayAndConflictRollBackCancellation() public {
+        _startRecordingLogs();
+        _open(ALICE, CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, MARK_PRICE);
+        OrderV3Types.OrderRequest memory historical = _manualCloseRequest(CfdTypes.Side.LONG);
+        historical.targetPrice = 1;
+        vm.prank(ALICE);
+        uint64 historicalId = router.commitOrder(historical);
+        bytes[] memory executionData = _mockPythUpdateData(95_000_000);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(historicalId, executionData);
+        assertEq(
+            uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Slippage), "historical close must fail"
+        );
+        _refreshMark(95_000_000);
+        vm.prank(ALICE);
+        uint64 protectionId = protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, 0));
+
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            historical,
+            abi.encodeWithSelector(PositionProtectionBook.PositionProtectionBook__InvalidHostResponse.selector)
+        );
+        bytes32 originalHash = router.lifecycleBook().hashOrderRequest(ALICE, historical);
+        historical.bounds.maxExplicitFeesUsdc -= 1;
+        bytes32 conflictHash = router.lifecycleBook().hashOrderRequest(ALICE, historical);
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            historical,
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__ClientIdConflict.selector,
+                ALICE,
+                historical.clientOrderId,
+                originalHash,
+                conflictHash
+            )
+        );
+        assertEq(
+            router.lifecycleBook().clientIntent(ALICE, historical.clientOrderId).orderId,
+            historicalId,
+            "historical identity retained"
+        );
+    }
+
+    function test_CancelAndCommitClose_AccruedCarryCannotBypassGrossDebitBound() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        vm.warp(block.timestamp + 1 hours);
+        uint256 carry = _expectedIndexedCarryUsdc(ALICE);
+        assertGt(carry, 0, "fixture must accrue carry before cancellation");
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.maxGrossAccountDebitUsdc = 0;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__CommitmentBoundExceeded.selector,
+                OrderV3Types.ConstraintKind.GrossAccountDebit,
+                carry,
+                uint256(0)
+            )
+        );
+        assertEq(_expectedIndexedCarryUsdc(ALICE), carry, "rejected close must not checkpoint accrued carry");
+    }
+
+    function test_CancelAndCommitClose_AccruedCarryCannotBypassActionChargeBound() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        vm.warp(block.timestamp + 1 hours);
+        uint256 carry = _expectedIndexedCarryUsdc(ALICE);
+        assertGt(carry, 0, "fixture must accrue carry before cancellation");
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.maxActionChargeUsdc = 0;
+        _expectCancelAndCommitCloseRevert(
+            protectionId,
+            request,
+            abi.encodeWithSelector(
+                IOrderLifecycleBook.OrderLifecycleBook__CommitmentBoundExceeded.selector,
+                OrderV3Types.ConstraintKind.ActionCharge,
+                carry,
+                uint256(0)
+            )
+        );
+        assertEq(_expectedIndexedCarryUsdc(ALICE), carry, "rejected close must not checkpoint accrued carry");
+    }
+
+    function test_CancelAndCommitClose_ExactCarryBoundsRetainCommitmentAndTerminalReceipt() public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        vm.warp(block.timestamp + 1 hours);
+        uint256 carry = _expectedIndexedCarryUsdc(ALICE);
+        uint256 settlementBefore = clearinghouse.balanceUsdc(ALICE);
+        assertGt(carry, 0, "fixture must accrue carry before cancellation");
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.maxGrossAccountDebitUsdc = carry;
+        request.bounds.maxActionChargeUsdc = carry;
+        request.bounds.executionWindowSeconds = 1;
+        vm.prank(ALICE);
+        uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+        CfdEnginePlanTypes.CloseCommitment memory commitment = router.lifecycleBook().pendingIntent(orderId).commitment;
+        assertEq(commitment.carryCollectedUsdc, carry, "full cancellation-time carry included in bounded commitment");
+        assertEq(commitment.carryOutstandingUsdc, 0, "funded carry fully collected");
+        assertEq(commitment.settlementBeforeUsdc, settlementBefore, "commitment starts before carry debit");
+        assertEq(commitment.settlementAfterUsdc, settlementBefore - carry, "commitment records full carry debit");
+        assertEq(clearinghouse.balanceUsdc(ALICE), settlementBefore - carry, "carry debited once");
+        assertEq(_expectedIndexedCarryUsdc(ALICE), 0, "commitment checkpoints carry");
+        _assertManualExitProtectionCancelled(protectionId);
+
+        OrderV3Types.ExecutionResult memory result = _expireProtectionAttempt(orderId, EXECUTION_KEEPER);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired), "close expires ordinarily");
+        OrderV3Types.OrderReceipt memory receipt =
+            _verifiedReceipt(IOrderLifecycleBook(address(router.lifecycleBook())), orderId);
+        assertEq(
+            keccak256(abi.encode(receipt.commitment)),
+            keccak256(abi.encode(commitment)),
+            "authenticated terminal receipt retains bounded carry effects"
+        );
+        assertEq(clearinghouse.balanceUsdc(ALICE), settlementBefore - carry, "expiry does not charge carry again");
+        _assertManualExitProtectionCancelled(protectionId);
+    }
+
+    function test_CancelAndCommitClose_FinancialFailureDoesNotRearmProtection() public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.maxExecutionNotionalUsdc = 0;
+        vm.prank(ALICE);
+        uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+        bytes[] memory updateData = _mockPythUpdateData(95_000_000);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Failed), "bounded close fails");
+        assertEq(
+            uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.ConstraintViolation), "bound is enforced"
+        );
+        assertEq(
+            uint8(_verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), orderId).failedConstraint),
+            uint8(OrderV3Types.ConstraintKind.ExecutionNotional),
+            "notional ceiling enforced"
+        );
+        _assertManualExitProtectionCancelled(protectionId);
+        (uint256 size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, POSITION_SIZE, "failed close preserves position");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "failed close leaves queue");
+    }
+
+    function test_CancelAndCommitClose_FrozenExecutionHonorsModeMask() public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        vm.warp(FRIDAY_FAD_START - 1);
+        _refreshMark(95_000_000);
+        vm.warp(FRIDAY_FAD_START + 3 hours);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.allowedExecutionModes = 1;
+        vm.prank(ALICE);
+        uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+        bytes[] memory updateData = _mockPythUpdateData(95_000_000);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(
+            uint8(result.terminalReason),
+            uint8(OrderV3Types.TerminalReason.ExecutionModeDisallowed),
+            "frozen must remain disallowed by caller"
+        );
+        _assertManualExitProtectionCancelled(protectionId);
+        (uint256 size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, POSITION_SIZE, "mode rejection preserves position");
+    }
+
+    function test_CancelAndCommitClose_ExpiryDoesNotRearmOrPermitProtectionRetry() public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(CfdTypes.Side.LONG);
+        request.bounds.executionWindowSeconds = 1;
+        vm.prank(ALICE);
+        uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+        OrderV3Types.ExecutionResult memory result = _expireProtectionAttempt(orderId, EXECUTION_KEEPER);
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired), "ordinary close expires");
+        _assertManualExitProtectionCancelled(protectionId);
+        assertEq(router.pendingOrderCounts(ALICE), 0, "expired close leaves queue");
+        assertEq(router.pendingCloseSize(ALICE), 0, "expired size released");
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotFound.selector);
+        protectionActions.retryPositionProtectionClose(protectionId);
+        (uint256 size,,,,,,) = engine.positions(ALICE);
+        assertEq(size, POSITION_SIZE, "expiry preserves position");
+    }
+
     function test_PostLockRisk_RejectsInitialMarginEqualityAndAcceptsOneMicroUsdcAboveBoundary() public {
+        _assertInitialMarginBoundary(false);
+    }
+
+    function test_PostLockRisk_DegradedRetainsInitialMarginBoundary() public {
+        _assertInitialMarginBoundary(true);
+    }
+
+    function _assertInitialMarginBoundary(
+        bool degraded
+    ) internal {
         _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
         RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
@@ -1027,6 +2113,8 @@ contract PositionProtectionTest is BasePerpTest {
         _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
         _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
         _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+
+        stdstore.target(address(engine)).sig("degradedMode()").checked_write(degraded);
 
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact pledge boundary");
         assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom pledge surplus");
@@ -1174,6 +2262,7 @@ contract PositionProtectionTest is BasePerpTest {
         clearinghouse.releaseVpiRebateReserve(BOB, 1);
 
         uint256 freeBefore = _freeSettlementUsdc(BOB);
+        _refreshMark(MARK_PRICE);
         vm.prank(BOB);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
         protectionActions.createPositionProtection(_params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
@@ -1298,8 +2387,16 @@ contract PositionProtectionTest is BasePerpTest {
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
         assertTrue(engine.degradedMode(), "setup should enter degraded mode");
 
+        PositionProtectionTypes.PositionProtectionParams memory replacementParams = _params(LONG_TAKE_PROFIT - 1, 0);
+        replacementParams.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: 11_111e6,
+            maxGrossAccountDebitUsdc: 8888e6,
+            maxActionChargeUsdc: 777e6,
+            maxExplicitFeesUsdc: 66e6
+        });
         vm.prank(ALICE);
-        protectionActions.replacePositionProtection(protectionId, _params(LONG_TAKE_PROFIT - 1, 0));
+        protectionActions.replacePositionProtection(protectionId, replacementParams);
+        _assertStoredCloseLimits(protectionId, replacementParams.closeLimits);
 
         PositionProtectionTypes.PositionProtectionView memory replaced =
             protectionViews.getPositionProtection(protectionId);
@@ -1318,16 +2415,62 @@ contract PositionProtectionTest is BasePerpTest {
         );
     }
 
+    function test_ReplacePositionProtection_UsesCurrentOracleAndResetsPublishBaseline() public {
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        PositionProtectionTypes.PositionProtectionView memory beforeReplacement =
+            protectionViews.getPositionProtection(protectionId);
+        uint256 bountyBefore = router.getAccountReservations(ALICE).executionBountyUsdc;
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(address(router));
+        IPletherOracle.PriceSnapshot memory current =
+            pletherOracle.updatePrice(BOB, _priceData(94_000_000), IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(engine.lastMarkPrice(), MARK_PRICE, "engine mark must remain cached");
+
+        vm.prank(ALICE);
+        vm.expectRevert(PositionProtectionBook.PositionProtectionBook__OracleMarkAhead.selector);
+        protectionActions.replacePositionProtection(protectionId, _params(95_000_000, 0));
+        router.updateMarkPrice(new bytes[](0));
+
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.replacePositionProtection(protectionId, _params(95_000_000, 0));
+        PositionProtectionTypes.PositionProtectionView memory afterRevert =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(afterRevert.takeProfitTriggerPrice, beforeReplacement.takeProfitTriggerPrice, "threshold unchanged");
+        assertEq(afterRevert.armedAt, beforeReplacement.armedAt, "failed replacement must not rearm");
+        assertEq(router.getAccountReservations(ALICE).executionBountyUsdc, bountyBefore, "bounty unchanged");
+
+        vm.prank(ALICE);
+        protectionActions.replacePositionProtection(protectionId, _params(93_000_000, 0));
+        assertEq(protectionViews.getPositionProtection(protectionId).takeProfitTriggerPrice, 93_000_000);
+
+        vm.roll(block.number + 1);
+        baseMockPyth.setAllUniquePrices(_basePythFeedIds(), int64(94_000_000), 0, int32(-8), current.publishTime, 0);
+        bytes[] memory samePublicationData = new bytes[](1);
+        samePublicationData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
+        protectionActions.triggerPositionProtection(protectionId, samePublicationData);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
+            "nonadvancing publication must preserve armed protection"
+        );
+    }
+
     function test_ProtectionBook_NonTriggerActionsRejectEthAndNeverCustodyIt() public {
         _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
         OrderV3Types.OrderRequest memory request =
             _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
-        bytes[] memory calls = new bytes[](4);
+        bytes[] memory calls = new bytes[](5);
         calls[0] = abi.encodeCall(IPositionProtectionActions.createPositionProtection, (params));
         calls[1] = abi.encodeCall(IPositionProtectionActions.replacePositionProtection, (uint64(1), params));
         calls[2] = abi.encodeCall(IPositionProtectionActions.cancelPositionProtection, (uint64(1)));
         calls[3] = abi.encodeCall(IPositionProtectionActions.commitOpenOrderWithProtection, (request, params));
+        calls[4] =
+            abi.encodeCall(IPositionProtectionActions.cancelPositionProtectionAndCommitClose, (uint64(1), request));
 
         vm.deal(ALICE, calls.length);
         for (uint256 i; i < calls.length; ++i) {
@@ -1397,6 +2540,10 @@ contract PositionProtectionTest is BasePerpTest {
         vm.prank(BOB);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
         router.commitProtectedOpen(ALICE, protectedOpenRequest);
+
+        vm.prank(BOB);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__Unauthorized.selector);
+        router.commitProtectedClose(ALICE, protectedOpenRequest, 0);
 
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
         _mockPythUpdateData(LONG_TAKE_PROFIT);
@@ -1746,6 +2893,12 @@ contract PositionProtectionTest is BasePerpTest {
     function test_AttachedOpen_SuccessArmsProtectionAtomically() public {
         _startRecordingLogs();
         PositionProtectionTypes.PositionProtectionParams memory params = _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS);
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: 13_333e6,
+            maxGrossAccountDebitUsdc: 9999e6,
+            maxActionChargeUsdc: 888e6,
+            maxExplicitFeesUsdc: 77e6
+        });
 
         vm.startPrank(ALICE);
         (uint64 parentOrderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(
@@ -1762,6 +2915,7 @@ contract PositionProtectionTest is BasePerpTest {
             "protection should stage before parent execution"
         );
         assertEq(router.pendingOrderCounts(ALICE), 1, "only parent should count as pending");
+        _assertStoredCloseLimits(protectionId, params.closeLimits);
         assertEq(
             router.getAccountReservations(ALICE).executionBountyUsdc,
             _totalProtectionBountyUsdc() + _executionBountyReserve(parentOrderId),
@@ -1769,8 +2923,15 @@ contract PositionProtectionTest is BasePerpTest {
         );
 
         PositionProtectionTypes.PositionProtectionParams memory replacement = _params(85_000_000, 115_000_000);
+        replacement.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: 14_444e6,
+            maxGrossAccountDebitUsdc: 8888e6,
+            maxActionChargeUsdc: 666e6,
+            maxExplicitFeesUsdc: 55e6
+        });
         vm.prank(ALICE);
         protectionActions.replacePositionProtection(protectionId, replacement);
+        _assertStoredCloseLimits(protectionId, replacement.closeLimits);
         PositionProtectionTypes.PositionProtectionView memory replacedPending =
             protectionViews.getPositionProtection(protectionId);
         assertEq(
@@ -1798,6 +2959,7 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(uint8(armed.side), uint8(CfdTypes.Side.LONG), "armed side should match actual position");
         assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId, "active id after parent success");
         assertEq(router.pendingOrderCounts(ALICE), 0, "parent should be terminal");
+        _assertStoredCloseLimits(protectionId, replacement.closeLimits);
         assertEq(
             router.getAccountReservations(ALICE).executionBountyUsdc,
             _totalProtectionBountyUsdc(),
@@ -1805,6 +2967,9 @@ contract PositionProtectionTest is BasePerpTest {
         );
         (uint256 liveSize,,,,,,) = engine.positions(ALICE);
         assertEq(liveSize, POSITION_SIZE, "parent should open the position");
+
+        uint64 linkedOrderId = _triggerAt(protectionId, replacement.takeProfitTriggerPrice);
+        _assertPendingCloseLimits(linkedOrderId, replacement.closeLimits);
     }
 
     function test_AttachedOpen_ValidFillSurvivesIfAcceptedMarkIsAheadOfEngine() public {
@@ -2187,6 +3352,16 @@ contract PositionProtectionTest is BasePerpTest {
         );
         assertEq(armed.size, POSITION_SIZE, "activation should bind the actual full position");
 
+        vm.roll(uint256(armed.armedBlock) + 1);
+        baseMockPyth.setAllPrices(
+            _basePythFeedIds(), int64(uint64(crossedTakeProfit)), 0, int32(-8), engine.lastMarkTime()
+        );
+        bytes[] memory fillPublicationData = new bytes[](1);
+        fillPublicationData[0] = hex"01";
+        vm.prank(TRIGGER_KEEPER);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TriggerPublishTimeNotAdvanced.selector);
+        protectionActions.triggerPositionProtection(protectionId, fillPublicationData);
+
         uint64 linkedOrderId = _triggerAt(protectionId, crossedTakeProfit);
         _assertTriggered(
             protectionId,
@@ -2194,6 +3369,46 @@ contract PositionProtectionTest is BasePerpTest {
             PositionProtectionTypes.PositionProtectionTriggerLeg.TakeProfit,
             crossedTakeProfit
         );
+    }
+
+    function test_AttachedOpen_StageAndPendingReplacementRejectCrossedCurrentOracle() public {
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
+        vm.prank(address(router));
+        pletherOracle.updatePrice(BOB, _priceData(LONG_TAKE_PROFIT), IPletherOracle.PriceMode.MarkRefresh);
+        assertEq(engine.lastMarkPrice(), MARK_PRICE, "oracle update must not refresh the engine mark");
+        _expectAttachedOpenCommitRevert(
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            abi.encodeWithSelector(PositionProtectionBook.PositionProtectionBook__OracleMarkAhead.selector)
+        );
+        router.updateMarkPrice(new bytes[](0));
+
+        _expectAttachedOpenCommitRevert(
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0),
+            abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector)
+        );
+
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
+        router.updateMarkPrice(_livePriceData(MARK_PRICE));
+        OrderV3Types.OrderRequest memory request =
+            _boundedOpenRequest(CfdTypes.Side.LONG, POSITION_SIZE, POSITION_MARGIN_USDC, 0);
+        vm.prank(ALICE);
+        (uint64 parentOrderId, uint64 protectionId) =
+            protectionActions.commitOpenOrderWithProtection(request, _params(80_000_000, LONG_STOP_LOSS));
+
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
+        vm.prank(address(router));
+        pletherOracle.updatePrice(BOB, _priceData(LONG_TAKE_PROFIT), IPletherOracle.PriceMode.MarkRefresh);
+        router.updateMarkPrice(new bytes[](0));
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionTriggerAlreadyMet.selector);
+        protectionActions.replacePositionProtection(protectionId, _params(LONG_TAKE_PROFIT, LONG_STOP_LOSS));
+
+        PositionProtectionTypes.PositionProtectionView memory pending =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(uint8(pending.status), uint8(PositionProtectionTypes.PositionProtectionStatus.PendingOpen));
+        assertEq(pending.takeProfitTriggerPrice, 80_000_000, "failed replacement must preserve staged threshold");
+        assertEq(pending.parentOrderId, parentOrderId, "failed replacement must preserve parent");
+        assertEq(router.pendingOrderCounts(ALICE), 1, "failed replacement must leave parent queued");
     }
 
     function test_AttachedOpen_SlippageFailureRefundsProtectionBounties() public {
@@ -2457,6 +3672,164 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "batch expiry should fully drain the parent queue");
     }
 
+    function _assertCancelAndCommitCloseExecutes(
+        CfdTypes.Side side,
+        bool frozen
+    ) internal {
+        _startRecordingLogs();
+        uint64 protectionId =
+            _createSingleLegProtection(side, side == CfdTypes.Side.LONG ? LONG_TAKE_PROFIT : SHORT_TAKE_PROFIT, 0);
+        if (frozen) {
+            // Frozen execution replays the last mark installed while the market was live.
+            vm.warp(FRIDAY_FAD_START - 1);
+            _refreshMark(95_000_000);
+            uint64 publication = engine.lastMarkTime();
+            vm.warp(FRIDAY_FAD_START + 3 hours);
+            assertTrue(engine.isOracleFrozen(), "frozen calendar fixture");
+            // A different Pyth storage price must not replace the frozen engine mark.
+            baseMockPyth.setAllPrices(_basePythFeedIds(), int64(105_000_000), 0, int32(-8), publication);
+            assertGt(
+                block.timestamp - publication,
+                pletherOracle.orderExecutionStalenessLimit(),
+                "quote stale under live rules"
+            );
+            assertLe(block.timestamp - publication, engine.fadMaxStaleness(), "quote allowed under frozen rules");
+            vm.prank(TRIGGER_KEEPER);
+            vm.expectRevert(IOrderRouterErrors.OrderRouter__ConditionalTriggerFrozen.selector);
+            protectionActions.triggerPositionProtection(protectionId, _priceData(95_000_000));
+            routerAdmin.pause();
+            stdstore.target(address(engine)).sig("degradedMode()").checked_write(true);
+        }
+        OrderV3Types.OrderRequest memory request = _manualCloseRequest(side);
+        request.bounds.allowedExecutionModes = frozen ? 4 : 1;
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        uint256 refund = protectionViews.getPositionProtection(protectionId).triggerBountyUsdc;
+        uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+        uint256 executorBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        vm.prank(ALICE);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionActive.selector);
+        router.commitOrder(request);
+        vm.prank(ALICE);
+        uint64 orderId = protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+        assertEq(_freeSettlementUsdc(ALICE), freeBefore + refund, "unpaid trigger bounty refunded atomically");
+        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), triggerKeeperBefore, "trigger keeper not paid");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(orderId), "ordinary manual close");
+        _assertManualExitProtectionCancelled(protectionId);
+
+        bytes[] memory updateData;
+        uint64 expectedPublication;
+        if (frozen) {
+            IPletherOracle.PriceSnapshot memory quote =
+                pletherOracle.getLatestPrice(IPletherOracle.PriceMode.OrderExecution);
+            assertEq(quote.price, 95_000_000, "asymmetric frozen engine mark");
+            expectedPublication = quote.publishTime;
+            vm.roll(block.number + 1);
+            vm.warp(block.timestamp + 1);
+            updateData = new bytes[](1);
+            updateData[0] = hex"01";
+        } else {
+            updateData = _mockPythUpdateData(95_000_000);
+        }
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "manual close executes");
+        OrderV3Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), orderId);
+        assertEq(
+            uint8(outcome.executionMode),
+            uint8(frozen ? OrderV3Types.ExecutionMode.Frozen : OrderV3Types.ExecutionMode.Live),
+            "authorized execution mode"
+        );
+        assertEq(outcome.executionPrice, 95_000_000, "execution uses validated basket price");
+        if (frozen) {
+            assertEq(outcome.oraclePublishTime, expectedPublication, "frozen execution accepts pre-commit stale quote");
+        }
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None), "no execution bounty");
+        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), executorBefore, "executor receives no bounty");
+        (uint256 remainingSize,,,,,,) = engine.positions(ALICE);
+        assertEq(remainingSize, 0, "entire position closed");
+        assertEq(router.pendingOrderCounts(ALICE), 0, "completed close leaves queue");
+        assertEq(router.pendingCloseSize(ALICE), 0, "completed size released");
+        _assertManualExitProtectionCancelled(protectionId);
+    }
+
+    function _manualCloseRequest(
+        CfdTypes.Side side
+    ) internal view returns (OrderV3Types.OrderRequest memory request) {
+        request = _publicBoundedRequest(keccak256(abi.encode("manual-protected-exit", router.nextCommitId())), true);
+        request.side = side;
+        request.targetPrice = side == CfdTypes.Side.LONG ? engine.CAP_PRICE() : 1;
+    }
+
+    function _assertManualExitProtectionCancelled(
+        uint64 protectionId
+    ) internal view {
+        PositionProtectionTypes.PositionProtectionView memory protection =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(protection.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Cancelled),
+            "protection remains cancelled"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0, "active protection cleared");
+        assertEq(protection.triggerBountyUsdc, 0, "trigger reserve released");
+        assertEq(protection.linkedOrderId, 0, "manual close does not become a trigger child");
+        assertEq(
+            uint8(protection.triggeredLeg),
+            uint8(PositionProtectionTypes.PositionProtectionTriggerLeg.None),
+            "no trigger recorded"
+        );
+    }
+
+    function _expectCancelAndCommitCloseRevert(
+        uint64 protectionId,
+        OrderV3Types.OrderRequest memory request,
+        bytes memory expectedRevert
+    ) internal {
+        bytes32 beforeState = _manualExitStateHash(protectionId, request.clientOrderId);
+        vm.prank(ALICE);
+        vm.expectRevert(expectedRevert);
+        protectionActions.cancelPositionProtectionAndCommitClose(protectionId, request);
+        assertEq(
+            _manualExitStateHash(protectionId, request.clientOrderId),
+            beforeState,
+            "failed atomic exit rolls back all protection, reserve, queue and identity state"
+        );
+    }
+
+    function _manualExitStateHash(
+        uint64 protectionId,
+        bytes32 clientOrderId
+    ) internal view returns (bytes32) {
+        bytes32 protectionHash = keccak256(
+            abi.encode(
+                protectionViews.getPositionProtection(protectionId),
+                protectionViews.closeFinancialLimits(protectionId),
+                protectionViews.activePositionProtectionId(ALICE),
+                PositionProtectionBook(address(protectionBook)).nextPositionProtectionId()
+            )
+        );
+        bytes32 accountHash = keccak256(
+            abi.encode(
+                clearinghouse.balanceUsdc(ALICE),
+                _freeSettlementUsdc(ALICE),
+                clearinghouse.actionReserveUsdc(ALICE),
+                router.getAccountReservations(ALICE),
+                router.pendingCloseSize(ALICE),
+                router.accountHeadOrderId(ALICE)
+            )
+        );
+        bytes32 queueHash = keccak256(
+            abi.encode(
+                router.nextCommitId(),
+                router.nextExecuteId(),
+                router.globalTailOrderId(),
+                router.lifecycleBook().clientIntent(ALICE, clientOrderId)
+            )
+        );
+        return keccak256(abi.encode(protectionHash, accountHash, queueHash));
+    }
+
     function _createSingleLegProtection(
         CfdTypes.Side side,
         uint256 takeProfit,
@@ -2498,6 +3871,13 @@ contract PositionProtectionTest is BasePerpTest {
         );
         updateData = new bytes[](1);
         updateData[0] = abi.encode(price);
+    }
+
+    function _mockArbitrumBlockNumber(
+        uint256 l2Block
+    ) internal {
+        vm.clearMockedCalls();
+        vm.mockCall(address(100), abi.encodeWithSignature("arbBlockNumber()"), abi.encode(l2Block));
     }
 
     function _expireProtectionAttempt(
@@ -2577,6 +3957,34 @@ contract PositionProtectionTest is BasePerpTest {
     ) internal pure returns (PositionProtectionTypes.PositionProtectionParams memory params) {
         params.takeProfitTriggerPrice = takeProfit;
         params.stopLossTriggerPrice = stopLoss;
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max
+        });
+    }
+
+    function _assertStoredCloseLimits(
+        uint64 protectionId,
+        PositionProtectionTypes.CloseFinancialLimits memory expected
+    ) internal view {
+        PositionProtectionTypes.CloseFinancialLimits memory actual = protectionViews.closeFinancialLimits(protectionId);
+        assertEq(actual.maxExecutionNotionalUsdc, expected.maxExecutionNotionalUsdc, "stored notional ceiling");
+        assertEq(actual.maxGrossAccountDebitUsdc, expected.maxGrossAccountDebitUsdc, "stored gross debit ceiling");
+        assertEq(actual.maxActionChargeUsdc, expected.maxActionChargeUsdc, "stored action charge ceiling");
+        assertEq(actual.maxExplicitFeesUsdc, expected.maxExplicitFeesUsdc, "stored explicit fees ceiling");
+    }
+
+    function _assertPendingCloseLimits(
+        uint64 orderId,
+        PositionProtectionTypes.CloseFinancialLimits memory expected
+    ) internal view {
+        OrderV3Types.ExecutionBounds memory policy = router.lifecycleBook().pendingPolicy(orderId);
+        assertEq(policy.maxExecutionNotionalUsdc, expected.maxExecutionNotionalUsdc, "pending notional ceiling");
+        assertEq(policy.maxGrossAccountDebitUsdc, expected.maxGrossAccountDebitUsdc, "pending gross debit ceiling");
+        assertEq(policy.maxActionChargeUsdc, expected.maxActionChargeUsdc, "pending action charge ceiling");
+        assertEq(policy.maxExplicitFeesUsdc, expected.maxExplicitFeesUsdc, "pending explicit fees ceiling");
     }
 
     function _publicBoundedRequest(

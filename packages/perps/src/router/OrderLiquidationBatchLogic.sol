@@ -18,6 +18,7 @@ import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouter
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
@@ -154,9 +155,23 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || request.isClose) {
-            revert OrderRouter__Unauthorized();
-        }
+        _requireProtectionHost(host, account, request.isClose);
+        return _commitOrder(host, account, request, true);
+    }
+
+    /// @notice Commits a caller-authored bounded close after the Book atomically cancels armed protection.
+    function commitProtectedClose(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 triggerBountyRefundUsdc
+    ) external returns (uint64 orderId) {
+        _requireDelegateCall();
+        IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
+        _requireProtectionHost(host, account, !request.isClose);
+        // The Book has taken the trigger-bounty classification. Release it without a carry checkpoint so all
+        // commitment carry is collected, bounded and recorded by the ordinary close path below.
+        IMarginClearinghouse(host.engine().clearinghouse())
+            .releaseReservedExecutionBountyToSource(account, triggerBountyRefundUsdc);
         return _commitOrder(host, account, request, true);
     }
 
@@ -171,12 +186,10 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) external returns (uint64 orderId) {
         _requireDelegateCall();
         IOrderLiquidationBatchHost host = IOrderLiquidationBatchHost(address(this));
-        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || size == 0) {
-            revert OrderRouter__Unauthorized();
-        }
+        _requireProtectionHost(host, account, size == 0);
 
         orderId = host.nextCommitId();
-        OrderV3Types.OrderRequest memory request = _protectionCloseRequest(host, side, size);
+        OrderV3Types.OrderRequest memory request = _protectionCloseRequest(host, protectionId, side, size);
         request.clientOrderId = OrderV3Types.protocolClientOrderId(
             keccak256(
                 abi.encode(
@@ -604,7 +617,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         uint64 linkedOrderId,
         IPositionProtectionBook.TriggerPlan memory plan
     ) private {
-        OrderV3Types.OrderRequest memory request = _protectionCloseRequest(host, plan.side, plan.size);
+        OrderV3Types.OrderRequest memory request = _protectionCloseRequest(host, protectionId, plan.side, plan.size);
         request.clientOrderId = OrderV3Types.protocolClientOrderId(
             keccak256(
                 abi.encode(
@@ -625,13 +638,16 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         host.lifecycleBook().registerProtectionAttempt(linkedOrderId);
     }
 
-    /// @dev Shares the execution envelope across initial and retried closes; callers supply their distinct client ids.
-    ///      Omitted margin and minimum-bound fields remain zero-initialized.
+    /// @dev Shares fresh timing and the Book's trader-authorized financial ceilings across initial and retried closes;
+    ///      callers supply their distinct client ids. Omitted margin and minimum-bound fields remain zero-initialized.
     function _protectionCloseRequest(
         IOrderLiquidationBatchHost host,
+        uint64 protectionId,
         CfdTypes.Side side,
         uint256 size
     ) private view returns (OrderV3Types.OrderRequest memory request) {
+        PositionProtectionTypes.CloseFinancialLimits memory limits =
+            host.positionProtectionBook().closeFinancialLimits(protectionId);
         request.side = side;
         request.sizeDelta = size;
         request.targetPrice = side == CfdTypes.Side.LONG ? host.engine().CAP_PRICE() : 1;
@@ -640,11 +656,11 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         request.bounds.executionWindowSeconds = uint32(host.maxExecutionWindowSeconds());
         request.bounds.allowedExecutionModes = ALL_V3_EXECUTION_MODES;
         request.bounds.expectedConfigHash = bytes32(0);
-        request.bounds.maxExecutionBountyUsdc = type(uint256).max;
-        request.bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        request.bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        request.bounds.maxActionChargeUsdc = type(uint256).max;
-        request.bounds.maxExplicitFeesUsdc = type(uint256).max;
+        request.bounds.maxExecutionBountyUsdc = 0;
+        request.bounds.maxExecutionNotionalUsdc = limits.maxExecutionNotionalUsdc;
+        request.bounds.maxGrossAccountDebitUsdc = limits.maxGrossAccountDebitUsdc;
+        request.bounds.maxActionChargeUsdc = limits.maxActionChargeUsdc;
+        request.bounds.maxExplicitFeesUsdc = limits.maxExplicitFeesUsdc;
         request.bounds.maxPostPositionSize = type(uint256).max;
         request.bounds.maxPostLeverageBps = type(uint32).max;
     }
@@ -785,6 +801,17 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             return LiquidationBatchResult.SkippedSolvent;
         }
         return LiquidationBatchResult.Failed;
+    }
+
+    /// @dev Shared authentication for protection-only commitments; callers also validate delegate context.
+    function _requireProtectionHost(
+        IOrderLiquidationBatchHost host,
+        address account,
+        bool invalidRequest
+    ) private view {
+        if (msg.sender != address(host.positionProtectionBook()) || account == address(0) || invalidRequest) {
+            revert OrderRouter__Unauthorized();
+        }
     }
 
     function _requireDelegateCall() private view {

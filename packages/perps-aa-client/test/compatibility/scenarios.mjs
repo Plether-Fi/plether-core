@@ -32,7 +32,9 @@ export function response(signatureByte = '99') {
 }
 
 export function actions(client) {
-  const params = { takeProfitTriggerPrice: 70000000n, stopLossTriggerPrice: 90000000n }
+  const closeLimits = { maxExecutionNotionalUsdc: 21000000n, maxGrossAccountDebitUsdc: 3000000n,
+    maxActionChargeUsdc: 200000n, maxExplicitFeesUsdc: 300000n }
+  const params = { takeProfitTriggerPrice: 70000000n, stopLossTriggerPrice: 90000000n, closeLimits }
   return [
     client.buildAuthorizedDepositAction({ account, usdc, clearinghouse,
       authorization: { from: owner, to: account, value: 25000000n, validAfter: 10n, validBefore: 1000n, nonce: word('ab') },
@@ -52,6 +54,13 @@ export function actions(client) {
         maxExecutionBountyUsdc: 100000n, maxExecutionNotionalUsdc: 21000000n,
         maxGrossAccountDebitUsdc: 3000000n, maxActionChargeUsdc: 200000n, maxExplicitFeesUsdc: 300000n,
         maxPostPositionSize: 2n * 10n ** 18n, minPostSettlementBalanceUsdc: 400000n,
+        minPostPositionEquityUsdc: 500000n, maxPostLeverageBps: 100000 },
+    } }),
+    client.buildAmendLatchedProtectionCloseLimitsAction({ account, book, protectionId: 42n, closeLimits }),
+    client.buildCancelProtectionAndCloseAction({ account, book, protectionId: 42n, request: {
+      clientOrderId: word('ef'), side: 1, sizeDelta: 200n * 10n ** 18n, marginDelta: 0n, targetPrice: 80000000n, isClose: true,
+      bounds: { submitBy: 1900000000n, executionWindowSeconds: 60, allowedExecutionModes: 7, expectedConfigHash: word('cd'),
+        maxExecutionBountyUsdc: 0n, ...closeLimits, maxPostPositionSize: 0n, minPostSettlementBalanceUsdc: 0n,
         minPostPositionEquityUsdc: 500000n, maxPostLeverageBps: 100000 },
     } }),
   ]
@@ -97,14 +106,46 @@ export async function assertCompatibility(client, fixture, currentSchema) {
   assert.equal(currentSchema.schema, 'current-v5', 'Wrong current schema golden')
   assert.equal(fixture.protectionAbiHash, currentSchema.historicalProtectionAbiHash,
     'Immutable historical protection ABI baseline changed')
-  // The immutable 0.2 baseline still guards action calldata, sponsorship and UserOperation hashes.
-  // The V5 receipt and protection view are a reviewed 0.3 schema break with their own fixed golden hashes.
+  assert.equal(fixture.actions.length, 11, 'Immutable historical action baseline changed')
+  // The immutable 0.2 baseline guards unaffected action calldata and hashes.
+  // MED-9/MED-30 protection actions and the V5 receipt/view are reviewed current-schema changes.
   const expectedExports = fixture.exports.filter(name => name !== 'hashOrderReceiptV4')
-    .concat('hashOrderReceiptV5').sort()
-  assert.deepEqual(current.exports, expectedExports, 'Only the reviewed current-receipt export may change')
+    .concat('hashOrderReceiptV5', 'buildAmendLatchedProtectionCloseLimitsAction', 'buildCancelProtectionAndCloseAction').sort()
+  assert.deepEqual(current.exports, expectedExports, 'Only the reviewed current-receipt and protection exports may change')
   assert.deepEqual(current.envelope, fixture.envelope, 'Native sponsorship envelope changed')
-  assert.deepEqual(current.actions, fixture.actions, 'Retained action calldata or sponsorship hashes changed')
+  assert.deepEqual(current.actions.slice(0, 7), fixture.actions.slice(0, 7),
+    'Retained non-protection action calldata or sponsorship hashes changed')
+  assert.deepEqual(current.actions.slice(7), currentSchema.protectionActions,
+    'Current protection action calldata or sponsorship hashes changed')
   assert.equal(current.protectionAbiHash, currentSchema.protectionAbiHash, 'Current protection ABI changed')
+  const closeLimitNames = ['maxExecutionNotionalUsdc', 'maxGrossAccountDebitUsdc',
+    'maxActionChargeUsdc', 'maxExplicitFeesUsdc']
+  const requireCloseLimitsTuple = tuple => {
+    assert.equal(tuple?.type, 'tuple', 'Close limits must be one tuple')
+    assert.deepEqual(tuple.components.map(({ name, type }) => [name, type]),
+      closeLimitNames.map(name => [name, 'uint256']), 'Close limits tuple changed')
+  }
+  const bookFunction = name => {
+    const item = client.positionProtectionBookAbi.find(entry => entry.type === 'function' && entry.name === name)
+    assert(item, `Current Book function ${name} is missing`)
+    return item
+  }
+  for (const [name, paramsIndex] of [
+    ['commitOpenOrderWithProtection', 1], ['createPositionProtection', 0], ['replacePositionProtection', 1],
+  ]) {
+    const params = bookFunction(name).inputs[paramsIndex]
+    assert.deepEqual(params.components.map(({ name }) => name),
+      ['takeProfitTriggerPrice', 'stopLossTriggerPrice', 'closeLimits'], `${name} parameters changed`)
+    requireCloseLimitsTuple(params.components[2])
+  }
+  requireCloseLimitsTuple(bookFunction('closeFinancialLimits').outputs[0])
+  requireCloseLimitsTuple(bookFunction('amendLatchedPositionProtectionCloseLimits').inputs[1])
+  const cancelAndClose = bookFunction('cancelPositionProtectionAndCommitClose')
+  assert.equal(cancelAndClose.stateMutability, 'nonpayable', 'Atomic protection close must carry no native value')
+  assert.equal(cancelAndClose.inputs.length, 2, 'Atomic protection close must bind one protection ID and one request')
+  assert.equal(cancelAndClose.inputs[0].type, 'uint64', 'Atomic protection close ID type changed')
+  assert.deepEqual(cancelAndClose.inputs[1], bookFunction('commitOpenOrderWithProtection').inputs[0],
+    'Atomic protection close must preserve the complete bounded V3 request tuple')
   for (const [name, abi] of Object.entries({
     closePreviewV3Abi: client.closePreviewV3Abi,
     committedOrderV3Abi: client.committedOrderV3Abi,
@@ -145,7 +186,7 @@ export async function assertCompatibility(client, fixture, currentSchema) {
   const finalEnvelope = client.normalizePaymasterResponse(response())
   const stubEnvelope = client.normalizePaymasterResponse(response('00'))
   // Every protection action traverses the hardened native-sponsorship path.
-  for (const action of actions(client).slice(-4)) {
+  for (const action of actions(client).slice(7)) {
     let journaled
     const events = []
     const input = {
@@ -169,7 +210,7 @@ export async function assertCompatibility(client, fixture, currentSchema) {
     }
     const result = await client.sendSponsoredAction(input)
     assert.deepEqual(events, ['sign', 'journal', 'send'])
-    assert.equal(result.userOperationHash, fixture.actions.find(item => item.plan.kind === action.kind).userOperationHash)
+    assert.equal(result.userOperationHash, currentSchema.protectionActions.find(item => item.plan.kind === action.kind).userOperationHash)
     events.length = 0
     await assert.rejects(client.sendSponsoredAction({ ...input, async journalSignedUserOperation() { throw new Error('Persistence failed') } }))
     assert.deepEqual(events, ['sign'], 'A failed journal must prevent submission')

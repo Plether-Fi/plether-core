@@ -33,10 +33,23 @@ close preview omits its zero-only bounty output. `hashOrderReceiptV5` replaces
 the current V4-domain helper. The archived `orderLifecycleV4Abi` is retained.
 
 `current-v5-schema.json` pins the exact reviewed current ABIs and archived Book
-ABI separately. The compatibility test compares the unchanged eleven action
-vectors, sponsorship envelopes and UserOperation hashes with `baseline.json`;
-it permits only the reviewed receipt-helper export rename. It also checks the
-current ABI hashes and current preview/receipt shapes. This keeps the historical
-fixture immutable while making the fresh-stack schema migration explicit. An
-intentional future ABI or export change requires a new reviewed golden, not an
-automatic fixture rewrite.
+ABI separately. MED-9 adds explicit close financial ceilings to protection
+creation, replacement, and protected opening, plus an owner amendment for a
+latched protection. Their calldata, sponsorship hashes, and UserOperation hashes
+are pinned as five current protection action vectors in that schema. The
+compatibility test still compares the seven unaffected actions and sponsorship
+envelope with `baseline.json`, and permits only the reviewed receipt-helper
+rename and amendment-builder export. It also checks the current ABI hashes,
+protection tuple fields, and current preview/receipt shapes. The historical
+fixture remains immutable. A future ABI or export change requires a new
+reviewed golden, not an automatic fixture rewrite.
+
+The MED-30 source change adds `buildCancelProtectionAndCloseAction` and a sixth
+current protection action vector for the single nonpayable
+`cancelPositionProtectionAndCommitClose(uint64,OrderRequest)` Book call. The
+current Book ABI hash, complete calldata, sponsorship hash, and UserOperation
+hash cover the new action; the test also checks that its request tuple matches
+the existing bounded V3 request. Its native sponsorship path retains the
+signature, durable journal, and submission ordering checks. The five existing
+current protection vectors and `baseline.json` are preserved. This source
+update does not publish a package or deploy a compatible Book.

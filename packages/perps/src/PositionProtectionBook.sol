@@ -15,6 +15,7 @@ import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionPro
 import {IPositionProtectionBook} from "@plether/perps/interfaces/IPositionProtectionBook.sol";
 import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
+import {ExecutionBlockNumberLib} from "@plether/perps/libraries/ExecutionBlockNumberLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 
 /// @notice Narrow engine view surface used by position-protection actions and lifecycle validation.
@@ -88,13 +89,19 @@ interface IPositionProtectionRouterHost {
 
 }
 
-/// @notice Book-only bounded-order surface for atomically attaching protection to a newly committed open.
+/// @notice Book-only bounded-order surface for attached opens and atomic protection cancellation with a full close.
 /// @dev The Router authenticates this explicit-account host call by requiring this immutable Book as caller.
 interface IPositionProtectionOrderCommitHost {
 
     function commitProtectedOpen(
         address account,
         OrderV3Types.OrderRequest calldata request
+    ) external returns (uint64 orderId);
+
+    function commitProtectedClose(
+        address account,
+        OrderV3Types.OrderRequest calldata request,
+        uint256 triggerBountyRefundUsdc
     ) external returns (uint64 orderId);
 
 }
@@ -136,9 +143,10 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 size;
         uint256 takeProfitTriggerPrice;
         uint256 stopLossTriggerPrice;
+        PositionProtectionTypes.CloseFinancialLimits closeLimits;
         uint64 armedAt;
         uint64 armedBlock;
-        uint64 armedOracleTime;
+        uint64 armedPublishTime;
         uint256 triggerMarkPrice;
         uint64 triggerPublishTime;
         PositionProtectionTypes.PositionProtectionTriggerLeg triggeredLeg;
@@ -210,9 +218,6 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         uint256 triggerBountyUsdc
     ) private returns (uint64 protectionId) {
         _validateProtectionCommitAllowed();
-        if (ENGINE.degradedMode()) {
-            revert OrderRouter__DegradedMode();
-        }
         _requireProtectionAccountAvailable(account, 0);
         _validateBountySnapshot(triggerBountyUsdc);
 
@@ -221,9 +226,9 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             revert OrderRouter__NoOpenPosition();
         }
 
-        uint256 markPrice = _freshCachedProtectionMark();
-        _validateProtectionPrices(position.side, markPrice, params);
-        _validatePostLockRisk(account, position, markPrice);
+        (uint256 cachedMarkPrice, uint256 currentMarkPrice, uint64 currentPublishTime) = _freshProtectionObservation();
+        _validateProtectionPrices(position.side, currentMarkPrice, params);
+        _validatePostLockRisk(account, position, cachedMarkPrice);
 
         protectionId = nextPositionProtectionId++;
         StoredProtection storage protection = _protections[protectionId];
@@ -233,16 +238,18 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.size = position.size;
         protection.takeProfitTriggerPrice = params.takeProfitTriggerPrice;
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
+        _setCloseLimits(protection, params.closeLimits);
         _clearinghouse()
             .recordBountyReservation(
                 account, IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId, triggerBountyUsdc
             );
-        _arm(protection);
+        _arm(protection, currentPublishTime);
         _activeProtectionIds[account] = protectionId;
 
         emit PositionProtectionCreated(
             protectionId, account, 0, params.takeProfitTriggerPrice, params.stopLossTriggerPrice, triggerBountyUsdc
         );
+        _emitCloseLimitsUpdated(protection);
         _emitArmed(protection);
     }
 
@@ -285,21 +292,39 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             }
         }
 
-        uint256 markPrice = _freshCachedProtectionMark();
-        _validateProtectionPrices(protection.side, markPrice, params);
+        (, uint256 currentMarkPrice, uint64 currentPublishTime) = _freshProtectionObservation();
+        _validateProtectionPrices(protection.side, currentMarkPrice, params);
         protection.takeProfitTriggerPrice = params.takeProfitTriggerPrice;
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
+        _setCloseLimits(protection, params.closeLimits);
 
         if (status == PositionProtectionTypes.PositionProtectionStatus.Armed) {
-            _arm(protection);
+            _arm(protection, currentPublishTime);
         }
 
         emit PositionProtectionReplaced(
             protectionId, account, params.takeProfitTriggerPrice, params.stopLossTriggerPrice
         );
+        _emitCloseLimitsUpdated(protection);
         if (status == PositionProtectionTypes.PositionProtectionStatus.Armed) {
             _emitArmed(protection);
         }
+    }
+
+    /// @inheritdoc IPositionProtectionActions
+    function amendLatchedPositionProtectionCloseLimits(
+        uint64 protectionId,
+        PositionProtectionTypes.CloseFinancialLimits calldata limits
+    ) external nonReentrant {
+        StoredProtection storage protection = _ownedActiveProtection(protectionId, msg.sender);
+        if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Latched) {
+            revert OrderRouter__ProtectionNotLatched();
+        }
+        if (IPositionProtectionRouterHost(ROUTER).pendingOrderCounts(msg.sender) != 0) {
+            revert OrderRouter__PendingOrdersExist();
+        }
+        _setCloseLimits(protection, limits);
+        _emitCloseLimitsUpdated(protection);
     }
 
     /// @inheritdoc IPositionProtectionActions
@@ -309,6 +334,36 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         (address refundAccount, uint256 refundUsdc) = _cancel(msg.sender, protectionId);
         if (refundUsdc != 0) {
             _clearinghouse().unlockReservedSettlement(refundAccount, refundUsdc);
+        }
+    }
+
+    /// @inheritdoc IPositionProtectionActions
+    function cancelPositionProtectionAndCommitClose(
+        uint64 protectionId,
+        OrderV3Types.OrderRequest calldata request
+    ) external nonReentrant returns (uint64 orderId) {
+        StoredProtection storage protection = _ownedActiveProtection(protectionId, msg.sender);
+        if (protection.status != PositionProtectionTypes.PositionProtectionStatus.Armed) {
+            revert OrderRouter__ProtectionNotArmed();
+        }
+        _requireMatchingPosition(protection);
+        if (!request.isClose) {
+            revert OrderRouter__NotCloseOrder();
+        }
+        if (request.side != protection.side || request.sizeDelta != protection.size) {
+            revert OrderRouter__PositionChanged();
+        }
+        IPositionProtectionRouterHost router = IPositionProtectionRouterHost(ROUTER);
+        if (router.pendingOrderCounts(msg.sender) != 0) {
+            revert OrderRouter__PendingOrdersExist();
+        }
+
+        (address refundAccount, uint256 refundUsdc) = _cancel(msg.sender, protectionId);
+        uint64 expectedOrderId = router.nextCommitId();
+        orderId = IPositionProtectionOrderCommitHost(ROUTER).commitProtectedClose(refundAccount, request, refundUsdc);
+        // A historical exact replay must not cancel protection without committing a new exit.
+        if (orderId != expectedOrderId) {
+            revert PositionProtectionBook__InvalidHostResponse();
         }
     }
 
@@ -405,8 +460,8 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
 
         _requireMatchingPendingParent(account, parentOrderId, side, size);
 
-        uint256 markPrice = _freshCachedProtectionMark();
-        _validateProtectionPrices(side, markPrice, params);
+        (, uint256 currentMarkPrice,) = _freshProtectionObservation();
+        _validateProtectionPrices(side, currentMarkPrice, params);
 
         protectionId = nextPositionProtectionId++;
         StoredProtection storage protection = _protections[protectionId];
@@ -417,6 +472,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.size = size;
         protection.takeProfitTriggerPrice = params.takeProfitTriggerPrice;
         protection.stopLossTriggerPrice = params.stopLossTriggerPrice;
+        _setCloseLimits(protection, params.closeLimits);
         _clearinghouse()
             .recordBountyReservation(
                 account, IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId, triggerBountyUsdc
@@ -433,6 +489,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
             params.stopLossTriggerPrice,
             triggerBountyUsdc
         );
+        _emitCloseLimitsUpdated(protection);
     }
 
     /// @inheritdoc IPositionProtectionBook
@@ -465,8 +522,11 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         if (_activeOracle().isOracleFrozen()) {
             revert OrderRouter__ConditionalTriggerFrozen();
         }
-        if (block.number <= protection.armedBlock || publishTime <= protection.armedOracleTime) {
+        if (ExecutionBlockNumberLib.current() <= protection.armedBlock) {
             revert OrderRouter__SameBlockTrigger();
+        }
+        if (publishTime <= protection.armedPublishTime) {
+            revert OrderRouter__TriggerPublishTimeNotAdvanced();
         }
         _requireMatchingPosition(protection);
         if (IPositionProtectionRouterHost(ROUTER).pendingOrderCounts(protection.account) != 0) {
@@ -539,7 +599,7 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
                     _failPendingParent(parentProtection);
                     return;
                 }
-                _arm(parentProtection);
+                _arm(parentProtection, ENGINE.lastMarkTime());
                 _emitArmed(parentProtection);
                 return;
             }
@@ -694,6 +754,13 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         protection.triggerBountyUsdc = _triggerBounty(stored);
     }
 
+    /// @inheritdoc IPositionProtectionViews
+    function closeFinancialLimits(
+        uint64 protectionId
+    ) external view returns (PositionProtectionTypes.CloseFinancialLimits memory limits) {
+        return _protections[protectionId].closeLimits;
+    }
+
     /// @inheritdoc IPositionProtectionBook
     function unpaidBounties(
         address account
@@ -792,19 +859,27 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
         }
     }
 
-    function _freshCachedProtectionMark() private view returns (uint256 markPrice) {
-        IPletherOracle.PolicySnapshot memory policy = _activeOracle().getOrderExecutionPolicy(true);
+    function _freshProtectionObservation()
+        private
+        view
+        returns (uint256 cachedMarkPrice, uint256 currentMarkPrice, uint64 currentPublishTime)
+    {
+        IPletherOracle oracle = _activeOracle();
+        IPletherOracle.PolicySnapshot memory policy = oracle.getOrderExecutionPolicy(true);
         if (policy.oracleFrozen) {
             revert OrderRouter__ConditionalTriggerFrozen();
         }
         uint64 markTime = ENGINE.lastMarkTime();
-        markPrice = ENGINE.lastMarkPrice();
+        cachedMarkPrice = ENGINE.lastMarkPrice();
         if (
-            markPrice == 0 || markTime == 0
+            cachedMarkPrice == 0 || markTime == 0
                 || OracleFreshnessPolicyLib.isStale(markTime, policy.maxStaleness, block.timestamp)
         ) {
             revert OrderRouter__ProtectionMarkTooStale();
         }
+        IPletherOracle.PriceSnapshot memory current = oracle.getLatestPrice(IPletherOracle.PriceMode.MarkRefresh);
+        currentMarkPrice = current.markPrice;
+        currentPublishTime = current.publishTime;
         if (!_acceptedMarkInstalled()) {
             revert PositionProtectionBook__OracleMarkAhead();
         }
@@ -982,12 +1057,34 @@ contract PositionProtectionBook is IPositionProtectionBook, IOrderRouterErrors, 
     }
 
     function _arm(
-        StoredProtection storage protection
+        StoredProtection storage protection,
+        uint64 publishTime
     ) private {
         protection.armedAt = uint64(block.timestamp);
-        protection.armedBlock = uint64(block.number);
-        protection.armedOracleTime = ENGINE.lastMarkTime();
+        protection.armedBlock = ExecutionBlockNumberLib.current();
+        protection.armedPublishTime = publishTime;
         protection.status = PositionProtectionTypes.PositionProtectionStatus.Armed;
+    }
+
+    function _setCloseLimits(
+        StoredProtection storage protection,
+        PositionProtectionTypes.CloseFinancialLimits memory limits
+    ) private {
+        protection.closeLimits = limits;
+    }
+
+    function _emitCloseLimitsUpdated(
+        StoredProtection storage protection
+    ) private {
+        PositionProtectionTypes.CloseFinancialLimits storage limits = protection.closeLimits;
+        emit PositionProtectionCloseLimitsUpdated(
+            protection.protectionId,
+            protection.account,
+            limits.maxExecutionNotionalUsdc,
+            limits.maxGrossAccountDebitUsdc,
+            limits.maxActionChargeUsdc,
+            limits.maxExplicitFeesUsdc
+        );
     }
 
     function _emitArmed(

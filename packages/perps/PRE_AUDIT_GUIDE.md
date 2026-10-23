@@ -118,9 +118,10 @@ Audit the prediction, transaction ordering, and post-deployment getter/code-hash
 - no user cancellation path
 - queue pointers and reservations must be unlinked exactly once
 
-A failed registered protection attempt may move its protection from `Triggered` to `Latched` and retain the execution
-bounty when the protected position still matches exactly. Permissionless retry creates a new child id at the FIFO tail;
-the old child remains terminal in the lifecycle Book.
+A failed registered protection attempt moves its protection from `Triggered` to `Latched` when the protected position
+still matches exactly. This includes expired reservation-mismatch recovery: disputed accounting remains protected,
+while the close mandate survives. Permissionless retry creates a new zero-bounty child id at the FIFO tail; the old
+child remains terminal in the lifecycle Book and no cleaner is paid for a zero-bounty attempt.
 
 ### Failure-policy table
 

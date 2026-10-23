@@ -218,6 +218,10 @@ interface IPletherOracle {
     error PletherOracle__PoolEpochComponentTooOld(uint256 minPublishTime, uint256 epochStart);
     /// @notice Thrown when weighted basket construction rounds or resolves to zero.
     error PletherOracle__ZeroBasketPrice();
+    /// @notice Thrown when an execution observation would produce a zero price after the adverse adjustment.
+    error PletherOracle__ZeroExecutionPrice();
+    /// @notice Thrown when confidence limits exceed their bounds or permit a full-price adverse adjustment.
+    error PletherOracle__InvalidConfidenceConfig();
     /// @notice Thrown when configuration contains a zero required window or an excessive component divergence.
     error PletherOracle__InvalidSettlementConfig();
 

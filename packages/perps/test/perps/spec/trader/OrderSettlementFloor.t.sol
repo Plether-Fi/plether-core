@@ -208,15 +208,23 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
     }
 
     function test_AttachedProtectionUsesSameFloorAndExecutionReleasesIt() public {
+        uint256 price = 95_000_000;
+        router.updateMarkPrice(_mockPythUpdateData(price));
         IPositionProtectionActions actions = IPositionProtectionActions(address(router.positionProtectionBook()));
         PositionProtectionTypes.PositionProtectionParams memory params;
         params.takeProfitTriggerPrice = 90_000_000;
         params.stopLossTriggerPrice = 110_000_000;
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max
+        });
         OrderV3Types.OrderRequest memory request = _request();
         vm.prank(BOUNTY_TRADER);
         (uint64 id,) = actions.commitOpenOrderWithProtection(request, params);
         _expectFloor(id, 100e6 + 1, true);
-        _bountyExecute(id, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+        _bountyExecute(id, price, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
         assertEq(router.accountHeadOrderId(BOUNTY_TRADER), 0);
         assertGt(engineAccountLens.getWithdrawableUsdc(BOUNTY_TRADER), 100e6);
     }

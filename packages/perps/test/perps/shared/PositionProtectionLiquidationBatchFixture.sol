@@ -75,6 +75,12 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
 
         PositionProtectionTypes.PositionProtectionParams memory params;
         params.stopLossTriggerPrice = LONG_STOP_LOSS;
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max
+        });
         vm.prank(account);
         protectionId = protectionActions.createPositionProtection(params);
     }

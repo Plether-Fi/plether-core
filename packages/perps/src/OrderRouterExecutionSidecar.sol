@@ -16,6 +16,7 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
+import {ExecutionBlockNumberLib} from "@plether/perps/libraries/ExecutionBlockNumberLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
 
 /// @title OrderRouterExecutionSidecar
@@ -431,7 +432,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         }
         // Exact block equality is the intended same-block MEV boundary, not a balance or price comparison.
         // slither-disable-next-line incorrect-equality
-        if (!request.oracleFrozen && block.number == order.commitBlock) {
+        if (!request.oracleFrozen && ExecutionBlockNumberLib.current() == order.commitBlock) {
             return _pendingResult(order.orderId, OrderV3Types.PendingReason.SameBlock);
         }
         if (!request.oracleFrozen && request.oraclePublishTime <= order.commitTime) {

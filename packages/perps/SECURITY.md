@@ -415,7 +415,8 @@ Keepers are permissionless executors.
 The Router-created position-protection Book owns the retained OCO lifecycle and uses only narrow clearinghouse/Router
 capabilities. It is stateful and distinct from the separately predeployed `OrderRouterLiquidationBatchSidecar`.
 Router `delegatecall` uses
-that sidecar only as a stateless bytecode carrier for public/protected-open commits, mark refresh/protection-trigger resolution, single and batch
+that sidecar only as a stateless bytecode carrier for public/protected-open commits, atomic protection-cancellation
+close commits, mark refresh/protection-trigger resolution, single and batch
 liquidation, atomic-refresh LP-epoch settlement, and the active-oracle forwarding step inside an authenticated Router
 configuration finalization. The Router retains admin authentication and applies its storage fields in the original
 before/after ordering. Delegated functions reject direct and foreign-context calls and must not read or write Router
@@ -429,6 +430,18 @@ Fresh external V3 commits reject a zero hash and remain bound to the exact diges
 close attempts skip only config-digest equality; their typed execution modes, deadlines, financial policy, lifecycle
 evidence, and observed receipt digest remain enforced.
 
+An owner may atomically replace an `Armed` protection with a caller-authored full close through
+`cancelPositionProtectionAndCommitClose`. Ownership, armed status, exact live side/size, and an empty account queue
+are checked before cancellation. The Router releases the unused trigger bounty without checkpointing carry before
+ordinary close commitment. All commitment carry is then collected and recorded by the canonical close path, including
+its gross-debit and action-charge bounds; any commitment failure rolls back the entire operation. The Book-only
+Router host preserves public V3 admission,
+configuration pinning, timing, mode and financial bounds. A returned historical replay id is rejected, so cancellation
+cannot succeed without a fresh close. This path is available during frozen markets, Router pause, and degraded mode,
+but does not bypass any execution limit. The resulting ordinary close has no protection-attempt marker; its later
+failure or expiry does not rearm protection. Pending-open, triggered, and latched protections cannot use this action.
+New automatic triggers still require live oracle policy and a publication newer than arming.
+
 Triggering is irreversible. `Triggered` means the Book has exactly one current live child; `Latched` means the trigger
 evidence and account trade lock remain but no child is live. A non-liquidation terminal child failure relatches only
 when the protected position still has the exact recorded account, side, and size; otherwise the protection fails and
@@ -441,6 +454,14 @@ attempt settles its authenticated zero Order record, pays no caller, and relatch
 position terminally fails it with the same zero-bounty outcome. Retry requires the exact protected position and
 creates a fresh zero Order record without another trader debit. The former retained-bounty disposition is absent from
 the current enum; archived decoders remain necessary for older receipts.
+Expired reservation-mismatch recovery uses the same exact-position relatch decision before deleting the child. The
+old order remains terminal with an `ExpiredReservationMismatch` receipt; disputed reservations retain their existing
+quarantine/ownership rules. Relatching neither repairs the ledger nor invents a refund, and receipt failure rolls back
+both recovery and the protection transition. Fresh retry eligibility does not bypass any remaining accounting checks.
+
+Existing-position protection creation remains available in degraded mode because it adds no exposure. Router pause,
+frozen-oracle policy, freshness, position/queue checks, and post-lock collateral admission still apply. Attached opening
+orders retain the ordinary degraded-mode restriction on new risk.
 
 When existing-position protection locks its trigger bounty, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
@@ -521,6 +542,10 @@ Security properties:
 - the unique historical parse rejects skipped ticks because the parsed update must prove its previous publish time is no later than the order's `commitTime`,
 - batch execution may reuse a parsed historical basket only for later FIFO orders whose `commitTime` is strictly before the cached tick and falls within its proven coverage,
 - the neutral pre-cap basket is accepted only when `basketConfidence * 10_000 <= basketPrice * basketMaxConfidenceRatioBps`; equality passes, each weighted component contribution is floored before summation, and no independent component-confidence ceiling applies,
+- confidence configuration is validated at proposal and oracle application: ratio <= 10,000 bps, multiplier <= 30,000
+  bps, and their product < 100,000,000; accepted adjustments cannot consume the entire raw basket value,
+- successful order execution quotes are strictly positive, including historical-cache reuse; a downward adjustment
+  that exhausts the capped execution base reverts the execution call and preserves pending orders and protections,
 - aggregate basket confidence is included in live/FAD execution and all liquidation prices instead of being treated only as metadata; oracle-frozen voluntary closes retain aggregate confidence-width validation but replace the adverse price shift with the fixed frozen-close spread,
 - FIFO execution prevents later orders from bypassing earlier ones,
 - partial-close size floors prevent dust closes from occupying global FIFO slots,

@@ -6,6 +6,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {OracleConfidencePolicyLib} from "@plether/perps/libraries/OracleConfidencePolicyLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
@@ -307,15 +308,12 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         address refundRecipient,
         bytes[] calldata pythUpdateData
     ) external payable override nonReentrant returns (LiquidationBatchSnapshot memory snapshot) {
-        (PriceSnapshot memory neutralSnapshot, uint256 confidence) = _updateLiquidationSnapshot(pythUpdateData);
+        (PriceSnapshot memory neutralSnapshot, uint256 rawPrice, uint256 confidence) =
+            _updateLiquidationSnapshot(pythUpdateData);
         uint256 shift = _liquidationConfidenceShift(confidence);
         snapshot = LiquidationBatchSnapshot({
-            longPrice: _clampToCap(
-                _directionalLiquidationPriceFromShift(CfdTypes.Side.LONG, neutralSnapshot.price, shift)
-            ),
-            shortPrice: _clampToCap(
-                _directionalLiquidationPriceFromShift(CfdTypes.Side.SHORT, neutralSnapshot.price, shift)
-            ),
+            longPrice: _clampToCap(_directionalLiquidationPriceFromShift(CfdTypes.Side.LONG, rawPrice, shift)),
+            shortPrice: _clampToCap(_directionalLiquidationPriceFromShift(CfdTypes.Side.SHORT, rawPrice, shift)),
             markPrice: neutralSnapshot.markPrice,
             publishTime: neutralSnapshot.publishTime,
             updateFee: neutralSnapshot.updateFee
@@ -337,9 +335,10 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         bytes[] calldata pythUpdateData,
         address account
     ) external payable override nonReentrant returns (PriceSnapshot memory snapshot) {
+        uint256 rawPrice;
         uint256 confidence;
-        (snapshot, confidence) = _updateLiquidationSnapshot(pythUpdateData);
-        snapshot.price = _clampToCap(_adverseLiquidationPrice(account, snapshot.price, confidence));
+        (snapshot, rawPrice, confidence) = _updateLiquidationSnapshot(pythUpdateData);
+        snapshot.price = _clampToCap(_adverseLiquidationPrice(account, rawPrice, confidence));
         _refundExcess(refundRecipient, snapshot.updateFee);
     }
 
@@ -426,7 +425,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     /// @notice Replaces the mutable oracle policy limits with router-finalized configuration.
     /// @dev Callable only by `engine.orderRouter()`. Both staleness limits, the settlement window, and component
     ///      divergence must be nonzero, and divergence cannot exceed the settlement window. Confidence-ratio and
-    ///      adverse-confidence values may be zero. The staleness/window/divergence fields use seconds; ratio and
+    ///      adverse-confidence values may be zero; their product must be below 100,000,000, with individual bounds
+    ///      of 10,000 and 30,000 respectively. The staleness/window/divergence fields use seconds; ratio and
     ///      multiplier fields use basis points. No Pyth or engine price state is updated.
     /// @param config Complete replacement policy configuration
     function applyConfig(
@@ -441,6 +441,11 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
                 || config.maxComponentPublishTimeDivergence > config.orderSettlementWindow
         ) {
             revert PletherOracle__InvalidSettlementConfig();
+        }
+        if (!OracleConfidencePolicyLib.isValidConfig(
+                config.basketMaxConfidenceRatioBps, config.adverseConfidenceMultiplierBps
+            )) {
+            revert PletherOracle__InvalidConfidenceConfig();
         }
         orderExecutionStalenessLimit = config.orderExecutionStalenessLimit;
         liquidationStalenessLimit = config.liquidationStalenessLimit;
@@ -522,15 +527,17 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         _refundExcess(refundRecipient, basket.pythFee);
     }
 
+    /// @dev Retains the pre-cap price for adverse liquidation shifts while keeping the neutral snapshot capped.
     function _updateLiquidationSnapshot(
         bytes[] calldata pythUpdateData
-    ) internal returns (PriceSnapshot memory snapshot, uint256 confidence) {
+    ) internal returns (PriceSnapshot memory snapshot, uint256 rawPrice, uint256 confidence) {
         if (msg.sender != engine.orderRouter()) {
             revert PletherOracle__Unauthorized();
         }
         PolicySnapshot memory policy = _policyForMode(PriceMode.Liquidation);
         BasketPrice memory basket = _resolveCurrentBasket(pythUpdateData, PriceMode.Liquidation, policy);
         snapshot = _snapshotFromBasket(basket, policy, true);
+        rawPrice = basket.price;
         confidence = basket.confidence;
     }
 
@@ -905,7 +912,13 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         }
 
         bool adverseUp = request.side == CfdTypes.Side.SHORT ? !request.isClose : request.isClose;
-        return adverseUp ? price + shift : price > shift ? price - shift : 0;
+        if (adverseUp) {
+            return price + shift;
+        }
+        if (shift >= price) {
+            revert PletherOracle__ZeroExecutionPrice();
+        }
+        return price - shift;
     }
 
     function _orderExecutionPrice(
@@ -914,6 +927,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         uint256 confidence,
         bool oracleFrozen
     ) internal view returns (uint256) {
+        if (price == 0) {
+            revert PletherOracle__ZeroExecutionPrice();
+        }
         // The fixed frozen-close spread replaces the Pyth adverse-confidence shift for voluntary
         // close/reduce execution while the oracle is frozen. Basket confidence-width validation still
         // applies when the basket is built, and opens (if called directly) retain the adverse shift.
