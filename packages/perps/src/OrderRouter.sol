@@ -195,6 +195,8 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return abi.decode(_delegateExecutionSidecar(), (OrderV3Types.ExecutionResult));
     }
 
+    /// @notice Recovers an expired mismatched reservation and preserves retry for a matching protected position.
+    /// @dev Recovery keeps disputed funds quarantined; protection handling precedes the terminal deletion callback.
     function expireMismatchedOrderFromSidecar(
         uint64 orderId
     ) external returns (IMarginClearinghouse.BountyRecovery memory recovery) {
@@ -204,15 +206,19 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         if (block.timestamp <= pending.timing.executionDeadline) {
             revert OrderRouter__OrderNotExpired();
         }
-        uint256 freeUsdc = lifecycleBook.isProtectionAttempt(orderId)
-            ? pending.executionBountyUsdc
-            : pending.commitment.bountyFromFreeUsdc;
+        bool protectionAttempt = lifecycleBook.isProtectionAttempt(orderId);
+        uint256 freeUsdc = protectionAttempt ? pending.executionBountyUsdc : pending.commitment.bountyFromFreeUsdc;
         recovery = clearinghouse.recoverExpiredBounty(order.account, orderId, freeUsdc);
         if (recovery.freeUsdc != 0) {
             clearinghouse.releaseReservedExecutionBountyToSource(order.account, recovery.freeUsdc);
         }
         // An invalid margin ledger is left protected; expiry must not invent a release.
         try clearinghouse.releaseOrderReservationForTerminalCleanup(orderId) {} catch {}
+        if (protectionAttempt) {
+            positionProtectionBook.handleFailedProtectionAttempt(
+                orderId, order.account, OrderV3Types.TerminalReason.ExpiredReservationMismatch
+            );
+        }
         _deleteOrder(orderId, IOrderRouterAccounting.OrderStatus.Failed);
     }
 

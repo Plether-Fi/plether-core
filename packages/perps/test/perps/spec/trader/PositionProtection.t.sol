@@ -1172,6 +1172,233 @@ contract PositionProtectionTest is BasePerpTest {
         assertEq(remainingSize, 0, "successful retry should fully close the position");
     }
 
+    function test_MismatchedProtectionExpiry_RelatchesAndRetries() public {
+        _assertMismatchedProtectionExpiry(0, 0, CfdTypes.Side.LONG);
+    }
+
+    function testFuzz_MismatchedProtectionExpiry_AllCleanupRoutes(
+        uint8 anomalySeed,
+        uint8 routeSeed,
+        bool shortSide
+    ) public {
+        _assertMismatchedProtectionExpiry(
+            uint8(bound(anomalySeed, 0, 5)),
+            uint8(bound(routeSeed, 0, 2)),
+            shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG
+        );
+    }
+
+    function _assertMismatchedProtectionExpiry(
+        uint8 anomaly,
+        uint8 route,
+        CfdTypes.Side side
+    ) internal {
+        _startRecordingLogs();
+        uint256 triggerPrice = side == CfdTypes.Side.LONG ? LONG_TAKE_PROFIT : SHORT_TAKE_PROFIT;
+        uint64 protectionId = _createSingleLegProtection(side, triggerPrice, 0);
+        uint64 attemptId = _triggerAt(protectionId, triggerPrice);
+        _damageProtectionAttemptReservation(attemptId, anomaly);
+        bytes32 bucketsBefore = keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ALICE)));
+        uint256 keeperBefore = clearinghouse.balanceUsdc(EXECUTION_KEEPER);
+        uint256 triggerKeeperBefore = clearinghouse.balanceUsdc(TRIGGER_KEEPER);
+        bytes32 limitsBefore = keccak256(abi.encode(protectionViews.closeFinancialLimits(protectionId)));
+        vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
+        vm.prank(EXECUTION_KEEPER);
+        if (route == 0) {
+            router.expireOrder(attemptId);
+        } else if (route == 1) {
+            router.executeOrder(attemptId, new bytes[](0));
+        } else {
+            OrderV3Types.BatchResult memory batch = router.executeOrderBatch(attemptId, new bytes[](0));
+            assertEq(batch.terminalCount, 1, "batch removes the expired head");
+        }
+        OrderV3Types.CompactOutcome memory outcome =
+            _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), attemptId);
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.ExpiredReservationMismatch));
+        assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(outcome.bountyUsdc, 0, "recovery cannot fabricate a refund");
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None));
+        assertEq(keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ALICE))), bucketsBefore);
+        assertEq(clearinghouse.balanceUsdc(EXECUTION_KEEPER), keeperBefore, "no cleaner payout");
+        assertEq(clearinghouse.balanceUsdc(TRIGGER_KEEPER), triggerKeeperBefore, "trigger paid only once");
+        assertFalse(router.lifecycleBook().isProtectionAttempt(attemptId), "terminal lifecycle marker cleared");
+        assertEq(router.pendingOrderCounts(ALICE), 0);
+        assertEq(router.pendingCloseSize(ALICE), 0);
+        assertEq(router.accountHeadOrderId(ALICE), 0);
+        PositionProtectionTypes.PositionProtectionView memory latched =
+            protectionViews.getPositionProtection(protectionId);
+        assertEq(
+            uint8(latched.status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched),
+            "surviving position retains retry"
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), protectionId);
+        assertEq(latched.triggerMarkPrice, triggerPrice, "trigger mandate retained");
+        assertEq(keccak256(abi.encode(protectionViews.closeFinancialLimits(protectionId))), limitsBefore);
+        IMarginClearinghouse.BountyReservation memory oldRecord =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId);
+        if (anomaly >= 3) {
+            assertEq(uint8(oldRecord.state), uint8(IMarginClearinghouse.BountyReservationState.Quarantined));
+        }
+        if (anomaly == 2) {
+            assertEq(oldRecord.account, address(0xBAD), "foreign ownership remains intact");
+        }
+        bytes32 oldRecordHash = keccak256(abi.encode(oldRecord));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OrderNotPending.selector);
+        router.expireOrder(attemptId);
+
+        vm.prank(CAROL);
+        uint64 retryId = protectionActions.retryPositionProtectionClose(protectionId);
+        assertGt(retryId, attemptId, "fresh child identity");
+        assertEq(
+            keccak256(abi.encode(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId))),
+            oldRecordHash,
+            "retry does not rewrite disputed old record"
+        );
+        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, retryId).amountUsdc, 0);
+        vm.prank(address(router));
+        protectionBook.afterOrderTerminal(attemptId, ALICE, IOrderRouterAccounting.OrderStatus.Failed);
+        assertEq(
+            protectionViews.getPositionProtection(protectionId).linkedOrderId,
+            retryId,
+            "stale callback cannot remove retry"
+        );
+        bytes[] memory retryData = _mockPythUpdateData(triggerPrice);
+        vm.prank(EXECUTION_KEEPER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryId, retryData);
+        assertEq(
+            uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed), "retry can close unchanged position"
+        );
+        (uint256 remaining,,,,,,) = engine.positions(ALICE);
+        assertEq(remaining, 0);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Executed)
+        );
+    }
+
+    function testFuzz_MismatchedProtectionExpiry_ChangedPositionStillFails(
+        uint8 changeSeed
+    ) public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 attemptId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        uint256 change = bound(changeSeed, 0, 2);
+        // Model an out-of-band size/side change through the trusted Engine test helper.
+        _close(ALICE, CfdTypes.Side.LONG, change == 0 ? POSITION_SIZE / 2 : POSITION_SIZE, LONG_TAKE_PROFIT);
+        if (change == 2) {
+            _open(ALICE, CfdTypes.Side.SHORT, POSITION_SIZE, POSITION_MARGIN_USDC, LONG_TAKE_PROFIT);
+        }
+        _damageProtectionAttemptReservation(attemptId, 0);
+        vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
+        router.expireOrder(attemptId);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Failed)
+        );
+        assertEq(protectionViews.activePositionProtectionId(ALICE), 0);
+        assertEq(router.pendingOrderCounts(ALICE), 0);
+        assertEq(router.pendingCloseSize(ALICE), 0);
+        assertEq(
+            uint8(_verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), attemptId).reason),
+            uint8(OrderV3Types.TerminalReason.ExpiredReservationMismatch)
+        );
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__ProtectionNotFound.selector);
+        protectionActions.retryPositionProtectionClose(protectionId);
+    }
+
+    function test_MismatchedProtectionExpiry_ReceiptFailureRollsBackRelatchAndCleanup() public {
+        _startRecordingLogs();
+        uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);
+        uint64 attemptId = _triggerAt(protectionId, LONG_TAKE_PROFIT);
+        _damageProtectionAttemptReservation(attemptId, 3);
+        vm.warp(uint256(router.lifecycleBook().orderTiming(attemptId).executionDeadline) + 1);
+        bytes32 beforeState = _protectionRecoveryStateHash(protectionId, attemptId);
+        vm.mockCallRevert(
+            address(router.lifecycleBook()),
+            abi.encodeWithSelector(IOrderLifecycleBook.finalize.selector),
+            bytes("forced receipt failure")
+        );
+        vm.expectRevert(bytes("forced receipt failure"));
+        router.expireOrder(attemptId);
+        vm.clearMockedCalls();
+        assertEq(
+            _protectionRecoveryStateHash(protectionId, attemptId),
+            beforeState,
+            "receipt failure restores all lifecycle and accounting state"
+        );
+        assertTrue(router.lifecycleBook().isProtectionAttempt(attemptId));
+        router.expireOrder(attemptId);
+        assertEq(
+            uint8(protectionViews.getPositionProtection(protectionId).status),
+            uint8(PositionProtectionTypes.PositionProtectionStatus.Latched)
+        );
+        _verifiedOutcome(IOrderLifecycleBook(address(router.lifecycleBook())), attemptId);
+    }
+
+    function _protectionRecoveryStateHash(
+        uint64 protectionId,
+        uint64 attemptId
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                protectionViews.getPositionProtection(protectionId),
+                protectionViews.activePositionProtectionId(ALICE),
+                _orderRecord(attemptId),
+                router.lifecycleBook().pendingIntent(attemptId),
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId),
+                clearinghouse.getAccountUsdcBuckets(ALICE),
+                router.pendingOrderCounts(ALICE),
+                router.pendingCloseSize(ALICE),
+                router.nextExecuteId(),
+                router.accountHeadOrderId(ALICE),
+                router.globalTailOrderId()
+            )
+        );
+    }
+
+    // Synthetic corruption tests recovery behavior; these fixtures do not imply public callers can corrupt the ledger.
+    function _damageProtectionAttemptReservation(
+        uint64 attemptId,
+        uint8 anomaly
+    ) internal {
+        vm.record();
+        clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, attemptId);
+        (bytes32[] memory slots,) = vm.accesses(address(clearinghouse));
+        if (anomaly == 0) {
+            vm.prank(address(router));
+            clearinghouse.takeBountyReservation(ALICE, IMarginClearinghouse.BountyKind.Order, attemptId);
+        } else if (anomaly == 1) {
+            vm.store(address(clearinghouse), slots[0], bytes32(0));
+            vm.store(address(clearinghouse), bytes32(uint256(slots[0]) + 1), bytes32(0));
+        } else if (anomaly == 2) {
+            uint256 word = uint256(vm.load(address(clearinghouse), slots[0]));
+            vm.store(
+                address(clearinghouse),
+                slots[0],
+                bytes32((word & ~uint256(type(uint160).max)) | uint160(address(0xBAD)))
+            );
+        } else if (anomaly == 3) {
+            bytes32 fundingSlot = bytes32(uint256(slots[0]) + 1);
+            vm.store(
+                address(clearinghouse),
+                fundingSlot,
+                bytes32(uint256(vm.load(address(clearinghouse), fundingSlot)) + (uint256(1) << 8))
+            );
+        } else if (anomaly == 4) {
+            vm.record();
+            router.lifecycleBook().pendingIntent(attemptId);
+            (bytes32[] memory intentSlots,) = vm.accesses(address(router.lifecycleBook()));
+            vm.store(address(router.lifecycleBook()), bytes32(uint256(intentSlots[0]) + 3), bytes32(uint256(1)));
+        } else {
+            vm.store(
+                address(clearinghouse),
+                slots[0],
+                bytes32(uint256(vm.load(address(clearinghouse), slots[0])) + (uint256(1) << 160))
+            );
+        }
+    }
+
     function test_FailedProtectionAttempt_PositionMismatchFailsAndPaysCleanerExactlyOnce() public {
         _startRecordingLogs();
         uint64 protectionId = _createSingleLegProtection(CfdTypes.Side.LONG, LONG_TAKE_PROFIT, 0);

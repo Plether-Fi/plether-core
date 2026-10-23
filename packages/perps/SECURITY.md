@@ -454,6 +454,10 @@ attempt settles its authenticated zero Order record, pays no caller, and relatch
 position terminally fails it with the same zero-bounty outcome. Retry requires the exact protected position and
 creates a fresh zero Order record without another trader debit. The former retained-bounty disposition is absent from
 the current enum; archived decoders remain necessary for older receipts.
+Expired reservation-mismatch recovery uses the same exact-position relatch decision before deleting the child. The
+old order remains terminal with an `ExpiredReservationMismatch` receipt; disputed reservations retain their existing
+quarantine/ownership rules. Relatching neither repairs the ledger nor invents a refund, and receipt failure rolls back
+both recovery and the protection transition. Fresh retry eligibility does not bypass any remaining accounting checks.
 
 Existing-position protection creation remains available in degraded mode because it adds no exposure. Router pause,
 frozen-oracle policy, freshness, position/queue checks, and post-lock collateral admission still apply. Attached opening
