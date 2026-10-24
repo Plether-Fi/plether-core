@@ -466,8 +466,10 @@ contract ExpiredBatchBountiesTest is BasePerpTest {
         vm.warp(1001);
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+        assertEq(result.orderId, 1);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         assertEq(clearinghouse.balanceUsdc(keeper), keeperBalanceBefore);
         assertEq(clearinghouse.balanceUsdc(alice), traderBalanceBefore);

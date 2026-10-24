@@ -20,7 +20,7 @@ import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 
-import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
@@ -98,7 +98,7 @@ contract StalenessGriefTest is BasePerpTest {
         updateData[0] = "";
     }
 
-    function test_LiveStaleOracleRevertsInsteadOfCancelling() public {
+    function test_LiveStaleOracleLeavesOrderPendingInsteadOfCancelling() public {
         _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxExecutionWindowSeconds = 300;
@@ -120,12 +120,14 @@ contract StalenessGriefTest is BasePerpTest {
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         vm.prank(attacker);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, empty);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, empty);
+        assertEq(result.orderId, 1);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         address aliceAccount = alice;
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
-        assertEq(size, 0, "stale oracle should leave the order unexecuted when execution reverts");
+        assertEq(size, 0, "stale oracle should leave the order unexecuted while history is unavailable");
     }
 
 }
