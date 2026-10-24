@@ -696,19 +696,21 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure returns (bool satisfied) {
-        CfdEnginePlanTypes.SideSnapshot memory long = snap.longSide;
-        CfdEnginePlanTypes.SideSnapshot memory short = snap.shortSide;
-        if (delta.posSide == CfdTypes.Side.LONG) {
-            long.openInterest += delta.sideOiIncrease;
-            long.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            long.totalMargin = delta.sideTotalMarginAfterOpen;
-        } else {
-            short.openInterest += delta.sideOiIncrease;
-            short.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            short.totalMargin = delta.sideTotalMarginAfterOpen;
+        uint256 postMaxLiability;
+        {
+            CfdEnginePlanTypes.SideSnapshot memory long = snap.longSide;
+            CfdEnginePlanTypes.SideSnapshot memory short = snap.shortSide;
+            if (delta.posSide == CfdTypes.Side.LONG) {
+                long.openInterest += delta.sideOiIncrease;
+                long.maxProfitUsdc += delta.sideMaxProfitIncrease;
+                long.totalMargin = delta.sideTotalMarginAfterOpen;
+            } else {
+                short.openInterest += delta.sideOiIncrease;
+                short.maxProfitUsdc += delta.sideMaxProfitIncrease;
+                short.totalMargin = delta.sideTotalMarginAfterOpen;
+            }
+            postMaxLiability = SolvencyAccountingLib.getMaxLiability(long.maxProfitUsdc, short.maxProfitUsdc);
         }
-
-        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(long.maxProfitUsdc, short.maxProfitUsdc);
 
         uint256 directlyCreditedUsdc =
             delta.tradeCostUsdc > 0 ? Math.min(uint256(delta.tradeCostUsdc), delta.executionFeeUsdc) : 0;
