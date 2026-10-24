@@ -7,6 +7,7 @@ import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
@@ -555,6 +556,11 @@ contract OrderRouterAgentV2Test is BasePerpTest {
     }
 
     function test_BulkCleanupRejectsOversizedList() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxPruneOrdersPerCall = 256;
+        _setRouterConfig(config);
+        assertEq(router.maxPruneOrdersPerCall(), 256);
+
         uint64[] memory ids = new uint64[](65);
         vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__TooManyCleanupIds.selector, 64));
         router.clearInvalidOrders(ids);

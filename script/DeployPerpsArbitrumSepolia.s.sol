@@ -126,7 +126,6 @@ contract ArbitrumSepoliaReleaseRouter is OrderRouter {
         )
     {
         minOpenNotionalUsdc = 1000e6;
-        require(pletherOracle.adverseConfidenceMultiplierBps() == 2500, "Unexpected initial adverse multiplier");
     }
 
 }
@@ -285,6 +284,10 @@ contract DeployPerpsArbitrumSepolia is Script {
             expectedRouter, address(deployed.engine), address(deployed.clearinghouse), address(deployed.housePool)
         );
         deployed.liquidationBatchSidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
+        require(
+            PletherOracle(deployed.pletherOracle).adverseConfidenceMultiplierBps() == 2500,
+            "Unexpected initial adverse multiplier"
+        );
         deployed.router = new ArbitrumSepoliaReleaseRouter(
             address(deployed.engine),
             address(deployed.engineLens),
