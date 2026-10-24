@@ -329,14 +329,26 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         return _delegateRecovery(msg.data);
     }
 
+    function clearInvalidOrders(
+        uint64[] calldata
+    ) external onlyDelegateCall returns (uint256 nextIndex, uint256 cleared) {
+        return abi.decode(_delegateRecoveryCall(msg.data), (uint256, uint256));
+    }
+
     function _delegateRecovery(
         bytes memory data
     ) private returns (OrderV3Types.ExecutionResult memory) {
-        (bool success, bytes memory result) = recoverySidecar.delegatecall(data);
+        return abi.decode(_delegateRecoveryCall(data), (OrderV3Types.ExecutionResult));
+    }
+
+    function _delegateRecoveryCall(
+        bytes memory data
+    ) private returns (bytes memory result) {
+        bool success;
+        (success, result) = recoverySidecar.delegatecall(data);
         if (!success) {
             assembly ("memory-safe") { revert(add(result, 32), mload(result)) }
         }
-        return abi.decode(result, (OrderV3Types.ExecutionResult));
     }
 
     /// @notice Executes or terminally settles one order inside a Router self-call rollback frame.

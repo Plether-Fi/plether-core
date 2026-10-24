@@ -8,6 +8,7 @@ import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
+import {IOrderRouterExecutionHost} from "@plether/perps/interfaces/IOrderRouterExecutionHost.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -446,6 +447,151 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(uint8(outcome.priceSource), uint8(OrderV3Types.PriceSource.None));
         assertEq(outcome.executionPrice, 0);
         assertEq(outcome.executor, KEEPER);
+    }
+
+    function test_BulkCleanupRemovesExpiredTailWithoutBlockingLiveHead() public {
+        _startRecordingLogs();
+        OrderV3Types.OrderRequest memory headRequest = _openRequest(bytes32("bulk-live-head"));
+        OrderV3Types.OrderRequest memory tailRequest = _openRequest(bytes32("bulk-expired-tail"));
+        tailRequest.bounds.executionWindowSeconds = 1;
+        vm.prank(ALICE);
+        uint64 headId = router.commitOrder(headRequest);
+        vm.prank(BOB);
+        uint64 tailId = router.commitOrder(tailRequest);
+        tailRequest.clientOrderId = bytes32("bulk-expired-tail-2");
+        vm.prank(BOB);
+        uint64 secondTailId = router.commitOrder(tailRequest);
+        uint256 keeperBefore = _settlementBalance(KEEPER);
+
+        uint64[] memory ids = new uint64[](5);
+        ids[0] = tailId;
+        ids[1] = secondTailId;
+        ids[2] = tailId;
+        ids[3] = 999;
+        ids[4] = headId;
+        vm.warp(book.orderTiming(tailId).executionDeadline);
+        vm.prank(KEEPER);
+        (uint256 nextIndex, uint256 cleared) = router.clearInvalidOrders(ids);
+        assertEq(nextIndex, ids.length);
+        assertEq(cleared, 0, "deadline equality must keep the order pending");
+
+        vm.warp(block.timestamp + 1);
+        vm.prank(KEEPER);
+        (nextIndex, cleared) = router.clearInvalidOrders(ids);
+        assertEq(nextIndex, ids.length);
+        assertEq(cleared, 2);
+        assertEq(router.nextExecuteId(), headId, "out-of-order cleanup must preserve the live head");
+        assertEq(router.pendingOrderCounts(BOB), 0);
+        assertEq(router.pendingOrderCounts(ALICE), 1);
+        assertEq(_remainingCommittedMargin(tailId), 0);
+        assertEq(_remainingCommittedMargin(secondTailId), 0);
+        OrderV3Types.CompactOutcome memory outcome = _verifiedOutcome(book, tailId);
+        OrderV3Types.CompactOutcome memory secondOutcome = _verifiedOutcome(book, secondTailId);
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Expired));
+        assertEq(uint8(secondOutcome.reason), uint8(OrderV3Types.TerminalReason.Expired));
+        assertEq(outcome.executor, KEEPER);
+        assertEq(_settlementBalance(KEEPER) - keeperBefore, outcome.bountyUsdc + secondOutcome.bountyUsdc);
+
+        vm.roll(block.number + 1);
+        vm.prank(KEEPER);
+        OrderV3Types.ExecutionResult memory headResult =
+            router.executeOrder(headId, _mockPythUpdateData(EXECUTION_PRICE));
+        assertEq(uint8(headResult.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+    }
+
+    function test_BulkCleanupRemovesNonHeadConfigMismatch() public {
+        _startRecordingLogs();
+        engineAdmin.proposeCalendarConfig(_engineCalendarConfig());
+        uint256 activationTime = engineAdmin.calendarConfigActivationTime();
+        vm.warp(activationTime - 1);
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bulk-config-head"));
+        vm.prank(ALICE);
+        uint64 headId = router.commitOrder(request);
+        request.clientOrderId = bytes32("bulk-config-tail");
+        vm.prank(BOB);
+        uint64 tailId = router.commitOrder(request);
+        vm.warp(activationTime);
+        engineAdmin.finalizeCalendarConfig();
+        bytes32 observedConfigHash = book.currentExecutionConfigHash();
+
+        uint64[] memory ids = new uint64[](1);
+        ids[0] = tailId;
+        vm.prank(KEEPER);
+        (uint256 nextIndex, uint256 cleared) = router.clearInvalidOrders(ids);
+        assertEq(nextIndex, 1);
+        assertEq(cleared, 1);
+        assertEq(router.nextExecuteId(), headId);
+        assertEq(router.pendingOrderCounts(ALICE), 1);
+        assertEq(router.pendingOrderCounts(BOB), 0);
+        OrderV3Types.CompactOutcome memory outcome = _verifiedOutcome(book, tailId);
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.ConfigMismatch));
+        assertEq(outcome.observedConfigHash, observedConfigHash);
+        assertEq(outcome.executor, KEEPER);
+    }
+
+    function test_BulkCleanupKeepsRiskOffOnlyOrderAndRefundsExpiredOverlap() public {
+        _startRecordingLogs();
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bulk-risk-off"));
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        uint256 keeperBefore = _settlementBalance(KEEPER);
+        routerAdmin.pause();
+        uint64[] memory ids = new uint64[](1);
+        ids[0] = orderId;
+        vm.prank(KEEPER);
+        (, uint256 cleared) = router.clearInvalidOrders(ids);
+        assertEq(cleared, 0, "risk-off alone is outside this endpoint");
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
+
+        vm.warp(uint256(book.orderTiming(orderId).executionDeadline) + 1);
+        vm.prank(KEEPER);
+        (, cleared) = router.clearInvalidOrders(ids);
+        assertEq(cleared, 1);
+        OrderV3Types.CompactOutcome memory outcome = _verifiedOutcome(book, orderId);
+        assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.RiskOff));
+        assertEq(outcome.bountyRecipient, ALICE);
+        assertEq(uint8(outcome.bountyDisposition), uint8(OrderV3Types.BountyDisposition.RefundedToAccount));
+        assertEq(_settlementBalance(KEEPER), keeperBefore);
+    }
+
+    function test_BulkCleanupRejectsOversizedList() public {
+        uint64[] memory ids = new uint64[](65);
+        vm.expectRevert(abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__TooManyCleanupIds.selector, 64));
+        router.clearInvalidOrders(ids);
+    }
+
+    function test_BulkCleanupKeepsSettledPrefixWhenLaterItemFails() public {
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bulk-prefix-first"));
+        request.bounds.executionWindowSeconds = 1;
+        vm.prank(ALICE);
+        uint64 firstId = router.commitOrder(request);
+        request.clientOrderId = bytes32("bulk-prefix-second");
+        vm.prank(BOB);
+        uint64 secondId = router.commitOrder(request);
+        vm.warp(uint256(book.orderTiming(secondId).executionDeadline) + 1);
+
+        uint64[] memory ids = new uint64[](2);
+        ids[0] = firstId;
+        ids[1] = secondId;
+        vm.mockCallRevert(
+            address(router),
+            abi.encodeWithSelector(IOrderRouterExecutionHost.executeOrderItemFromSidecar.selector, secondId),
+            bytes("forced second-item failure")
+        );
+        vm.prank(KEEPER);
+        (uint256 nextIndex, uint256 cleared) = router.clearInvalidOrders(ids);
+        assertEq(nextIndex, 1);
+        assertEq(cleared, 1);
+        assertEq(uint8(book.lifecycleStatus(firstId)), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(book.lifecycleStatus(secondId)), uint8(OrderV3Types.LifecycleStatus.Pending));
+
+        vm.clearMockedCalls();
+        uint64[] memory remaining = new uint64[](1);
+        remaining[0] = secondId;
+        vm.prank(KEEPER);
+        (nextIndex, cleared) = router.clearInvalidOrders(remaining);
+        assertEq(nextIndex, 1);
+        assertEq(cleared, 1);
     }
 
     /// @dev Synthetic oracle callback: a matured owner action changes configuration during oracle work.
