@@ -105,8 +105,9 @@ contract FuturePublishDelayTest is BasePerpTest {
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         assertEq(router.nextExecuteId(), 1, "Future publish time must leave the order pending");
     }
@@ -565,8 +566,9 @@ contract PostCommitTimestampBoundsTest is BasePerpTest {
 
         bytes[] memory updateData = new bytes[](1);
         updateData[0] = "";
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
     }
 
 }
@@ -979,8 +981,9 @@ contract StaleExecutionReservationTest is Test {
         vm.warp(t0 + 61);
         vm.roll(101);
         vm.prank(keeper);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         assertEq(
             clearinghouse.balanceUsdc(keeper) - keeperUsdcBefore,

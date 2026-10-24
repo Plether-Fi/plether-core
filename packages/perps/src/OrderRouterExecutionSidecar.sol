@@ -210,7 +210,12 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
 
         IOrderRouterExecutionHost.OrderView memory target = host.getOrderForSidecar(head);
         _requireOrderView(head, target);
-        OracleResult memory oracleResult = _prepareSingleOracle(host, target.order, executor, pythUpdateData);
+        OracleResult memory oracleResult;
+        (result.pendingReason, oracleResult) = _prepareSingleOracle(host, target.order, executor, pythUpdateData);
+        if (result.pendingReason != OrderV3Types.PendingReason.None) {
+            _refundEth(host, executor, msg.value - oracleResult.fee);
+            return _pendingResult(head, result.pendingReason);
+        }
         IOrderRouterExecutionHost.ItemRequest memory executionRequest =
             _executionItem(host, target.order, oracleResult, executor);
         uint256 executionGas = _itemCallGas();
@@ -963,18 +968,19 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         CfdTypes.Order memory order,
         address executor,
         bytes[] calldata pythUpdateData
-    ) private returns (OracleResult memory result) {
+    ) private returns (OrderV3Types.PendingReason stopReason, OracleResult memory result) {
         IPletherOracle oracle = IPletherOracle(host.pletherOracle());
         result.fee = oracle.getOrderExecutionFee(pythUpdateData);
         if (msg.value < result.fee) {
             revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, result.fee);
         }
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
-            oracle.updateOrderExecutionPrice{value: result.fee}(executor, pythUpdateData, _oracleRequest(order, true));
-        if (!ok) {
-            _revertOrderExecutionStale(oracle);
-        }
+            oracle.updateOrderExecutionPrice{value: result.fee}(executor, pythUpdateData, _oracleRequest(order, false));
         result = _oracleResult(snapshot);
+        if (!ok) {
+            // The Oracle already refunded or deferred this allocation; the caller refunds only excess funding.
+            return (OrderV3Types.PendingReason.HistoricalPriceUnavailable, result);
+        }
         _updateEngineMark(host, result);
     }
 
@@ -1089,18 +1095,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             return false;
         }
         return uint256(cache.publishTime) <= uint256(commitTime) + oracle.orderSettlementWindow();
-    }
-
-    function _revertOrderExecutionStale(
-        IPletherOracle oracle
-    ) private view {
-        revert IPletherOracle.PletherOracle__StalePrice(
-            IPletherOracle.PriceMode.OrderExecution,
-            bytes32(0),
-            block.timestamp,
-            oracle.orderExecutionStalenessLimit(),
-            block.timestamp
-        );
     }
 
     function _validateBatchBounds(
