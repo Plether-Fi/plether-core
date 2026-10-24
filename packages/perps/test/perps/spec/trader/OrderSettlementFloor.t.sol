@@ -302,7 +302,7 @@ contract OrderSettlementFloorTest is SourceBoundBountyFixture {
                 IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
                 config.maxPendingOrders += 1;
                 routerAdmin.proposeRouterConfig(config);
-                vm.warp(vm.getBlockTimestamp() + 48 hours + 1);
+                vm.warp(vm.getBlockTimestamp() + 72 hours + 1);
                 r = _request();
             }
             uint64 id = _commit(r);

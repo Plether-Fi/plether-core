@@ -522,7 +522,7 @@ contract FadStalenessTest is BasePerpTest {
 
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxExecutionWindowSeconds = 300;
-        vm.warp(fridayFadStart - 48 hours - 1);
+        vm.warp(fridayFadStart - 72 hours - 1);
         routerAdmin.proposeRouterConfig(config);
         vm.warp(fridayFadStart);
         routerAdmin.finalizeRouterConfig();

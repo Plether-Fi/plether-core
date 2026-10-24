@@ -126,7 +126,7 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
     }
 
     function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
     }
 
     function _configureBroadSeniorCapacity() internal {
@@ -153,7 +153,8 @@ contract KeeperFeeRefundTest is RecordedOrderReceipts {
     }
 
     function setUp() public {
-        vm.warp(1_709_532_000);
+        // Both 72-hour configuration waits must finish before the Friday market close.
+        vm.warp(1_709_532_000 - 2 days);
         usdc = new MockUSDC();
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({

@@ -386,7 +386,7 @@ next successful crystallization. Shares minted at zero NAV initially have no ass
 recovery like ordinary transferable Junior shares.
 
 Only the current HousePool owner may propose, replace, cancel, or finalize Junior fee configuration. Changes have a
-48-hour delay, `maintenanceFeeAprBps` is capped at `1_000`, and a nonzero rate requires a valid nonzero recipient.
+72-hour delay, `maintenanceFeeAprBps` is capped at `10_000`, and a nonzero rate requires a valid nonzero recipient.
 Finalization first pays elapsed time under the old rate and recipient, preventing retroactive enablement or recipient
 rotation. This mechanism is not a performance fee: it has no profit test, Junior HWM, equalization, cost basis, or
 per-holder accounting.
@@ -553,7 +553,7 @@ Default configured fees:
 
 Governance model:
 
-- `HousePool` governance may update these fees through the same 48-hour timelock pattern used for other LP-facing config,
+- `HousePool` governance may update these fees through the same 72-hour timelock pattern used for other LP-facing config,
 - the active fee is zero whenever `oracleFrozen == false`, even during the FAD-only shoulder windows.
 
 Accounting rules:
@@ -918,7 +918,7 @@ Close and liquidation should share the same economic assumptions wherever the qu
 Successful ordinary close planning uses physical PnL pledge and same-account claim. No close-bounty escrow exists.
 The enclosing item rolls back settlement if later receipt finalization or queue cleanup fails.
 
-Every voluntary close uses the normal signed VPI curve and the lifetime rebate clamp. While `oracleFrozen`, the same VPI result is combined with a fixed spread on reduced notional. `frozenCloseSpreadBps` defaults to `50` bps (0.50%), is part of the 48-hour timelocked engine risk config, must be nonzero, and is hard-capped at `1,000` bps (10%). For an oracle-frozen voluntary close, the spread replaces the Pyth adverse-confidence price adjustment and is allocated exclusively to LPs; live/FAD-only closes and liquidations retain adverse-confidence pricing.
+Every voluntary close uses the normal signed VPI curve and the lifetime rebate clamp. While `oracleFrozen`, the same VPI result is combined with a fixed spread on reduced notional. `frozenCloseSpreadBps` defaults to `50` bps (0.50%), is part of the 72-hour timelocked engine risk config, must be nonzero, and is hard-capped at `1,000` bps (10%). For an oracle-frozen voluntary close, the spread replaces the Pyth adverse-confidence price adjustment and is allocated exclusively to LPs; live/FAD-only closes and liquidations retain adverse-confidence pricing.
 
 When a close realizes a loss:
 

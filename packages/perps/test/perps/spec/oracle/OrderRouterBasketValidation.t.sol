@@ -22,7 +22,7 @@ contract OrderRouterBasketValidationTest is OrderRouterPythTestBase {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.basketMaxConfidenceRatioBps = 100;
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(SETUP_TIMESTAMP + 48 hours + 1);
+        vm.warp(SETUP_TIMESTAMP + 72 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
         vm.prank(alice);

@@ -78,7 +78,7 @@ contract PerpsPublicLensTest is BasePerpTest {
         IHousePool.PoolConfig memory poolConfig = _currentPoolConfig();
         poolConfig.markStalenessLimit = type(uint256).max;
         pool.proposePoolConfig(poolConfig);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         engineAdmin.finalizeFreshnessConfig();
         pool.finalizePoolConfig();
 

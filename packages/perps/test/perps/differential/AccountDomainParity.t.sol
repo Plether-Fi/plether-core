@@ -128,7 +128,7 @@ contract AccountDomainParityTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.markStalenessLimit = 30;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         pool.finalizePoolConfig();
 
         address trader = address(0xD011A4);

@@ -280,7 +280,7 @@ contract PerpsForkTest is Test {
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         routerAdmin.finalizeRouterConfig();
     }
 

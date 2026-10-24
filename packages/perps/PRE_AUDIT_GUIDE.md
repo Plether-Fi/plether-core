@@ -68,7 +68,7 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold, stops new Senior requests, and permits refunds of existing Senior commitments; Junior requests, reconciliation, trading, and funded claims remain live |
 | `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
 | `TrancheVault.requestRedeemFromClaimableDeposit` | source controller or its approved operator | consumes one finalized source lot only after its activation-aged cooldown and preserves the controller on the destination redemption request; no token allowance or wallet custody is involved |
-| `TrancheVault.proposeMaintenanceFeeConfig` / `finalizeMaintenanceFeeConfig` / `cancelMaintenanceFeeConfigProposal` | current `HousePool.owner()` only, Junior vault only | 48-hour delayed configuration; finalization checkpoints the old rate/recipient before applying the new pair; no arbitrary mint or USDC-transfer authority |
+| `TrancheVault.proposeMaintenanceFeeConfig` / `finalizeMaintenanceFeeConfig` / `cancelMaintenanceFeeConfigProposal` | current `HousePool.owner()` only, Junior vault only | 72-hour delayed configuration; finalization checkpoints the old rate/recipient before applying the new pair; no arbitrary mint or USDC-transfer authority |
 | `HousePoolRedemptionMathSidecar` pure functions | permissionless | stateless EIP-170 size split used by the HousePool immutable binding; fixed implementation id, no storage, authorization, setter, delegatecall, or upgrade path |
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
 | `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, the public `MONITOR()` binding remains readable while dependency bindings stay internal, and there are no setters or delegatecall paths |
@@ -219,7 +219,7 @@ Reachability note:
 - Chosen tradeoff: opens are blocked, but closes and liquidations may proceed inside explicit frozen/FAD windows.
 - New risk: execution may rely on older marks than the live regime would permit, and the fixed spread does not scale with staleness inside that window.
 - Pricing rule: voluntary closes keep normal signed VPI and the lifetime rebate clamp. During `oracleFrozen`, the fixed `frozenCloseSpreadBps` replaces the Pyth adverse-confidence price shift; live/FAD-only closes and liquidations retain adverse-confidence pricing.
-- Ownership rule: paid spread belongs only to LPs and never credits protocol treasury. `frozenCloseSpreadBps` defaults to `50`, is 48-hour timelocked, must be nonzero, and is capped at `1,000` bps.
+- Ownership rule: paid spread belongs only to LPs and never credits protocol treasury. `frozenCloseSpreadBps` defaults to `50`, is 72-hour timelocked, must be nonzero, and is capped at `1,000` bps.
 - Liveness rule: partial closes must fully settle separate action charges, including frozen spread, but price loss above the account cap is written off. Terminal full closes may waive an uncollectible action remainder. Neither creates a protocol liability or terminal deficit. Liquidations do not assess the spread.
 - Protecting invariant: frozen execution remains close-only, and close preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`.
 
@@ -238,7 +238,7 @@ Reachability note:
 - Chosen tradeoff: let `P = HousePool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`,
   `L = max(bullMaxProfit, bearMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`. Opens/increases require
   post-op `E >= L + B`, and LP redemption funding reserves `C + L + B`.
-- Governance rule: the rate defaults to `25` bps and the 48-hour timelocked `EngineRiskConfig` accepts `0..1,000` bps,
+- Governance rule: the rate defaults to `25` bps and the 72-hour timelocked `EngineRiskConfig` accepts `0..1,000` bps,
   inclusive.
 - Ownership rule: `B` is not a trader or LP liability, terminal NAV, yield, or a clearinghouse/custody bucket. It
   constrains admission and withdrawable cash only.
@@ -295,7 +295,7 @@ Reachability note:
 
 - Ownership choice: the fee is paid only by diluting Junior supply; it does not move USDC or alter principal, HWM,
   reserves, claimant buckets, or waterfall arithmetic.
-- Governance boundary: the current HousePool owner controls a 48-hour delayed configuration capped at `1,000 bps`
+- Governance boundary: the current HousePool owner controls a 72-hour delayed configuration capped at `10,000 bps` (100%)
   nominal APR. The generic Junior constructor accepts a zero rate with either zero or a valid nonzero recipient; this
   release initializes `0 bps` with the deployment-time protocol treasury as recipient.
 - Pricing invariant: every Junior conversion and epoch quote uses raw supply plus pending fee shares. Pending deposits

@@ -391,7 +391,7 @@ A_{\mathrm{physical}}\ge
 +B_{\mathrm{settle}}.
 \]
 
-The deployed default is \(\beta_{\mathrm{buf}}=25\) basis points. The 48-hour
+The deployed default is \(\beta_{\mathrm{buf}}=25\) basis points. The 72-hour
 timelocked Engine risk config accepts the inclusive range from zero to 1,000 basis
 points (10%). Zero disables this additional headroom.
 
@@ -782,8 +782,8 @@ admission and liquidity controls, not changes to the waterfall.
 Junior may additionally pay a governance-configured maintenance fee through
 share dilution. Share conversions include accrued, unminted fee shares; actual
 minting occurs at specified supply mutations or configuration finalization.
-The fee uses completed Unix hours, is capped at a 1,000-basis-point nominal APR,
-and has a 48-hour configuration delay. Each checkpoint charges at most 8,760
+The fee uses completed Unix hours, is capped at a 10,000-basis-point (100%) nominal APR,
+and has a 72-hour configuration delay. Each checkpoint charges at most 8,760
 hours and forgives older time. It transfers no USDC and changes neither tranche
 principal nor the Senior high-water mark. The current Arbitrum Sepolia
 deployment script initializes a zero-basis-point rate with the protocol treasury

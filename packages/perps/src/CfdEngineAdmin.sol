@@ -10,14 +10,14 @@ import {ICfdEngineAdminHost} from "@plether/perps/interfaces/ICfdEngineAdminHost
 /// @title CfdEngineAdmin
 /// @notice Timelocked, two-step owner-controlled administrator for risk, FAD calendar, and mark freshness.
 /// @dev Risk, calendar, and freshness proposals use independent single-slot queues. Re-proposing a category overwrites
-///      its pending value and restarts that category's 48-hour delay. Proposals survive ownership transfer, so the
+///      its pending value and restarts that category's 72-hour delay. Proposals survive ownership transfer, so the
 ///      current owner at execution time may finalize or cancel them. Finalization is permitted at or after its activation
 ///      timestamp and proposals do not expire. Basis-point values use a 10,000 denominator, WAD values use 1e18,
 ///      USDC amounts use 6 decimals, and timestamps/durations use seconds.
 contract CfdEngineAdmin is Ownable2Step {
 
     /// @notice Delay between a proposal and its earliest finalization, in seconds.
-    uint256 public constant TIMELOCK_DELAY = 48 hours;
+    uint256 public constant TIMELOCK_DELAY = 72 hours;
     /// @notice Maximum oracle-frozen close spread, in basis points (10%).
     uint256 public constant MAX_FROZEN_CLOSE_SPREAD_BPS = 1000;
     /// @notice Maximum protected settlement buffer, in basis points (10%).

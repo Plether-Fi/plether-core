@@ -64,7 +64,7 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
     }
 
     function _warpPastTimelock() internal {
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
     }
 
     function _configureBroadSeniorCapacity() internal {

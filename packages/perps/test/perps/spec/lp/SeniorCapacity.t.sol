@@ -16,11 +16,18 @@ contract SeniorCapacityTest is BasePerpTest {
 
     using stdStorage for StdStorage;
 
-    uint256 internal constant SATURDAY_FROZEN = 1_710_021_600;
+    uint256 internal constant SATURDAY_FROZEN = 1_710_021_600 + 7 days;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
     address internal constant CAROL = address(0xCA401);
+
+    function setUp() public override {
+        super.setUp();
+        // Start on Tuesday so successive 72-hour proposals mature on Friday and Monday.
+        vm.warp(block.timestamp + 1 days);
+        _refreshMark();
+    }
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
         return 0;

@@ -236,7 +236,7 @@ contract AdminConfigVersionTest is Test {
     }
 
     function _elapseTimelock() private {
-        vm.warp(block.timestamp + 48 hours);
+        vm.warp(block.timestamp + 72 hours);
     }
 
     function _riskConfig() private pure returns (ICfdEngineAdminHost.EngineRiskConfig memory config) {

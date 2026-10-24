@@ -813,7 +813,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         config.frozenCloseSpreadBps = engine.frozenCloseSpreadBps();
         config.settlementBufferBps = engine.settlementBufferBps();
         engineAdmin.proposeRiskConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         engineAdmin.finalizeRiskConfig();
     }
 
@@ -821,7 +821,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         ICfdEngineAdminHost.EngineCalendarConfig memory config
     ) internal {
         engineAdmin.proposeCalendarConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         engineAdmin.finalizeCalendarConfig();
     }
 
@@ -829,7 +829,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         ICfdEngineAdminHost.EngineFreshnessConfig memory config
     ) internal {
         engineAdmin.proposeFreshnessConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         engineAdmin.finalizeFreshnessConfig();
     }
 
@@ -855,7 +855,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         IOrderRouterAdminHost.RouterConfig memory config
     ) internal {
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         routerAdmin.finalizeRouterConfig();
     }
 

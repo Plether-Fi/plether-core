@@ -104,7 +104,7 @@ contract StalenessGriefTest is BasePerpTest {
         config.maxExecutionWindowSeconds = 300;
         OrderRouterAdmin admin = OrderRouterAdmin(router.admin());
         admin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         admin.finalizeRouterConfig();
 
         _fundJunior(bob, 1_000_000e6);

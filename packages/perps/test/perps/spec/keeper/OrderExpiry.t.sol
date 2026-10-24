@@ -43,7 +43,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         routerAdmin.finalizeRouterConfig();
         assertEq(router.openOrderExecutionBountyBps(), 1);
         assertEq(router.maxOpenOrderExecutionBountyUsdc(), 200_000);
@@ -121,7 +121,7 @@ contract StaleOrderExpiryTest is BasePerpTest {
         routerAdmin.proposeRouterConfig(config);
 
         routerAdmin.proposeRouterConfig(config);
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         routerAdmin.finalizeRouterConfig();
         assertEq(router.maxExecutionWindowSeconds(), 600);
     }

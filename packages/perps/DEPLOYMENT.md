@@ -166,7 +166,7 @@ recompute the prediction, and redeploy them; neither immutable binding can be re
 The three Arbitrum Sepolia wrappers modify constructor state only and add no post-deployment setter. The shared
 HousePool, PletherOracle, and OrderRouter constructors and generic defaults remain unchanged. The release Router
 constructor also rejects an oracle that does not already expose the exact `2,500`-bps adverse multiplier. After
-construction, all configuration changes use the unchanged HousePool and RouterAdmin 48-hour governance paths.
+construction, all configuration changes use the unchanged HousePool and RouterAdmin 72-hour governance paths.
 
 The Router constructor creates RouterAdmin and the stateful position-protection Book. That Book requires no separate deployment
 transaction or mutable wiring. Discover it from `OrderRouter.positionProtectionBook()` and verify its immutable
@@ -339,7 +339,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 
 `frozenCloseSpreadBps = 50` charges a fixed 0.50% spread on reduced notional for voluntary close/reduce execution only while `oracleFrozen`. Normal signed VPI and its lifetime rebate clamp remain active. For oracle-frozen voluntary closes, the spread replaces rather than compounds with the Pyth adverse-confidence adjustment; live/FAD-only closes and liquidations retain that adjustment. The spread belongs to LPs rather than protocol treasury and does not apply to liquidations. A terminal full close waives any uncollectible portion without creating a protocol liability or terminal deficit, while a partial close must settle this separate spread obligation in full. Price loss beyond the terminal collectible cap is a diagnostic write-off and does not block the partial close.
 
-`frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 48-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
+`frozenCloseSpreadBps` is part of `CfdEngineAdmin.EngineRiskConfig` and therefore uses the 72-hour propose/finalize timelock. Deployments and updates reject zero and values above `1_000` bps (10%). `keeperShareBps` and `protocolShareBps` use the same timelock; both may be zero, but their sum must not exceed `10_000`. Each configured allocation rounds down and LPs receive the exact liquidation-charge remainder.
 
 The release initializes the Junior vault constructor at `0` bps with the Engine's current protocol treasury as
 recipient. Senior is constructed with `0/address(0)` and registered first so the Junior constructor can reject all
@@ -349,9 +349,9 @@ with a separately timelocked Junior recipient rotation if that recipient is to f
 vault constructor also permits a zero rate with a zero recipient; this release retains the treasury snapshot while
 the fee is disabled so a later rate change can retain the same recipient.
 
-After deployment, the current HousePool owner may propose a rate/recipient pair, wait 48 hours, verify the exact pending
+After deployment, the current HousePool owner may propose a rate/recipient pair, wait 72 hours, verify the exact pending
 values, and finalize it. Rates are
-capped at `1,000 bps` nominal APR and a nonzero rate requires a valid nonzero recipient. Finalization crystallizes
+capped at `10,000 bps` (100%) nominal APR and a nonzero rate requires a valid nonzero recipient. Finalization crystallizes
 elapsed completed-hour fees under the old pair before applying the new pair. The recipient receives ordinary Junior
 shares, not USDC, and must use the normal asynchronous redemption lifecycle. There is no public fee checkpoint;
 materialization occurs before an actual Junior supply mutation or during configuration finalization. Each checkpoint
@@ -571,7 +571,7 @@ The deployment transaction installs exact HousePool `$40M/80%` limits and Router
 `deployed` verifier, then bootstrap with `ACTIVATE_TRADING=false`; bootstrap verifies the live values, requires no
 outstanding HousePool or Router proposal, initializes Junior then Senior, and funds any configured test users. Run the
 `seeded` verifier, change `ACTIVATE_TRADING=true`, rerun bootstrap once more, and run the `active` verifier. There is no
-initial configuration proposal or 48-hour release wait.
+initial configuration proposal or 72-hour release wait.
 
 ## Bootstrap Behavior
 
@@ -669,7 +669,7 @@ variants require archived decoders. The receipt and execution-config hash domain
 hashes with an earlier stack.
 
 Position protection is available immediately on an unpaused fresh Router; no protection-specific governance proposal
-or timelock is required. The trigger bounty remains part of the ordinary 48-hour timelocked
+or timelock is required. The trigger bounty remains part of the ordinary 72-hour timelocked
 `OrderRouterAdmin.RouterConfig`. Changing that bounty requires a complete configuration built from current onchain
 values, followed by the normal proposal/finalization path. Finalization replaces the complete router configuration.
 Router pause blocks new protection creation, replacement, and attached opens. Cancellation, valid triggering, linked
@@ -699,7 +699,7 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
   terminal NAV book, clearinghouse, pool, both vaults, router/oracle, sidecars, coordinator, and lenses as a single
   versioned unit.
 - Deploy Junior with the approved `0`-bps fee and the exact deployment-time protocol-treasury recipient. Do not add a
-  bootstrap fee transaction. Any later rate or recipient change is a separate 48-hour governance operation.
+  bootstrap fee transaction. Any later rate or recipient change is a separate 72-hour governance operation.
 - `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
   price cap, size quantum, and empty initial state were verified by the deploy transaction.
 - The bootstrap script only mints mock USDC. It does not fund users with ETH.

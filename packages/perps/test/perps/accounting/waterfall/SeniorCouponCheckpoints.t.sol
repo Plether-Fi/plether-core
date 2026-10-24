@@ -26,7 +26,7 @@ contract StaleRateFinalizationTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 121);
+        vm.warp(block.timestamp + 72 hours + 121);
         vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
@@ -46,6 +46,8 @@ contract StaleRateFinalizationTest is BasePerpTest {
         _fundTrader(trader, 50_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
+        // Let the second 72-hour proposal mature on Monday under the live mark policy.
+        vm.warp(block.timestamp + 1 days);
         config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
@@ -109,7 +111,7 @@ contract StaleLpSettlementCouponTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 800; // 8% annualized target coupon
         pool.proposePoolConfig(config);
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         pool.finalizePoolConfig();
 
         _fundTrader(address(0xBBB), 10_000 * 1e6);
@@ -123,7 +125,7 @@ contract StaleLpSettlementCouponTest is BasePerpTest {
         uint256 reconcileBeforeStale = pool.lastReconcileTime();
 
         // Make the mark stale while remaining before Friday's New York-time FAD shoulder.
-        _warpForward(2 days);
+        _warpForward(1 days);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -165,7 +167,7 @@ contract SeniorRedemptionHighWaterTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 800; // 8% annualized target coupon
         pool.proposePoolConfig(config);
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         pool.finalizePoolConfig();
 
         _warpForward(90 days);
@@ -219,7 +221,7 @@ contract StaleRateCheckpointTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 121);
+        vm.warp(block.timestamp + 72 hours + 121);
         vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
@@ -286,7 +288,7 @@ contract StaleConfigurationCouponTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1600;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 121);
+        vm.warp(block.timestamp + 72 hours + 121);
         vm.expectRevert(IHousePool.HousePool__MarkPriceStale.selector);
         pool.finalizePoolConfig();
 
@@ -436,7 +438,7 @@ contract FrozenCouponCheckpointTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
@@ -525,7 +527,7 @@ contract FrozenFreshnessCouponTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000; // 10% annualized target coupon
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
@@ -564,7 +566,7 @@ contract FrozenFreshnessCouponTest is BasePerpTest {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.seniorRateBps = 1000; // 10% annualized target coupon
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();

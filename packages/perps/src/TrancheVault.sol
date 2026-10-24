@@ -35,8 +35,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
 
     uint256 public constant DEPOSIT_COOLDOWN = 1 hours;
     uint256 public constant LP_REQUEST_CUTOFF_DURATION = 5 minutes;
-    uint256 public constant MAINTENANCE_FEE_CONFIG_DELAY = 48 hours;
-    uint256 public constant MAX_MAINTENANCE_FEE_APR_BPS = 1000;
+    uint256 public constant MAINTENANCE_FEE_CONFIG_DELAY = 72 hours;
+    uint256 public constant MAX_MAINTENANCE_FEE_APR_BPS = JuniorMaintenanceFeeMathLib.MAX_APR_BPS;
     uint256 public constant MAX_MAINTENANCE_FEE_CHECKPOINT_HOURS = 8760;
 
     bytes4 internal constant INTERFACE_ID_ERC165 = 0x01ffc9a7;

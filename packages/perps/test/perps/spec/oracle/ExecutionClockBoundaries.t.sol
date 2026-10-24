@@ -952,7 +952,7 @@ contract StaleExecutionReservationTest is Test {
             maxPruneOrdersPerCall: router.maxPruneOrdersPerCall()
         });
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
         uint256 t0 = 2_000_000_000;

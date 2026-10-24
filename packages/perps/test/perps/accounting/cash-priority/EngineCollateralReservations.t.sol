@@ -139,7 +139,7 @@ contract EngineCollateralReservationsTest is CfdEngineTestBase {
         IHousePool.PoolConfig memory config = _currentPoolConfig();
         config.markStalenessLimit = 300;
         pool.proposePoolConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         pool.finalizePoolConfig();
 
         address trader = address(0x5159);

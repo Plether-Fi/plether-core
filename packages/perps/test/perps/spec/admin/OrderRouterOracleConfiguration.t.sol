@@ -116,7 +116,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
         routerAdmin.finalizeOracleConfig();
 
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
         routerAdmin.finalizeOracleConfig();
 
         assertEq(address(router.pletherOracle().pyth()), address(newPyth), "Pyth endpoint should rotate after timelock");
@@ -137,7 +137,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
             IOrderRouterAdminHost.OracleConfig({pletherOracle: address(wrongEngineOracle)});
 
         routerAdmin.proposeOracleConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
         routerAdmin.finalizeOracleConfig();
@@ -152,7 +152,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
             IOrderRouterAdminHost.OracleConfig({pletherOracle: address(wrongPoolOracle)});
 
         routerAdmin.proposeOracleConfig(config);
-        vm.warp(block.timestamp + 48 hours + 1);
+        vm.warp(block.timestamp + 72 hours + 1);
 
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
         routerAdmin.finalizeOracleConfig();
@@ -312,8 +312,8 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
 
     function test_OracleRotation_InvalidatesConfigPinnedOrderWithAuthenticatedReceipt() public {
         _startRecordingLogs();
-        // Tuesday plus the 48-hour timelock remains outside the FX weekend close-only window.
-        vm.warp(1_700_000_000);
+        // Monday plus the 72-hour timelock remains outside the FX weekend close-only window.
+        vm.warp(1_700_000_000 - 1 days);
         PletherOracle candidate = _newOracle();
         _proposeRotation(address(candidate));
         uint256 activationTime = routerAdmin.oracleConfigActivationTime();

@@ -115,7 +115,7 @@ contract TimelockPauseTest is BasePerpTest {
         vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
         engineAdmin.finalizeRiskConfig();
 
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         engineAdmin.finalizeRiskConfig();
 
         (,,,,,,,, uint256 keeperShareAfter, uint256 protocolShareAfter) = engine.riskParams();
@@ -159,6 +159,58 @@ contract TimelockPauseTest is BasePerpTest {
         engineAdmin.proposeRiskConfig(config);
 
         assertGt(engineAdmin.riskConfigActivationTime(), block.timestamp);
+    }
+
+    function test_AllGovernanceConfigsRequireFull72Hours() public {
+        uint256 proposedAt = block.timestamp;
+        engineAdmin.proposeRiskConfig(_engineRiskConfig());
+        engineAdmin.proposeCalendarConfig(_engineCalendarConfig());
+        engineAdmin.proposeFreshnessConfig(_engineFreshnessConfig());
+        pool.proposePoolConfig(_currentPoolConfig());
+        routerAdmin.proposeRouterConfig(_routerConfig());
+        routerAdmin.proposeOracleConfig(IOrderRouterAdminHost.OracleConfig({pletherOracle: address(pletherOracle)}));
+        juniorVault.proposeMaintenanceFeeConfig(10_000, alice);
+
+        uint256 activationTime = proposedAt + 72 hours;
+        assertEq(engineAdmin.riskConfigActivationTime(), activationTime);
+        assertEq(engineAdmin.calendarConfigActivationTime(), activationTime);
+        assertEq(engineAdmin.freshnessConfigActivationTime(), activationTime);
+        assertEq(pool.poolConfigActivationTime(), activationTime);
+        assertEq(routerAdmin.routerConfigActivationTime(), activationTime);
+        assertEq(routerAdmin.oracleConfigActivationTime(), activationTime);
+        assertEq(juniorVault.maintenanceFeeConfigActivationTime(), activationTime);
+
+        vm.warp(proposedAt + 48 hours);
+        _assertAllGovernanceFinalizationsBlocked();
+        vm.warp(activationTime - 1);
+        _assertAllGovernanceFinalizationsBlocked();
+
+        vm.warp(activationTime);
+        engineAdmin.finalizeRiskConfig();
+        engineAdmin.finalizeCalendarConfig();
+        engineAdmin.finalizeFreshnessConfig();
+        pool.finalizePoolConfig();
+        routerAdmin.finalizeRouterConfig();
+        routerAdmin.finalizeOracleConfig();
+        juniorVault.finalizeMaintenanceFeeConfig();
+        assertEq(juniorVault.maintenanceFeeAprBps(), 10_000);
+    }
+
+    function _assertAllGovernanceFinalizationsBlocked() internal {
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
+        engineAdmin.finalizeRiskConfig();
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
+        engineAdmin.finalizeCalendarConfig();
+        vm.expectRevert(CfdEngineAdmin.CfdEngineAdmin__TimelockNotReady.selector);
+        engineAdmin.finalizeFreshnessConfig();
+        vm.expectRevert(IHousePool.HousePool__TimelockNotReady.selector);
+        pool.finalizePoolConfig();
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
+        routerAdmin.finalizeRouterConfig();
+        vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
+        routerAdmin.finalizeOracleConfig();
+        vm.expectRevert(TrancheVault.TrancheVault__MaintenanceFeeTimelockNotReady.selector);
+        juniorVault.finalizeMaintenanceFeeConfig();
     }
 
     function test_ProposeRiskParams_StoresAndSetsActivationTime() public {
@@ -226,7 +278,7 @@ contract TimelockPauseTest is BasePerpTest {
         config.executionFeeBps = 7;
         config.frozenCloseSpreadBps = 70;
         engineAdmin.proposeRiskConfig(config);
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         engineAdmin.finalizeRiskConfig();
 
         (,, uint256 maintMarginBps,,,,,,,) = engine.riskParams();
@@ -436,7 +488,7 @@ contract TimelockPauseTest is BasePerpTest {
         vm.expectRevert(IHousePool.HousePool__TimelockNotReady.selector);
         pool.finalizePoolConfig();
 
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         pool.finalizePoolConfig();
@@ -454,7 +506,7 @@ contract TimelockPauseTest is BasePerpTest {
         vm.expectRevert(IHousePool.HousePool__TimelockNotReady.selector);
         pool.finalizePoolConfig();
 
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         pool.finalizePoolConfig();
 
         assertEq(pool.markStalenessLimit(), 60);
@@ -484,7 +536,7 @@ contract TimelockPauseTest is BasePerpTest {
         vm.expectRevert(IHousePool.HousePool__TimelockNotReady.selector);
         pool.finalizePoolConfig();
 
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         pool.finalizePoolConfig();
 
         assertEq(pool.seniorFrozenLpFeeBps(), 40);
@@ -547,7 +599,7 @@ contract TimelockPauseTest is BasePerpTest {
         vm.expectRevert(OrderRouterAdmin.OrderRouterAdmin__TimelockNotReady.selector);
         routerAdmin.finalizeRouterConfig();
 
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
         assertEq(router.maxExecutionWindowSeconds(), 600);

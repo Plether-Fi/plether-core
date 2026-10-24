@@ -1381,6 +1381,8 @@ contract PerpHousePoolMaintenanceFeeInvariantTest is BasePerpTest {
         // Make fee minting and its isolation checks non-vacuously reachable in every campaign.
         handler.materializeJuniorMaintenanceFee();
 
+        // Both 72-hour fee proposals finish on Sunday; enter Monday for the required live epoch settlements.
+        vm.warp(block.timestamp + 1 days);
         // Complete only this companion campaign's lifecycle so a real epoch settlement can crystallize the fee.
         uint256 markPrice = engine.lastMarkPrice();
         vm.prank(engine.orderRouter());
