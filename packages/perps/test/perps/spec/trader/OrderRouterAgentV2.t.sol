@@ -600,6 +600,42 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(cleared, 1);
     }
 
+    function test_BulkCleanupStopsOnPendingItemAndCapsBountyPrice() public {
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("bulk-pending-cap"));
+        request.bounds.executionWindowSeconds = 1;
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        vm.warp(uint256(book.orderTiming(orderId).executionDeadline) + 1);
+
+        uint256 cap = engine.lastMarkPrice() - 1;
+        vm.mockCall(address(engine), abi.encodeWithSelector(engine.CAP_PRICE.selector), abi.encode(cap));
+        IOrderRouterExecutionHost.ItemRequest memory expected;
+        expected.orderId = orderId;
+        expected.action = IOrderRouterExecutionHost.ItemAction.Expire;
+        expected.executor = KEEPER;
+        expected.observedConfigHash = book.currentExecutionConfigHash();
+        expected.neutralMarkPrice = engine.lastMarkPrice();
+        expected.poolDepthUsdc = pool.totalAssets();
+        expected.bountyAccountingPrice = cap;
+        expected.bountyAccountingPublishTime = engine.lastMarkTime();
+        bytes memory itemCall = abi.encodeWithSelector(
+            IOrderRouterExecutionHost.executeOrderItemFromSidecar.selector, expected
+        );
+        OrderV3Types.ExecutionResult memory pending;
+        pending.orderId = orderId;
+        pending.status = OrderV3Types.LifecycleStatus.Pending;
+        vm.mockCall(address(router), itemCall, abi.encode(pending));
+        vm.expectCall(address(router), itemCall);
+
+        uint64[] memory ids = new uint64[](1);
+        ids[0] = orderId;
+        vm.prank(KEEPER);
+        (uint256 nextIndex, uint256 cleared) = router.clearInvalidOrders(ids);
+        assertEq(nextIndex, 0);
+        assertEq(cleared, 0);
+        assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
+    }
+
     /// @dev Synthetic oracle callback: a matured owner action changes configuration during oracle work.
     ///      The execution item must observe the post-oracle digest and never execute under the earlier policy.
     function test_ConfigObservationIsRefreshedAfterOracleCallback() public {
