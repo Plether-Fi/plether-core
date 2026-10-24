@@ -10,6 +10,18 @@ interface IPerpsKeeper {
         uint64 orderId
     ) external returns (OrderV3Types.ExecutionResult memory);
 
+    /// @notice Clears expired or configuration-invalid orders by id, including non-head orders.
+    /// @dev Ineligible, duplicate, and already terminal ids are skipped. Each eligible item uses the ordinary
+    ///      reservation, bounty, protection, and receipt path. A failed item settlement stops without rolling back
+    ///      prior items.
+    ///      Risk-off precedence still applies to an otherwise eligible order.
+    /// @param orderIds Candidate ids in caller-selected order, bounded by the smaller of 64 and maxPruneOrdersPerCall.
+    /// @return nextIndex First unattempted id index, or orderIds.length when all were considered.
+    /// @return cleared Number of orders made terminal by this call.
+    function clearInvalidOrders(
+        uint64[] calldata orderIds
+    ) external returns (uint256 nextIndex, uint256 cleared);
+
     /// @notice Permissionlessly executes an eligible delayed order using router-validated oracle data.
     /// @dev Risk-off, expiry, and pinned-config mismatch are checked before oracle work. Slippage and exact-shape typed
     ///      planner/policy rejections terminally fail with canonical receipts. Close-only, MEV, gas, mark ordering, and

@@ -141,7 +141,10 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         ) {
             return;
         }
-        uint256 commitPrice = snapshot.lastMarkPrice == 0 ? 1e8 : snapshot.lastMarkPrice;
+        uint256 commitPrice = snapshot.lastMarkPrice;
+        if (commitPrice == 0) {
+            revert IOrderRouterErrors.OrderRouter__MarkPriceUnavailable();
+        }
         commitPrice = Math.min(commitPrice, snapshot.capPrice);
         uint256 minNotionalUsdc =
             Math.mulDiv(snapshot.riskParams.minBountyUsdc, 10_000, snapshot.riskParams.bountyBps, Math.Rounding.Ceil);

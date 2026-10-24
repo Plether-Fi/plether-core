@@ -254,14 +254,14 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         _commitParity(o, 101_000_000, KEEPER);
     }
 
-    function test_DustChecksUseFallbackAndCappedMarkEvenWithZeroBounty() public {
+    function test_DustChecksRejectMissingMarkAndUseCappedMarkEvenWithZeroBounty() public {
         _openNormally(CfdTypes.Side.LONG, 20e6);
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, 9 * CfdTypes.SIZE_QUANTUM);
         bytes memory err = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
         vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkPrice()"), abi.encode(uint256(0)));
-        vm.expectRevert(err);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MarkPriceUnavailable.selector);
         previewer.previewClose(address(engine), o, KEEPER, PRICE, _bounds());
-        vm.expectRevert(err);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MarkPriceUnavailable.selector);
         vm.prank(ACCOUNT);
         router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
 

@@ -58,7 +58,7 @@ contract OrderRouterSlippageTest is OrderRouterPythTestBase {
         vm.roll(block.number + 1);
         vm.warp(1050);
         vm.prank(alice);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.SHORT, 10_000 * 1e18, 500 * 1e6, 1e8, false);
 
         address account = alice;
         bytes[] memory empty = _pythUpdateData();

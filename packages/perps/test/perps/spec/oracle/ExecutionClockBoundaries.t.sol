@@ -125,7 +125,7 @@ contract StoredMarkOrderingTest is BasePerpTest {
     address alice = address(0xA11CE);
     address keeper = address(0xBEEF);
 
-    function _initialJuniorDeposit() internal pure override returns (uint256) {
+    function _initialJuniorSeedDeposit() internal pure override returns (uint256) {
         return 1_000_000e6;
     }
 
@@ -181,6 +181,8 @@ contract StoredMarkOrderingTest is BasePerpTest {
     function test_OlderEligibleTickTerminatesOrderWithoutRollingBackCachedMark() public {
         vm.warp(1000);
         vm.roll(100);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, 1000);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
@@ -219,6 +221,8 @@ contract StoredMarkOrderingTest is BasePerpTest {
     function test_OlderEligibleTickTerminatesBatchWithoutRollingBackCachedMark() public {
         vm.warp(1000);
         vm.roll(100);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, 1000);
 
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);

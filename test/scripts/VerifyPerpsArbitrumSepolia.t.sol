@@ -99,6 +99,9 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         assertEq(deployed.juniorVault.totalSupply(), juniorShares, "junior seed rerun is a no-op");
         assertFalse(deployed.housePool.isTradingActive(), "seed rerun must stay inactive");
 
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = abi.encode(uint256(1e8));
+        vm.setEnv("PYTH_UPDATE_DATA", vm.toString(abi.encode(updateData)));
         vm.setEnv("ACTIVATE_TRADING", "true");
         bootstrap.run();
         vm.setEnv("VERIFY_PHASE", "active");

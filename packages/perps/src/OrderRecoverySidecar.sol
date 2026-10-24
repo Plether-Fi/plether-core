@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {ICfdEngineCore} from "@plether/perps/interfaces/ICfdEngineCore.sol";
+import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
@@ -18,6 +19,9 @@ interface IRecoveryEngineClaims {
 
 /// @notice Immutable, storage-free expiry and externally settled receipt logic delegated by the execution sidecar.
 contract OrderRecoverySidecar is IOrderRouterErrors {
+
+    uint256 private constant MAX_BULK_CLEANUP_IDS = 64;
+    uint256 private constant CLEANUP_RETURN_GAS = 1_000_000;
 
     error OrderRouterExecutionSidecar__InvalidSettledReason();
     error OrderRouterExecutionSidecar__OrderIdentityMismatch(uint64 orderId);
@@ -58,6 +62,80 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         request.action = IOrderRouterExecutionHost.ItemAction.Expire;
         request.executor = msg.sender;
         return host.executeOrderItemFromSidecar(request);
+    }
+
+    /// @notice Removes independently invalid orders by id while preserving the Router's per-item rollback boundary.
+    function clearInvalidOrders(
+        uint64[] calldata orderIds
+    ) external delegated returns (uint256 nextIndex, uint256 cleared) {
+        IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
+        uint256 maximum = host.maxPruneOrdersPerCall();
+        if (maximum > MAX_BULK_CLEANUP_IDS) {
+            maximum = MAX_BULK_CLEANUP_IDS;
+        }
+        if (orderIds.length > maximum) {
+            revert OrderRouter__TooManyCleanupIds(maximum);
+        }
+
+        IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
+        for (; nextIndex < orderIds.length; ++nextIndex) {
+            if (gasleft() <= 2 * CLEANUP_RETURN_GAS) {
+                break;
+            }
+            uint64 orderId = orderIds[nextIndex];
+            OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
+            if (pending.account == address(0)) {
+                continue;
+            }
+
+            bytes32 observedConfigHash = book.currentExecutionConfigHash();
+            bool expired = block.timestamp > pending.timing.executionDeadline;
+            bool configInvalid = pending.bounds.expectedConfigHash != bytes32(0)
+                && pending.bounds.expectedConfigHash != observedConfigHash;
+            if (!expired && !configInvalid) {
+                continue;
+            }
+
+            IOrderRouterExecutionHost.ItemRequest memory request =
+                _cleanupRequest(host, orderId, expired, observedConfigHash);
+            uint256 available = gasleft();
+            if (available <= 2 * CLEANUP_RETURN_GAS) {
+                break;
+            }
+            try host.executeOrderItemFromSidecar{gas: available - CLEANUP_RETURN_GAS}(request) returns (
+                OrderV3Types.ExecutionResult memory result
+            ) {
+                if (result.status == OrderV3Types.LifecycleStatus.Pending) {
+                    break;
+                }
+                ++cleared;
+            } catch {
+                break;
+            }
+        }
+    }
+
+    function _cleanupRequest(
+        IOrderRouterExecutionHost host,
+        uint64 orderId,
+        bool expired,
+        bytes32 observedConfigHash
+    ) private view returns (IOrderRouterExecutionHost.ItemRequest memory request) {
+        ICfdEngineCore engine = ICfdEngineCore(host.engine());
+        request.orderId = orderId;
+        request.action =
+            expired ? IOrderRouterExecutionHost.ItemAction.Expire : IOrderRouterExecutionHost.ItemAction.ConfigMismatch;
+        request.executor = msg.sender;
+        request.observedConfigHash = observedConfigHash;
+        uint256 mark = engine.lastMarkPrice();
+        request.neutralMarkPrice = mark;
+        request.poolDepthUsdc = IHousePool(engine.pool()).totalAssets();
+        request.bountyAccountingPrice = mark == 0 ? 1e8 : mark;
+        uint256 cap = engine.CAP_PRICE();
+        if (request.bountyAccountingPrice > cap) {
+            request.bountyAccountingPrice = cap;
+        }
+        request.bountyAccountingPublishTime = engine.lastMarkTime();
     }
 
     function recoverExpiredItem(

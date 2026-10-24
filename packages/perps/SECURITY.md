@@ -1168,6 +1168,16 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 - account-scoped client ids are permanent; a terminal or config-invalidated id cannot be reused for a replacement
   request, so clients must generate and persist unique ids,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
+- **Stale cached marks can underfund open-order bounties and global FIFO cleanup.** Status: **Won't fix**
+  (accepted low-severity finding). After a nonzero Engine mark is loaded, open commitment remains available when that
+  mark is stale. The cached price can misstate the minimum
+  opening notional and the reserved keeper bounty; an understated bounty can make cleanup of a shared-FIFO order
+  less attractive to keepers. The configured bounty floor and cap, trader-specified bounty bound, and per-account
+  pending-order cap limit individual commitments, but do not eliminate that residual risk. Execution separately
+  validates oracle data. Although `updateMarkPrice` is permissionless on-chain, obtaining the required signed Pyth
+  update data in this deployment requires a paid feed subscription expected to be held by keepers. Requiring a fresh
+  mark at commitment would therefore make opens after an idle period depend on a keeper refresh and its fee. We
+  accept stale-mark admission to preserve open-order liveness; no admission freshness gate is planned,
 - ordinary failed closes require unpaid cleanup. The protocol keeper must fund gas
   for permissionless oracle-free expiry; bounded deadlines and queues do not guarantee a positive keeper incentive
   or prevent repeated fresh invalid submissions,

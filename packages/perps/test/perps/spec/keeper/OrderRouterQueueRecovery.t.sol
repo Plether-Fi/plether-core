@@ -21,7 +21,7 @@ contract OrderRouterQueueRecoveryTest is OrderRouterPythTestBase {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.SHORT, 8000 * 1e18, 400 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 8000 * 1e18, 400 * 1e6, 1e8, false);
         vm.stopPrank();
 
         address account = alice;

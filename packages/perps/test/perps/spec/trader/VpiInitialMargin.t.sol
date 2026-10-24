@@ -260,6 +260,9 @@ contract VpiImrBypassTest is RecordedOrderReceipts {
 
     function test_TypedUserInvalidOpenPaysClearer() public {
         _startRecordingLogs();
+        uint64 staleMarkTime = uint64(block.timestamp - router.pletherOracle().orderExecutionStalenessLimit() - 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, staleMarkTime);
         address eve = address(0xE223);
         address eveAccount = eve;
 

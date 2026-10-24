@@ -266,17 +266,23 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             return;
         }
 
+        // The Engine preview sees only the live position; an earlier queued close can clear an opposing side.
+        bool liveOpposingMayCloseFirst =
+            attempt.revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
+
         if (attempt.commitSucceeded) {
             assertTrue(
                 !attempt.prefilterActive
-                    || attempt.failureCategory != CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable,
-                "Committed opens must not succeed when preview classifies them as commit-time rejectable"
+                    || attempt.failureCategory != CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable
+                    || liveOpposingMayCloseFirst,
+                "Committed opens must not bypass a predictable commit-time rejection"
             );
         }
 
         if (
             attempt.routerOpenAllowed && attempt.prefilterActive
                 && attempt.failureCategory == CfdEnginePlanTypes.OpenFailurePolicyCategory.CommitTimeRejectable
+                && !liveOpposingMayCloseFirst
         ) {
             assertFalse(
                 attempt.commitSucceeded,

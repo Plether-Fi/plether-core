@@ -1353,7 +1353,8 @@ contract PerpAccountingHandler is Test {
         uint64 orderId
     ) internal view returns (uint256) {
         uint256 targetPrice = _orderRecord(orderId).core.targetPrice;
-        return targetPrice == 0 ? _commitReferencePrice() : targetPrice;
+        // The legacy harness encodes an unconstrained limit as 1 or uint256.max; neither is a mock oracle mark.
+        return targetPrice <= 1 || targetPrice == type(uint256).max ? _commitReferencePrice() : targetPrice;
     }
 
     function _nextBlockPriceData(

@@ -57,7 +57,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         router.executeOrder(1, empty);
 
         assertEq(router.nextExecuteId(), 1, "Future oracle publication must not consume the FIFO head");
-        assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
+        assertEq(engine.lastMarkTime(), 1, "Future oracle publication must not update the cached mark");
     }
 
     function test_SameBlockExecution_ReturnsPending() public {
@@ -210,23 +210,25 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         assertEq(router.nextExecuteId(), 0, "Successful batch execution should clear the queue head");
     }
 
-    function test_FrozenCloseExecution_AllowsFeedPublishDivergenceWithinFadStaleness() public {
+    function test_FrozenCloseExecution_ReplaysEngineMarkDespiteFeedSkew() public {
         _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderExecutionStalenessLimit = 2 hours;
         _setRouterConfig(config);
 
         uint256 saturdayNoon = 605_016_000;
-        uint256 minPublishTime = saturdayNoon - 2 hours;
+        uint256 minPublishTime = saturdayNoon - 2 hours - 1;
         address aliceAccount = alice;
 
         vm.warp(minPublishTime - 1);
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8);
 
         mockPyth.setPrice(feedIds[0], int64(100_000_000), int32(-8), minPublishTime);
-        mockPyth.setPrice(feedIds[1], int64(100_000_000), int32(-8), minPublishTime + 2 hours);
+        mockPyth.setPrice(feedIds[1], int64(100_000_000), int32(-8), saturdayNoon);
 
         vm.warp(saturdayNoon);
+        assertGt(saturdayNoon - minPublishTime, pletherOracle.orderExecutionStalenessLimit());
+        assertLe(saturdayNoon - minPublishTime, engine.fadMaxStaleness());
         uint64 orderId = router.nextCommitId();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
@@ -235,7 +237,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         router.executeOrder(orderId, _pythUpdateData());
 
         (uint256 sizeAfter,,,,,,) = engine.positions(aliceAccount);
-        assertEq(sizeAfter, 0, "Frozen close execution should accept feed divergence within FAD staleness");
+        assertEq(sizeAfter, 0, "Frozen close execution should use the cached mark despite feed skew");
     }
 
     function test_SingleExecute_EmptyQueueRevertsNoOrders() public {
