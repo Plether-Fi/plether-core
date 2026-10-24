@@ -114,17 +114,19 @@ contract PartialCloseAdmissionPropertyTest is BasePerpTest {
 
     function _checkUnfundedCarryCommit() private {
         _enableCarry();
-        _fundTrader(ACCOUNT, 131_200_000);
-        _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 131_200_000, 80_000_000);
-        // $7880 borrow, 78 utilization bps, and 100 years produce $307.32 carry. Only $120 pledge is
-        // collectible; the separate $8 liquidation reserve remains protected, leaving $187.32 arrears.
+        _fundTrader(ACCOUNT, 131_200_001);
+        _open(ACCOUNT, CfdTypes.Side.LONG, 100 * CfdTypes.SIZE_QUANTUM, 131_200_001, 80_000_000);
+        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 120_000_001, "Open equity exceeds initial margin by one atom");
+        assertEq(clearinghouse.liquidationReserveUsdc(ACCOUNT), 8e6);
+        // $7879.999999 borrow, 78 utilization bps, and 100 years produce $307.319999 carry. Only $120.000001
+        // pledge is collectible; the separate $8 liquidation reserve remains protected, leaving $187.319998 arrears.
         vm.warp(block.timestamp + 100 * 365 days);
         vm.prank(address(router));
         engine.updateMarkPrice(80_000_000, uint64(block.timestamp));
         bytes32 beforeState = _state();
         uint64 nextId = router.nextCommitId();
         vm.expectRevert(
-            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 187_320_000)
+            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__PartialCloseCarryUnfunded.selector, 187_319_998)
         );
         vm.prank(ACCOUNT);
         router.commitOrder(CfdTypes.Side.LONG, 50 * CfdTypes.SIZE_QUANTUM, 0, 80_000_000, true);
