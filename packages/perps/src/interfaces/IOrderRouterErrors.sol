@@ -108,6 +108,8 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidExecutionModeMask();
     /// @notice A fresh V3 request did not pin the currently authoritative execution configuration.
     error OrderRouter__ExecutionConfigMismatch(bytes32 expectedConfigHash, bytes32 currentConfigHash);
+    /// @notice A fresh order cannot be accepted before the Engine's terminal NAV book is bound.
+    error OrderRouter__TerminalNavBookUnavailable();
     /// @notice A fresh V3 request omitted its mandatory post-position leverage ceiling.
     error OrderRouter__ZeroPostLeverageBound();
     /// @notice The quoted execution bounty alone exceeds the request's gross-account-debit ceiling.

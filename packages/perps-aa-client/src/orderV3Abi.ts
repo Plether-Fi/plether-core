@@ -401,6 +401,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__MarkPriceUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__NoOpenPosition",
     "inputs": []
   },
@@ -593,6 +598,22 @@ export const orderRouterV3Abi = [
     "type": "error",
     "name": "OrderRouter__SizeExceedsQueued",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TerminalNavBookUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TooManyCleanupIds",
+    "inputs": [
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1133,6 +1154,11 @@ export const closePreviewV3Abi = [
         "internalType": "uint8"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__MarkPriceUnavailable",
+    "inputs": []
   },
   {
     "type": "error",
@@ -2978,6 +3004,11 @@ export const orderLifecycleV5Abi = [
   {
     "type": "error",
     "name": "OrderLifecycleBook__ZeroOrderId",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TerminalNavBookUnavailable",
     "inputs": []
   },
   {

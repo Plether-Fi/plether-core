@@ -212,6 +212,10 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         deployed.terminalNavBook = new TerminalNavBookV2(address(deployed.engine), CAP_PRICE);
         deployed.engine.setTerminalNavBook(address(deployed.terminalNavBook));
+        require(
+            address(deployed.engine.terminalNavBook()) == address(deployed.terminalNavBook),
+            "Engine terminal NAV book mismatch"
+        );
 
         deployed.planner = new CfdEnginePlanner();
         deployed.settlementSidecar = new CfdEngineSettlementSidecar(address(deployed.engine));
@@ -520,6 +524,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         OrderRouterExecutionSidecar orderExecutionSidecar,
         OrderRouter router
     ) internal view returns (OrderLifecycleBook lifecycleBook) {
+        require(address(engine.terminalNavBook()) != address(0), "Engine terminal NAV book unset");
         require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
         require(address(housePool.ENGINE()) == address(engine), "HousePool Engine mismatch");
         require(address(engine.clearinghouse()) == address(clearinghouse), "Engine Clearinghouse mismatch");

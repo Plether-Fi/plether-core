@@ -59,6 +59,7 @@ contract PositionProtectionTest is BasePerpTest {
     address internal constant RISK_PLUS_ONE = address(0xB0A0D2);
 
     uint256 internal constant MARK_PRICE = 1e8;
+    uint256 internal constant POST_MARK_PRICE = MARK_PRICE + 2;
     uint256 internal constant POSITION_SIZE = 10_000e18;
     uint256 internal constant POSITION_MARGIN_USDC = 2000e6;
     uint256 internal constant LONG_TAKE_PROFIT = 90_000_000;
@@ -2107,17 +2108,31 @@ contract PositionProtectionTest is BasePerpTest {
     ) internal {
         _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
-        RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
+        riskParams.baseCarryBps = 0;
+        _setRiskParams(riskParams);
+        RiskBoundaryFixture memory fixture = _postMarkInitialMarginBoundaryFixture(riskParams);
 
         _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
         _fundTrader(RISK_PLUS_ONE, fixture.plusOneOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
         _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
         _open(RISK_PLUS_ONE, CfdTypes.Side.LONG, POSITION_SIZE, fixture.plusOneOpeningMarginDeltaUsdc, MARK_PRICE);
+        _refreshMark(POST_MARK_PRICE);
+        assertEq(engine.lastMarkPrice(), POST_MARK_PRICE, "adverse basket mark installed");
 
         stdstore.target(address(engine)).sig("degradedMode()").checked_write(degraded);
 
-        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "exact pledge boundary");
-        assertEq(clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE), fixture.requirementUsdc + 1, "one-atom pledge surplus");
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+                * (POST_MARK_PRICE - MARK_PRICE),
+            fixture.requirementUsdc,
+            "exact marked equity boundary"
+        );
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(RISK_PLUS_ONE) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+                * (POST_MARK_PRICE - MARK_PRICE),
+            fixture.requirementUsdc + 1,
+            "one-atom marked equity surplus"
+        );
 
         uint256 exactFreeBefore = _freeSettlementUsdc(RISK_EXACT);
         assertEq(
@@ -2143,15 +2158,24 @@ contract PositionProtectionTest is BasePerpTest {
     function test_PostLockRisk_FreeSettlementCannotCureExactPriceRisk() public {
         _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
-        RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
+        riskParams.baseCarryBps = 0;
+        _setRiskParams(riskParams);
+        RiskBoundaryFixture memory fixture = _postMarkInitialMarginBoundaryFixture(riskParams);
         uint256 surplusFreeSettlementUsdc = 5000e6;
 
         _fundTrader(
             RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc
         );
         _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
+        _refreshMark(POST_MARK_PRICE);
+        assertEq(engine.lastMarkPrice(), POST_MARK_PRICE, "adverse basket mark installed");
 
-        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "price pledge at equality");
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+                * (POST_MARK_PRICE - MARK_PRICE),
+            fixture.requirementUsdc,
+            "price equity at equality"
+        );
         assertEq(
             _freeSettlementUsdc(RISK_EXACT),
             fixture.protectionBountiesUsdc + surplusFreeSettlementUsdc,
@@ -2173,11 +2197,20 @@ contract PositionProtectionTest is BasePerpTest {
     function test_PostLockRisk_SameAccountClaimProvidesOneAtomOfExactPriceCollateral() public {
         _startRecordingLogs();
         CfdTypes.RiskParams memory riskParams = _riskParams();
-        RiskBoundaryFixture memory fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
+        riskParams.baseCarryBps = 0;
+        _setRiskParams(riskParams);
+        RiskBoundaryFixture memory fixture = _postMarkInitialMarginBoundaryFixture(riskParams);
 
         _fundTrader(RISK_EXACT, fixture.exactOpeningMarginDeltaUsdc + fixture.protectionBountiesUsdc);
         _open(RISK_EXACT, CfdTypes.Side.LONG, POSITION_SIZE, fixture.exactOpeningMarginDeltaUsdc, MARK_PRICE);
-        assertEq(clearinghouse.pnlPledgeUsdc(RISK_EXACT), fixture.requirementUsdc, "pledge starts at equality");
+        _refreshMark(POST_MARK_PRICE);
+        assertEq(engine.lastMarkPrice(), POST_MARK_PRICE, "adverse basket mark installed");
+        assertEq(
+            clearinghouse.pnlPledgeUsdc(RISK_EXACT) - (POSITION_SIZE / CfdTypes.SIZE_QUANTUM)
+                * (POST_MARK_PRICE - MARK_PRICE),
+            fixture.requirementUsdc,
+            "marked equity starts at equality"
+        );
 
         vm.prank(RISK_EXACT);
         vm.expectRevert(IOrderRouterErrors.OrderRouter__InsufficientFreeEquity.selector);
@@ -4124,6 +4157,18 @@ contract PositionProtectionTest is BasePerpTest {
             + _liquidationReserveTargetUsdc(notionalUsdc, riskParams);
         fixture.plusOneOpeningMarginDeltaUsdc = fixture.exactOpeningMarginDeltaUsdc + 1;
         fixture.protectionBountiesUsdc = _totalProtectionBountyUsdc();
+    }
+
+    function _postMarkInitialMarginBoundaryFixture(
+        CfdTypes.RiskParams memory riskParams
+    ) internal view returns (RiskBoundaryFixture memory fixture) {
+        fixture = _riskBoundaryFixture(riskParams, riskParams.initMarginBps);
+        uint256 lots = POSITION_SIZE / CfdTypes.SIZE_QUANTUM;
+        uint256 postMarkRequirement = lots * POST_MARK_PRICE * riskParams.initMarginBps / 10_000;
+        uint256 openingSurplus = lots * (POST_MARK_PRICE - MARK_PRICE) + postMarkRequirement - fixture.requirementUsdc;
+        fixture.exactOpeningMarginDeltaUsdc += openingSurplus;
+        fixture.plusOneOpeningMarginDeltaUsdc += openingSurplus;
+        fixture.requirementUsdc = postMarkRequirement;
     }
 
     function _liquidationReserveTargetUsdc(

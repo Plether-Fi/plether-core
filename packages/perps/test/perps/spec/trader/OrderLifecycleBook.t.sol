@@ -10,6 +10,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 
 import {Vm} from "forge-std/Vm.sol";
@@ -49,6 +50,21 @@ contract OrderLifecycleBookTest is RecordedOrderReceipts {
 
     function setUp() public {
         book = new OrderLifecycleBook(address(this), ENGINE, CLEARINGHOUSE, HOUSE_POOL);
+        vm.mockCall(ENGINE, abi.encodeWithSignature("terminalNavBook()"), abi.encode(TERMINAL_NAV_BOOK));
+    }
+
+    function test_RegisterRejectsUnsetTerminalNavBookButPreservesExactReplay() public {
+        OrderV3Types.OrderRequest memory original = _request(bytes32("bound"));
+        book.registerPending(ACCOUNT, 1, original, EXECUTION_BOUNTY_USDC);
+
+        vm.mockCall(ENGINE, abi.encodeWithSignature("terminalNavBook()"), abi.encode(address(0)));
+        (uint64 orderId,, bool replayed) = book.registerPending(ACCOUNT, 99, original, type(uint256).max);
+        assertEq(orderId, 1, "existing identity remains stable");
+        assertTrue(replayed, "exact replay remains available");
+
+        OrderV3Types.OrderRequest memory fresh = _request(bytes32("unbound"));
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TerminalNavBookUnavailable.selector);
+        book.registerPending(ACCOUNT, 2, fresh, EXECUTION_BOUNTY_USDC);
     }
 
     function testFuzz_CompactCommitmentRoundTripsWithoutNarrowingBalances(

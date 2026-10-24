@@ -10,7 +10,6 @@ import {ICfdEnginePlanner} from "@plether/perps/interfaces/ICfdEnginePlanner.sol
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {CloseCommitmentLib} from "@plether/perps/libraries/CloseCommitmentLib.sol";
-import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 
 interface ICloseAdmission {
 
@@ -24,6 +23,8 @@ interface ICloseAdmission {
 interface ICfdClosePreviewRouter {
 
     function liquidationBatchSidecar() external view returns (address);
+
+    function minOpenNotionalUsdc() external view returns (uint256);
 
 }
 
@@ -88,7 +89,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
             _buildRawSnapshot(engine, planner, order.account, IHousePool(engine.pool()).totalAssets());
-        return _previewSnapshot(planner, snapshot, order, executor, executionPrice, bounds);
+        return _previewSnapshot(planner, snapshot, order, engine.orderRouter(), executor, executionPrice, bounds);
     }
 
     function _requestOrder(
@@ -112,11 +113,12 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         ICfdEnginePlanner planner,
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdTypes.Order memory order,
+        address router,
         address executor,
         uint256 executionPrice,
         OrderV3Types.ExecutionBounds calldata bounds
     ) private view returns (ClosePreview memory preview) {
-        _validateRouterCommit(snapshot, order);
+        _validateRouterCommit(snapshot, order, router);
         preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta);
         preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice);
@@ -128,8 +130,9 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
     ///      projection is deliberately not reproduced here; callers must still simulate the actual commitment.
     function _validateRouterCommit(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
-        CfdTypes.Order memory order
-    ) private pure {
+        CfdTypes.Order memory order,
+        address router
+    ) private view {
         if (snapshot.position.size != 0 && order.side != snapshot.position.side) {
             revert IOrderRouterErrors.OrderRouter__SideMismatch();
         }
@@ -146,11 +149,10 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
             revert IOrderRouterErrors.OrderRouter__MarkPriceUnavailable();
         }
         commitPrice = Math.min(commitPrice, snapshot.capPrice);
-        uint256 minNotionalUsdc =
-            Math.mulDiv(snapshot.riskParams.minBountyUsdc, 10_000, snapshot.riskParams.bountyBps, Math.Rounding.Ceil);
-        uint256 minCloseSizeDelta =
-            Math.mulDiv(minNotionalUsdc, DecimalConstants.USDC_TO_TOKEN_SCALE, commitPrice, Math.Rounding.Ceil);
-        if (order.sizeDelta < minCloseSizeDelta) {
+        if (
+            Math.mulDiv(order.sizeDelta, commitPrice, CfdTypes.SIZE_QUANTUM)
+                < ICfdClosePreviewRouter(router).minOpenNotionalUsdc()
+        ) {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(11);
         }
     }

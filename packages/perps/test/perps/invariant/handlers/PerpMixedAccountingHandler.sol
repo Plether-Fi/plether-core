@@ -2059,7 +2059,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             return 0;
         }
         uint256 queuedLots = orders.queuedLots(i, traders[i].lots, riskOffCutoff);
-        bool belowMinimum = isClose ? lots < queuedLots && lots * currentPrice < 1000e6 : lots * currentPrice < 100e6;
+        bool belowMinimum = lots * currentPrice < router.minOpenNotionalUsdc() && (!isClose || lots < queuedLots);
         if (belowMinimum) {
             vm.prank(actorAt(i));
             vm.expectRevert(

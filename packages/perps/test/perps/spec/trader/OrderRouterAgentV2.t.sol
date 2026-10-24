@@ -160,6 +160,27 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(uint8(book.lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
     }
 
+    function test_FreshCommitRejectsUnboundTerminalNavBookButExactReplaySurvives() public {
+        OrderV3Types.OrderRequest memory original = _openRequest(bytes32("nav-book-replay"));
+        vm.prank(ALICE);
+        uint64 originalId = router.commitOrder(original);
+        uint64 nextCommitId = router.nextCommitId();
+        uint256 pendingCount = router.pendingOrderCounts(ALICE);
+
+        vm.mockCall(address(engine), abi.encodeWithSelector(engine.terminalNavBook.selector), abi.encode(address(0)));
+        OrderV3Types.OrderRequest memory fresh = _openRequest(bytes32("nav-book-unbound"));
+        assertNotEq(fresh.bounds.expectedConfigHash, bytes32(0), "zero book still produces a nonzero config hash");
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__TerminalNavBookUnavailable.selector);
+        vm.prank(BOB);
+        router.commitOrder(fresh);
+        assertEq(router.nextCommitId(), nextCommitId);
+        assertEq(router.pendingOrderCounts(BOB), 0);
+
+        vm.prank(ALICE);
+        assertEq(router.commitOrder(original), originalId, "exact replay remains unconditional");
+        assertEq(router.pendingOrderCounts(ALICE), pendingCount);
+    }
+
     function test_ClientIdConflictRevertsWithoutChangingOriginalIntent() public {
         _startRecordingLogs();
         OrderV3Types.OrderRequest memory original = _openRequest(bytes32("conflict"));

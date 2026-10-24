@@ -32,6 +32,7 @@ PROPERTY_TESTS = r"testFuzz_|invariant_"
 PRODUCTION_SENSITIVE_TESTS = {
     "test_BatchItemOogAndRefundGasBurnCannotRollbackCompletedPrefix",
     "test_Batch_LowGasReturnsSameUnattemptedIndex",
+    "test_Batch_MaxConfigReservesEip150GasBeforeDispatch",
     "test_UpdatePrice_GasBurningRefundRecipientAccruesAndClaimsDeferredRefund",
     "test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating",
     "test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund",
@@ -48,6 +49,8 @@ COVERAGE_EXCLUSIONS = [
     (GAS_TESTS + "|" + SIZE_TESTS, "Instrumented bytecode cannot measure production gas or deployment size."),
     (r"test_BatchLiquidationAppliesRiskOffRefundBeforeLiquidating|test_BatchLiquidationHonorsCutoffAdvancedDuringOracleRefund",
      "Instrumentation changes bounded batch gas admission; execute under production codegen."),
+    (r"test_Batch_MaxConfigReservesEip150GasBeforeDispatch",
+     "Instrumentation changes the EIP-150 gas boundary; execute under production codegen."),
 ]
 
 

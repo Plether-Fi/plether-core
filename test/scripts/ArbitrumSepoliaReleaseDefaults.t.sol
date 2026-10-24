@@ -466,6 +466,11 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(router.liquidationBatchSidecar(), address(sidecar), "prebound liquidation sidecar");
         assertNotEq(lifecycleBook.currentExecutionConfigHash(), bytes32(0), "execution config hash");
 
+        vm.mockCall(address(engine), abi.encodeWithSelector(engine.terminalNavBook.selector), abi.encode(address(0)));
+        vm.expectRevert(bytes("Engine terminal NAV book unset"));
+        deployScript.verifyV2OrderStack(engine, clearinghouse, housePool, evaluator, executionSidecar, router);
+        vm.clearMockedCalls();
+
         HousePool wrongEngineHousePool =
             new HousePool(address(usdc), address(0xE11E), address(new HousePoolRedemptionMathSidecar()));
         vm.mockCall(address(engine), abi.encodeWithSignature("pool()"), abi.encode(address(wrongEngineHousePool)));

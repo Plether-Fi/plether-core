@@ -428,7 +428,7 @@ library CfdEnginePlanLib {
         }
         if (
             postOpenRiskState.liquidatable
-                || postOpenRiskState.equityUsdc < int256(openState.initialMarginRequirementUsdc)
+                || postOpenRiskState.equityUsdc <= int256(openState.initialMarginRequirementUsdc)
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;
             return delta;

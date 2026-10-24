@@ -5,6 +5,7 @@ import {BasePerpTest} from "../../BasePerpTest.sol";
 import {MixedLpTestHarness} from "../support/MixedLpTestHarness.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 
 contract PerpMixedAccountingInvariantTest is BasePerpTest {
 
@@ -301,6 +302,9 @@ contract PerpMixedAccountingInvariantTest is BasePerpTest {
 
     function test_RegressionClaimBackedDustCloseRejectedBeforeCollection() public {
         handler.createDeferredClaimHistory();
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.minOpenNotionalUsdc = 1000e6;
+        _setRouterConfig(config);
         handler.close(0, 1, false);
         assertEq(handler.rejectedSmallOrders(), 1);
         handler.assertModel();
