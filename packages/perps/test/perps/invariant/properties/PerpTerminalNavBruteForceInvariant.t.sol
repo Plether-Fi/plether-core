@@ -10,6 +10,7 @@ import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 
 /// @notice Differential invariant between the radix NAV book and direct canonical-account enumeration.
@@ -76,6 +77,20 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         handler.liquidate(2, 1.8e8);
         (uint256 sizeAfter,,,,,,) = engine.positions(account);
         assertEq(sizeAfter, 0, "Liquidation regression position must be removed");
+        _assertInvariant_TerminalNavBookMatchesIndependentCanonicalEnumeration();
+    }
+
+    function test_PendingUnboundedCloseReplaysWithValidOraclePrice() public {
+        // CI's shrunk sequence leaves an unbounded close ahead of a fresh close in the same batch.
+        handler.warpForward(438_893);
+        handler.createTraderClaim(0);
+        assertEq(router.nextExecuteId(), 5, "Claim close should remain queued");
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(5);
+        assertEq(pending.targetPrice, type(uint256).max, "Queued close should have unbounded limit");
+        handler.warpForward(406_680);
+        handler.commitCloseOrder(1, 1);
+        assertEq(router.nextCommitId(), 7, "Second close should be queued");
+        handler.executeNextOrderBatch(2);
         _assertInvariant_TerminalNavBookMatchesIndependentCanonicalEnumeration();
     }
 
