@@ -618,9 +618,8 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         expected.poolDepthUsdc = pool.totalAssets();
         expected.bountyAccountingPrice = cap;
         expected.bountyAccountingPublishTime = engine.lastMarkTime();
-        bytes memory itemCall = abi.encodeWithSelector(
-            IOrderRouterExecutionHost.executeOrderItemFromSidecar.selector, expected
-        );
+        bytes memory itemCall =
+            abi.encodeWithSelector(IOrderRouterExecutionHost.executeOrderItemFromSidecar.selector, expected);
         OrderV3Types.ExecutionResult memory pending;
         pending.orderId = orderId;
         pending.status = OrderV3Types.LifecycleStatus.Pending;
