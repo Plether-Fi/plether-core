@@ -246,7 +246,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
         assertEq(
@@ -290,7 +290,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
         vm.expectRevert();
         router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 0, 1e8, true);
-        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
         // Exhaust free settlement so the live action charge reaches exactly the intended order margin.
@@ -438,7 +438,7 @@ contract OrderRouterReservationsTest is OrderRouterTestBase {
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 1000 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.SHORT, 5000 * 1e18, 250 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 5000 * 1e18, 250 * 1e6, 1e8, false);
         vm.stopPrank();
 
         bytes[] memory empty = _mockPythUpdateData();

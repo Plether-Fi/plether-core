@@ -195,6 +195,14 @@ contract OrderRouter is IPerpsKeeper, IPerpsTraderActions, OrderHandler {
         return abi.decode(_delegateExecutionSidecar(), (OrderV3Types.ExecutionResult));
     }
 
+    /// @notice Permissionlessly clears a bounded list of expired or configuration-invalid orders, even behind a live head.
+    function clearInvalidOrders(
+        uint64[] calldata orderIds
+    ) external nonReentrant returns (uint256 nextIndex, uint256 cleared) {
+        orderIds;
+        return abi.decode(_delegateExecutionSidecar(), (uint256, uint256));
+    }
+
     /// @notice Recovers an expired mismatched reservation and preserves retry for a matching protected position.
     /// @dev Recovery keeps disputed funds quarantined; protection handling precedes the terminal deletion callback.
     function expireMismatchedOrderFromSidecar(

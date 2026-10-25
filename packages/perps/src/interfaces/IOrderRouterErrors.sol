@@ -56,6 +56,8 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidLifecycleBook();
     /// @notice Engine execution rejected an oracle publish timestamp older than its cached mark.
     error OrderRouter__MarkPriceOutOfOrder();
+    /// @notice Admission needs a real cached oracle mark before it can price notional or keeper bounty.
+    error OrderRouter__MarkPriceUnavailable();
 
     /// @notice Execution was requested while the global FIFO queue has no live head.
     error OrderRouter__NoOrdersToExecute();
@@ -67,6 +69,8 @@ interface IOrderRouterErrors {
     error OrderRouter__BatchOrderNotCommitted();
     /// @notice An internal path expected the supplied order id to have `Pending` status.
     error OrderRouter__OrderNotPending();
+    /// @notice A permissionless cleanup list exceeds the per-call bound.
+    error OrderRouter__TooManyCleanupIds(uint256 maximum);
     /// @notice Permissionless cleanup targeted an order that is not an invalidated pre-cutoff open.
     error OrderRouter__OrderNotRiskOff();
     /// @notice Stored committed-margin linked-list pointers are internally inconsistent.
@@ -104,6 +108,8 @@ interface IOrderRouterErrors {
     error OrderRouter__InvalidExecutionModeMask();
     /// @notice A fresh V3 request did not pin the currently authoritative execution configuration.
     error OrderRouter__ExecutionConfigMismatch(bytes32 expectedConfigHash, bytes32 currentConfigHash);
+    /// @notice A fresh order cannot be accepted before the Engine's terminal NAV book is bound.
+    error OrderRouter__TerminalNavBookUnavailable();
     /// @notice A fresh V3 request omitted its mandatory post-position leverage ceiling.
     error OrderRouter__ZeroPostLeverageBound();
     /// @notice The quoted execution bounty alone exceeds the request's gross-account-debit ceiling.

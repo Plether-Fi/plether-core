@@ -9,6 +9,7 @@ import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 import {CfdClosePreviewTestBase} from "../CfdClosePreviewTestBase.sol";
@@ -224,6 +225,14 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
 
 contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
 
+    function _setCloseFloor(
+        uint256 minimumUsdc
+    ) private {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.minOpenNotionalUsdc = minimumUsdc;
+        _setRouterConfig(config);
+    }
+
     function test_WrongSideMatchesRouterCommitError() public {
         _openNormally(CfdTypes.Side.LONG, 20e6);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
@@ -238,6 +247,7 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
     }
 
     function test_PartialCloseDustBoundaryMatchesRouterCommit() public {
+        _setCloseFloor(1000e6);
         _openNormally(CfdTypes.Side.LONG, 20e6);
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
@@ -254,14 +264,15 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         _commitParity(o, 101_000_000, KEEPER);
     }
 
-    function test_DustChecksUseFallbackAndCappedMarkEvenWithZeroBounty() public {
+    function test_DustChecksRejectMissingMarkAndUseCappedMarkEvenWithZeroBounty() public {
+        _setCloseFloor(1000e6);
         _openNormally(CfdTypes.Side.LONG, 20e6);
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, 9 * CfdTypes.SIZE_QUANTUM);
         bytes memory err = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
         vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkPrice()"), abi.encode(uint256(0)));
-        vm.expectRevert(err);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MarkPriceUnavailable.selector);
         previewer.previewClose(address(engine), o, KEEPER, PRICE, _bounds());
-        vm.expectRevert(err);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MarkPriceUnavailable.selector);
         vm.prank(ACCOUNT);
         router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
 
@@ -276,6 +287,7 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
 
     function test_FullCloseBelowDustFloorMatchesRouterCommit() public {
         // Opens must support the minimum liquidation charge; a valid partial close can leave a smaller remainder.
+        _setCloseFloor(1000e6);
         _openNormally(CfdTypes.Side.LONG, 20e6);
         (uint64 id,) = _commitParity(_order(CfdTypes.Side.LONG, SIZE - 9 * CfdTypes.SIZE_QUANTUM), PRICE, KEEPER);
         bytes[] memory update = _mockPythUpdateData(PRICE);
@@ -288,6 +300,31 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(101_000_000, uint64(vm.getBlockTimestamp()));
         _commitParity(_order(CfdTypes.Side.LONG, size), 101_000_000, KEEPER);
+    }
+
+    function test_PartialCloseTracksGovernedMinimumWhileFullCloseRemainsExempt() public {
+        _openNormally(CfdTypes.Side.LONG, 20e6);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(101_000_000, uint64(block.timestamp));
+
+        CfdTypes.Order memory order = _order(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM);
+        uint256 snapshot = vm.snapshotState();
+        _commitParity(order, 101_000_000, KEEPER);
+        assertTrue(vm.revertToState(snapshot));
+        vm.deleteStateSnapshot(snapshot);
+
+        _setCloseFloor(1000e6);
+        order.sizeDelta = 9 * CfdTypes.SIZE_QUANTUM;
+        bytes memory dustError = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
+        vm.expectRevert(dustError);
+        previewer.previewClose(address(engine), order, KEEPER, 101_000_000, _bounds());
+        vm.expectRevert(dustError);
+        vm.prank(ACCOUNT);
+        router.commitOrder(order.side, order.sizeDelta, 0, order.targetPrice, true);
+
+        order.sizeDelta = 10 * CfdTypes.SIZE_QUANTUM;
+        _commitParity(order, 101_000_000, KEEPER);
     }
 
 }

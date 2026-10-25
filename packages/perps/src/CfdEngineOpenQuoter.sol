@@ -203,7 +203,7 @@ contract CfdEngineOpenQuoter {
     }
 
     /// @dev Pledge cannot grow by more than marginDelta, and exact price PnL is unchanged by an open at this price.
-    ///      Invert FLOOR(notional * IM / BPS) <= equity using CEIL((equity + 1) * BPS / denominator) - 1.
+    ///      Invert FLOOR(notional * IM / BPS) < equity using CEIL(equity * BPS / denominator) - 1.
     ///      Skew uses the carry-projected depth. Healing exceptions still cannot finish above opposing OI + the cap.
     function _upperBound(
         Context memory ctx
@@ -211,12 +211,11 @@ contract CfdEngineOpenQuoter {
         int256 equity = SafeCast.toInt256(
             ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount
         ) + ctx.pricePnl;
-        if (equity < 0) {
+        if (equity <= 0) {
             return 0;
         }
-        uint256 maxTotalLots = Math.mulDiv(
-            uint256(equity) + 1, 10_000, ctx.price * ctx.snap.riskParams.initMarginBps, Math.Rounding.Ceil
-        ) - 1;
+        uint256 maxTotalLots =
+            Math.mulDiv(uint256(equity), 10_000, ctx.price * ctx.snap.riskParams.initMarginBps, Math.Rounding.Ceil) - 1;
         if (maxTotalLots <= ctx.currentLots) {
             return 0;
         }
@@ -301,7 +300,7 @@ contract CfdEngineOpenQuoter {
         uint256 activeMarginBps =
             ctx.snap.isFadWindow ? ctx.snap.riskParams.fadMarginBps : ctx.snap.riskParams.maintMarginBps;
         uint256 minMaintenance = Math.mulDiv(totalNotionalFloor, activeMarginBps, 10_000);
-        return maxEquity >= SafeCast.toInt256(minInitial) && maxEquity > SafeCast.toInt256(minMaintenance);
+        return maxEquity > SafeCast.toInt256(minInitial) && maxEquity > SafeCast.toInt256(minMaintenance);
     }
 
     function _maxAffordableMargin(

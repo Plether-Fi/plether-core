@@ -79,6 +79,27 @@ contract OrderRouterCloseSideBindingTest is SourceBoundBountyFixture {
         }
     }
 
+    function test_FreshMarkQueuedFlipSucceedsWhenEarlierCloseExecutes() public {
+        for (uint256 side; side < 2; ++side) {
+            uint256 checkpoint = vm.snapshotState();
+            CfdTypes.Side original = CfdTypes.Side(side);
+            CfdTypes.Side opposite = _opposite(original);
+            _openFunded(original);
+            assertLe(block.timestamp - engine.lastMarkTime(), pletherOracle.orderExecutionStalenessLimit());
+
+            uint64 closeId = _bountyCommit(BOUNTY_TRADER, original, true, BOUNTY_SIZE, 0);
+            uint64 openId = _bountyCommit(BOUNTY_TRADER, opposite, false, BOUNTY_SIZE, 1000e6);
+            _bountyExecute(closeId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+            _bountyExecute(openId, BOUNTY_PRICE, BOUNTY_KEEPER, OrderV3Types.LifecycleStatus.Executed);
+
+            (uint256 liveSize,,,, CfdTypes.Side liveSide,,) = engine.positions(BOUNTY_TRADER);
+            assertEq(liveSize, BOUNTY_SIZE);
+            assertEq(uint8(liveSide), uint8(opposite));
+            assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 0);
+            assertTrue(vm.revertToStateAndDelete(checkpoint));
+        }
+    }
+
     function test_WrongSideBatchFinalizesEachItemAndExecutesFollower() public {
         _openFunded(CfdTypes.Side.LONG);
         FailedChain memory chain = _commitFailedChain(CfdTypes.Side.LONG, false);

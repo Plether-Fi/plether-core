@@ -1463,6 +1463,11 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__MarkPriceUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__NoOpenPosition",
     "inputs": []
   },
@@ -1655,6 +1660,22 @@ export const positionProtectionBookAbi = [
     "type": "error",
     "name": "OrderRouter__SizeExceedsQueued",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TerminalNavBookUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderRouter__TooManyCleanupIds",
+    "inputs": [
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

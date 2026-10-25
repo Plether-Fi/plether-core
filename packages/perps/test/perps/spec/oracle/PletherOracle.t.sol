@@ -414,6 +414,58 @@ contract PletherOracleTest is Test {
         assertEq(snapshot.price, 100_000_000);
     }
 
+    function test_OracleFrozenClose_ReplaysEngineMarkDespiteFeedSkew() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
+        pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
+        pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true));
+
+        assertTrue(ok);
+        assertTrue(snapshot.oracleFrozen);
+        assertEq(snapshot.maxStaleness, engine.fadMaxStaleness());
+        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.updateFee, 0);
+    }
+
+    function test_OracleFrozenBatchClose_ReplaysEngineMarkDespiteFeedSkew() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
+        pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
+        pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
+        IPletherOracle.BatchOrderPriceCache memory cache;
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot, IPletherOracle.BatchOrderPriceCache memory nextCache) = oracle.updateBatchOrderExecutionPrice(
+            address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, true), cache
+        );
+
+        assertTrue(ok);
+        assertTrue(snapshot.oracleFrozen);
+        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.updateFee, 0);
+        assertFalse(nextCache.hasHistoricalBasket);
+    }
+
+    function test_OracleFrozenOpen_ReplaysEngineMarkDespiteFeedSkew() public {
+        vm.warp(1000);
+        engine.setFadDayOverride(block.timestamp / 86_400, true);
+        engine.setLastMark(100_000_000, 990);
+        pyth.setPrice(FEED_A, int64(100_000_000), int32(-8), 1000);
+        pyth.setPrice(FEED_B, int64(100_000_000), int32(-8), 900);
+
+        (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
+            oracle.updateOrderExecutionPrice(address(this), _pythUpdateData(), _orderRequest(CfdTypes.Side.LONG, false));
+
+        assertTrue(ok);
+        assertTrue(snapshot.oracleFrozen);
+        assertEq(snapshot.publishTime, 990);
+        assertEq(snapshot.updateFee, 0);
+    }
+
     function test_FrozenLiquidation_AllowsFeedDivergenceWithinFadMaxStaleness() public {
         vm.warp(1000);
         engine.setFadDayOverride(block.timestamp / 86_400, true);

@@ -243,6 +243,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         uint256 maxPendingOrders = 32;
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxPendingOrders = maxPendingOrders;
+        config.minEngineGas = 5_000_000;
         _setRouterConfig(config);
 
         address account = address(0xBA7C0032);
@@ -548,6 +549,26 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
             1,
             "shared oracle update must complete before the clean low-gas stop"
         );
+    }
+
+    function test_Batch_MaxConfigReservesEip150GasBeforeDispatch() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxPendingOrders = 32;
+        config.minEngineGas = 5_000_000;
+        _setRouterConfig(config);
+
+        address account = address(0xBA7C150);
+        vm.mockCall(
+            address(router), abi.encodeWithSelector(router.pendingOrderCounts.selector, account), abi.encode(32)
+        );
+        address[] memory accounts = new address[](1);
+        accounts[0] = account;
+        bytes[] memory updateData = _liveLiquidationData(NEUTRAL_PRICE);
+
+        vm.prank(KEEPER);
+        uint256 nextIndex = IPerpsKeeper(address(router)).executeLiquidationBatch{gas: 25_500_000}(accounts, updateData);
+
+        assertEq(nextIndex, 0, "batch must stop before forwarding a clipped maximum item budget");
     }
 
     function test_BatchItem_DirectCallRevertsUnauthorized() public {

@@ -992,6 +992,14 @@ Notional times the capped fee/margin rates fits `uint256`; each checked VPI curv
 These bounds do not promise safe arbitrary future governance parameters or totality of the maximum-size search
 outside its existing domain.
 
+### Open direction at admission
+
+An open must match the account position projected through its earlier pending orders. An opposing projected position
+rejects at commitment even when the cached mark is stale. A full queued close can project the account flat and allow
+the following opposite-side open; the live-position preview's `MUST_CLOSE_OPPOSING` result does not reject that
+sequence. Other preview failures retain their existing freshness policy. The projection assumes earlier orders
+execute, so execution must recheck the actual position and may terminally reject the later open if a predecessor fails.
+
 ### Close direction at execution
 
 A queued close must match the nonzero live position's side. Earlier queued closes and opens may fail, so admission's

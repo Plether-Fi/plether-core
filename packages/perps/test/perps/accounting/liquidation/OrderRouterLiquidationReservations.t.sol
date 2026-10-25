@@ -356,7 +356,7 @@ contract OrderRouterLiquidationReservationTest is BasePerpTest {
 
         vm.startPrank(otherTrader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
-        router.commitOrder(CfdTypes.Side.SHORT, 10_000e18, 500e6, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, type(uint256).max, false);
         vm.stopPrank();
 
         vm.prank(trader);

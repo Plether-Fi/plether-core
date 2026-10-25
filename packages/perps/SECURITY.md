@@ -559,8 +559,12 @@ Security properties:
 - batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds
   cap recipient-call gas and defer rejected refunds; a later gas-burning prepared item or refund recipient therefore
   cannot roll back an already finalized batch prefix,
-- Unexpected historical parser errors stop the batch with `OracleFailure`, preserving finalized predecessors and
-  refunding the failed call's unspent funding. `HistoricalPriceUnavailable` means the supplied payload contains no
+- **LOW-70 — unavailable history preserves single-order cleanup:** Both execution entrypoints return
+  `HistoricalPriceUnavailable` when the supplied payload has no qualifying historical tick. Single-order execution
+  preserves earlier terminal cleanup and leaves the target pending without updating the mark. The Oracle refunds or
+  defers the forwarded funding; the Router refunds only the excess, so each allocation is returned once.
+- Unexpected historical parser errors still revert single-order execution and stop the batch with `OracleFailure`,
+  preserving finalized predecessors and refunding the failed call's unspent funding. `HistoricalPriceUnavailable` means the supplied payload contains no
   qualifying update for at least one feed; it does not prove no such history exists elsewhere.
 - Other Oracle/Pyth preparation failures and the resulting Engine mark update remain in the outer batch frame.
   A revert at that boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
@@ -1168,6 +1172,16 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 - account-scoped client ids are permanent; a terminal or config-invalidated id cannot be reused for a replacement
   request, so clients must generate and persist unique ids,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
+- **Stale cached marks can underfund open-order bounties and global FIFO cleanup.** Status: **Won't fix**
+  (accepted low-severity finding). After a nonzero Engine mark is loaded, open commitment remains available when that
+  mark is stale. The cached price can misstate the minimum
+  opening notional and the reserved keeper bounty; an understated bounty can make cleanup of a shared-FIFO order
+  less attractive to keepers. The configured bounty floor and cap, trader-specified bounty bound, and per-account
+  pending-order cap limit individual commitments, but do not eliminate that residual risk. Execution separately
+  validates oracle data. Although `updateMarkPrice` is permissionless on-chain, obtaining the required signed Pyth
+  update data in this deployment requires a paid feed subscription expected to be held by keepers. Requiring a fresh
+  mark at commitment would therefore make opens after an idle period depend on a keeper refresh and its fee. We
+  accept stale-mark admission to preserve open-order liveness; no admission freshness gate is planned,
 - ordinary failed closes require unpaid cleanup. The protocol keeper must fund gas
   for permissionless oracle-free expiry; bounded deadlines and queues do not guarantee a positive keeper incentive
   or prevent repeated fresh invalid submissions,

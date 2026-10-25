@@ -53,3 +53,9 @@ the existing bounded V3 request. Its native sponsorship path retains the
 signature, durable journal, and submission ordering checks. The five existing
 current protection vectors and `baseline.json` are preserved. This source
 update does not publish a package or deploy a compatible Book.
+
+The order/oracle audit fixes add the reviewed errors `OrderRouter__MarkPriceUnavailable`,
+`OrderRouter__TerminalNavBookUnavailable`, and `OrderRouter__TooManyCleanupIds(uint256)`
+to the current generated ABIs. The current ABI hashes include those error additions;
+function and event signatures, action vectors, public exports, and historical ABI
+hashes remain unchanged.

@@ -445,9 +445,9 @@ interface IPletherOracle {
     function orderSettlementWindow() external view returns (uint256);
 
     /// @notice Returns max allowed publish-time divergence across basket components.
-    /// @dev This configured value applies to unique historical order baskets; current-basket reads derive their
-    ///      divergence limit from the applicable staleness policy. Frozen MarkRefresh, Liquidation, and PoolReconcile
-    ///      use `fadMaxStaleness`; frozen OrderExecution retains the live order-staleness divergence limit.
+    /// @dev This configured value applies to unique historical order baskets; current live basket reads derive their
+    ///      divergence limit from the applicable staleness policy. Frozen reads reuse the Engine mark and do not
+    ///      compare component publish times.
     /// @return Historical basket component-time divergence limit in seconds.
     function maxComponentPublishTimeDivergence() external view returns (uint256);
 
