@@ -522,7 +522,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IPletherOracle.OracleConfig memory policy = _oraclePolicy(activeOracle);
         candidate.applyConfig(policy);
         if (keccak256(abi.encode(_oraclePolicy(candidate))) != keccak256(abi.encode(policy))) {
-            revert OrderRouter__InvalidPletherOracle();
+            revert OrderRouter__OraclePolicyMismatch();
         }
     }
 

@@ -551,9 +551,9 @@ Security properties:
 - partial-close size floors prevent dust closes from occupying global FIFO slots,
 - binding order semantics and the lack of a user cancellation path prevent traders from turning queued intents into
   free options,
-- the stateless evaluator reads a settlement snapshot and calls the configured Engine planner before mutation; its
-  current snapshot leaves `settlementBufferBps` at zero, while Engine execution independently enforces the configured
-  buffer. The execution sidecar checks selected assessment fields against actual pre/post state,
+- the stateless evaluator reads a settlement snapshot with the Engine's live `settlementBufferBps` and calls the
+  configured Engine planner before mutation. Planning and Engine execution enforce that configured buffer. The
+  execution sidecar checks selected assessment fields against actual pre/post state,
 - the execution sidecar reserves a fixed post-Engine gas tail and finalizes the lifecycle Book only after economic
   settlement and Router-record deletion,
 - batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds

@@ -41,8 +41,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     error OrderRouterExecutionSidecar__RetryableFailure(address target, bytes4 selector, uint256 returndataLength);
     /// @notice Router settlement did not consume exactly the lifecycle-book bounty.
     error OrderRouterExecutionSidecar__BountyMismatch(uint256 expectedUsdc, uint256 actualUsdc);
-    /// @notice A receipt-only helper was supplied a reason outside its risk-off/liquidation domain.
-    error OrderRouterExecutionSidecar__InvalidSettledReason();
     /// @notice Evaluator output disagreed with the actual pre- or post-settlement protocol state.
     error OrderRouterExecutionSidecar__AssessmentStateMismatch(uint8 field, uint256 expected, uint256 actual);
 

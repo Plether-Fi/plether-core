@@ -101,7 +101,7 @@ interface ICfdEngineLens {
     /// @param sizeDelta Position size delta (18 decimals)
     /// @param marginDelta Margin supplied with the hypothetical order in USDC
     /// @param oraclePrice Candidate execution price (8 decimals)
-    /// @return category Commit-time open failure policy category
+    /// @return category Open failure policy category, including execution-time categories
     function previewOpenFailurePolicyCategory(
         address account,
         CfdTypes.Side side,

@@ -23,8 +23,10 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
     uint256 private constant MAX_BULK_CLEANUP_IDS = 64;
     uint256 private constant CLEANUP_RETURN_GAS = 1_000_000;
 
-    error OrderRouterExecutionSidecar__InvalidSettledReason();
-    error OrderRouterExecutionSidecar__OrderIdentityMismatch(uint64 orderId);
+    /// @notice Settled receipt evidence does not match the risk-off or liquidation terminal reason.
+    error OrderRecoverySidecar__InvalidSettledReason();
+    /// @notice The settled order identity or bounty disagrees with its lifecycle-book intent.
+    error OrderRecoverySidecar__OrderIdentityMismatch(uint64 orderId);
 
     address private immutable SELF = address(this);
     error RecoveryUnauthorized();
@@ -223,13 +225,13 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
             input.reason != OrderV3Types.TerminalReason.RiskOff
                 && input.reason != OrderV3Types.TerminalReason.AccountLiquidated
         ) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+            revert OrderRecoverySidecar__InvalidSettledReason();
         }
         IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
         IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
         OrderV3Types.PendingIntent memory pending = book.pendingIntent(input.orderId);
         if (pending.account == address(0) || input.bountyUsdc != pending.executionBountyUsdc) {
-            revert OrderRouterExecutionSidecar__OrderIdentityMismatch(input.orderId);
+            revert OrderRecoverySidecar__OrderIdentityMismatch(input.orderId);
         }
         _validateSettledTerminalInput(host, pending, input);
         OrderV3Types.OrderReceipt memory receipt = _receipt(input.orderId, pending, input.executor);
@@ -264,7 +266,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
             && input.failure.code == 0 && input.failure.constraint == OrderV3Types.ConstraintKind.None
             && input.failure.actual == 0 && input.failure.limit == 0 && input.failure.revertDataHash == bytes32(0);
         if (!failureIsEmpty) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+            revert OrderRecoverySidecar__InvalidSettledReason();
         }
         uint256 refund = input.reason == OrderV3Types.TerminalReason.RiskOff ? input.bountyUsdc : 0;
         OrderV3Types.BountyDisposition disposition;
@@ -280,7 +282,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
             input.bountyRefundedUsdc != refund || input.bountyDisposition != disposition
                 || input.bountyRecipient != recipient
         ) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+            revert OrderRecoverySidecar__InvalidSettledReason();
         }
 
         if (input.reason == OrderV3Types.TerminalReason.RiskOff) {
@@ -289,12 +291,12 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
                     || input.priceSource != OrderV3Types.PriceSource.None || input.executionPrice != 0
                     || input.oraclePublishTime != 0 || input.priceReachedEngine
             ) {
-                revert OrderRouterExecutionSidecar__InvalidSettledReason();
+                revert OrderRecoverySidecar__InvalidSettledReason();
             }
             return;
         }
         if (input.priceSource != OrderV3Types.PriceSource.Liquidation || input.priceReachedEngine) {
-            revert OrderRouterExecutionSidecar__InvalidSettledReason();
+            revert OrderRecoverySidecar__InvalidSettledReason();
         }
     }
 

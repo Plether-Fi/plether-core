@@ -431,6 +431,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__OraclePolicyMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__OrderNotExpired",
     "inputs": []
   },

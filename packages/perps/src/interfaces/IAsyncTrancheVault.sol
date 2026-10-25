@@ -12,7 +12,9 @@ import {IERC7575, IERC7575Share} from "@plether/perps/interfaces/IERC7575.sol";
 ///      a later HousePool call. Deposit claims and redemption cancellations/refunds require receiver == controller,
 ///      including zero-share acknowledgements, so share delivery cannot impose another account's cooldown or depend
 ///      on an unsolicited receiver balance. Approved operators may execute these actions for the controller.
-///      `maxDeposit` and `maxMint` report controller limits; the receiver must still be that controller.
+///      All four ERC-7575 `max*` claim views take the request controller. Deposit/mint receivers must still be that
+///      controller; funded redemption assets may be sent to another receiver. The custom interface id is `0xa4fc3325`;
+///      implementations also retain support for the previous custom interface id `0x8f61af3a`.
 interface IAsyncTrancheVault is IERC7540, IERC7575Share {
 
     /// @notice Returns the epoch currently targeted by new requests and the timestamp when that target next changes.
@@ -21,13 +23,15 @@ interface IAsyncTrancheVault is IERC7540, IERC7575Share {
     function getRequestEpochWindow() external view returns (uint256 nextRequestEpoch, uint256 nextRequestCutoffTime);
 
     /// @notice Returns the maximum underlying assets currently accepted for a new deposit request by `controller`.
-    /// @dev This is a request-capacity view, not the ERC-7575 `maxDeposit` claim-capacity view.
+    /// @dev Returns zero for the zero controller. This is a request-capacity view, not the ERC-7575 `maxDeposit`
+    ///      claim-capacity view. A request must also satisfy the minimum amount, funding and owner authorization.
     function maxRequestDeposit(
         address controller
     ) external view returns (uint256 maxAssets);
 
     /// @notice Returns the maximum shares currently accepted for a new redemption request from `owner`.
-    /// @dev This is a request-capacity view, not the ERC-7575 `maxRedeem` claim-capacity view.
+    /// @dev This is a request-capacity view, not the ERC-7575 `maxRedeem` claim-capacity view. Smaller requests must
+    ///      meet the minimum estimated asset value; redeeming this owner's entire available balance permits dust exits.
     function maxRequestRedeem(
         address owner
     ) external view returns (uint256 maxShares);
@@ -35,27 +39,32 @@ interface IAsyncTrancheVault is IERC7540, IERC7575Share {
     /// @notice Estimates shares for a deposit amount using current pricing without promising a claim result.
     /// @dev ERC-7540 requires `previewDeposit` to revert for an asynchronous deposit flow; integrations should use this
     ///      explicitly nonbinding estimate when presenting current indicative pricing. Returns zero when projected
-    ///      deposit-pricing assets are zero with surviving shares. Other admission/settlement gates are not encoded;
+    ///      deposit-pricing assets are zero with surviving shares. The request minimum and other admission/settlement
+    ///      gates are not encoded; a nonzero quote does not imply the amount can be requested, and
     ///      accepted Senior reservations retain an estimate even when new-deposit capacity is exhausted.
     function estimateDepositShares(
         uint256 assets
     ) external view returns (uint256 shares);
 
     /// @notice Estimates assets for a target share amount using current pricing without promising a claim result.
-    /// @dev ERC-7540 requires `previewMint` to revert for an asynchronous deposit flow.
+    /// @dev ERC-7540 requires `previewMint` to revert for an asynchronous deposit flow. This conversion does not
+    ///      enforce the deposit-request minimum or other admission/settlement gates.
     function estimateMintAssets(
         uint256 shares
     ) external view returns (uint256 assets);
 
     /// @notice Estimates shares for a target withdrawal amount using current pricing without promising a claim result.
-    /// @dev ERC-7540 requires `previewWithdraw` to revert for an asynchronous redemption flow.
+    /// @dev ERC-7540 requires `previewWithdraw` to revert for an asynchronous redemption flow. This conversion
+    ///      includes the active frozen-oracle fee but does not check owner balances, cooldowns or request minimums.
     function estimateWithdrawShares(
         uint256 assets
     ) external view returns (uint256 shares);
 
     /// @notice Estimates assets for a redemption amount using current pricing without promising a claim result.
     /// @dev ERC-7540 requires `previewRedeem` to revert for an asynchronous redemption flow; integrations should use
-    ///      this explicitly nonbinding estimate when presenting current indicative pricing.
+    ///      this explicitly nonbinding estimate when presenting current indicative pricing. Includes the active
+    ///      frozen-oracle fee but does not enforce request minimums or owner-specific eligibility. A below-minimum
+    ///      request is allowed only when redeeming the owner's entire available balance.
     function estimateRedeemAssets(
         uint256 shares
     ) external view returns (uint256 assets);
@@ -156,6 +165,14 @@ interface IAsyncTrancheVault is IERC7540, IERC7575Share {
         uint256 requestId,
         address receiver,
         address controller
+    ) external returns (uint256 shares);
+
+    /// @notice Compatibility wrapper that cancels the caller's complete pending redemption request.
+    /// @dev The caller is the controller and `receiver` must equal the caller. The request must be unmatured and
+    ///      wholly unfunded, as for the three-argument overload.
+    function cancelRedeemRequest(
+        uint256 requestId,
+        address receiver
     ) external returns (uint256 shares);
 
     /// @notice Compatibility wrapper that requests a deposit funded by the caller and controlled by `receiver`.

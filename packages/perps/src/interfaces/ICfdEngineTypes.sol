@@ -306,7 +306,8 @@ interface ICfdEngineTypes {
     ///      partial depending on where planning stopped.
     /// @param valid Whether the planner would accept the open/increase.
     /// @param invalidReason Typed planner rejection code.
-    /// @param failureCategory Commit-time policy category for `invalidReason`.
+    /// @param failureCategory Open failure policy category for `invalidReason`, including execution-time categories
+    ///        for degraded mode and fee-drained margin.
     /// @param executionPrice Caller-supplied oracle price clamped to the engine cap.
     /// @param sizeDelta Requested position-size increase.
     /// @param notionalUsdc Notional represented by `sizeDelta` at `executionPrice`.
