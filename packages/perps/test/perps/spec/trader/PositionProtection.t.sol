@@ -1058,14 +1058,18 @@ contract PositionProtectionTest is BasePerpTest {
         bytes[] memory oldWindowData =
             _mockUniquePythUpdateDataAt(MARK_PRICE, oldOrder.commitTime + 1, oldOrder.commitTime);
         vm.prank(EXECUTION_KEEPER);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(retryOrderId, oldWindowData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryOrderId, oldWindowData);
+        assertEq(result.orderId, retryOrderId);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         bytes[] memory commitBoundaryData =
             _mockUniquePythUpdateDataAt(MARK_PRICE, retryOrder.commitTime, retryOrder.commitTime - 1);
         vm.prank(EXECUTION_KEEPER);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(retryOrderId, commitBoundaryData);
+        result = router.executeOrder(retryOrderId, commitBoundaryData);
+        assertEq(result.orderId, retryOrderId);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         assertEq(router.nextExecuteId(), retryOrderId, "ticks at or before the retry commit must leave it pending");
         assertEq(
@@ -1104,8 +1108,10 @@ contract PositionProtectionTest is BasePerpTest {
         bytes[] memory afterDeadlineData =
             _mockUniquePythUpdateDataAt(MARK_PRICE, settlementDeadline + 1, retryOrder.commitTime);
         vm.prank(EXECUTION_KEEPER);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(retryOrderId, afterDeadlineData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(retryOrderId, afterDeadlineData);
+        assertEq(result.orderId, retryOrderId);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         assertEq(router.nextExecuteId(), retryOrderId, "post-deadline tick must leave the retry pending");
         assertTrue(
