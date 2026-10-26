@@ -78,6 +78,24 @@ The release-script `frozenCloseSpreadBps` default is `50` bps (0.50%). Both cons
 The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked updates accept the inclusive range
 `0..1,000` bps; zero disables the additional headroom without changing raw solvency or degraded-mode semantics.
 
+### Protocol treasury commitment
+
+`CfdEngine.setProtocolTreasury(address,uint256)` activates a nonzero treasury immediately and locks it for a
+caller-selected positive duration in seconds. The constructor's initial treasury is unlocked. Both treasury setters,
+including the legacy one-argument setter and same-address calls, reject updates while
+`block.timestamp < protocolTreasuryLockedUntil`. A lock cannot be cancelled, shortened, extended, or bypassed by
+ownership transfer. At the exact expiry, the owner may update again; expiry never automatically changes the address.
+The legacy setter starts no new lock. The expiry getter retains the last lock timestamp.
+
+This is an optional commitment after immediate activation, not a proposal delay or a mandatory minimum tenure.
+There is no emergency override or duration cap; an incorrect address or excessively long duration cannot be
+corrected before expiry. Zero duration is rejected by the locking setter, and timestamp overflow reverts atomically.
+The commitment affects future protocol credits only. Existing balances remain with their original clearinghouse
+accounts, and normal withdrawal rules continue to apply to both old and current treasuries. It does not constrain
+the treasury wallet's own spending or the separately governed junior-vault maintenance-fee recipient.
+`ProtocolTreasuryLocked(treasury, lockedUntil)` records each commitment. Existing non-upgradeable deployments
+cannot acquire this protection without a new deployment.
+
 ### Owner-funded recapitalization
 
 `CfdEngine.recapitalizePool(amountUsdc)` is an immediate, owner-only, non-reentrant recovery action.
@@ -155,7 +173,8 @@ The owner can act immediately to:
 - pause and unpause `HousePool` LP epoch settlement independently,
 - install or replace the common coordinator pauser on `OrderRouterAdmin` and `HousePool`,
 - rotate or disable the coordinator guardian,
-- set the protocol treasury account; existing balances remain withdrawable by their original accounts,
+- set the protocol treasury account when its optional commitment lock has expired, optionally starting a new lock;
+  existing balances remain withdrawable by their original accounts,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:

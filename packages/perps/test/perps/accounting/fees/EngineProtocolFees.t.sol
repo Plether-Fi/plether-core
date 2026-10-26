@@ -185,11 +185,28 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
     }
 
     function test_SetProtocolTreasury_KeepsExistingBalanceWithOldTreasury() public {
+        _checkTreasuryRotationBalances(false);
+    }
+
+    function test_TreasuryLock_KeepsOldBalancesAndAllowsCurrentTreasuryWithdrawal() public {
+        _checkTreasuryRotationBalances(true);
+        _withdrawProtocolTreasury(40e6);
+        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), 0);
+        assertGt(engine.protocolTreasuryLockedUntil(), block.timestamp);
+    }
+
+    function _checkTreasuryRotationBalances(
+        bool withLock
+    ) internal {
         address oldTreasury = engine.protocolTreasury();
         address newTreasury = address(0xFEE99);
 
         _fundProtocolTreasury(1e6);
-        engine.setProtocolTreasury(newTreasury);
+        if (withLock) {
+            engine.setProtocolTreasury(newTreasury, 90 days);
+        } else {
+            engine.setProtocolTreasury(newTreasury);
+        }
 
         assertEq(engine.protocolTreasury(), newTreasury, "Treasury should rotate despite the old balance");
         assertEq(clearinghouse.balanceUsdc(oldTreasury), 1e6, "Old treasury retains its balance");

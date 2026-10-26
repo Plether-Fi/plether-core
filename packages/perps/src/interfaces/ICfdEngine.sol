@@ -34,6 +34,9 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return Current protocol treasury account
     function protocolTreasury() external view returns (address);
 
+    /// @notice Unix timestamp before which treasury updates revert; zero if no lock has ever been set.
+    function protocolTreasuryLockedUntil() external view returns (uint256);
+
     /// @notice Settlement token used for fees, margin, and payouts
     /// @return USDC-compatible settlement token
     function USDC() external view returns (IERC20);

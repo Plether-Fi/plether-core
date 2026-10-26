@@ -129,6 +129,9 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     address public orderRouter;
     /// @notice Clearinghouse account credited with protocol execution fees and forfeited bounties.
     address public protocolTreasury;
+    /// @notice Unix timestamp before which all treasury updates revert; zero means no lock has been set.
+    /// @dev Expiry does not change the treasury or clear this historical timestamp.
+    uint256 public protocolTreasuryLockedUntil;
 
     /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
     mapping(uint256 => bool) public fadDayOverrides;
@@ -152,6 +155,11 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Emitted when the clearinghouse account designated to receive future protocol fees changes.
     /// @param treasury New protocol treasury clearinghouse account.
     event ProtocolTreasuryUpdated(address indexed treasury);
+
+    /// @notice Emitted when the owner immediately commits a treasury for a chosen duration.
+    /// @param treasury Treasury protected against replacement, including by a subsequent owner.
+    /// @param lockedUntil Unix timestamp at which treasury updates become available again.
+    event ProtocolTreasuryLocked(address indexed treasury, uint256 lockedUntil);
 
     function _sideIndex(
         CfdTypes.Side side
@@ -439,13 +447,41 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         orderRouter = _router;
     }
 
-    /// @notice Updates the clearinghouse account receiving protocol fees.
-    /// @dev Callable only by the owner. Existing balances remain in their original clearinghouse accounts;
-    ///      supplying the current treasury is a no-op.
+    /// @notice Immediately updates the protocol treasury without starting a new lock.
+    /// @dev Owner-only; reverts while a treasury lock is active, even for the current address.
+    ///      Existing balances remain in their original accounts. Once unlocked, the current address is a no-op.
     /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
     function setProtocolTreasury(
         address treasury
     ) external onlyOwner {
+        _setProtocolTreasury(treasury);
+    }
+
+    /// @notice Immediately sets the protocol treasury and prevents further updates for lockDuration seconds.
+    /// @dev Owner-only. Can lock the current address. An active lock cannot be shortened, extended, or bypassed
+    ///      through ownership transfer. Existing balances and withdrawals are unaffected. Expiry allows updates
+    ///      at block.timestamp >= protocolTreasuryLockedUntil; it does not automatically replace the treasury.
+    /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
+    /// @param lockDuration Positive lock duration in seconds. Timestamp overflow reverts atomically.
+    function setProtocolTreasury(
+        address treasury,
+        uint256 lockDuration
+    ) external onlyOwner {
+        if (lockDuration == 0) {
+            revert CfdEngine__InvalidTreasuryLockDuration();
+        }
+        _setProtocolTreasury(treasury);
+        protocolTreasuryLockedUntil = block.timestamp + lockDuration;
+        emit ProtocolTreasuryLocked(treasury, protocolTreasuryLockedUntil);
+    }
+
+    /// @dev Shared guard for both public setters, including same-address calls.
+    function _setProtocolTreasury(
+        address treasury
+    ) internal {
+        if (block.timestamp < protocolTreasuryLockedUntil) {
+            revert CfdEngine__TreasuryLocked(protocolTreasuryLockedUntil);
+        }
         if (treasury == address(0)) {
             revert CfdEngine__ZeroAddress();
         }

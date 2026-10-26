@@ -1006,6 +1006,7 @@ without moving funds, and unknown failures still roll back the item for retry.
 - protocol fee withdrawal is a standard `MarginClearinghouse` withdrawal from the configured treasury account,
 - `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports the configured treasury account balance,
 - rotating the treasury changes the recipient of future fees; existing balances stay with the previous account and remain withdrawable by it,
+- an optional treasury commitment activates immediately and blocks both treasury setters until its expiry; it does not restrict withdrawals or move balances,
 - only cash-collected execution or liquidation fees and free-cash-funded top-ups become treasury margin,
 - uncredited fee amounts are not withdrawable protocol inventory in the simplified treasury-margin model,
 - frozen-close spread is LP-owned trading revenue and never becomes treasury margin,

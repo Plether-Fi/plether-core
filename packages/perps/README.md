@@ -72,6 +72,26 @@ Refunds remain available under the documented recovery conditions. See the
 The contracts are non-upgradeable. Governance can adjust risk parameters through timelocks, and emergency
 controls can restrict trading and LP activity. See the [security model](SECURITY.md) for trust assumptions.
 
+## Protocol treasury lock
+
+The engine owner can activate a treasury immediately and lock its address for a chosen positive duration in seconds:
+
+```solidity
+engine.setProtocolTreasury(treasury, 90 days);
+uint256 expiry = engine.protocolTreasuryLockedUntil();
+```
+
+Both treasury setters revert while `block.timestamp < expiry`, including calls that supply the current address.
+The lock cannot be shortened, extended, or bypassed by transferring ownership. At expiry the treasury stays in place;
+the owner may then replace it or lock it again. The one-argument `setProtocolTreasury(treasury)` remains available
+when unlocked and does not start a new lock. The constructor's initial treasury is unlocked.
+
+The lock applies to future protocol fee routing, not fund withdrawals: existing clearinghouse balances stay with
+their original accounts and remain withdrawable under normal clearinghouse rules. Junior-vault maintenance-fee
+recipients are configured separately. `ProtocolTreasuryLocked` exposes the selected address and expiry for monitoring.
+The expiry getter retains the last lock timestamp after expiry. These contracts are non-upgradeable, so this feature
+requires a new deployment and does not change existing deployments.
+
 ## Development
 
 This package uses Foundry and depends on the shared package and third-party libraries. From the repository root:
