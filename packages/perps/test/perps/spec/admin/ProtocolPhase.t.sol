@@ -88,4 +88,41 @@ contract ProtocolPhaseTest is BasePerpTest {
         );
     }
 
+    function test_RouterPauseCannotReportActiveAndUnpauseRestoresActive() public {
+        assertEq(publicLens.getProtocolStatus().phase, uint8(ICfdEngine.ProtocolPhase.Active));
+        routerAdmin.pause();
+        assertEq(publicLens.getProtocolStatus().phase, uint8(ICfdEngine.ProtocolPhase.Paused));
+        assertTrue(publicLens.getProtocolStatus().tradingActive, "Pool activation is separate from Router pause");
+        routerAdmin.unpause();
+        assertEq(publicLens.getProtocolStatus().phase, uint8(ICfdEngine.ProtocolPhase.Active));
+    }
+
+    function test_MandatoryDependencyWithoutCodeCannotReportActive() public {
+        bytes4[4] memory getters = [
+            bytes4(keccak256("planner()")),
+            bytes4(keccak256("settlementSidecar()")),
+            bytes4(keccak256("terminalNavBook()")),
+            bytes4(keccak256("admin()"))
+        ];
+        for (uint256 i; i < getters.length; ++i) {
+            for (uint256 j; j < 2; ++j) {
+                vm.mockCall(
+                    address(engine),
+                    abi.encodeWithSelector(getters[i]),
+                    abi.encode(j == 0 ? address(0) : address(0xBAD))
+                );
+                assertEq(publicLens.getProtocolStatus().phase, uint8(ICfdEngine.ProtocolPhase.Configuring));
+                vm.clearMockedCalls();
+                assertEq(publicLens.getProtocolStatus().phase, uint8(ICfdEngine.ProtocolPhase.Active));
+            }
+        }
+    }
+
+    function test_DegradedTakesPrecedenceOverPaused() public {
+        routerAdmin.pause();
+        vm.mockCall(address(engine), abi.encodeWithSelector(engine.degradedMode.selector), abi.encode(true));
+        assertEq(publicLens.getProtocolStatus().phase, uint8(ICfdEngine.ProtocolPhase.Degraded));
+        vm.clearMockedCalls();
+    }
+
 }
