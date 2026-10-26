@@ -2,7 +2,9 @@
 
 This document outlines the security assumptions, trust model, known limitations, and emergency procedures for the Plether protocol.
 
-The perps module has its own security model and audit packet. Use [`packages/perps/SECURITY.md`](packages/perps/SECURITY.md), [`packages/perps/PRE_AUDIT_GUIDE.md`](packages/perps/PRE_AUDIT_GUIDE.md), and [`packages/perps/EMERGENCY_RESPONSE_GUIDE.md`](packages/perps/EMERGENCY_RESPONSE_GUIDE.md) for perps-specific assumptions, order-flow policy, trader claim handling, keeper bounty routing, LP risk, and circuit-breaker operations.
+The perps module has its own [security model and review guide](packages/perps/SECURITY.md) and
+[emergency response guide](packages/perps/EMERGENCY_RESPONSE_GUIDE.md). Use them for perps-specific assumptions,
+order-flow policy, trader claims, keeper rewards, LP risk and circuit-breaker operations.
 
 ## Upgradeability
 

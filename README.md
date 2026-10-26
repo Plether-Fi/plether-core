@@ -179,8 +179,7 @@ Security assumptions are product-specific:
 
 - [Spot and shared integration assumptions](SECURITY.md)
 - [Options security model](packages/options/README.md#security-model)
-- [Perps security model](packages/perps/SECURITY.md)
-- [Perps pre-audit guide](packages/perps/PRE_AUDIT_GUIDE.md)
+- [Perps security model and review guide](packages/perps/SECURITY.md)
 - [Perps emergency response and circuit breakers](packages/perps/EMERGENCY_RESPONSE_GUIDE.md)
 - [Perps gas sponsorship security model](packages/perps-aa/SECURITY.md)
 

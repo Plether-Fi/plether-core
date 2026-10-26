@@ -84,4 +84,4 @@ The existing approved cap-only [proposal transaction](https://sepolia.arbiscan.i
 
 The standard bootstrap hard-codes 1 USDC, and the standard verifier assumes the original 40M cap and nonzero guardian. Independent checks cover this explicitly authorized operation. Guardian configuration, bridge enablement and consumer cutover remain separate; `activateTrading()` itself does not require a guardian.
 
-[Deployment guide](../../../packages/perps/DEPLOYMENT.md) · [Oracle synchronization](../../../packages/perps/ORACLE_SYNCHRONIZATION.md) · [V3 timing](../../../packages/perps/ORDER_V3_TIMING.md) · [Deposit-free close](../../../packages/perps/DEPOSIT_FREE_CLOSE.md) · [Bridge funding](../../../packages/perps/BRIDGE_FUNDING.md)
+[Deployment guide](../../../packages/perps/DEPLOYMENT.md) · [Oracle synchronization](../../../packages/perps/ORACLE_SYNCHRONIZATION.md) · [V3 timing](../../../packages/perps/CANONICAL_ENTRYPOINTS.md#order-timing) · [Close settlement](../../../packages/perps/ACCOUNTING_SPEC.md#close-settlement) · [Bridge funding](../../../packages/perps/BRIDGE_FUNDING.md)
