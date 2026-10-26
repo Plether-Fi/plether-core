@@ -87,9 +87,6 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory housePoolSnapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
-        uint256 expectedNetPhysicalAssetsUsdc = snapshot.poolAssetsUsdc > snapshot.protocolTreasuryBalanceUsdc
-            ? snapshot.poolAssetsUsdc - snapshot.protocolTreasuryBalanceUsdc
-            : 0;
         uint256 settlementBufferUsdc =
             SolvencyAccountingLib.settlementBufferTargetUsdc(snapshot.maxLiabilityUsdc, engine.settlementBufferBps());
         uint256 expectedWithdrawalReservedUsdc =
@@ -99,7 +96,7 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
             : 0;
 
         assertEq(snapshot.poolAssetsUsdc, pool.totalAssets());
-        assertEq(snapshot.netPhysicalAssetsUsdc, expectedNetPhysicalAssetsUsdc);
+        assertEq(snapshot.netPhysicalAssetsUsdc, pool.totalAssets());
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability());
         assertEq(snapshot.withdrawalReservedUsdc, expectedWithdrawalReservedUsdc);
         assertEq(snapshot.freeUsdc, expectedFreeUsdc);
@@ -240,17 +237,14 @@ contract EngineAccountingViewsTest is CfdEngineTestBase {
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
         HousePoolEngineViewTypes.HousePoolStatusSnapshot memory status = engineProtocolLens.getHousePoolStatusSnapshot();
         ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engine.terminalNavSnapshot();
-        uint256 protocolTreasuryBalanceUsdc = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        uint256 expectedNetPhysicalAssetsUsdc =
-            pool.totalAssets() > protocolTreasuryBalanceUsdc ? pool.totalAssets() - protocolTreasuryBalanceUsdc : 0;
 
         assertEq(
             snapshot.physicalAssetsUsdc, pool.totalAssets(), "Snapshot physical assets must match canonical pool assets"
         );
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            expectedNetPhysicalAssetsUsdc,
-            "Treasury clearinghouse fees should be excluded from pool net assets"
+            pool.totalAssets(),
+            "Treasury is already outside pool custody and must not be subtracted"
         );
         assertEq(snapshot.maxLiabilityUsdc, _maxLiability(), "Snapshot liability must match accessor");
         assertEq(

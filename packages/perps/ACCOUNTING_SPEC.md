@@ -58,7 +58,11 @@ Use these terms consistently:
 - `economicDepth = max(physicalAssets - totalTraderClaimBalanceUsdc, 0)`: depth for carry utilization, skew capacity,
   and VPI. Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
 - `protocolTreasuryBalance = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
-- `netPhysicalAssets = max(physicalAssets - protocolTreasuryBalance, 0)`: protocol/lens diagnostic quantity exposed by accounting snapshots when treasury margin should be excluded from protocol-owned pool depth
+- `netPhysicalAssets = physicalAssets`: the retained snapshot field reports canonical pool backing. Treasury
+  settlement is held in the clearinghouse, outside pool custody, so subtracting it here would understate backing.
+  A pool-funded treasury payment already reduces `rawAssets` and `accountedAssets` when it leaves the pool.
+  Treasury-only clearinghouse deposits and withdrawals must not change either pool asset field. Trader claims
+  remain separate liabilities and are deducted when computing `economicDepth` and effective solvency assets.
 
 Operational rules:
 
@@ -501,7 +505,7 @@ Purpose:
 
 - canonical accounting payload for LP redemption funding and tranche reconciliation. Live LP kernels consume
   `physicalAssetsUsdc` plus explicit reserve fields; `netPhysicalAssetsUsdc` is exposed for protocol and read-layer
-  parity where treasury margin should be excluded.
+  parity with the same canonical pool backing. Treasury clearinghouse balances are outside this custody boundary.
 
 Key fields:
 

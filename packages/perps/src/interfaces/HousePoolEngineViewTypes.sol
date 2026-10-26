@@ -10,7 +10,8 @@ library HousePoolEngineViewTypes {
     ///      adjustment shared by LP entry and exit pricing: positive values are collectible by LPs, while negative
     ///      values are payable by LPs.
     /// @param physicalAssetsUsdc Canonical assets recognized by the HousePool before engine-side reservations.
-    /// @param netPhysicalAssetsUsdc Physical assets net of protocol-treasury settlement credited in custody.
+    /// @param netPhysicalAssetsUsdc Canonical pool assets, equal to physicalAssetsUsdc. Treasury settlement is held
+    ///        separately in the clearinghouse and must not be subtracted again; trader claims are also separate.
     /// @param maxLiabilityUsdc Larger of the long-side and short-side maximum-profit envelopes.
     /// @param supplementalReservedUsdc Additional senior reservation supplied by the engine, including protected
     ///        settlement headroom that does not affect terminal NAV.
