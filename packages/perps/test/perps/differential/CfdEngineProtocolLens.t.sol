@@ -22,11 +22,11 @@ contract CfdEngineProtocolLensTest is Test {
         vm.mockCall(ENGINE, abi.encodeWithSignature("protocolTreasury()"), abi.encode(TREASURY));
         vm.mockCall(POOL, abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(100_000e6)));
         vm.mockCall(
-            CLEARINGHOUSE, abi.encodeWithSignature("balanceUsdc(address)", TREASURY), abi.encode(uint256(10_000e6))
+            CLEARINGHOUSE, abi.encodeWithSignature("balanceAssets(address)", TREASURY), abi.encode(uint256(10_000e6))
         );
         _mockSide(CfdTypes.Side.LONG, 20_000e6, 20_000e18);
         _mockSide(CfdTypes.Side.SHORT, 35_000e6, 35_000e18);
-        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceUsdc()"), abi.encode(uint256(5000e6)));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(uint256(5000e6)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("settlementBufferBps()"), abi.encode(uint256(125)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(false));
         lens = new CfdEngineProtocolLens(ENGINE);
@@ -34,13 +34,13 @@ contract CfdEngineProtocolLensTest is Test {
 
     function _mockSide(
         CfdTypes.Side side,
-        uint256 maxProfitUsdc,
+        uint256 maxProfitAssets,
         uint256 openInterest
     ) internal {
         vm.mockCall(
             ENGINE,
             abi.encodeWithSignature("sides(uint256)", uint256(side)),
-            abi.encode(maxProfitUsdc, openInterest, uint256(0), uint256(0))
+            abi.encode(maxProfitAssets, openInterest, uint256(0), uint256(0))
         );
     }
 
@@ -50,14 +50,14 @@ contract CfdEngineProtocolLensTest is Test {
         uint256 gasBefore = gasleft();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory actual = lens.getProtocolAccountingSnapshot();
         emit log_named_uint("protocol_snapshot_gas", gasBefore - gasleft());
-        assertEq(actual.poolAssetsUsdc, expected.poolAssetsUsdc, "physical assets");
-        assertEq(actual.netPhysicalAssetsUsdc, expected.netPhysicalAssetsUsdc, "canonical pool assets");
-        assertEq(actual.maxLiabilityUsdc, expected.maxLiabilityUsdc, "maximum directional liability");
-        assertEq(actual.effectiveSolvencyAssetsUsdc, expected.effectiveSolvencyAssetsUsdc, "claim-adjusted solvency");
-        assertEq(actual.withdrawalReservedUsdc, expected.withdrawalReservedUsdc, "liability, claims, and buffer");
-        assertEq(actual.freeUsdc, expected.freeUsdc, "free liquidity");
-        assertEq(actual.protocolTreasuryBalanceUsdc, expected.protocolTreasuryBalanceUsdc, "treasury balance");
-        assertEq(actual.totalTraderClaimBalanceUsdc, expected.totalTraderClaimBalanceUsdc, "trader claims");
+        assertEq(actual.poolAssets, expected.poolAssets, "physical assets");
+        assertEq(actual.netPhysicalAssets, expected.netPhysicalAssets, "canonical pool assets");
+        assertEq(actual.maxLiabilityAssets, expected.maxLiabilityAssets, "maximum directional liability");
+        assertEq(actual.effectiveSolvencyAssets, expected.effectiveSolvencyAssets, "claim-adjusted solvency");
+        assertEq(actual.withdrawalReservedAssets, expected.withdrawalReservedAssets, "liability, claims, and buffer");
+        assertEq(actual.freeAssets, expected.freeAssets, "free liquidity");
+        assertEq(actual.protocolTreasuryBalanceAssets, expected.protocolTreasuryBalanceAssets, "treasury balance");
+        assertEq(actual.totalTraderClaimBalanceAssets, expected.totalTraderClaimBalanceAssets, "trader claims");
         assertEq(actual.degradedMode, expected.degradedMode, "engine degraded-mode flag");
         assertEq(actual.hasLiveLiability, expected.hasLiveLiability, "live liability flag");
         assertEq(
@@ -77,7 +77,7 @@ contract CfdEngineProtocolLensTest is Test {
 
     function test_ProtocolSnapshotKeepsBackingWhenTreasuryExceedsPoolAssets() public {
         vm.mockCall(
-            CLEARINGHOUSE, abi.encodeWithSignature("balanceUsdc(address)", TREASURY), abi.encode(uint256(125_000e6))
+            CLEARINGHOUSE, abi.encodeWithSignature("balanceAssets(address)", TREASURY), abi.encode(uint256(125_000e6))
         );
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
@@ -87,7 +87,7 @@ contract CfdEngineProtocolLensTest is Test {
     }
 
     function test_ProtocolSnapshotFloorsAssetsWhenClaimsExceedCustody() public {
-        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceUsdc()"), abi.encode(uint256(125_000e6)));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(uint256(125_000e6)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(true));
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
@@ -128,7 +128,7 @@ contract CfdEngineProtocolLensTest is Test {
     function test_ProtocolSnapshotPreservesCheckedLiabilitySum() public {
         _mockSide(CfdTypes.Side.LONG, type(uint256).max / 2 + 1, 0);
         _mockSide(CfdTypes.Side.SHORT, type(uint256).max / 2 + 1, 0);
-        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceUsdc()"), abi.encode(uint256(0)));
+        vm.mockCall(ENGINE, abi.encodeWithSignature("totalTraderClaimBalanceAssets()"), abi.encode(uint256(0)));
         vm.mockCall(ENGINE, abi.encodeWithSignature("settlementBufferBps()"), abi.encode(uint256(0)));
         vm.expectRevert(stdError.arithmeticError);
         lens.getProtocolAccountingSnapshot();

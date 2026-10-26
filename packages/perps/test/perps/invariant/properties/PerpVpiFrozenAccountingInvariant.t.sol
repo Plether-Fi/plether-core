@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -21,7 +21,7 @@ contract PerpVpiFrozenAccountingHandler is Test {
 
     CfdEngine internal immutable engine;
     MarginClearinghouse internal immutable clearinghouse;
-    MockUSDC internal immutable usdc;
+    MockSettlementToken internal immutable settlementToken;
     address internal immutable router;
     address internal immutable pool;
 
@@ -46,21 +46,21 @@ contract PerpVpiFrozenAccountingHandler is Test {
     constructor(
         CfdEngine engine_,
         MarginClearinghouse clearinghouse_,
-        MockUSDC usdc_,
+        MockSettlementToken settlementToken_,
         address router_,
         address pool_
     ) {
         engine = engine_;
         clearinghouse = clearinghouse_;
-        usdc = usdc_;
+        settlementToken = settlementToken_;
         router = router_;
         pool = pool_;
         ghostPoolCash = 1_000_000e6;
         for (uint256 i; i < 4; ++i) {
             address account = actorAt(i);
-            usdc.mint(account, INITIAL_TRADER_CASH);
+            settlementToken.mint(account, INITIAL_TRADER_CASH);
             vm.startPrank(account);
-            usdc.approve(address(clearinghouse), type(uint256).max);
+            settlementToken.approve(address(clearinghouse), type(uint256).max);
             clearinghouse.deposit(account, INITIAL_TRADER_CASH);
             vm.stopPrank();
             ghostTraderCash[i] = int256(INITIAL_TRADER_CASH);
@@ -256,23 +256,23 @@ contract PerpVpiFrozenAccountingHandler is Test {
             (uint256 size,,,,,, int256 accrued) = engine.positions(account);
             assertEq(size, ghostLots[i] * CfdTypes.SIZE_QUANTUM, "persistent size model");
             assertEq(accrued, ghostVpiAccrued[i], "independent lifetime VPI model");
-            assertEq(int256(clearinghouse.balanceUsdc(account)), ghostTraderCash[i], "independent trader cash model");
+            assertEq(int256(clearinghouse.balanceAssets(account)), ghostTraderCash[i], "independent trader cash model");
             uint256 reserve = ghostVpiAccrued[i] < 0 ? uint256(-ghostVpiAccrued[i]) : 0;
-            assertEq(clearinghouse.vpiRebateReserveUsdc(account), reserve, "exact lifetime rebate backing");
-            assertEq(engine.traderClaimBalanceUsdc(account), 0, "zero-price-PnL actions cannot create claims");
+            assertEq(clearinghouse.vpiRebateReserveAssets(account), reserve, "exact lifetime rebate backing");
+            assertEq(engine.traderClaimBalanceAssets(account), 0, "zero-price-PnL actions cannot create claims");
             expectedCustody += uint256(ghostTraderCash[i]);
         }
         for (uint256 side; side < 2; ++side) {
             (, uint256 oi,,) = engine.sides(uint8(side));
             assertEq(oi, ghostSideLots[side] * CfdTypes.SIZE_QUANTUM, "independent side size model");
         }
-        assertEq(int256(usdc.balanceOf(pool)), ghostPoolCash, "VPI and frozen spread belong to LP cash");
+        assertEq(int256(settlementToken.balanceOf(pool)), ghostPoolCash, "VPI and frozen spread belong to LP cash");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             ghostTreasuryCash,
             "only execution fees reach treasury"
         );
-        assertEq(usdc.balanceOf(address(clearinghouse)), expectedCustody, "physical clearinghouse custody");
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), expectedCustody, "physical clearinghouse custody");
         assertFalse(engine.degradedMode(), "bounded funded actions remain solvent");
     }
 
@@ -294,7 +294,9 @@ contract PerpVpiFrozenAccountingInvariantTest is BasePerpInvariantTest {
 
     function setUp() public override {
         super.setUp();
-        handler = new PerpVpiFrozenAccountingHandler(engine, clearinghouse, usdc, address(router), address(housePool));
+        handler = new PerpVpiFrozenAccountingHandler(
+            engine, clearinghouse, settlementToken, address(router), address(housePool)
+        );
         handler.openOrIncrease(0, 1000);
         handler.openOrIncrease(1, 500);
         bytes4[] memory selectors = new bytes4[](4);
@@ -316,7 +318,7 @@ contract PerpVpiFrozenAccountingInvariantTest is BasePerpInvariantTest {
 
     function test_IndependentCashModelRejectsOneAtomOfUnmodeledPoolCash() public {
         handler.assertModel();
-        usdc.mint(address(housePool), 1);
+        settlementToken.mint(address(housePool), 1);
         vm.expectRevert();
         handler.assertModel();
     }

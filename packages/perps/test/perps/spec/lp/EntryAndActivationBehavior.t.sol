@@ -16,7 +16,7 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
     function test_OpenPositionAllowsDepositRequestButNotUnfinalizedClaim() public {
         address trader = address(0x7100);
         address attacker = address(0xA77A);
-        uint256 attackerDepositUsdc = 100_000e6;
+        uint256 attackerDepositAssets = 100_000e6;
 
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
@@ -30,11 +30,11 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
             juniorVault.maxRequestDeposit(attacker), 0, "live positions should remain compatible with delayed entry"
         );
 
-        usdc.mint(attacker, attackerDepositUsdc);
+        settlementToken.mint(attacker, attackerDepositAssets);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), attackerDepositUsdc);
+        settlementToken.approve(address(juniorVault), attackerDepositAssets);
         vm.expectRevert(TrancheVault.TrancheVault__DepositEpochNotFinalized.selector);
-        juniorVault.deposit(attackerDepositUsdc, attacker);
+        juniorVault.deposit(attackerDepositAssets, attacker);
         vm.stopPrank();
     }
 
@@ -43,30 +43,30 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
         address trader = address(0x7101);
         address attacker = address(0xA77A2);
         address keeper = address(0xB0B0);
-        uint256 attackerDepositUsdc = 100_000e6;
+        uint256 attackerDepositAssets = 100_000e6;
 
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
-        uint256 immediateSharesBeforeLiquidation = juniorVault.estimateDepositShares(attackerDepositUsdc);
+        uint256 immediateSharesBeforeLiquidation = juniorVault.estimateDepositShares(attackerDepositAssets);
 
-        usdc.mint(attacker, attackerDepositUsdc);
+        settlementToken.mint(attacker, attackerDepositAssets);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), attackerDepositUsdc);
-        uint256 epochId = juniorVault.requestDeposit(attackerDepositUsdc, attacker);
+        settlementToken.approve(address(juniorVault), attackerDepositAssets);
+        uint256 epochId = juniorVault.requestDeposit(attackerDepositAssets, attacker);
         vm.stopPrank();
 
         assertEq(juniorVault.balanceOf(attacker), 0, "pending deposits must not mint active shares");
         assertEq(
             juniorVault.pendingDepositAssets(attacker, epochId),
-            attackerDepositUsdc,
+            attackerDepositAssets,
             "pending assets should be assigned to the activation epoch"
         );
 
-        uint256 poolDepthUsdc = pool.totalAssets();
+        uint256 poolDepthAssets = pool.totalAssets();
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
-        engine.liquidatePosition(trader, 150_000_000, poolDepthUsdc, uint64(vm.getBlockTimestamp()), keeper);
+        engine.liquidatePosition(trader, 150_000_000, poolDepthAssets, uint64(vm.getBlockTimestamp()), keeper);
 
         vm.warp(juniorVault.depositEpochStart(epochId));
         vm.prank(address(router));
@@ -90,22 +90,22 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
     /// @dev spec; source: ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries.
     function test_HealthyPendingDepositCanCancelOnlyBeforeActivationEpoch() public {
         address attacker = address(0xCACE1);
-        uint256 depositUsdc = 100_000e6;
+        uint256 depositAssets = 100_000e6;
 
-        usdc.mint(attacker, depositUsdc);
+        settlementToken.mint(attacker, depositAssets);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), depositUsdc);
-        uint256 epochId = juniorVault.requestDeposit(depositUsdc, attacker);
+        settlementToken.approve(address(juniorVault), depositAssets);
+        uint256 epochId = juniorVault.requestDeposit(depositAssets, attacker);
         juniorVault.cancelPendingDeposit(epochId);
         vm.stopPrank();
 
-        assertEq(usdc.balanceOf(attacker), depositUsdc, "pre-activation cancellation should refund assets");
+        assertEq(settlementToken.balanceOf(attacker), depositAssets, "pre-activation cancellation should refund assets");
         assertEq(juniorVault.pendingDepositAssets(attacker, epochId), 0, "cancelled request should clear pending state");
 
-        usdc.mint(attacker, depositUsdc);
+        settlementToken.mint(attacker, depositAssets);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), depositUsdc);
-        epochId = juniorVault.requestDeposit(depositUsdc, attacker);
+        settlementToken.approve(address(juniorVault), depositAssets);
+        epochId = juniorVault.requestDeposit(depositAssets, attacker);
         vm.warp(juniorVault.depositEpochStart(epochId));
         vm.expectRevert(TrancheVault.TrancheVault__DepositEpochAlreadyActive.selector);
         juniorVault.cancelPendingDeposit(epochId);
@@ -115,12 +115,12 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
     /// @dev spec; source: ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries.
     function test_ActivePendingDepositCanCancelWhenSeniorImpairmentBlocksFinalization() public {
         address pendingLp = address(0xCAFE2);
-        uint256 depositUsdc = 50_000e6;
+        uint256 depositAssets = 50_000e6;
 
-        usdc.mint(pendingLp, depositUsdc);
+        settlementToken.mint(pendingLp, depositAssets);
         vm.startPrank(pendingLp);
-        usdc.approve(address(juniorVault), depositUsdc);
-        uint256 epochId = juniorVault.requestDeposit(depositUsdc, pendingLp);
+        settlementToken.approve(address(juniorVault), depositAssets);
+        uint256 epochId = juniorVault.requestDeposit(depositAssets, pendingLp);
         vm.stopPrank();
 
         uint256 activationTime = juniorVault.depositEpochStart(epochId);
@@ -142,8 +142,10 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
         uint256 refunded = juniorVault.cancelPendingDeposit(epochId);
 
         (uint256 epochAssets,,,, bool finalized) = juniorVault.depositEpochs(epochId);
-        assertEq(refunded, depositUsdc, "active impaired cancellation should refund pending assets");
-        assertEq(usdc.balanceOf(pendingLp), depositUsdc, "depositor should recover escrowed USDC");
+        assertEq(refunded, depositAssets, "active impaired cancellation should refund pending assets");
+        assertEq(
+            settlementToken.balanceOf(pendingLp), depositAssets, "depositor should recover escrowed settlementToken"
+        );
         assertEq(juniorVault.pendingDepositAssets(pendingLp, epochId), 0, "pending balance should clear");
         assertEq(epochAssets, 0, "epoch aggregate assets should decrease");
         assertFalse(finalized, "epoch should remain unfinalized");
@@ -153,19 +155,19 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
     function test_PendingDepositClaimsAllocateAllFinalizedShares() public {
         address alice = address(0xA11CE);
         address bob = address(0xB0B);
-        uint256 aliceDepositUsdc = 33_333e6;
-        uint256 bobDepositUsdc = 66_667e6;
+        uint256 aliceDepositAssets = 33_333e6;
+        uint256 bobDepositAssets = 66_667e6;
 
-        usdc.mint(alice, aliceDepositUsdc);
+        settlementToken.mint(alice, aliceDepositAssets);
         vm.startPrank(alice);
-        usdc.approve(address(juniorVault), aliceDepositUsdc);
-        uint256 epochId = juniorVault.requestDeposit(aliceDepositUsdc, alice);
+        settlementToken.approve(address(juniorVault), aliceDepositAssets);
+        uint256 epochId = juniorVault.requestDeposit(aliceDepositAssets, alice);
         vm.stopPrank();
 
-        usdc.mint(bob, bobDepositUsdc);
+        settlementToken.mint(bob, bobDepositAssets);
         vm.startPrank(bob);
-        usdc.approve(address(juniorVault), bobDepositUsdc);
-        assertEq(juniorVault.requestDeposit(bobDepositUsdc, bob), epochId, "same epoch should batch together");
+        settlementToken.approve(address(juniorVault), bobDepositAssets);
+        assertEq(juniorVault.requestDeposit(bobDepositAssets, bob), epochId, "same epoch should batch together");
         vm.stopPrank();
 
         vm.warp(juniorVault.depositEpochStart(epochId));
@@ -186,7 +188,7 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
             1,
             "two-controller allocation should burn at most one share of terminal dust"
         );
-        assertEq(claimedAssets, aliceDepositUsdc + bobDepositUsdc, "epoch should mark all assets claimed");
+        assertEq(claimedAssets, aliceDepositAssets + bobDepositAssets, "epoch should mark all assets claimed");
         assertEq(claimedShares, finalizedShares, "epoch should mark all shares claimed");
         assertEq(juniorVault.balanceOf(address(juniorVault)), 0, "terminal deposit dust must leave escrow");
     }
@@ -194,12 +196,12 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
     /// @dev spec; source: ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries.
     function test_FinalizedPendingDepositSharesAreEscrowedBeforeClaim() public {
         address pendingLp = address(0xE5C20);
-        uint256 depositUsdc = 100_000e6;
+        uint256 depositAssets = 100_000e6;
 
-        usdc.mint(pendingLp, depositUsdc);
+        settlementToken.mint(pendingLp, depositAssets);
         vm.startPrank(pendingLp);
-        usdc.approve(address(juniorVault), depositUsdc);
-        uint256 epochId = juniorVault.requestDeposit(depositUsdc, pendingLp);
+        settlementToken.approve(address(juniorVault), depositAssets);
+        uint256 epochId = juniorVault.requestDeposit(depositAssets, pendingLp);
         vm.stopPrank();
 
         vm.warp(juniorVault.depositEpochStart(epochId));
@@ -232,7 +234,7 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
     function test_PendingSeniorDepositUsesSameDelayedActivationFlow() public {
         address trader = address(0x7102);
         address seniorLp = address(0x5E7102);
-        uint256 depositUsdc = 25_000e6;
+        uint256 depositAssets = 25_000e6;
 
         _fundTrader(trader, 20_000e6);
         _open(trader, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
@@ -240,10 +242,10 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
         assertEq(seniorVault.maxDeposit(seniorLp), 0, "no finalized request should expose claim capacity");
         assertGt(seniorVault.maxRequestDeposit(seniorLp), 0, "senior pending deposit requests should remain available");
 
-        usdc.mint(seniorLp, depositUsdc);
+        settlementToken.mint(seniorLp, depositAssets);
         vm.startPrank(seniorLp);
-        usdc.approve(address(seniorVault), depositUsdc);
-        uint256 epochId = seniorVault.requestDeposit(depositUsdc, seniorLp);
+        settlementToken.approve(address(seniorVault), depositAssets);
+        uint256 epochId = seniorVault.requestDeposit(depositAssets, seniorLp);
         vm.stopPrank();
 
         uint256 activationTime = seniorVault.depositEpochStart(epochId);
@@ -271,7 +273,7 @@ contract PendingDepositLifecycleEntryTest is BasePerpTest {
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
 
-        assertEq(snapshot.maxLiabilityUsdc, 0, "SHORT opened at the cap has no bounded upside liability");
+        assertEq(snapshot.maxLiabilityAssets, 0, "SHORT opened at the cap has no bounded upside liability");
         assertTrue(snapshot.hasOpenPositions, "snapshot must still expose live open interest");
         assertEq(juniorVault.maxDeposit(lp), 0, "no finalized request should expose claim capacity");
         assertGt(juniorVault.maxRequestDeposit(lp), 0, "pending deposit requests should remain available");
@@ -289,7 +291,7 @@ contract SymmetricNavEntryCancellationTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -304,12 +306,12 @@ contract SymmetricNavEntryCancellationTest is BasePerpTest {
     function test_ActivePendingDepositCanCancelWhenSymmetricNavImpairsSenior() public {
         address pendingLp = address(0xCAFE3);
         address trader = address(0xBEA4);
-        uint256 depositUsdc = 50e6;
+        uint256 depositAssets = 50e6;
 
-        usdc.mint(pendingLp, depositUsdc);
+        settlementToken.mint(pendingLp, depositAssets);
         vm.startPrank(pendingLp);
-        usdc.approve(address(juniorVault), depositUsdc);
-        uint256 epochId = juniorVault.requestDeposit(depositUsdc, pendingLp);
+        settlementToken.approve(address(juniorVault), depositAssets);
+        uint256 epochId = juniorVault.requestDeposit(depositAssets, pendingLp);
         vm.stopPrank();
 
         _fundTrader(trader, 100e6);
@@ -341,8 +343,10 @@ contract SymmetricNavEntryCancellationTest is BasePerpTest {
         vm.prank(pendingLp);
         uint256 refunded = juniorVault.cancelPendingDeposit(epochId);
 
-        assertEq(refunded, depositUsdc, "active cancellation should refund escrowed assets");
-        assertEq(usdc.balanceOf(pendingLp), depositUsdc, "depositor should recover escrowed USDC");
+        assertEq(refunded, depositAssets, "active cancellation should refund escrowed assets");
+        assertEq(
+            settlementToken.balanceOf(pendingLp), depositAssets, "depositor should recover escrowed settlementToken"
+        );
         assertEq(juniorVault.pendingDepositAssets(pendingLp, epochId), 0, "pending balance should clear");
     }
 

@@ -49,7 +49,7 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _sidecarSnapshot(ACCOUNT, depth);
         CfdEnginePlanTypes.OpenDelta memory delta = engine.planner().planOpen(snapshot, order, PRICE);
         assertTrue(delta.valid);
-        assertGt(delta.pendingCarryUsdc, 0);
+        assertGt(delta.pendingCarryAssets, 0);
         OrderV3Types.ExecutionAssessment memory expected = parityEvaluator.evaluateOpen(snapshot, delta, bounds, BOUNTY);
         OrderV3Types.ExecutionAssessment memory actual =
             parityEvaluator.assessOrder(address(engine), order, EXTERNAL_EXECUTOR, PRICE, depth, bounds, BOUNTY);
@@ -69,7 +69,7 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         CfdEnginePlanTypes.RawSnapshot memory snapshot = _sidecarSnapshot(ACCOUNT, depth);
         CfdEnginePlanTypes.CloseDelta memory delta = engine.planner().planClose(snapshot, order, PRICE);
         assertTrue(delta.valid);
-        assertGt(delta.pendingCarryUsdc, 0);
+        assertGt(delta.pendingCarryAssets, 0);
 
         OrderV3Types.ExecutionAssessment memory expected =
             parityEvaluator.evaluateClose(snapshot, delta, bounds, BOUNTY);
@@ -90,8 +90,8 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
         OrderV3Types.ExecutionAssessment memory selfExecution =
             parityEvaluator.assessOrder(address(engine), order, ACCOUNT, PRICE, depth, bounds, BOUNTY);
 
-        assertEq(selfExecution.grossAccountDebitUsdc, externalExecution.grossAccountDebitUsdc);
-        assertEq(selfExecution.postSettlementBalanceUsdc, externalExecution.postSettlementBalanceUsdc + BOUNTY);
+        assertEq(selfExecution.grossAccountDebitAssets, externalExecution.grossAccountDebitAssets);
+        assertEq(selfExecution.postSettlementBalanceAssets, externalExecution.postSettlementBalanceAssets + BOUNTY);
     }
 
     function _sidecarSnapshot(
@@ -133,11 +133,11 @@ contract CfdOrderPolicyEvaluatorParityTest is BasePerpTest {
 
     function _permissiveBounds() private pure returns (OrderV3Types.ExecutionBounds memory bounds) {
         bounds.allowedExecutionModes = 7;
-        bounds.maxExecutionBountyUsdc = type(uint256).max;
-        bounds.maxExecutionNotionalUsdc = type(uint256).max;
-        bounds.maxGrossAccountDebitUsdc = type(uint256).max;
-        bounds.maxActionChargeUsdc = type(uint256).max;
-        bounds.maxExplicitFeesUsdc = type(uint256).max;
+        bounds.maxExecutionBountyAssets = type(uint256).max;
+        bounds.maxExecutionNotionalAssets = type(uint256).max;
+        bounds.maxGrossAccountDebitAssets = type(uint256).max;
+        bounds.maxActionChargeAssets = type(uint256).max;
+        bounds.maxExplicitFeesAssets = type(uint256).max;
         bounds.maxPostPositionSize = type(uint256).max;
         bounds.maxPostLeverageBps = type(uint32).max;
     }

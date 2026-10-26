@@ -1,5 +1,10 @@
 # Bridge funding into perps margin
 
+The new MockUSDG deployment has bridge funding disabled. This guide documents a separately reviewed USDC provider
+route; it does not make MockUSDG bridgeable. Current SDK token-address fields use `settlementToken`, including the
+bridge deployment object. The rename is breaking and introduces no `usdc` alias; old release manifests remain
+archived evidence and must not be loaded as the new runtime configuration.
+
 The Across integration requests an atomic destination action through Across's existing MulticallHandler: approve
 canonical USDC to the configured clearinghouse, call `depositFor` for the user's verified trading account, clear the
 allowance, and emit the quote's unique marker through the known Across EventEmitter.
@@ -99,14 +104,14 @@ per-intent receiver/factory and has no bridge-specific KMS signer, deployment tr
 
 `@plether-fi/perps-aa-client` exports the minimal clearinghouse funding ABI and:
 
-- `buildDepositForCalls({usdc,clearinghouse,beneficiary,amount})`: approval plus a caller-funded deposit, both executed
+- `buildDepositForCalls({settlementToken,clearinghouse,beneficiary,amount})`: approval plus a caller-funded deposit, both executed
   from the same payer. Batch atomically when the account supports it; otherwise confirm approval before depositing.
   This helper uses a supplied positive amount; it does not build the Across balance-replacement message.
 - `verifyBridgeFundingDeployment({client,deployment})`: checks the RPC chain, runtime hashes for USDC, clearinghouse,
   SpokePool proxy/implementation and handler, the SpokePool's EIP-1967 implementation slot, and the clearinghouse's
   settlement-token binding at one block. Returns the verified addresses, chain ID, and observation block.
 
-`BridgeFundingDeployment` contains `chainId`, `usdc`, `clearinghouse`, `destinationSpokePool`,
+`BridgeFundingDeployment` contains `chainId`, `settlementToken`, `clearinghouse`, `destinationSpokePool`,
 `destinationSpokePoolImplementation`, `multicallHandler`, and each address's corresponding `*RuntimeCodeHash`.
 Map those fields from a previously validated release. The handler has no immutable SpokePool binding; the helper
 cannot prove route authorization, provider support, `depositFor` behavior, or a credited receipt. It also does not

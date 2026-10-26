@@ -5,10 +5,10 @@ import type { PerpsActionKind, PerpsActionPlan } from "./types.js";
 
 export type ProtectedOpenRequest = ContractFunctionArgs<typeof positionProtectionBookAbi, "nonpayable", "commitOpenOrderWithProtection">[0];
 export interface CloseFinancialLimits {
-  maxExecutionNotionalUsdc: bigint;
-  maxGrossAccountDebitUsdc: bigint;
-  maxActionChargeUsdc: bigint;
-  maxExplicitFeesUsdc: bigint;
+  maxExecutionNotionalAssets: bigint;
+  maxGrossAccountDebitAssets: bigint;
+  maxActionChargeAssets: bigint;
+  maxExplicitFeesAssets: bigint;
 }
 
 export interface PositionProtectionParams {
@@ -18,7 +18,7 @@ export interface PositionProtectionParams {
 }
 
 function validateCloseLimits(limits: CloseFinancialLimits): void {
-  for (const field of ["maxExecutionNotionalUsdc", "maxGrossAccountDebitUsdc", "maxActionChargeUsdc", "maxExplicitFeesUsdc"] as const) {
+  for (const field of ["maxExecutionNotionalAssets", "maxGrossAccountDebitAssets", "maxActionChargeAssets", "maxExplicitFeesAssets"] as const) {
     const value = limits?.[field];
     if (typeof value !== "bigint" || value < 0n || value > maxUint256) {
       throw new Error(`Protection closeLimits.${field} must be an explicit uint256 bigint`);
@@ -85,11 +85,11 @@ export function buildCancelProtectionAndCloseAction(input: { account: Address; b
       !Number.isInteger(bounds.maxPostLeverageBps) || bounds.maxPostLeverageBps <= 0 || bounds.maxPostLeverageBps > 0xffff_ffff) {
     throw new Error("Protection cancellation and close requires a fresh bounded V3 closing request.");
   }
-  if (bounds.minPostSettlementBalanceUsdc !== 0n) {
+  if (bounds.minPostSettlementBalanceAssets !== 0n) {
     throw new Error("A protection close requires a zero settlement balance floor.");
   }
-  for (const field of ["maxExecutionBountyUsdc", "maxExecutionNotionalUsdc", "maxGrossAccountDebitUsdc",
-    "maxActionChargeUsdc", "maxExplicitFeesUsdc", "maxPostPositionSize", "minPostPositionEquityUsdc"] as const) {
+  for (const field of ["maxExecutionBountyAssets", "maxExecutionNotionalAssets", "maxGrossAccountDebitAssets",
+    "maxActionChargeAssets", "maxExplicitFeesAssets", "maxPostPositionSize", "minPostPositionEquityAssets"] as const) {
     const value = bounds[field];
     if (typeof value !== "bigint" || value < 0n || value > maxUint256) {
       throw new Error(`Protection close bounds.${field} must be an explicit uint256 bigint`);
@@ -117,8 +117,8 @@ export function buildProtectedOpenAction(input: { account: Address; book: Addres
       ![1, 2, 4].includes(request.bounds.allowedExecutionModes) || request.bounds.maxPostLeverageBps <= 0) {
     throw new Error("Protected opens require a fresh bounded V3 opening request");
   }
-  if (request.bounds.minPostSettlementBalanceUsdc > 0n && request.bounds.maxGrossAccountDebitUsdc === maxUint256) {
-    throw new Error("A positive settlement balance floor requires a finite maxGrossAccountDebitUsdc.");
+  if (request.bounds.minPostSettlementBalanceAssets > 0n && request.bounds.maxGrossAccountDebitAssets === maxUint256) {
+    throw new Error("A positive settlement balance floor requires a finite maxGrossAccountDebitAssets.");
   }
   return Object.freeze({ ...action("place-protected-order", input.account, input.book, encodeFunctionData({ abi: positionProtectionBookAbi, functionName: "commitOpenOrderWithProtection", args: [request, input.params] })), submissionDeadline: request.bounds.submitBy });
 }

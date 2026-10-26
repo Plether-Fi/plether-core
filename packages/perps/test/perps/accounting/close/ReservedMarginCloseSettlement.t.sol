@@ -31,7 +31,7 @@ contract PartialCloseCommitmentIsolationTest is BasePerpTest {
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertGt(committedBefore, 0, "Should have committed margin from pending open order");
 
-        uint256 freeSettlement = _freeSettlementUsdc(account);
+        uint256 freeSettlement = _freeSettlementAssets(account);
         assertLt(freeSettlement, 1100e6, "Free settlement should be small after committing margin");
 
         _close(account, CfdTypes.Side.LONG, 50_000e18, 1.02e8);
@@ -55,12 +55,12 @@ contract PartialCloseCommitmentIsolationTest is BasePerpTest {
 
         uint256 committedBefore = _remainingCommittedMargin(1);
         assertEq(committedBefore, 4000e6, "Committed margin should match order margin delta");
-        uint256 pnlPledgeBefore = clearinghouse.pnlPledgeUsdc(account);
+        uint256 pnlPledgeBefore = clearinghouse.pnlPledgeAssets(account);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 1.02e8);
 
         assertTrue(preview.valid, "Dedicated price collateral should fund the partial-close loss");
-        assertEq(preview.realizedPnlUsdc, -1000e6, "Fixture should realize a one-thousand USDC price loss");
+        assertEq(preview.realizedPnlAssets, -1000e6, "Fixture should realize a one-thousand settlementToken price loss");
         assertEq(
             preview.remainingMargin,
             pnlPledgeBefore / 2,
@@ -122,8 +122,8 @@ contract WholeLotResidualCloseTest is BasePerpTest {
         assertEq(remainingSize, CfdTypes.SIZE_QUANTUM, "Partial close must leave one canonical whole lot");
         assertLt(remainingMargin, 5e6, "Fixture must retain a small but exact residual pledge");
         assertEq(
-            clearinghouse.liquidationReserveUsdc(aliceAccount),
-            _riskParams().minBountyUsdc,
+            clearinghouse.liquidationReserveAssets(aliceAccount),
+            _riskParams().minBountyAssets,
             "Residual lot must retain the configured minimum liquidation reserve"
         );
         _assertTerminalCurveMatchesEngine(aliceAccount);
@@ -153,21 +153,21 @@ contract PriceAndActionReservePriorityCloseTest is BasePerpTest {
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
         uint64 queuedOrderId = router.nextCommitId();
-        uint256 committedMarginUsdc = _freeSettlementUsdc(account) - 200_000;
+        uint256 committedMarginAssets = _freeSettlementAssets(account) - 200_000;
         vm.prank(trader);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginUsdc, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, committedMarginAssets, type(uint256).max, false);
 
-        uint256 committedBefore = router.getAccountReservations(account).committedMarginUsdc;
-        assertEq(_freeSettlementUsdc(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
+        uint256 committedBefore = router.getAccountReservations(account).committedMarginAssets;
+        assertEq(_freeSettlementAssets(account), 0, "Setup must shelter all non-bounty free settlement in the queue");
         vm.warp(block.timestamp + 365 days);
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
         assertTrue(preview.valid, "Full close should collect charges from released surplus");
-        assertEq(preview.realizedPnlUsdc, 0, "Setup must isolate action charges from price PnL");
+        assertEq(preview.realizedPnlAssets, 0, "Setup must isolate action charges from price PnL");
 
         _close(account, CfdTypes.Side.LONG, 100_000e18, 1e8);
 
         assertEq(
-            router.getAccountReservations(account).committedMarginUsdc,
+            router.getAccountReservations(account).committedMarginAssets,
             committedBefore,
             "Released pledge covers the charges before queued margin"
         );

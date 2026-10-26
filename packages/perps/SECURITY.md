@@ -2,10 +2,11 @@
 
 This document describes the trust model, protocol invariants, failure-containment design, and known limitations for the Plether perps system.
 
-The new Arbitrum Sepolia release uses six-decimal MockUSDG. Retained `USDC()`, `*Usdc`, and `usdc` public names
-refer to the configured settlement asset and its six-decimal units; they do not establish token identity. Historical
-USDC deployments and their recorded audit evidence retain their original meaning. The token substitution adds no
-margin, PnL, liquidation, or tranche-math change.
+The new Arbitrum Sepolia release uses six-decimal MockUSDG and token-neutral APIs. Token bindings are named
+`settlementToken`; amounts use `*Assets` or `*AssetAtoms` and six-decimal integer base units. The public API rename
+is deliberately breaking, with no old token-specific aliases. Current consumers must use the matching ABI and SDK;
+names and metadata do not establish token identity. Historical USDC deployments and recorded audit evidence retain
+their original meaning. The substitution and renaming add no margin, PnL, liquidation, or tranche-math change.
 
 It is written as an audit-facing companion to:
 
@@ -69,7 +70,7 @@ size quantum.
 | `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
 | `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps` | `HousePool` | `onlyOwner`, 48-hour timelock; each fee is capped at `1,000` bps |
-| `maxSeniorExposureUsdc`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
+| `maxSeniorExposureAssets`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
 | Junior `maintenanceFeeAprBps`, `maintenanceFeeRecipient` | `TrancheVault` | current `HousePool.owner()` only, 48-hour timelock; fee is capped at `1,000` bps nominal APR |
 | `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, confidence policy, historical settlement window, component skew, opening minimum, bounty rates/limits, pending-order cap, minimum execution gas, cleanup cap) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
 | `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
@@ -85,7 +86,7 @@ The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked up
 
 ### Owner-funded recapitalization
 
-`CfdEngine.recapitalizePool(amountUsdc)` is an immediate, owner-only, non-reentrant recovery action.
+`CfdEngine.recapitalizePool(amountAssets)` is an immediate, owner-only, non-reentrant recovery action.
 The engine owner approves the engine to pull settlement tokens from its own wallet directly into the configured HousePool.
 The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
 `Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
@@ -493,7 +494,7 @@ orders retain the ordinary degraded-mode restriction on new risk.
 
 When existing-position protection locks its trigger bounty, admission is checked after the lock.
 The Book calls the Engine-configured planner's canonical `isExactPriceRiskLiquidatable(...)` predicate rather than
-duplicating it. Inputs use `positionEntryCostUsdcAtoms`; price collateral is only `position.margin` (the PnL pledge) plus
+duplicating it. Inputs use `positionEntryCostAssetAtoms`; price collateral is only `position.margin` (the PnL pledge) plus
 that account's trader claim. Free settlement and generic action, order, liquidation, VPI, and protection reserves cannot
 rescue the test. Nonzero uncovered carry or a VPI reserve below `max(-vpiAccrued, 0)` rejects independently, and price
 equity must be strictly greater than `max(initMargin, active maintenance/FAD margin)`.
@@ -770,7 +771,7 @@ This is a deliberate trade-off: preserve close and liquidation liveness during r
 
 LP entry and exit pricing consume the same authenticated terminal snapshot. The Engine stores whole 100-token lots
 and exact entry cost, while `TerminalNavBookV2` aggregates each account's LP-side marked price PnL. A positive LP
-receivable is capped by that account's `pnlPledgeUsdc + traderClaimBalanceUsdc`. Liquidation, order and action
+receivable is capped by that account's `pnlPledgeAssets + traderClaimBalanceAssets`. Liquidation, order and action
 reserves cannot inflate it. A negative value is the exact marked price amount LPs owe the trader within the bounded
 market. Ordinary and protection close attempts have zero bounty and no collectible escrow component.
 
@@ -868,12 +869,12 @@ still latches only at `E < L` and may be cleared at `E >= L`; the full buffer ne
 
 The perps system uses LP-capital carry instead of a side-to-side rate mechanism.
 
-- carry base: `max(positionMaxProfitUsdc - activePositionMarginUsdc, 0)`
-- utilization denominator: `max(pool.totalAssets() - totalTraderClaimBalanceUsdc, 0)`; a positive base at zero depth
+- carry base: `max(positionMaxProfitAssets - activePositionMarginAssets, 0)`
+- utilization denominator: `max(pool.totalAssets() - totalTraderClaimBalanceAssets, 0)`; a positive base at zero depth
   uses full utilization. Claim creation, consumption, and payment checkpoint both side indexes before changing depth
 - accrual clock: wall-clock time
 - stale/frozen behavior: carry does not pause during stale or frozen oracle windows
-- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryUsdc`,
+- claim/bounty credits: first collect available margin and free settlement, retain unpaid carry in `unsettledCarryAssets`,
   then apply the full incoming credit. The credit can fund retained arrears at a later checkpoint, including at the same
   timestamp; it is not collected or waived in this call. Claim liquidity checks run after collection, and any failure
   rolls back the collection and credit
@@ -918,7 +919,7 @@ This preserves risk reduction and liquidation liveness under temporary cash shor
 Same-account trader claim balance is price-risk backing, not generic cash or action collateral.
 
 - open/increase, trader-withdraw, close, and liquidation health use the exact same-account price-risk cap:
-  `pnlPledgeUsdc + traderClaimBalanceUsdc`; VPI never adds to or subtracts from this price-risk equity,
+  `pnlPledgeAssets + traderClaimBalanceAssets`; VPI never adds to or subtracts from this price-risk equity,
 - the separately funded VPI reserve backs only that account's typed VPI obligation: overfunding never adds price
   collateral, while backing below `max(-vpiAccrued, 0)` independently blocks withdrawal and sets the account lens's
   liquidation flag; close planning returns a typed failure and liquidation planning reverts on that reserve mismatch,
@@ -1373,7 +1374,7 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 
 | Quantity | Decimals |
 |----------|----------|
-| Settlement token (including legacy `USDC` / `Usdc` fields) | 6 |
+| Settlement-token amounts (`*Assets` / `*AssetAtoms`; 1 token = 1,000,000 base units) | 6 |
 | Position size | 18 |
 | Oracle / basket price | 8 |
 | PnL | 6 |

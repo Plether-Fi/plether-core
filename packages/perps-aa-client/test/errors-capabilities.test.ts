@@ -67,7 +67,7 @@ describe("UI capability and error mapping", () => {
     // receiveWithAuthorization nor a token-domain signature from its owner.
     const action = buildSmartAccountBalanceDepositAction({
       account,
-      usdc: settlementToken,
+      settlementToken: settlementToken,
       clearinghouse,
       amount: 25_000_000n,
     });

@@ -5,7 +5,7 @@ const account = "0x1111111111111111111111111111111111111111";
 const router = "0x2222222222222222222222222222222222222222";
 const data: Hex[] = ["0xabcd"];
 const request: OrderRequestV3 = { clientOrderId: `0x${"12".repeat(32)}`, side: 0, sizeDelta: 100n * 10n ** 18n, marginDelta: 0n, targetPrice: 100_000_000n, isClose: true,
-  bounds: { submitBy: 100n, executionWindowSeconds: 60, allowedExecutionModes: 1, expectedConfigHash: `0x${"34".repeat(32)}`, maxExecutionBountyUsdc: 0n, maxExecutionNotionalUsdc: maxUint256, maxGrossAccountDebitUsdc: maxUint256, maxActionChargeUsdc: maxUint256, maxExplicitFeesUsdc: maxUint256, maxPostPositionSize: maxUint256, minPostSettlementBalanceUsdc: 0n, minPostPositionEquityUsdc: 0n, maxPostLeverageBps: 100_000 } };
+  bounds: { submitBy: 100n, executionWindowSeconds: 60, allowedExecutionModes: 1, expectedConfigHash: `0x${"34".repeat(32)}`, maxExecutionBountyAssets: 0n, maxExecutionNotionalAssets: maxUint256, maxGrossAccountDebitAssets: maxUint256, maxActionChargeAssets: maxUint256, maxExplicitFeesAssets: maxUint256, maxPostPositionSize: maxUint256, minPostSettlementBalanceAssets: 0n, minPostPositionEquityAssets: 0n, maxPostLeverageBps: 100_000 } };
 describe("unpaid execution primitives", () => {
   it("keeps owner commitment at the original smart account and contains no funding call", () => {
     const outer = buildOwnerAccountClose(account, router, request);
@@ -24,7 +24,7 @@ describe("unpaid execution primitives", () => {
     expect(classifyKeeperHead({ ...input, status: 0 })).toBe("reconcile");
     expect(classifyKeeperHead({ ...input, deadline: 0n })).toBe("reconcile");
   });
-  it("quotes execution and trigger policies separately without confusing USDC with native value", async () => {
+  it("quotes execution and trigger policies separately without confusing settlementToken with native value", async () => {
     const readContract = vi.fn(async () => 13n);
     const client = { readContract } as unknown as Pick<PublicClient, "readContract">;
     expect(await quoteExecutionNativeValue(client, account, data)).toBe(13n);

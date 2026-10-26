@@ -70,28 +70,28 @@ contract MockUSDGPerpsLifecycleTest is Test {
         deployed.settlementToken.approve(address(deployed.clearinghouse), 10_000e6);
         deployed.clearinghouse.depositMargin(10_000e6);
         vm.stopPrank();
-        assertEq(deployed.clearinghouse.balanceUsdc(TRADER), 10_000e6, "legacy units hold USDG");
+        assertEq(deployed.clearinghouse.balanceAssets(TRADER), 10_000e6, "settlement assets hold USDG");
         assertEq(deployed.settlementToken.balanceOf(TRADER), 0);
 
         _executeTrade(false, 120_000_000);
         (uint256 size,, uint256 entryPrice,,,,) = deployed.engine.positions(TRADER);
         assertEq(size, POSITION_SIZE);
         assertApproxEqAbs(entryPrice, 120_000_000, 10);
-        uint256 entryCost = deployed.engine.positionEntryCostUsdcAtoms(TRADER);
+        uint256 entryCost = deployed.engine.positionEntryCostAssetAtoms(TRADER);
         assertApproxEqAbs(entryCost, 12_000e6, 1000, "basket price must participate in notional conversion");
 
         // A LONG loses as the raw FX basket rises. Exercise actual PnL settlement before withdrawing collateral.
         _executeTrade(true, 125_000_000);
         (size,,,,,,) = deployed.engine.positions(TRADER);
         assertEq(size, 0);
-        uint256 withdrawable = deployed.clearinghouse.balanceUsdc(TRADER);
+        uint256 withdrawable = deployed.clearinghouse.balanceAssets(TRADER);
         assertGt(withdrawable, 9400e6, "collateral survives ordinary settlement costs");
         assertLt(withdrawable, 9500e6, "500 USDG price loss plus execution costs");
         vm.prank(TRADER);
         deployed.clearinghouse.withdrawMargin(withdrawable);
         assertEq(deployed.settlementToken.balanceOf(TRADER), withdrawable);
-        assertEq(deployed.clearinghouse.balanceUsdc(TRADER), 0);
-        assertGt(deployed.clearinghouse.balanceUsdc(KEEPER), 0, "keeper receives USDG execution bounties");
+        assertEq(deployed.clearinghouse.balanceAssets(TRADER), 0);
+        assertGt(deployed.clearinghouse.balanceAssets(KEEPER), 0, "keeper receives USDG execution bounties");
 
         _redeemJuniorLiquidity(lpShares / 2);
         assertEq(deployed.juniorVault.balanceOf(LP), lpShares - lpShares / 2);
@@ -162,14 +162,14 @@ contract MockUSDGPerpsLifecycleTest is Test {
             executionWindowSeconds: 60,
             allowedExecutionModes: 1,
             expectedConfigHash: deployed.lifecycleBook.currentExecutionConfigHash(),
-            maxExecutionBountyUsdc: 100e6,
-            maxExecutionNotionalUsdc: 13_000e6,
-            maxGrossAccountDebitUsdc: 1100e6,
-            maxActionChargeUsdc: 100e6,
-            maxExplicitFeesUsdc: 100e6,
+            maxExecutionBountyAssets: 100e6,
+            maxExecutionNotionalAssets: 13_000e6,
+            maxGrossAccountDebitAssets: 1100e6,
+            maxActionChargeAssets: 100e6,
+            maxExplicitFeesAssets: 100e6,
             maxPostPositionSize: POSITION_SIZE,
-            minPostSettlementBalanceUsdc: isClose ? 0 : 8800e6,
-            minPostPositionEquityUsdc: 0,
+            minPostSettlementBalanceAssets: isClose ? 0 : 8800e6,
+            minPostPositionEquityAssets: 0,
             maxPostLeverageBps: 200_000
         });
         vm.prank(TRADER);

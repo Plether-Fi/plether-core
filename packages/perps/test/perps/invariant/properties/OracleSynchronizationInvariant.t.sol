@@ -11,8 +11,9 @@ contract OracleSynchronizationInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         baseMockPyth.setSynchronizeLegacyUniquePrices(false);
-        handler =
-            new OracleSynchronizationHandler(router, engine, clearinghouse, baseMockPyth, usdc, _basePythFeedIds());
+        handler = new OracleSynchronizationHandler(
+            router, engine, clearinghouse, baseMockPyth, settlementToken, _basePythFeedIds()
+        );
         handler.execute(0, 0, false, false);
         assertEq(handler.executed(), 1, "warm-up must execute an order");
         bytes4[] memory selectors = new bytes4[](1);

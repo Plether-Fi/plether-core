@@ -86,8 +86,8 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
 
         // Coverage's minimum-optimization bytecode can exhaust the production item cap when it also collects carry.
         // Keep pricing assertions independent of that cost; the production gas test retains pending carry and the cap.
-        assertGt(_expectedIndexedCarryUsdc(long), 0, "setup must accrue long carry");
-        assertGt(_expectedIndexedCarryUsdc(short), 0, "setup must accrue short carry");
+        assertGt(_expectedIndexedCarryAssets(long), 0, "setup must accrue long carry");
+        assertGt(_expectedIndexedCarryAssets(short), 0, "setup must accrue short carry");
         if (checkpointSetupCarry) {
             vm.startPrank(address(clearinghouse));
             engine.realizeCarryBeforeMarginChange(long);
@@ -163,11 +163,11 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
 
     function _queueOpen(
         address account,
-        uint256 marginUsdc
+        uint256 marginAssets
     ) internal returns (uint64 orderId) {
         orderId = router.nextCommitId();
         vm.prank(account);
-        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, marginUsdc, type(uint256).max, false);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, marginAssets, type(uint256).max, false);
     }
 
     function _positionSize(
@@ -181,8 +181,8 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
         IOrderRouterAccounting.AccountReservationView memory expected
     ) internal view {
         IOrderRouterAccounting.AccountReservationView memory actual = router.getAccountReservations(account);
-        assertEq(actual.committedMarginUsdc, expected.committedMarginUsdc, "committed margin reservation changed");
-        assertEq(actual.executionBountyUsdc, expected.executionBountyUsdc, "execution bounty reservation changed");
+        assertEq(actual.committedMarginAssets, expected.committedMarginAssets, "committed margin reservation changed");
+        assertEq(actual.executionBountyAssets, expected.executionBountyAssets, "execution bounty reservation changed");
         assertEq(actual.pendingOrderCount, expected.pendingOrderCount, "pending order count changed");
     }
 
@@ -203,10 +203,10 @@ abstract contract LiquidationBatchTestFixture is BasePerpTest {
             }
 
             assertEq(logs[i].emitter, address(router), "delegatecall event must be emitted from Router");
-            (uint8 result, uint256 keeperBountyUsdc, bytes4 selector) =
+            (uint8 result, uint256 keeperBountyAssets, bytes4 selector) =
                 abi.decode(logs[i].data, (uint8, uint256, bytes4));
             assertEq(result, uint8(expectedResult), "batch result classification");
-            assertEq(keeperBountyUsdc, 0, "skipped or failed item must not report a bounty");
+            assertEq(keeperBountyAssets, 0, "skipped or failed item must not report a bounty");
             assertEq(selector, expectedSelector, "batch result selector");
             return;
         }

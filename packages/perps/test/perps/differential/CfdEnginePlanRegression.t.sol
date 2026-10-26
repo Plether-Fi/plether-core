@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -26,35 +27,34 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract CfdEnginePlanHarness is CfdEngine {
 
     constructor(
-        address usdc,
+        address settlementToken,
         address clearinghouse,
         uint256 capPrice,
         CfdTypes.RiskParams memory params,
         uint256 frozenCloseSpreadBps
-    ) CfdEngine(usdc, clearinghouse, capPrice, params, frozenCloseSpreadBps) {}
+    ) CfdEngine(settlementToken, clearinghouse, capPrice, params, frozenCloseSpreadBps) {}
 
     function previewOpenPlan(
         CfdTypes.Order memory order,
         uint256 executionPrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (CfdEnginePlanTypes.OpenDelta memory delta) {
-        CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(order.account, poolDepthUsdc);
-        snap.poolCashUsdc = pool.totalAssets();
+        CfdEnginePlanTypes.RawSnapshot memory snap = settlementSidecar.buildRawSnapshot(order.account, poolDepthAssets);
+        snap.poolCashAssets = pool.totalAssets();
         return CfdEnginePlanLib.planOpen(snap, order, executionPrice);
     }
 
     function buildRawSnapshotForPlanner(
         address account,
         uint256 executionPrice,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) external view returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
-        snap = settlementSidecar.buildRawSnapshot(account, poolDepthUsdc);
-        snap.poolCashUsdc = pool.totalAssets();
+        snap = settlementSidecar.buildRawSnapshot(account, poolDepthAssets);
+        snap.poolCashAssets = pool.totalAssets();
     }
 
 }
@@ -76,7 +76,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -88,11 +88,11 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
 
         engine = new CfdEnginePlanHarness(
-            address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
         );
         planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlementSidecar = new CfdEngineSettlementSidecar(address(engine));
@@ -102,13 +102,13 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
         engineProtocolLens = new CfdEngineProtocolLens(address(engine));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -143,7 +143,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     function _position(
         address account
     ) internal view returns (CfdTypes.Position memory pos) {
-        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engine.positions(account);
     }
 
@@ -190,18 +190,18 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
     function _attachFullRateCarry(
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdTypes.Side side,
-        uint256 borrowBaseUsdc,
+        uint256 borrowBaseAssets,
         uint256 timeDelta
     ) internal pure {
         uint256 carryIndex =
             PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, timeDelta, 1, 1, snap.riskParams.baseCarryBps);
-        snap.positionBorrowBaseUsdc = borrowBaseUsdc;
+        snap.positionBorrowBaseAssets = borrowBaseAssets;
         snap.positionLastCarryIndex = 0;
         if (side == CfdTypes.Side.LONG) {
-            snap.longSide.borrowBaseUsdc = borrowBaseUsdc;
+            snap.longSide.borrowBaseAssets = borrowBaseAssets;
             snap.longSide.carryIndex = carryIndex;
         } else {
-            snap.shortSide.borrowBaseUsdc = borrowBaseUsdc;
+            snap.shortSide.borrowBaseAssets = borrowBaseAssets;
             snap.shortSide.carryIndex = carryIndex;
         }
     }
@@ -211,22 +211,22 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         uint256 size = 25_000e18;
         uint256 openPrice = 1e8;
         uint256 closePrice = 99_968_000;
-        uint256 profitUsdc = 8e6;
+        uint256 profitAssets = 8e6;
 
         _fundTrader(account, 2000e6);
         _open(account, CfdTypes.Side.LONG, size, 1000e6, openPrice);
 
-        uint256 closeFeeUsdc = _engineExecutionFeeUsdc(size, closePrice);
+        uint256 closeFeeAssets = _engineExecutionFeeAssets(size, closePrice);
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
 
         assertTrue(preview.valid, "Fee-offset close should preview as valid");
-        assertEq(preview.realizedPnlUsdc, int256(profitUsdc), "Setup should produce the intended trader profit");
-        assertEq(preview.executionFeeUsdc, closeFeeUsdc, "Preview should retain the total collectible fee");
+        assertEq(preview.realizedPnlAssets, int256(profitAssets), "Setup should produce the intended trader profit");
+        assertEq(preview.executionFeeAssets, closeFeeAssets, "Preview should retain the total collectible fee");
         assertEq(
-            preview.seizedCollateralUsdc, 0, "Price collateral should not be seized when the trader has a price gain"
+            preview.seizedCollateralAssets, 0, "Price collateral should not be seized when the trader has a price gain"
         );
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256 poolAssetsBefore = pool.totalAssets();
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
         bool degradedBefore = engine.degradedMode();
@@ -236,13 +236,13 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, degradedBefore);
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            closeFeeUsdc,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            closeFeeAssets,
             "Treasury should receive seized cash plus retained-profit top-up"
         );
         assertEq(
             poolAssetsBefore - pool.totalAssets(),
-            profitUsdc,
+            profitAssets,
             "Pool should pass through the trader profit it retained against the fee"
         );
     }
@@ -251,40 +251,40 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         address account = address(0xFEE100);
         uint256 size = 25_000e18;
         uint256 closePrice = 99_968_000;
-        uint256 reservedRecapitalizationUsdc = 100_000e6;
+        uint256 reservedRecapitalizationAssets = 100_000e6;
 
         _fundTrader(account, 2000e6);
         _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
 
-        usdc.mint(address(pool), reservedRecapitalizationUsdc);
+        settlementToken.mint(address(pool), reservedRecapitalizationAssets);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            reservedRecapitalizationUsdc,
+            reservedRecapitalizationAssets,
             IHousePool.ClaimantInflowKind.Recapitalization,
             IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        uint256 cashToDrainUsdc = pool.totalAssets() - reservedRecapitalizationUsdc;
+        uint256 cashToDrainAssets = pool.totalAssets() - reservedRecapitalizationAssets;
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), cashToDrainUsdc);
+        settlementToken.transfer(address(0xDEAD), cashToDrainAssets);
 
-        assertEq(pool.totalAssets(), reservedRecapitalizationUsdc);
-        assertEq(pool.getFreeUSDC(), 0, "Pending recapitalization reserves all pool cash");
+        assertEq(pool.totalAssets(), reservedRecapitalizationAssets);
+        assertEq(pool.getFreeAssets(), 0, "Pending recapitalization reserves all pool cash");
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
         assertTrue(preview.valid, "Close remains valid with reserved pool cash");
-        assertEq(preview.realizedPnlUsdc, int256(8e6), "Setup creates the fee-offset gain");
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        assertEq(preview.realizedPnlAssets, int256(8e6), "Setup creates the fee-offset gain");
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
 
         _close(account, CfdTypes.Side.LONG, size, closePrice);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
-        assertEq(pool.totalAssets(), reservedRecapitalizationUsdc, "Fee top-up must preserve pending recap cash");
-        assertEq(pool.pendingRecapitalizationUsdc(), reservedRecapitalizationUsdc);
+        assertEq(pool.totalAssets(), reservedRecapitalizationAssets, "Fee top-up must preserve pending recap cash");
+        assertEq(pool.pendingRecapitalizationAssets(), reservedRecapitalizationAssets);
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            preview.executionFeeUsdc - 8e6,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeAssets - 8e6,
             "Only directly collected fee cash reaches the treasury"
         );
     }
@@ -294,32 +294,32 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         address shortAccount = address(0xFEE102);
         uint256 size = 25_000e18;
         uint256 closePrice = 99_968_000;
-        uint256 freeForFeeUsdc = 5e6;
+        uint256 freeForFeeAssets = 5e6;
 
         _fundTrader(longAccount, 2000e6);
         _fundTrader(shortAccount, 2000e6);
         _open(longAccount, CfdTypes.Side.LONG, size, 1000e6, 1e8);
         _open(shortAccount, CfdTypes.Side.SHORT, size, 1000e6, 1e8);
 
-        uint256 freeBeforeDrainUsdc = pool.getFreeUSDC();
+        uint256 freeBeforeDrainAssets = pool.getFreeAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), freeBeforeDrainUsdc - freeForFeeUsdc);
-        assertEq(pool.getFreeUSDC(), freeForFeeUsdc, "Setup leaves only five free USDC");
+        settlementToken.transfer(address(0xDEAD), freeBeforeDrainAssets - freeForFeeAssets);
+        assertEq(pool.getFreeAssets(), freeForFeeAssets, "Setup leaves only five free settlementToken");
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longAccount, size, closePrice);
         assertTrue(preview.valid, "Close remains valid with opposite-side liability reserved");
-        assertEq(preview.realizedPnlUsdc, int256(8e6), "Setup creates the fee-offset gain");
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        assertEq(preview.realizedPnlAssets, int256(8e6), "Setup creates the fee-offset gain");
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(longAccount);
 
         _close(longAccount, CfdTypes.Side.LONG, size, closePrice);
 
         CloseParityObserved memory observed = _observeCloseParity(longAccount, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
-        assertEq(pool.getFreeUSDC(), 0, "Fee top-up must stop at directional liability and buffer");
+        assertEq(pool.getFreeAssets(), 0, "Fee top-up must stop at directional liability and buffer");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            preview.executionFeeUsdc - 8e6 + freeForFeeUsdc,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeAssets - 8e6 + freeForFeeAssets,
             "Treasury receives only direct collection and unreserved cash"
         );
     }
@@ -328,39 +328,39 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         address account = address(0xFEE103);
         uint256 size = 25_000e18;
         uint256 closePrice = 99_968_000;
-        uint256 reservedRevenueUsdc = 100_000e6;
+        uint256 reservedRevenueAssets = 100_000e6;
 
         _fundTrader(account, 2000e6);
         _open(account, CfdTypes.Side.LONG, size, 1000e6, 1e8);
 
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
         assertEq(pool.seniorPrincipal() + pool.juniorPrincipal(), 0, "Setup wipes stored LP principal");
 
-        usdc.mint(address(pool), reservedRevenueUsdc);
+        settlementToken.mint(address(pool), reservedRevenueAssets);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            reservedRevenueUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+            reservedRevenueAssets, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        assertEq(pool.pendingTradingRevenueUsdc(), reservedRevenueUsdc);
-        assertEq(pool.getFreeUSDC(), 0, "Queued revenue reserves all cash");
+        assertEq(pool.pendingTradingRevenueAssets(), reservedRevenueAssets);
+        assertEq(pool.getFreeAssets(), 0, "Queued revenue reserves all cash");
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
         assertTrue(preview.valid, "Close remains valid after principal wipe");
-        assertEq(preview.realizedPnlUsdc, int256(8e6));
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        assertEq(preview.realizedPnlAssets, int256(8e6));
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         CloseParitySnapshot memory beforeSnapshot = _captureCloseParitySnapshot(account);
 
         _close(account, CfdTypes.Side.LONG, size, closePrice);
 
         CloseParityObserved memory observed = _observeCloseParity(account, beforeSnapshot);
         _assertClosePreviewMatchesObserved(preview, observed, beforeSnapshot.protocol.degradedMode);
-        assertEq(pool.totalAssets(), reservedRevenueUsdc, "Fee top-up must preserve queued revenue cash");
-        assertGe(pool.pendingTradingRevenueUsdc(), reservedRevenueUsdc, "Close revenue stays queued");
+        assertEq(pool.totalAssets(), reservedRevenueAssets, "Fee top-up must preserve queued revenue cash");
+        assertGe(pool.pendingTradingRevenueAssets(), reservedRevenueAssets, "Close revenue stays queued");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            preview.executionFeeUsdc - 8e6,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeAssets - 8e6,
             "Only directly collected fee cash reaches the treasury"
         );
     }
@@ -377,24 +377,24 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, size, closePrice);
         assertTrue(preview.valid, "Exact-zero frozen close should be valid");
-        assertEq(preview.realizedPnlUsdc, int256(27e6), "Price profit should exactly offset close charges");
-        assertEq(preview.executionFeeUsdc, 2e6, "Close should assess the normal execution fee");
-        assertEq(preview.frozenSpreadUsdc, 25e6, "Close should assess the fixed LP-owned spread");
-        assertEq(preview.freshTraderPayoutUsdc, 0, "Exact-zero settlement should not create a payout");
-        assertEq(preview.seizedCollateralUsdc, 0, "Exact-zero settlement should not seize collateral");
+        assertEq(preview.realizedPnlAssets, int256(27e6), "Price profit should exactly offset close charges");
+        assertEq(preview.executionFeeAssets, 2e6, "Close should assess the normal execution fee");
+        assertEq(preview.frozenSpreadAssets, 25e6, "Close should assess the fixed LP-owned spread");
+        assertEq(preview.freshTraderPayoutAssets, 0, "Exact-zero settlement should not create a payout");
+        assertEq(preview.seizedCollateralAssets, 0, "Exact-zero settlement should not seize collateral");
 
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256 poolAssetsBefore = pool.totalAssets();
         _close(account, CfdTypes.Side.LONG, size, closePrice);
 
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
-            preview.executionFeeUsdc,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - treasuryBefore,
+            preview.executionFeeAssets,
             "Exact-zero settlement should credit the full execution fee to treasury"
         );
         assertEq(
             poolAssetsBefore - pool.totalAssets(),
-            preview.executionFeeUsdc,
+            preview.executionFeeAssets,
             "Only the protocol fee should leave LP cash; the frozen spread remains LP-owned"
         );
     }
@@ -484,7 +484,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             uint8(delta.revertCode), uint8(CfdEnginePlanTypes.OpenRevertCode.OK), "Setup should not predict failure"
         );
 
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         _open(account, CfdTypes.Side.LONG, order.sizeDelta, order.marginDelta, 1e8);
 
         (uint256 size, uint256 margin, uint256 entryPrice,,,,) = engine.positions(account);
@@ -492,8 +492,8 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         assertEq(margin, delta.positionMarginAfterOpen, "Live open margin should match planner delta");
         assertEq(entryPrice, delta.newPosEntryPrice, "Live open entry price should match planner delta");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
-            delta.executionFeeUsdc,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - feesBefore,
+            delta.executionFeeAssets,
             "Live open fee collection should match planner execution fee"
         );
         assertEq(
@@ -524,7 +524,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             libDelta.positionMarginAfterOpen,
             "Planner open margin should match library"
         );
-        assertEq(plannerDelta.executionFeeUsdc, libDelta.executionFeeUsdc, "Planner open fee should match library");
+        assertEq(plannerDelta.executionFeeAssets, libDelta.executionFeeAssets, "Planner open fee should match library");
         assertEq(
             plannerDelta.sideTotalMarginAfterOpen,
             libDelta.sideTotalMarginAfterOpen,
@@ -543,7 +543,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 1000e6, 1e8), 1e8, pool.totalAssets()
         );
 
-        assertGt(delta.pendingCarryUsdc, 0, "Open plan should report observational pending carry");
+        assertGt(delta.pendingCarryAssets, 0, "Open plan should report observational pending carry");
     }
 
     function test_PlanOpen_DoesNotDoubleCountRealizedCarryInProjectedRisk() public {
@@ -554,58 +554,58 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             size: 100_000e18,
             margin: 2500e6,
             entryPrice: 1e8,
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 1,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
+        snap.positionEntryCostAssetAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
         snap.currentTimestamp = uint64(30 days + 1);
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 100_000e18,
             entryNotional: 100_000e6,
             totalMargin: 2500e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 100_000e18,
             entryNotional: 100_000e6,
             totalMargin: 2500e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
-        snap.poolAssetsUsdc = 2_000_000e6;
-        snap.poolCashUsdc = 2_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 3110e6,
-            totalLockedMarginUsdc: 2610e6,
-            activePositionMarginUsdc: 2500e6,
-            otherLockedMarginUsdc: 110e6,
-            freeSettlementUsdc: 500e6
+        snap.poolAssets = 2_000_000e6;
+        snap.poolCashAssets = 2_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 3110e6,
+            totalLockedMarginAssets: 2610e6,
+            activePositionMarginAssets: 2500e6,
+            otherLockedMarginAssets: 110e6,
+            freeSettlementAssets: 500e6
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 2500e6,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 2610e6
+            positionMarginAssets: 2500e6,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: 2610e6
         });
-        snap.liquidationReserveUsdc = 110e6;
+        snap.liquidationReserveAssets = 110e6;
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();
         _attachFullRateCarry(
             snap,
             CfdTypes.Side.LONG,
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin),
+            PositionRiskAccountingLib.computeBorrowBaseAssets(snap.position.maxProfitAssets, snap.position.margin),
             30 days
         );
-        uint256 freeSettlementBeforeCarry = snap.accountBuckets.freeSettlementUsdc;
+        uint256 freeSettlementBeforeCarry = snap.accountBuckets.freeSettlementAssets;
         uint256 marginBeforeCarry = snap.position.margin;
         CfdEnginePlanTypes.OpenDelta memory delta =
             CfdEnginePlanLib.planOpen(snap, _openOrder(account, CfdTypes.Side.LONG, 5000e18, 0, 1e8), 1e8);
@@ -616,15 +616,15 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             "Planner should accept opens once the carry-realized snapshot still clears IMR"
         );
         assertTrue(delta.valid, "An OK carry-realized plan should be valid");
-        assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue pending carry");
+        assertGt(delta.pendingCarryAssets, 0, "Setup must accrue pending carry");
         assertGe(
             freeSettlementBeforeCarry,
-            uint256(delta.tradeCostUsdc),
+            uint256(delta.tradeCostAssets),
             "Margin-funded carry preserves free settlement for the incremental action charge"
         );
         assertEq(
             delta.positionMarginAfterOpen,
-            marginBeforeCarry - delta.pendingCarryUsdc,
+            marginBeforeCarry - delta.pendingCarryAssets,
             "Projected price collateral must include the carry debit exactly once"
         );
     }
@@ -640,32 +640,32 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             size: 0,
             margin: 0,
             entryPrice: 0,
-            maxProfitUsdc: 0,
+            maxProfitAssets: 0,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
+        snap.positionEntryCostAssetAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 0,
+            maxProfitAssets: 0,
             openInterest: 300_000e18,
             entryNotional: 300_000e6,
             totalMargin: 50_000e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseUsdc: 0, carryIndex: 0
+            maxProfitAssets: 0, openInterest: 0, entryNotional: 0, totalMargin: 0, borrowBaseAssets: 0, carryIndex: 0
         });
-        snap.poolAssetsUsdc = 2_000_000e6;
-        snap.poolCashUsdc = 2_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 4920e6,
-            totalLockedMarginUsdc: 0,
-            activePositionMarginUsdc: 0,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 4920e6
+        snap.poolAssets = 2_000_000e6;
+        snap.poolCashAssets = 2_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 4920e6,
+            totalLockedMarginAssets: 0,
+            activePositionMarginAssets: 0,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: 4920e6
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = params;
@@ -684,17 +684,17 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         CfdEnginePlanTypes.OpenDelta memory delta = planner.planOpen(snap, order, 1e8);
 
-        assertLt(delta.tradeCostUsdc, 0, "Setup must produce a skew-reducing rebate");
-        assertEq(delta.vpiRebateReserveAfterUsdc, 1125e6, "Reserve must back the gross negative VPI");
-        assertEq(delta.poolRebatePayoutUsdc, 1005e6, "Pool cash rebate is net of the execution fee");
+        assertLt(delta.tradeCostAssets, 0, "Setup must produce a skew-reducing rebate");
+        assertEq(delta.vpiRebateReserveAfterAssets, 1125e6, "Reserve must back the gross negative VPI");
+        assertEq(delta.poolRebatePayoutAssets, 1005e6, "Pool cash rebate is net of the execution fee");
         assertEq(
-            delta.vpiRebateReserveFromPledgeUsdc,
+            delta.vpiRebateReserveFromPledgeAssets,
             120e6,
             "New pledge must fill the gap between gross VPI backing and the net cash rebate"
         );
         assertEq(
             delta.positionMarginAfterOpen,
-            delta.openState.initialMarginRequirementUsdc,
+            delta.openState.initialMarginRequirementAssets,
             "IMR must be rechecked after both mandatory reserves are carved out"
         );
         assertEq(
@@ -704,12 +704,12 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         );
         assertFalse(delta.valid);
 
-        snap.accountBuckets.settlementBalanceUsdc += 1;
-        snap.accountBuckets.freeSettlementUsdc += 1;
+        snap.accountBuckets.settlementBalanceAssets += 1;
+        snap.accountBuckets.freeSettlementAssets += 1;
         order.marginDelta += 1;
         delta = planner.planOpen(snap, order, 1e8);
-        assertEq(delta.positionMarginAfterOpen, delta.openState.initialMarginRequirementUsdc + 1);
-        assertTrue(delta.valid, "One micro-USDC above initial margin remains admissible");
+        assertEq(delta.positionMarginAfterOpen, delta.openState.initialMarginRequirementAssets + 1);
+        assertTrue(delta.valid, "One micro-settlementToken above initial margin remains admissible");
     }
 
     function test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta() public view {
@@ -720,7 +720,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             size: 10_000e18,
             margin: 100e6,
             entryPrice: 1e8,
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 1,
@@ -730,35 +730,35 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 10_000e18,
             entryNotional: 10_000e18 * 1e8,
             totalMargin: 100e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 10_000e18,
             entryNotional: 10_000e18 * 1e8,
             totalMargin: 100e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
-        snap.poolAssetsUsdc = 50_000_000e6;
-        snap.poolCashUsdc = 50_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 200e6,
-            totalLockedMarginUsdc: 100e6,
-            activePositionMarginUsdc: 100e6,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 100e6
+        snap.poolAssets = 50_000_000e6;
+        snap.poolCashAssets = 50_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 200e6,
+            totalLockedMarginAssets: 100e6,
+            activePositionMarginAssets: 100e6,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: 100e6
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 100e6,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 100e6
+            positionMarginAssets: 100e6,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: 100e6
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
@@ -766,16 +766,16 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         _attachFullRateCarry(
             snap,
             CfdTypes.Side.LONG,
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin),
+            PositionRiskAccountingLib.computeBorrowBaseAssets(snap.position.maxProfitAssets, snap.position.margin),
             30 days
         );
         CfdTypes.Order memory order = _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 100e6, 1e8);
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8);
-        uint256 freeSettlementAfterCarry = delta.pendingCarryUsdc >= snap.accountBuckets.freeSettlementUsdc
+        uint256 freeSettlementAfterCarry = delta.pendingCarryAssets >= snap.accountBuckets.freeSettlementAssets
             ? 0
-            : snap.accountBuckets.freeSettlementUsdc - delta.pendingCarryUsdc;
+            : snap.accountBuckets.freeSettlementAssets - delta.pendingCarryAssets;
 
-        assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue pending carry");
+        assertGt(delta.pendingCarryAssets, 0, "Setup must accrue pending carry");
         assertLt(
             freeSettlementAfterCarry,
             order.marginDelta,
@@ -813,53 +813,53 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             isClose: true
         });
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snap, closeOrder, 1e8);
-        assertGt(delta.pendingCarryUsdc, 0, "Close plan should report observational pending carry");
+        assertGt(delta.pendingCarryAssets, 0, "Close plan should report observational pending carry");
     }
 
     function test_PlanClose_LossConsumptionExcludesReservedSettlementBounty() public pure {
         address account = address(uint160(0xB007));
-        uint256 positionMarginUsdc = 1000e6;
-        uint256 reservedBountyUsdc = 200_000;
+        uint256 positionMarginAssets = 1000e6;
+        uint256 reservedBountyAssets = 200_000;
         CfdEnginePlanTypes.RawSnapshot memory snap;
         snap.account = account;
         snap.position = CfdTypes.Position({
             size: 100_000e18,
-            margin: positionMarginUsdc,
+            margin: positionMarginAssets,
             entryPrice: 1e8,
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
+        snap.positionEntryCostAssetAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
         snap.lastMarkPrice = 150_000_000;
         snap.lastMarkTime = 1;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 100_000e18,
             entryNotional: 100_000e18 * 1e8,
-            totalMargin: positionMarginUsdc,
-            borrowBaseUsdc: 0,
+            totalMargin: positionMarginAssets,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
-        snap.poolAssetsUsdc = 2_000_000e6;
-        snap.poolCashUsdc = 2_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: positionMarginUsdc + reservedBountyUsdc,
-            totalLockedMarginUsdc: positionMarginUsdc + reservedBountyUsdc,
-            activePositionMarginUsdc: positionMarginUsdc,
-            otherLockedMarginUsdc: reservedBountyUsdc,
-            freeSettlementUsdc: 0
+        snap.poolAssets = 2_000_000e6;
+        snap.poolCashAssets = 2_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: positionMarginAssets + reservedBountyAssets,
+            totalLockedMarginAssets: positionMarginAssets + reservedBountyAssets,
+            activePositionMarginAssets: positionMarginAssets,
+            otherLockedMarginAssets: reservedBountyAssets,
+            freeSettlementAssets: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: positionMarginUsdc,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: reservedBountyUsdc,
-            totalLockedMarginUsdc: positionMarginUsdc + reservedBountyUsdc
+            positionMarginAssets: positionMarginAssets,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: reservedBountyAssets,
+            totalLockedMarginAssets: positionMarginAssets + reservedBountyAssets
         });
-        snap.actionReserveUsdc = reservedBountyUsdc;
-        snap.protectedExecutionBountyUsdc = reservedBountyUsdc;
+        snap.actionReserveAssets = reservedBountyAssets;
+        snap.protectedExecutionBountyAssets = reservedBountyAssets;
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = 4;
@@ -879,16 +879,18 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
 
         assertTrue(delta.valid, "Underwater full close should remain executable");
         assertEq(
-            delta.pricePnlPledgeConsumedUsdc,
-            positionMarginUsdc,
+            delta.pricePnlPledgeConsumedAssets,
+            positionMarginAssets,
             "Close price loss should consume only the dedicated PnL pledge"
         );
         assertEq(
-            delta.actionReserveConsumedUsdc, 0, "Reserved execution bounty must stay isolated from terminal close loss"
+            delta.actionReserveConsumedAssets,
+            0,
+            "Reserved execution bounty must stay isolated from terminal close loss"
         );
         assertGe(
-            delta.priceLossWrittenOffUsdc,
-            reservedBountyUsdc,
+            delta.priceLossWrittenOffAssets,
+            reservedBountyAssets,
             "Reserved bounty should remain outside reachable collateral even when loss has shortfall"
         );
     }
@@ -903,27 +905,27 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         CfdEnginePlanTypes.RawSnapshot memory snap =
             harness.buildRawSnapshotForPlanner(account, 150_000_000, pool.totalAssets());
         CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, 150_000_000);
-        assertGt(delta.pendingCarryUsdc, 0, "Liquidation plan should report observational pending carry");
+        assertGt(delta.pendingCarryAssets, 0, "Liquidation plan should report observational pending carry");
     }
 
     function test_PendingCarry_IncreasesWithHigherLeverage() public pure {
         uint256 carryIndexDelta = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 30 days, 1, 1, 500);
-        uint256 lowLeverageCarry = PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 50_000e6), carryIndexDelta
+        uint256 lowLeverageCarry = PositionRiskAccountingLib.computeIndexedCarryAssets(
+            PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 50_000e6), carryIndexDelta
         );
-        uint256 highLeverageCarry = PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 10_000e6), carryIndexDelta
+        uint256 highLeverageCarry = PositionRiskAccountingLib.computeIndexedCarryAssets(
+            PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 10_000e6), carryIndexDelta
         );
         assertGt(highLeverageCarry, lowLeverageCarry, "Higher leverage should report more carry");
     }
 
     function test_PendingCarry_IncreasesWithTime() public pure {
-        uint256 borrowBaseUsdc = PositionRiskAccountingLib.computeBorrowBaseUsdc(100_000e6, 10_000e6);
-        uint256 shortCarry = PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            borrowBaseUsdc, PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 1 days, 1, 1, 500)
+        uint256 borrowBaseAssets = PositionRiskAccountingLib.computeBorrowBaseAssets(100_000e6, 10_000e6);
+        uint256 shortCarry = PositionRiskAccountingLib.computeIndexedCarryAssets(
+            borrowBaseAssets, PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 1 days, 1, 1, 500)
         );
-        uint256 longCarry = PositionRiskAccountingLib.computeIndexedCarryUsdc(
-            borrowBaseUsdc, PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 30 days, 1, 1, 500)
+        uint256 longCarry = PositionRiskAccountingLib.computeIndexedCarryAssets(
+            borrowBaseAssets, PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, 30 days, 1, 1, 500)
         );
         assertGt(longCarry, shortCarry, "Longer time should report more carry");
     }
@@ -939,43 +941,46 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             size: 100_000e18,
             margin: 1e6,
             entryPrice: 1e8,
-            maxProfitUsdc: 10_000e6,
+            maxProfitAssets: 10_000e6,
             side: CfdTypes.Side.SHORT,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
-        snap.positionEntryCostUsdcAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
+        snap.positionEntryCostAssetAtoms = CfdMath.sizeToLots(snap.position.size) * snap.position.entryPrice;
         snap.currentTimestamp = 365 days;
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 1_000_000e18,
             entryNotional: 1_000_000e18 * 1e8,
             totalMargin: 50_000e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 10_000e6,
+            maxProfitAssets: 10_000e6,
             openInterest: 100_000e18,
             entryNotional: 100_000e18 * 1e8,
             totalMargin: 1e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
-        snap.poolAssetsUsdc = 50_000_000e6;
-        snap.poolCashUsdc = 0;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 0,
-            totalLockedMarginUsdc: 1e6,
-            activePositionMarginUsdc: 1e6,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 0
+        snap.poolAssets = 50_000_000e6;
+        snap.poolCashAssets = 0;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 0,
+            totalLockedMarginAssets: 1e6,
+            activePositionMarginAssets: 1e6,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: 0
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 1e6, committedOrderMarginUsdc: 0, reservedSettlementUsdc: 0, totalLockedMarginUsdc: 1e6
+            positionMarginAssets: 1e6,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: 1e6
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = params;
@@ -984,7 +989,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             CfdEnginePlanLib.planOpen(snap, _openOrder(account, CfdTypes.Side.SHORT, 10_000e18, 0, 1e8), 1e8);
 
         assertEq(
-            uint256(delta.tradeCostUsdc),
+            uint256(delta.tradeCostAssets),
             4e6,
             "Execution fee on the incremental open should exceed eligible free settlement"
         );
@@ -1003,7 +1008,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             size: 100_000e18,
             margin: 2000e6,
             entryPrice: 1e8,
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             side: CfdTypes.Side.LONG,
             lastUpdateTime: 0,
             lastCarryTimestamp: 1,
@@ -1013,66 +1018,66 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         snap.lastMarkPrice = 1e8;
         snap.lastMarkTime = uint64(block.timestamp);
         snap.longSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 100_000e18,
             entryNotional: 100_000e18 * 1e8,
             totalMargin: 2000e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
         snap.shortSide = CfdEnginePlanTypes.SideSnapshot({
-            maxProfitUsdc: 100_000e6,
+            maxProfitAssets: 100_000e6,
             openInterest: 100_000e18,
             entryNotional: 100_000e18 * 1e8,
             totalMargin: 2000e6,
-            borrowBaseUsdc: 0,
+            borrowBaseAssets: 0,
             carryIndex: 0
         });
-        snap.poolAssetsUsdc = 50_000_000e6;
-        snap.poolCashUsdc = 50_000_000e6;
-        snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 5000e6,
-            totalLockedMarginUsdc: 4000e6,
-            activePositionMarginUsdc: 2000e6,
-            otherLockedMarginUsdc: 2000e6,
-            freeSettlementUsdc: 1000e6
+        snap.poolAssets = 50_000_000e6;
+        snap.poolCashAssets = 50_000_000e6;
+        snap.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 5000e6,
+            totalLockedMarginAssets: 4000e6,
+            activePositionMarginAssets: 2000e6,
+            otherLockedMarginAssets: 2000e6,
+            freeSettlementAssets: 1000e6
         });
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 2000e6,
-            committedOrderMarginUsdc: 2000e6,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 4000e6
+            positionMarginAssets: 2000e6,
+            committedOrderMarginAssets: 2000e6,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: 4000e6
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams();
         snap.executionFeeBps = engine.executionFeeBps();
-        uint256 borrowBaseUsdc =
-            PositionRiskAccountingLib.computeBorrowBaseUsdc(snap.position.maxProfitUsdc, snap.position.margin);
-        _attachFullRateCarry(snap, CfdTypes.Side.LONG, borrowBaseUsdc, 30 days);
+        uint256 borrowBaseAssets =
+            PositionRiskAccountingLib.computeBorrowBaseAssets(snap.position.maxProfitAssets, snap.position.margin);
+        _attachFullRateCarry(snap, CfdTypes.Side.LONG, borrowBaseAssets, 30 days);
 
         CfdEnginePlanTypes.OpenDelta memory delta =
             engine.planner().planOpen(snap, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8);
         CfdEnginePlanTypes.RawSnapshot memory withoutQueuedReservations = snap;
-        withoutQueuedReservations.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 5000e6,
-            totalLockedMarginUsdc: 2000e6,
-            activePositionMarginUsdc: 2000e6,
-            otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 3000e6
+        withoutQueuedReservations.accountBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: 5000e6,
+            totalLockedMarginAssets: 2000e6,
+            activePositionMarginAssets: 2000e6,
+            otherLockedMarginAssets: 0,
+            freeSettlementAssets: 3000e6
         });
         withoutQueuedReservations.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets({
-            positionMarginUsdc: 2000e6,
-            committedOrderMarginUsdc: 0,
-            reservedSettlementUsdc: 0,
-            totalLockedMarginUsdc: 2000e6
+            positionMarginAssets: 2000e6,
+            committedOrderMarginAssets: 0,
+            reservedSettlementAssets: 0,
+            totalLockedMarginAssets: 2000e6
         });
         CfdEnginePlanTypes.OpenDelta memory noQueueDelta = engine.planner()
             .planOpen(withoutQueuedReservations, _openOrder(account, CfdTypes.Side.LONG, 10_000e18, 0, 1e8), 1e8);
 
-        assertGt(delta.pendingCarryUsdc, 0, "Setup must accrue indexed carry");
+        assertGt(delta.pendingCarryAssets, 0, "Setup must accrue indexed carry");
         assertEq(
-            delta.pendingCarryUsdc,
-            noQueueDelta.pendingCarryUsdc,
+            delta.pendingCarryAssets,
+            noQueueDelta.pendingCarryAssets,
             "Queued reservations must not change historical indexed carry"
         );
     }
@@ -1086,7 +1091,7 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
         _open(shortAccount, CfdTypes.Side.SHORT, 300_000e18, 30_000e6, 1e8);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 700_000e6);
+        settlementToken.transfer(address(0xDEAD), 700_000e6);
 
         CfdTypes.Order memory order = _openOrder(longAccount, CfdTypes.Side.LONG, 350_000e18, 35_000e6, 1e8);
         CfdEnginePlanHarness harness = CfdEnginePlanHarness(address(engine));

@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract GovernedSeniorCapacityHandler is Test {
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant SECONDS_PER_YEAR = 365 days;
-    uint256 internal constant MIN_DEPOSIT_USDC = 1e6;
-    uint256 internal constant MAX_ACTION_ASSETS_USDC = 25_000e6;
+    uint256 internal constant MIN_DEPOSIT_ASSETS = 1e6;
+    uint256 internal constant MAX_ACTION_ASSETS = 25_000e6;
     uint256 internal constant MAX_TRACKED_EPOCHS = 8;
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     CfdEngine public immutable engine;
     HousePool public immutable pool;
     OrderRouter public immutable router;
@@ -39,14 +39,14 @@ contract GovernedSeniorCapacityHandler is Test {
     uint256 public expectedSettlementNoProgress;
 
     constructor(
-        MockUSDC _usdc,
+        MockSettlementToken _settlementToken,
         CfdEngine _engine,
         HousePool _pool,
         OrderRouter _router,
         TrancheVault _seniorVault,
         TrancheVault _juniorVault
     ) {
-        usdc = _usdc;
+        settlementToken = _settlementToken;
         engine = _engine;
         pool = _pool;
         router = _router;
@@ -245,15 +245,15 @@ contract GovernedSeniorCapacityHandler is Test {
 
         address actor = actors[actorIndex % actors.length];
         uint256 maxAssets = vault.maxRequestDeposit(actor);
-        uint256 upper = maxAssets < MAX_ACTION_ASSETS_USDC ? maxAssets : MAX_ACTION_ASSETS_USDC;
-        if (upper < MIN_DEPOSIT_USDC) {
+        uint256 upper = maxAssets < MAX_ACTION_ASSETS ? maxAssets : MAX_ACTION_ASSETS;
+        if (upper < MIN_DEPOSIT_ASSETS) {
             return;
         }
 
-        uint256 assets = bound(assetsFuzz, MIN_DEPOSIT_USDC, upper);
-        usdc.mint(actor, assets);
+        uint256 assets = bound(assetsFuzz, MIN_DEPOSIT_ASSETS, upper);
+        settlementToken.mint(actor, assets);
         vm.startPrank(actor);
-        usdc.approve(address(vault), assets);
+        settlementToken.approve(address(vault), assets);
         uint256 requestId = vault.requestDeposit(assets, actor, actor);
         vm.stopPrank();
 
@@ -330,7 +330,7 @@ contract GovernedSeniorCapacityHandler is Test {
             return;
         }
         uint256 shares = bound(sharesFuzz, 1, maxShares);
-        if (vault.estimateRedeemAssets(shares) < MIN_DEPOSIT_USDC && shares < maxShares) {
+        if (vault.estimateRedeemAssets(shares) < MIN_DEPOSIT_ASSETS && shares < maxShares) {
             shares = maxShares;
         }
 
@@ -432,7 +432,7 @@ contract GovernedSeniorCapacityHandler is Test {
         uint256 cutoffEpoch = pool.currentLpEpoch();
         (, uint256 seniorRedeemShares) = seniorVault.getMaturedRedeemHead(cutoffEpoch);
         (, uint256 juniorRedeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
-        if ((seniorRedeemShares != 0 || juniorRedeemShares != 0) && pool.getFreeUSDC() != 0) {
+        if ((seniorRedeemShares != 0 || juniorRedeemShares != 0) && pool.getFreeAssets() != 0) {
             return true;
         }
 
@@ -474,13 +474,13 @@ contract GovernedSeniorCapacityHandler is Test {
         (uint256 projectedSenior, uint256 projectedJunior, uint256 projectedHighWaterMark) =
             _projectStoredWaterfallAfterCoupon();
         uint256 projectedExposure = projectedSenior > projectedHighWaterMark ? projectedSenior : projectedHighWaterMark;
-        uint256 reservations = pool.reservedSeniorDepositAssetsUsdc();
+        uint256 reservations = pool.reservedSeniorDepositAssets();
 
         if (reservations > type(uint256).max - projectedExposure) {
             return false;
         }
         uint256 committedExposure = projectedExposure + reservations;
-        if (committedExposure > pool.maxSeniorExposureUsdc()) {
+        if (committedExposure > pool.maxSeniorExposureAssets()) {
             return false;
         }
 
@@ -587,8 +587,8 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
 
     GovernedSeniorCapacityHandler internal handler;
 
-    uint256 internal constant SMOKE_SENIOR_DEPOSIT_USDC = 1e6;
-    uint256 internal constant SMOKE_JUNIOR_DEPOSIT_USDC = 2e6;
+    uint256 internal constant SMOKE_SENIOR_DEPOSIT_ASSETS = 1e6;
+    uint256 internal constant SMOKE_JUNIOR_DEPOSIT_ASSETS = 2e6;
     uint256 internal constant SMOKE_REDEEM_SHARES_FUZZ = 1e6;
 
     function _initialJuniorDeposit() internal pure override returns (uint256) {
@@ -599,15 +599,15 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         super.setUp();
         _setSeniorCapacity(100_000e6, 7500);
 
-        handler = new GovernedSeniorCapacityHandler(usdc, engine, pool, router, seniorVault, juniorVault);
+        handler = new GovernedSeniorCapacityHandler(settlementToken, engine, pool, router, seniorVault, juniorVault);
 
         // Make the postcondition counters non-vacuous in every invariant campaign. The fuzzer retains the full
         // selector set below and continues exploring additional transitions from this valid, exercised state.
-        handler.requestSeniorDeposit(0, SMOKE_SENIOR_DEPOSIT_USDC, false);
+        handler.requestSeniorDeposit(0, SMOKE_SENIOR_DEPOSIT_ASSETS, false);
         uint256 seniorDepositEpochIndex = handler.trackedEpochCount() - 1;
         uint256 seniorDepositEpochId = handler.trackedEpochIdAt(seniorDepositEpochIndex);
 
-        handler.requestJuniorDeposit(0, SMOKE_JUNIOR_DEPOSIT_USDC, true);
+        handler.requestJuniorDeposit(0, SMOKE_JUNIOR_DEPOSIT_ASSETS, true);
         uint256 juniorDepositEpochIndex = handler.trackedEpochCount() - 1;
         uint256 juniorDepositEpochId = handler.trackedEpochIdAt(juniorDepositEpochIndex);
 
@@ -652,13 +652,13 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
     function test_CouponDriftCannotBlockCommittedSeniorSettlement() public {
         uint256 successfulBefore = handler.successfulSettlements();
         handler.requestSeniorDeposit(1, type(uint256).max, false);
-        assertGt(pool.reservedSeniorDepositAssetsUsdc(), 0);
+        assertGt(pool.reservedSeniorDepositAssets(), 0);
         handler.warpForward(90 minutes);
         assertFalse(pool.areSeniorDepositReservationsWithinLimits());
 
         handler.settleLpEpoch();
         assertEq(handler.successfulSettlements(), successfulBefore + 1);
-        assertEq(pool.reservedSeniorDepositAssetsUsdc(), 0);
+        assertEq(pool.reservedSeniorDepositAssets(), 0);
         address actor = handler.actorAt(1);
         assertGt(seniorVault.claimableDepositRequest(seniorVault.controllerDepositHead(actor), actor), 0);
         _assertAllInvariants();
@@ -704,7 +704,7 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
 
     function _assertInvariant_ReservationCounterMatchesReservedSeniorEpochAssets() internal view {
         assertEq(
-            pool.reservedSeniorDepositAssetsUsdc(),
+            pool.reservedSeniorDepositAssets(),
             handler.reservedSeniorEpochAssets(),
             "pool reservation counter must equal aggregate pending, non-rejected senior epoch assets"
         );
@@ -724,9 +724,9 @@ contract GovernedSeniorCapacityInvariantTest is BasePerpTest {
         TrancheVault vault
     ) internal view {
         assertEq(
-            usdc.balanceOf(address(vault)),
+            settlementToken.balanceOf(address(vault)),
             vault.pendingDepositEscrowAssets() + vault.withdrawalEscrowAssets(),
-            "vault USDC custody must equal pending deposit plus funded withdrawal escrow"
+            "vault settlementToken custody must equal pending deposit plus funded withdrawal escrow"
         );
         assertEq(
             vault.balanceOf(address(vault)),

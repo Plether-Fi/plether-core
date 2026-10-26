@@ -19,7 +19,7 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
+        handler = new PerpAccountingHandler(settlementToken, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
         bytes4[] memory selectors = new bytes4[](9);
@@ -90,12 +90,12 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
         for (uint256 i = 0; i < handler.actorCount(); i++) {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerView memory ledger = engineAccountLens.getAccountLedgerView(account);
-            aggregateTraderClaims += ledger.traderClaimBalanceUsdc;
+            aggregateTraderClaims += ledger.traderClaimBalanceAssets;
         }
 
         assertEq(
             aggregateTraderClaims,
-            engine.totalTraderClaimBalanceUsdc(),
+            engine.totalTraderClaimBalanceAssets(),
             "Per-account trader claims must stay isolated and sum cleanly"
         );
     }
@@ -139,13 +139,13 @@ contract PerpMultiAccountInvariantTest is BasePerpInvariantTest {
 
             assertEq(snapshot.margin, margin, "Account snapshot margin must match engine economic position margin");
             assertEq(
-                snapshot.positionMarginBucketUsdc,
-                buckets.positionMarginUsdc,
+                snapshot.positionMarginBucketAssets,
+                buckets.positionMarginAssets,
                 "Account snapshot custody bucket must match clearinghouse position-margin bucket"
             );
             assertEq(
-                snapshot.activePositionMarginUsdc,
-                buckets.positionMarginUsdc,
+                snapshot.activePositionMarginAssets,
+                buckets.positionMarginAssets,
                 "Account snapshot active position margin view must reflect the clearinghouse custody bucket"
             );
         }

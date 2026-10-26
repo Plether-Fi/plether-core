@@ -75,7 +75,7 @@ contract ArbitrumSepoliaReleaseHousePool is HousePool {
         address engine,
         address redemptionMathSidecar
     ) HousePool(settlementToken, engine, redemptionMathSidecar) {
-        poolConfig.maxSeniorExposureUsdc = 40_000_000e6;
+        poolConfig.maxSeniorExposureAssets = 40_000_000e6;
         poolConfig.maxSeniorShareBps = 8000;
         _validatePoolConfig(poolConfig);
     }
@@ -125,7 +125,7 @@ contract ArbitrumSepoliaReleaseRouter is OrderRouter {
             lifecycleBook
         )
     {
-        minOpenNotionalUsdc = 1000e6;
+        minOpenNotionalAssets = 1000e6;
     }
 
 }
@@ -381,7 +381,7 @@ contract DeployPerpsArbitrumSepolia is Script {
             "SettlementMonitorLens JuniorVault mismatch"
         );
         require(
-            address(deployed.settlementMonitorLens.USDC()) == address(deployed.settlementToken),
+            address(deployed.settlementMonitorLens.settlementToken()) == address(deployed.settlementToken),
             "SettlementMonitorLens settlement token mismatch"
         );
         require(
@@ -439,7 +439,7 @@ contract DeployPerpsArbitrumSepolia is Script {
             initMarginBps: 20,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -451,10 +451,10 @@ contract DeployPerpsArbitrumSepolia is Script {
         OrderRouter router,
         OrderRouterAdmin routerAdmin
     ) internal view {
-        require(housePool.maxSeniorExposureUsdc() == 40_000_000e6, "Initial maximum senior exposure mismatch");
+        require(housePool.maxSeniorExposureAssets() == 40_000_000e6, "Initial maximum senior exposure mismatch");
         require(housePool.maxSeniorShareBps() == 8000, "Initial maximum senior share mismatch");
         require(housePool.poolConfigActivationTime() == 0, "Unexpected initial HousePool proposal");
-        require(router.minOpenNotionalUsdc() == 1000e6, "Initial opening notional mismatch");
+        require(router.minOpenNotionalAssets() == 1000e6, "Initial opening notional mismatch");
         require(router.pletherOracle().adverseConfidenceMultiplierBps() == 2500, "Initial adverse multiplier mismatch");
         require(router.pletherOracle().basketMaxConfidenceRatioBps() == 10, "Initial basket confidence mismatch");
         require(router.maxPendingOrders() == 5, "Initial pending-order limit mismatch");
@@ -535,8 +535,14 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(address(housePool.ENGINE()) == address(engine), "HousePool Engine mismatch");
         require(address(engine.clearinghouse()) == address(clearinghouse), "Engine Clearinghouse mismatch");
         require(clearinghouse.engine() == address(engine), "Clearinghouse Engine mismatch");
-        require(address(engine.USDC()) == address(housePool.USDC()), "Engine settlement asset mismatch");
-        require(clearinghouse.settlementAsset() == address(housePool.USDC()), "Clearinghouse settlement asset mismatch");
+        require(
+            address(engine.settlementToken()) == address(housePool.settlementToken()),
+            "Engine settlement asset mismatch"
+        );
+        require(
+            clearinghouse.settlementAsset() == address(housePool.settlementToken()),
+            "Clearinghouse settlement asset mismatch"
+        );
         require(address(orderPolicyEvaluator).code.length > 0, "Order policy evaluator has no code");
         require(address(orderExecutionSidecar).code.length > 0, "Order execution sidecar has no code");
         require(orderExecutionSidecar.recoverySidecar().code.length > 0, "Order recovery sidecar has no code");
@@ -566,7 +572,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(address(seniorVault) != address(juniorVault), "HousePool vault pair is duplicated");
         require(housePool.seniorVault() == address(seniorVault), "HousePool senior vault mismatch");
         require(housePool.juniorVault() == address(juniorVault), "HousePool junior vault mismatch");
-        require(address(housePool.USDC()) == address(settlementToken), "HousePool asset mismatch");
+        require(address(housePool.settlementToken()) == address(settlementToken), "HousePool asset mismatch");
         require(housePool.LP_EPOCH_DURATION() == 1 hours, "Unexpected LP epoch duration");
         require(housePool.MAX_LP_EPOCHS_PER_PHASE() == 16, "Unexpected LP epoch bound");
 
@@ -680,7 +686,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("HousePoolRedemptionMathSidecar:", address(deployed.housePoolRedemptionMathSidecar));
         console.logBytes32(deployed.housePoolRedemptionMathSidecar.implementationId());
         console.log("HousePool:", address(deployed.housePool));
-        console.log("MaximumSeniorExposureUsdc:", deployed.housePool.maxSeniorExposureUsdc());
+        console.log("MaximumSeniorExposureAssets:", deployed.housePool.maxSeniorExposureAssets());
         console.log("MaximumSeniorShareBps:", deployed.housePool.maxSeniorShareBps());
         console.log("LpEpochDuration:", deployed.housePool.LP_EPOCH_DURATION());
         console.log("MaxLpEpochsPerPhase:", deployed.housePool.MAX_LP_EPOCHS_PER_PHASE());
@@ -696,11 +702,11 @@ contract DeployPerpsArbitrumSepolia is Script {
         console.log("OrderRouterExecutionSidecar:", address(deployed.orderExecutionSidecar));
         console.log("OrderRecoverySidecar:", deployed.orderExecutionSidecar.recoverySidecar());
         console.log("OrderRouter:", address(deployed.router));
-        console.log("MinimumOpenNotionalUsdc:", deployed.router.minOpenNotionalUsdc());
+        console.log("MinimumOpenNotionalAssets:", deployed.router.minOpenNotionalAssets());
         console.log("AdverseConfidenceMultiplierBps:", deployed.router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("OrderRouterLiquidationBatchSidecar:", address(deployed.liquidationBatchSidecar));
         console.log("PositionProtectionBook:", deployed.positionProtectionBook);
-        console.log("PositionProtectionTriggerBountyUsdc:", deployed.router.positionProtectionTriggerBountyUsdc());
+        console.log("PositionProtectionTriggerBountyAssets:", deployed.router.positionProtectionTriggerBountyAssets());
         console.log("OrderLifecycleBook:", address(deployed.lifecycleBook));
         console.log("OrderExecutionConfigHash:");
         console.logBytes32(deployed.lifecycleBook.currentExecutionConfigHash());

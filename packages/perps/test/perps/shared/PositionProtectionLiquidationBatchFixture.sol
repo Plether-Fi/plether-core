@@ -29,10 +29,10 @@ interface ILiquidationBatchSidecarErrors {
 abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest {
 
     struct SolventProtectionSnapshot {
-        uint256 triggerBountyUsdc;
-        uint256 reservationBountyUsdc;
-        uint256 reservedSettlementUsdc;
-        uint256 freeSettlementUsdc;
+        uint256 triggerBountyAssets;
+        uint256 reservationBountyAssets;
+        uint256 reservedSettlementAssets;
+        uint256 freeSettlementAssets;
         uint256 positionSize;
     }
 
@@ -46,8 +46,8 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
     uint256 internal constant DEEP_LIQUIDATION_PRICE = 150_000_000;
     uint256 internal constant LONG_STOP_LOSS = 110_000_000;
     uint256 internal constant POSITION_SIZE = 10_000e18;
-    uint256 internal constant HEALTHY_MARGIN_USDC = 2000e6;
-    uint256 internal constant THIN_MARGIN_USDC = 250e6;
+    uint256 internal constant HEALTHY_MARGIN_ASSETS = 2000e6;
+    uint256 internal constant THIN_MARGIN_ASSETS = 250e6;
 
     address internal constant ARMED_ACCOUNT = address(0xB47C1001);
     address internal constant SOLVENT_ACCOUNT = address(0xB47C1002);
@@ -68,18 +68,18 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
 
     function _openAndProtect(
         address account,
-        uint256 marginUsdc
+        uint256 marginAssets
     ) internal returns (uint64 protectionId) {
         _fundTrader(account, 20_000e6);
-        _open(account, CfdTypes.Side.LONG, POSITION_SIZE, marginUsdc, MARK_PRICE);
+        _open(account, CfdTypes.Side.LONG, POSITION_SIZE, marginAssets, MARK_PRICE);
 
         PositionProtectionTypes.PositionProtectionParams memory params;
         params.stopLossTriggerPrice = LONG_STOP_LOSS;
         params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
-            maxExecutionNotionalUsdc: type(uint256).max,
-            maxGrossAccountDebitUsdc: type(uint256).max,
-            maxActionChargeUsdc: type(uint256).max,
-            maxExplicitFeesUsdc: type(uint256).max
+            maxExecutionNotionalAssets: type(uint256).max,
+            maxGrossAccountDebitAssets: type(uint256).max,
+            maxActionChargeAssets: type(uint256).max,
+            maxExplicitFeesAssets: type(uint256).max
         });
         vm.prank(account);
         protectionId = protectionActions.createPositionProtection(params);
@@ -90,10 +90,11 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
     ) internal view returns (SolventProtectionSnapshot memory snapshot) {
         PositionProtectionTypes.PositionProtectionView memory protection =
             protectionViews.getPositionProtection(protectionId);
-        snapshot.triggerBountyUsdc = protection.triggerBountyUsdc;
-        snapshot.reservationBountyUsdc = router.getAccountReservations(SOLVENT_ACCOUNT).executionBountyUsdc;
-        snapshot.reservedSettlementUsdc = clearinghouse.getLockedMarginBuckets(SOLVENT_ACCOUNT).reservedSettlementUsdc;
-        snapshot.freeSettlementUsdc = _freeSettlementUsdc(SOLVENT_ACCOUNT);
+        snapshot.triggerBountyAssets = protection.triggerBountyAssets;
+        snapshot.reservationBountyAssets = router.getAccountReservations(SOLVENT_ACCOUNT).executionBountyAssets;
+        snapshot.reservedSettlementAssets =
+        clearinghouse.getLockedMarginBuckets(SOLVENT_ACCOUNT).reservedSettlementAssets;
+        snapshot.freeSettlementAssets = _freeSettlementAssets(SOLVENT_ACCOUNT);
         snapshot.positionSize = _positionSize(SOLVENT_ACCOUNT);
     }
 
@@ -108,7 +109,7 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
             uint8(PositionProtectionTypes.PositionProtectionStatus.Armed),
             "caught solvent revert must restore Book status"
         );
-        assertEq(protection.triggerBountyUsdc, beforeSnapshot.triggerBountyUsdc, "trigger bounty must roll back");
+        assertEq(protection.triggerBountyAssets, beforeSnapshot.triggerBountyAssets, "trigger bounty must roll back");
         assertEq(
             protectionViews.activePositionProtectionId(SOLVENT_ACCOUNT),
             protectionId,
@@ -117,18 +118,20 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
         IOrderRouterAccounting.AccountReservationView memory reservation =
             router.getAccountReservations(SOLVENT_ACCOUNT);
         assertEq(
-            reservation.executionBountyUsdc,
-            beforeSnapshot.reservationBountyUsdc,
+            reservation.executionBountyAssets,
+            beforeSnapshot.reservationBountyAssets,
             "caught solvent revert must restore reserved settlement"
         );
         assertEq(reservation.pendingOrderCount, 0, "caught solvent revert must preserve the empty order queue");
         assertEq(
-            clearinghouse.getLockedMarginBuckets(SOLVENT_ACCOUNT).reservedSettlementUsdc,
-            beforeSnapshot.reservedSettlementUsdc,
+            clearinghouse.getLockedMarginBuckets(SOLVENT_ACCOUNT).reservedSettlementAssets,
+            beforeSnapshot.reservedSettlementAssets,
             "caught solvent revert must restore the clearinghouse reserve bucket"
         );
         assertEq(
-            _freeSettlementUsdc(SOLVENT_ACCOUNT), beforeSnapshot.freeSettlementUsdc, "free settlement must be unchanged"
+            _freeSettlementAssets(SOLVENT_ACCOUNT),
+            beforeSnapshot.freeSettlementAssets,
+            "free settlement must be unchanged"
         );
         assertEq(_positionSize(SOLVENT_ACCOUNT), beforeSnapshot.positionSize, "solvent position must be unchanged");
     }
@@ -156,13 +159,13 @@ abstract contract PositionProtectionLiquidationBatchTestFixture is BasePerpTest 
     function _withdrawAllFreeSettlement(
         address account
     ) internal {
-        uint256 freeSettlementUsdc = _freeSettlementUsdc(account);
+        uint256 freeSettlementAssets = _freeSettlementAssets(account);
         vm.prank(account);
-        clearinghouse.withdraw(account, freeSettlementUsdc);
+        clearinghouse.withdraw(account, freeSettlementAssets);
     }
 
-    function _totalProtectionBountyUsdc() internal view returns (uint256) {
-        return router.positionProtectionTriggerBountyUsdc();
+    function _totalProtectionBountyAssets() internal view returns (uint256) {
+        return router.positionProtectionTriggerBountyAssets();
     }
 
     function _positionSize(

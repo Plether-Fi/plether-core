@@ -23,16 +23,16 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
     /// @notice Predeployed immutable registry for V3 client intents, pending policy, and authenticated receipts.
     OrderLifecycleBook public immutable lifecycleBook;
 
-    /// @notice Minimum open/increase notional accepted at commit time (6-decimal USDC).
-    uint256 public minOpenNotionalUsdc;
+    /// @notice Minimum open/increase notional accepted at commit time (6-decimal settlement token).
+    uint256 public minOpenNotionalAssets;
     /// @notice Variable open-order keeper-bounty rate in basis points.
     uint256 public openOrderExecutionBountyBps;
-    /// @notice Minimum open-order keeper bounty (6-decimal USDC).
-    uint256 public minOpenOrderExecutionBountyUsdc;
-    /// @notice Maximum open-order keeper bounty (6-decimal USDC).
-    uint256 public maxOpenOrderExecutionBountyUsdc;
-    /// @notice Fixed keeper bounty paid when an armed protection is validly triggered (6-decimal USDC).
-    uint256 public positionProtectionTriggerBountyUsdc;
+    /// @notice Minimum open-order keeper bounty (6-decimal settlement token).
+    uint256 public minOpenOrderExecutionBountyAssets;
+    /// @notice Maximum open-order keeper bounty (6-decimal settlement token).
+    uint256 public maxOpenOrderExecutionBountyAssets;
+    /// @notice Fixed keeper bounty paid when an armed protection is validly triggered (6-decimal settlement token).
+    uint256 public positionProtectionTriggerBountyAssets;
 
     /// @notice Initializes oracle/accounting integrations, deploys the admin, and installs router defaults.
     /// @dev Defaults are: $100 minimum open notional, 1 bp open bounty with $0.01/$0.20 floor/cap,
@@ -68,11 +68,11 @@ abstract contract OrderRouterBase is IOrderRouterAdminHost, OrderExecutionOrches
         admin = address(new OrderRouterAdmin(address(this), msg.sender));
         policyEvaluator = _policyEvaluator;
         lifecycleBook = lifecycleBook_;
-        minOpenNotionalUsdc = 100_000_000;
+        minOpenNotionalAssets = 100_000_000;
         openOrderExecutionBountyBps = 1;
-        minOpenOrderExecutionBountyUsdc = 10_000;
-        maxOpenOrderExecutionBountyUsdc = 200_000;
-        positionProtectionTriggerBountyUsdc = 200_000;
+        minOpenOrderExecutionBountyAssets = 10_000;
+        maxOpenOrderExecutionBountyAssets = 200_000;
+        positionProtectionTriggerBountyAssets = 200_000;
         minEngineGas = 600_000;
         maxPruneOrdersPerCall = 64;
     }

@@ -7,10 +7,15 @@ For audit review that needs policy tables and read-surface canonicality in one p
 For autonomous trading-account and AI-agent integration, including bounded authority and receipt verification, use
 [`WORKING_WITH_AI_AGENTS.md`](WORKING_WITH_AI_AGENTS.md) alongside this file.
 
+The fresh MockUSDG stack uses token-neutral APIs with no old token-specific aliases. Token-address inputs/getters
+are `settlementToken`; settlement amounts use `*Assets` or `*AssetAtoms` in six-decimal integer base units
+(`1_000_000` = one token). Use current generated ABIs and SDK types together; archived ABIs belong only to their
+original deployments.
+
 ## Traders
 
 - Owner margin actions: `MarginClearinghouse.depositMargin(uint256)` and `MarginClearinghouse.withdrawMargin(uint256)`
-- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact USDC amount and
+- Credit-only funding: `MarginClearinghouse.depositFor(address,uint256)` pulls the payer's exact settlement-token amount and
   credits the beneficiary's free settlement without a carry checkpoint or position-margin allocation. Funding gives
   the payer no authority over the beneficiary. `DepositFor` is payer metadata for the same credit recorded by
   `Deposit`; indexers must not count both. See [`BRIDGE_FUNDING.md`](BRIDGE_FUNDING.md) for the Across
@@ -25,8 +30,8 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Open with staged protection: `PositionProtectionBook.commitOpenOrderWithProtection(OrderV3Types.OrderRequest,PositionProtectionParams)`
 - Existing-position protection: `PositionProtectionBook.createPositionProtection(PositionProtectionParams)`
 - A protection request must explicitly supply `PositionProtectionParams.closeLimits` with four close financial limits:
-  `maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`, `maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. Each is a
-  `uint256` ceiling in 6-decimal USDC units for future triggered or retried close attempts. Set the limits from the trader's intended
+  `maxExecutionNotionalAssets`, `maxGrossAccountDebitAssets`, `maxActionChargeAssets`, and `maxExplicitFeesAssets`. Each is a
+  `uint256` ceiling in six-decimal settlement-token units units for future triggered or retried close attempts. Set the limits from the trader's intended
   close policy; integrations must not assume an implicit unlimited default. Zero is a zero allowance;
   `type(uint256).max` is an explicit unlimited allowance. The separately reserved trigger bounty is paid when the
   protection fires; these ceilings apply to its generated close attempt.
@@ -58,7 +63,7 @@ For autonomous trading-account and AI-agent integration, including bounded autho
 - Trader claim settlement: `CfdEngine.settleTraderClaim(address account)` for the account owner
 - Compact reads: `PerpsPublicLens`; use `getTrancheQueues(bool)` for matured heads/backlog and
   `getLpRequestState(bool,uint256,address)` for controller-specific pending/claimable balances. The legacy
-  `TrancheView.maxWithdrawUsdc` field now means current pool-level queue-funding capacity, not synchronous holder
+  `TrancheView.maxWithdrawAssets` field now means current pool-level queue-funding capacity, not synchronous holder
   withdrawal capacity.
 - Protection reads: `PositionProtectionBook.activePositionProtectionId(address)` and
   `PositionProtectionBook.getPositionProtection(uint64)`. Read the retained close ceilings with
@@ -136,7 +141,7 @@ does not upgrade an existing clearinghouse or resolve the application's V3 tradi
   Lens selects the direct cached route when there are no open positions or when the oracle is frozen and the cached
   mark is still fresh under the applicable frozen-mode limit; a frozen stale mark requires the atomic-refresh route.
 - Compact reads: `PerpsPublicLens`
-- Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssetsUsdc()`, and
+- Capacity-specific reads: `HousePool.getSeniorDepositCapacity()`, `reservedSeniorDepositAssets()`, and
   `areSeniorDepositReservationsWithinLimits()`; these intentionally are not added to the compact liquidity lens
 
 Use these interfaces:

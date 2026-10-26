@@ -16,13 +16,13 @@ export interface BridgeFundingCall {
 /** Values pinned by a separately validated bridge-funding release, never inferred from a wallet/provider. */
 export interface BridgeFundingDeployment {
   readonly chainId: number;
-  /** Legacy input name: the settlement token pinned by this bridge-specific release. */
-  readonly usdc: Address;
+  /** The settlement token pinned by this bridge-specific release. */
+  readonly settlementToken: Address;
   readonly clearinghouse: Address;
   readonly destinationSpokePool: Address;
   readonly destinationSpokePoolImplementation: Address;
   readonly multicallHandler: Address;
-  readonly usdcRuntimeCodeHash: Hex;
+  readonly settlementTokenRuntimeCodeHash: Hex;
   readonly clearinghouseRuntimeCodeHash: Hex;
   readonly destinationSpokePoolRuntimeCodeHash: Hex;
   readonly destinationSpokePoolImplementationRuntimeCodeHash: Hex;
@@ -58,7 +58,7 @@ function call(to: Address, data: Hex): BridgeFundingCall {
  * This never changes account authority and is not an existing paymaster-approved action.
  */
 export function buildDepositForCalls(input: {
-  readonly usdc: Address;
+  readonly settlementToken: Address;
   readonly clearinghouse: Address;
   readonly beneficiary: Address;
   readonly amount: bigint;
@@ -66,14 +66,14 @@ export function buildDepositForCalls(input: {
   if (input.amount <= 0n || input.amount > maxUint256) {
     throw new InvalidPerpsActionError("Deposit amount must be a positive uint256.");
   }
-  const usdc = address(input.usdc, "Settlement token");
+  const settlementToken = address(input.settlementToken, "Settlement token");
   const clearinghouse = address(input.clearinghouse, "Clearinghouse");
   const beneficiary = address(input.beneficiary, "Beneficiary");
-  if (usdc === clearinghouse) {
+  if (settlementToken === clearinghouse) {
     throw new InvalidPerpsActionError("Settlement token and clearinghouse must be distinct.");
   }
   return Object.freeze([
-    call(usdc, encodeFunctionData({ abi: erc20ApproveAbi, functionName: "approve", args: [clearinghouse, input.amount] })),
+    call(settlementToken, encodeFunctionData({ abi: erc20ApproveAbi, functionName: "approve", args: [clearinghouse, input.amount] })),
     call(clearinghouse, encodeFunctionData({ abi: marginClearinghouseFundingAbi, functionName: "depositFor", args: [beneficiary, input.amount] })),
   ]);
 }
@@ -81,7 +81,7 @@ export function buildDepositForCalls(input: {
 export interface VerifiedBridgeFundingDeployment {
   readonly chainId: number;
   readonly blockNumber: bigint;
-  readonly usdc: Address;
+  readonly settlementToken: Address;
   readonly clearinghouse: Address;
   readonly destinationSpokePool: Address;
   readonly destinationSpokePoolImplementation: Address;
@@ -103,17 +103,17 @@ export async function verifyBridgeFundingDeployment(input: {
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new InvalidPerpsActionError("Deployment chain id must be a positive safe integer.");
   }
-  const usdc = address(input.deployment.usdc, "Settlement token");
+  const settlementToken = address(input.deployment.settlementToken, "Settlement token");
   const clearinghouse = address(input.deployment.clearinghouse, "Clearinghouse");
   const destinationSpokePool = address(input.deployment.destinationSpokePool, "Destination SpokePool");
   const destinationSpokePoolImplementation = address(input.deployment.destinationSpokePoolImplementation, "SpokePool implementation");
   const multicallHandler = address(input.deployment.multicallHandler, "Multicall handler");
-  const targets = [usdc, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler];
+  const targets = [settlementToken, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler];
   if (new Set(targets).size !== targets.length) {
     throw new InvalidPerpsActionError("Funding deployment contracts must be distinct.");
   }
   const hashes = [
-    word(input.deployment.usdcRuntimeCodeHash, "Settlement token runtime hash"),
+    word(input.deployment.settlementTokenRuntimeCodeHash, "Settlement token runtime hash"),
     word(input.deployment.clearinghouseRuntimeCodeHash, "Clearinghouse runtime hash"),
     word(input.deployment.destinationSpokePoolRuntimeCodeHash, "SpokePool runtime hash"),
     word(input.deployment.destinationSpokePoolImplementationRuntimeCodeHash, "SpokePool implementation runtime hash"),
@@ -136,11 +136,11 @@ export async function verifyBridgeFundingDeployment(input: {
     }),
     client.getStorageAt({ address: destinationSpokePool, slot: implementationSlot, blockNumber }),
   ]);
-  if (getAddress(settlementAsset) !== usdc) {
+  if (getAddress(settlementAsset) !== settlementToken) {
     throw new InvalidPerpsActionError("Clearinghouse settlement asset does not match the funding release.");
   }
   if (implementation?.toLowerCase() !== `0x${destinationSpokePoolImplementation.slice(2).toLowerCase().padStart(64, "0")}`) {
     throw new InvalidPerpsActionError("SpokePool implementation does not match the funding release.");
   }
-  return Object.freeze({ chainId, blockNumber, usdc, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler });
+  return Object.freeze({ chainId, blockNumber, settlementToken, clearinghouse, destinationSpokePool, destinationSpokePoolImplementation, multicallHandler });
 }

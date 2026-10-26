@@ -29,8 +29,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
     function test_SetPoolRejectsMismatchedSettlementAsset() public {
-        CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine victim = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
         HousePool wrongAssetPool =
             new HousePool(address(0xBEEF), address(victim), address(housePoolRedemptionMathSidecar));
 
@@ -40,8 +41,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
     function test_SetPoolRejectsPoolBoundToAnotherEngine() public {
-        CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine victim = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidPool.selector);
         victim.setPool(address(pool));
@@ -49,8 +51,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
     function test_SetPoolRejectsNonContract() public {
-        CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine victim = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
 
         vm.expectRevert(ICfdEngineTypes.CfdEngine__InvalidPool.selector);
         victim.setPool(address(0xBEEF));
@@ -77,7 +80,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         CfdEngineSettlementSidecar sidecar = new CfdEngineSettlementSidecar(mockHost);
         CfdEnginePlanTypes.OpenDelta memory delta;
         delta.account = address(0xA11CE);
-        delta.requiredEffectiveAssetsAfterUsdc = 1;
+        delta.requiredEffectiveAssetsAfterAssets = 1;
         CfdTypes.Position memory position;
 
         vm.mockCall(
@@ -86,7 +89,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         vm.mockCall(mockHost, abi.encodeWithSelector(bytes4(keccak256("pool()"))), abi.encode(mockPool));
         vm.mockCall(mockHost, abi.encodeWithSelector(bytes4(keccak256("protocolTreasury()"))), abi.encode(address(0)));
         vm.mockCall(
-            mockHost, abi.encodeWithSelector(bytes4(keccak256("totalTraderClaimBalanceUsdc()"))), abi.encode(uint256(0))
+            mockHost,
+            abi.encodeWithSelector(bytes4(keccak256("totalTraderClaimBalanceAssets()"))),
+            abi.encode(uint256(0))
         );
 
         IMarginClearinghouse.LockedMarginBuckets memory emptyBuckets;
@@ -97,7 +102,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         );
         vm.mockCall(
             mockClearinghouse,
-            abi.encodeWithSelector(IMarginClearinghouse.vpiRebateReserveUsdc.selector, delta.account),
+            abi.encodeWithSelector(IMarginClearinghouse.vpiRebateReserveAssets.selector, delta.account),
             abi.encode(uint256(0))
         );
         vm.mockCall(
@@ -107,7 +112,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
         );
         vm.mockCall(
             mockClearinghouse,
-            abi.encodeWithSelector(IMarginClearinghouse.pnlPledgeUsdc.selector, delta.account),
+            abi.encodeWithSelector(IMarginClearinghouse.pnlPledgeAssets.selector, delta.account),
             abi.encode(uint256(0))
         );
         vm.mockCall(mockPool, abi.encodeWithSelector(bytes4(keccak256("totalAssets()"))), abi.encode(uint256(0)));
@@ -119,8 +124,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
 
     function test_SettlementSidecar_RevertsWhenCallerIsNotImmutableEngine() public {
         CfdEngineSettlementSidecar sidecar = CfdEngineSettlementSidecar(address(engine.settlementSidecar()));
-        CfdEngine wrongHost =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine wrongHost = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
         CfdEnginePlanTypes.OpenDelta memory openDelta;
         CfdEnginePlanTypes.CloseDelta memory closeDelta;
         CfdEnginePlanTypes.LiquidationDelta memory liquidationDelta;
@@ -141,8 +147,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
     function test_SetDependencies_RevertsWhenSettlementSidecarBoundToDifferentEngine() public {
-        CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine victim = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar wrongSidecar = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
@@ -152,8 +159,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
     function test_SetDependencies_RevertsWhenSettlementSidecarHasNoEngineBinding() public {
-        CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine victim = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineAdmin adminModule = new CfdEngineAdmin(address(victim), address(this));
 
@@ -162,8 +170,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
     function test_SetDependencies_RevertsWhenAdminBoundToDifferentEngine() public {
-        CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine victim = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(victim));
         CfdEngineAdmin wrongAdmin = new CfdEngineAdmin(address(engine), address(this));
@@ -173,8 +182,9 @@ contract EngineConfigurationTest is CfdEngineTestBase {
     }
 
     function test_SetDependencies_RevertsWhenAdminHasNoCode() public {
-        CfdEngine victim =
-            new CfdEngine(address(usdc), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS);
+        CfdEngine victim = new CfdEngine(
+            address(settlementToken), address(clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+        );
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(victim));
 
@@ -262,7 +272,7 @@ contract EngineConfigurationTest is CfdEngineTestBase {
 
     function test_ProposeRiskParams_RevertsOnZeroMinBounty() public {
         CfdTypes.RiskParams memory params = _riskParams();
-        params.minBountyUsdc = 0;
+        params.minBountyAssets = 0;
         ICfdEngineAdminHost.EngineRiskConfig memory config;
         config.riskParams = params;
         config.executionFeeBps = engine.executionFeeBps();

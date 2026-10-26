@@ -23,7 +23,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 9,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -33,7 +33,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
+        handler = new PerpAccountingHandler(settlementToken, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
         bytes4[] memory selectors = new bytes4[](8);
@@ -56,13 +56,13 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
         assertEq(accountingView.degradedMode, engine.degradedMode(), "Protocol accounting view degraded flag mismatch");
         assertEq(
-            accountingView.totalTraderClaimBalanceUsdc,
-            engine.totalTraderClaimBalanceUsdc(),
+            accountingView.totalTraderClaimBalanceAssets,
+            engine.totalTraderClaimBalanceAssets(),
             "Protocol accounting view trader claim balance mismatch"
         );
         assertEq(
-            accountingView.protocolTreasuryBalanceUsdc,
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            accountingView.protocolTreasuryBalanceAssets,
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             "Protocol accounting view treasury balance mismatch"
         );
     }
@@ -81,7 +81,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 engineLens.previewLiquidation(account, oraclePrice);
             assertFalse(liquidationPreview.liquidatable, "Empty positions must not preview as liquidatable");
             assertEq(
-                liquidationPreview.reachableCollateralUsdc, 0, "Empty positions must not expose reachable collateral"
+                liquidationPreview.reachableCollateralAssets, 0, "Empty positions must not expose reachable collateral"
             );
             assertFalse(liquidationPreview.triggersDegradedMode, "Empty positions must not trigger degraded mode");
 
@@ -112,16 +112,16 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 engineLens.previewLiquidation(account, oraclePrice);
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
-            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
+            uint256 priceRiskCollateralAssets = snapshot.activePositionMarginAssets + snapshot.traderClaimBalanceAssets;
             assertEq(
-                liquidationPreview.reachableCollateralUsdc,
-                priceRiskCollateralUsdc - _marginCarryConsumption(account, snapshot.activePositionMarginUsdc)
-                    + clearinghouse.vpiRebateReserveUsdc(account),
+                liquidationPreview.reachableCollateralAssets,
+                priceRiskCollateralAssets - _marginCarryConsumption(account, snapshot.activePositionMarginAssets)
+                    + clearinghouse.vpiRebateReserveAssets(account),
                 "Liquidation preview must use post-carry pledge, same-account claim, and the dedicated VPI reserve"
             );
             assertLe(
-                snapshot.terminalPriceCollectibleCapUsdc,
-                priceRiskCollateralUsdc,
+                snapshot.terminalPriceCollectibleCapAssets,
+                priceRiskCollateralAssets,
                 "Endpoint-clipped collectible cap must not exceed pledge plus same-account claims"
             );
         }
@@ -134,22 +134,22 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             address account = _account(handler.actorAt(i));
             AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
                 engineAccountLens.getAccountLedgerSnapshot(account);
-            if (!snapshot.hasPosition || snapshot.executionBountyReserveUsdc == 0) {
+            if (!snapshot.hasPosition || snapshot.executionBountyReserveAssets == 0) {
                 continue;
             }
 
             ICfdEngineTypes.LiquidationPreview memory liquidationPreview =
                 engineLens.previewLiquidation(account, oraclePrice);
-            uint256 priceRiskCollateralUsdc = snapshot.activePositionMarginUsdc + snapshot.traderClaimBalanceUsdc;
+            uint256 priceRiskCollateralAssets = snapshot.activePositionMarginAssets + snapshot.traderClaimBalanceAssets;
             assertEq(
-                liquidationPreview.reachableCollateralUsdc,
-                priceRiskCollateralUsdc - _marginCarryConsumption(account, snapshot.activePositionMarginUsdc)
-                    + clearinghouse.vpiRebateReserveUsdc(account),
+                liquidationPreview.reachableCollateralAssets,
+                priceRiskCollateralAssets - _marginCarryConsumption(account, snapshot.activePositionMarginAssets)
+                    + clearinghouse.vpiRebateReserveAssets(account),
                 "Liquidation preview must remain isolated to pledge, same-account claim, and VPI reserve"
             );
             assertEq(
-                snapshot.liquidationReachableSettlementUsdc,
-                snapshot.settlementBalanceUsdc - snapshot.executionBountyReserveUsdc,
+                snapshot.liquidationReachableSettlementAssets,
+                snapshot.settlementBalanceAssets - snapshot.executionBountyReserveAssets,
                 "Account liquidation custody must exclude the reserved execution bounty"
             );
         }
@@ -157,22 +157,22 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
 
     function _marginCarryConsumption(
         address account,
-        uint256 marginUsdc
+        uint256 marginAssets
     ) internal view returns (uint256) {
         (,,,, CfdTypes.Side side,,) = engine.positions(account);
-        (uint256 borrowBaseUsdc, uint256 startIndex,) = engine.positionCarryState(account);
+        (uint256 borrowBaseAssets, uint256 startIndex,) = engine.positionCarryState(account);
         (,,,,, uint256 baseCarryBps,,,,) = engine.riskParams();
         uint256 endIndex = PositionRiskAccountingLib.computeCurrentCarryIndex(
             engine.sideCarryIndex(uint256(side)),
             engine.sideCarryTimestamp(uint256(side)),
             block.timestamp,
-            engine.sideBorrowBaseUsdc(uint256(side)),
+            engine.sideBorrowBaseAssets(uint256(side)),
             housePool.totalAssets(),
             baseCarryBps
         );
-        uint256 pendingCarryUsdc = engine.unsettledCarryUsdc(account)
-            + PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
-        return pendingCarryUsdc < marginUsdc ? pendingCarryUsdc : marginUsdc;
+        uint256 pendingCarryAssets = engine.unsettledCarryAssets(account)
+            + PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
+        return pendingCarryAssets < marginAssets ? pendingCarryAssets : marginAssets;
     }
 
     function _assertInvariant_PreviewLiquidation_EqualsSimulateLiquidationAtCanonicalDepth() internal view {
@@ -242,7 +242,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
                 engineLens.previewLiquidation(account, oraclePrice);
             assertEq(
                 liquidationPreview.postOpDegradedMode,
-                liquidationPreview.effectiveAssetsAfterUsdc < liquidationPreview.maxLiabilityAfterUsdc,
+                liquidationPreview.effectiveAssetsAfterAssets < liquidationPreview.maxLiabilityAfterAssets,
                 "Liquidation preview post-op degraded flag mismatch"
             );
 
@@ -254,7 +254,7 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
             ICfdEngineTypes.ClosePreview memory closePreview = engineLens.previewClose(account, size, oraclePrice);
             assertEq(
                 closePreview.postOpDegradedMode,
-                closePreview.effectiveAssetsAfterUsdc < closePreview.maxLiabilityAfterUsdc,
+                closePreview.effectiveAssetsAfterAssets < closePreview.maxLiabilityAfterAssets,
                 "Close preview post-op degraded flag mismatch"
             );
         }
@@ -330,36 +330,40 @@ contract PerpPreviewInvariantTest is BasePerpInvariantTest {
     ) internal pure {
         assertEq(actual.liquidatable, expected.liquidatable, "Liquidatable flag should match canonical simulation");
         assertEq(actual.oraclePrice, expected.oraclePrice, "Liquidation oracle price should match");
-        assertEq(actual.equityUsdc, expected.equityUsdc, "Liquidation equity should match");
-        assertEq(actual.pnlUsdc, expected.pnlUsdc, "Liquidation pnl should match");
-        assertEq(actual.reachableCollateralUsdc, expected.reachableCollateralUsdc, "Reachable collateral should match");
-        assertEq(actual.liquidationChargeUsdc, expected.liquidationChargeUsdc, "Liquidation charge should match");
-        assertEq(actual.keeperBountyUsdc, expected.keeperBountyUsdc, "Keeper bounty should match");
+        assertEq(actual.equityAssets, expected.equityAssets, "Liquidation equity should match");
+        assertEq(actual.pnlAssets, expected.pnlAssets, "Liquidation pnl should match");
         assertEq(
-            actual.protocolLiquidationFeeUsdc,
-            expected.protocolLiquidationFeeUsdc,
+            actual.reachableCollateralAssets, expected.reachableCollateralAssets, "Reachable collateral should match"
+        );
+        assertEq(actual.liquidationChargeAssets, expected.liquidationChargeAssets, "Liquidation charge should match");
+        assertEq(actual.keeperBountyAssets, expected.keeperBountyAssets, "Keeper bounty should match");
+        assertEq(
+            actual.protocolLiquidationFeeAssets,
+            expected.protocolLiquidationFeeAssets,
             "Protocol liquidation fee should match"
         );
-        assertEq(actual.lpLiquidationFeeUsdc, expected.lpLiquidationFeeUsdc, "LP liquidation fee should match");
-        assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Seized collateral should match");
-        assertEq(actual.settlementRetainedUsdc, expected.settlementRetainedUsdc, "Settlement retained should match");
-        assertEq(actual.freshTraderPayoutUsdc, expected.freshTraderPayoutUsdc, "Fresh trader payout should match");
+        assertEq(actual.lpLiquidationFeeAssets, expected.lpLiquidationFeeAssets, "LP liquidation fee should match");
+        assertEq(actual.seizedCollateralAssets, expected.seizedCollateralAssets, "Seized collateral should match");
+        assertEq(actual.settlementRetainedAssets, expected.settlementRetainedAssets, "Settlement retained should match");
+        assertEq(actual.freshTraderPayoutAssets, expected.freshTraderPayoutAssets, "Fresh trader payout should match");
         assertEq(
-            actual.existingTraderClaimConsumedUsdc,
-            expected.existingTraderClaimConsumedUsdc,
+            actual.existingTraderClaimConsumedAssets,
+            expected.existingTraderClaimConsumedAssets,
             "Trader claim consumption should match"
         );
         assertEq(
-            actual.existingTraderClaimRemainingUsdc,
-            expected.existingTraderClaimRemainingUsdc,
+            actual.existingTraderClaimRemainingAssets,
+            expected.existingTraderClaimRemainingAssets,
             "Trader claim remainder should match"
         );
-        assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Immediate payout should match");
-        assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Trader claim should match");
+        assertEq(actual.immediatePayoutAssets, expected.immediatePayoutAssets, "Immediate payout should match");
+        assertEq(actual.traderClaimBalanceAssets, expected.traderClaimBalanceAssets, "Trader claim should match");
         assertEq(actual.triggersDegradedMode, expected.triggersDegradedMode, "Degraded trigger should match");
         assertEq(actual.postOpDegradedMode, expected.postOpDegradedMode, "Post-op degraded mode should match");
-        assertEq(actual.effectiveAssetsAfterUsdc, expected.effectiveAssetsAfterUsdc, "Effective assets should match");
-        assertEq(actual.maxLiabilityAfterUsdc, expected.maxLiabilityAfterUsdc, "Max liability should match");
+        assertEq(
+            actual.effectiveAssetsAfterAssets, expected.effectiveAssetsAfterAssets, "Effective assets should match"
+        );
+        assertEq(actual.maxLiabilityAfterAssets, expected.maxLiabilityAfterAssets, "Max liability should match");
     }
 
     /// forge-config: default.invariant.fail-on-revert = true

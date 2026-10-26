@@ -25,9 +25,9 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
     function _lpRequest(
         TrancheVault vault
     ) internal returns (uint256 id) {
-        usdc.mint(PRICING_LP, DEPOSIT);
+        settlementToken.mint(PRICING_LP, DEPOSIT);
         vm.startPrank(PRICING_LP);
-        usdc.approve(address(vault), DEPOSIT);
+        settlementToken.approve(address(vault), DEPOSIT);
         id = vault.requestDeposit(DEPOSIT, PRICING_LP, PRICING_LP);
         vm.stopPrank();
     }
@@ -44,7 +44,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         if (reserve) {
             order = _bountyCommit(BOUNTY_TRADER, side, true, BOUNTY_SIZE, 0);
         }
-        nav = engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc;
+        nav = engine.terminalNavSnapshot().terminalLpPriceDeltaAssets;
         vm.warp(pool.lpEpochStart(epoch));
         router.settleLpEpoch(_bountyPriceData(price));
         uint256 assets = vault.claimableDepositRequest(epoch, PRICING_LP);
@@ -69,10 +69,10 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         router.settleLpEpoch(_bountyPriceData(price));
         uint256 claimable = vault.claimableRedeemRequest(id, PRICING_LP);
         assertEq(claimable, shares, "entire round-trip redemption settles");
-        uint256 cash = usdc.balanceOf(PRICING_LP);
+        uint256 cash = settlementToken.balanceOf(PRICING_LP);
         vm.prank(PRICING_LP);
         vault.claimRedeem(id, claimable, PRICING_LP, PRICING_LP);
-        paid = usdc.balanceOf(PRICING_LP) - cash;
+        paid = settlementToken.balanceOf(PRICING_LP) - cash;
         assertEq(vault.pendingRedeemRequest(id, PRICING_LP), 0);
         assertEq(vault.claimableRedeemRequest(id, PRICING_LP), 0);
         assertEq(vault.balanceOf(PRICING_LP), 0);
@@ -98,11 +98,11 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         assertEq(shares, controlShares, "unpaid close record must not change a real epoch's share price");
         vm.warp(pool.lpEpochStart(id) + 61);
         OrderV3Types.OrderReceipt memory receipt = _bountyExpire(order, BOUNTY_KEEPER);
-        assertEq(receipt.bounty.bountyPaidUsdc, 0);
-        assertEq(receipt.bounty.bountyRefundedUsdc, 0);
-        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
+        assertEq(receipt.bounty.bountyPaidAssets, 0);
+        assertEq(receipt.bounty.bountyRefundedAssets, 0);
+        assertEq(clearinghouse.pnlPledgeAssets(BOUNTY_TRADER), pledge);
 
-        assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc, controlNav);
+        assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaAssets, controlNav);
         uint256 payout = _lpRedeem(vault, shares, price);
         // Same state and timing imply identical integer rounding, not an arbitrary tolerance.
         assertEq(payout, controlPayout, "unpaid close expiry must produce zero incremental LP payout");
@@ -131,7 +131,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         assertEq(juniorVault.claimableDepositRequest(epoch, PRICING_LP), 0);
         vm.warp(pool.lpEpochStart(epoch) + 61);
         _bountyExpire(order, BOUNTY_KEEPER);
-        assertEq(clearinghouse.pnlPledgeUsdc(BOUNTY_TRADER), pledge);
+        assertEq(clearinghouse.pnlPledgeAssets(BOUNTY_TRADER), pledge);
         pool.unpauseLpEpochSettlement();
         router.settleLpEpoch(_bountyPriceData(120_000_000));
         uint256 assets = juniorVault.claimableDepositRequest(epoch, PRICING_LP);
@@ -159,9 +159,9 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         assertGt(controlClaimable, 0);
         assertGt(controlPending, 0, "withdrawal reserve forces genuinely partial epoch funding");
         assertEq(controlClaimable + controlPending, shares);
-        uint256 controlWallet = usdc.balanceOf(address(this));
+        uint256 controlWallet = settlementToken.balanceOf(address(this));
         juniorVault.claimRedeem(epoch, controlClaimable, address(this), address(this));
-        uint256 controlPaid = usdc.balanceOf(address(this)) - controlWallet;
+        uint256 controlPaid = settlementToken.balanceOf(address(this)) - controlWallet;
         assertTrue(vm.revertToState(snapshot));
         uint64 order = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         vm.warp(pool.lpEpochStart(epoch));
@@ -170,9 +170,9 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         assertEq(juniorVault.pendingRedeemRequest(epoch, address(this)), controlPending);
         assertEq(juniorVault.withdrawalEscrowAssets(), controlCash);
         _bountyExpire(order, BOUNTY_KEEPER);
-        uint256 beforeCash = usdc.balanceOf(address(this));
+        uint256 beforeCash = settlementToken.balanceOf(address(this));
         juniorVault.claimRedeem(epoch, controlClaimable, address(this), address(this));
-        assertEq(usdc.balanceOf(address(this)) - beforeCash, controlPaid);
+        assertEq(settlementToken.balanceOf(address(this)) - beforeCash, controlPaid);
         assertEq(juniorVault.withdrawalEscrowAssets(), controlCash - controlPaid);
         assertEq(juniorVault.pendingRedeemRequest(epoch, address(this)), controlPending);
     }
@@ -189,25 +189,31 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         uint64 control = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         OrderV3Types.OrderReceipt memory controlReceipt =
             _bountyExecute(control, 120_000_000, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
-        uint256 controlPoolCash = usdc.balanceOf(address(pool));
-        assertEq(controlReceipt.economics.close.pricePnlPledgeConsumedUsdc, pledge);
+        uint256 controlPoolCash = settlementToken.balanceOf(address(pool));
+        assertEq(controlReceipt.economics.close.pricePnlPledgeConsumedAssets, pledge);
         assertTrue(vm.revertToState(snapshot));
-        int256 preNav = engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc;
+        int256 preNav = engine.terminalNavSnapshot().terminalLpPriceDeltaAssets;
         uint64 order = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
-        assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaUsdc, preNav);
+        assertEq(engine.terminalNavSnapshot().terminalLpPriceDeltaAssets, preNav);
         OrderV3Types.OrderReceipt memory receipt =
             _bountyExecute(order, 120_000_000, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
-        assertEq(receipt.bounty.bountyPaidUsdc, bounty);
-        assertEq(receipt.bounty.bountyRefundedUsdc, 0);
-        assertEq(receipt.economics.close.pricePnlPledgeConsumedUsdc, pledge - bounty);
-        assertEq(controlPoolCash - usdc.balanceOf(address(pool)), bounty, "successful pledge cost is counted once");
+        assertEq(receipt.bounty.bountyPaidAssets, bounty);
+        assertEq(receipt.bounty.bountyRefundedAssets, 0);
+        assertEq(receipt.economics.close.pricePnlPledgeConsumedAssets, pledge - bounty);
+        assertEq(
+            controlPoolCash - settlementToken.balanceOf(address(pool)), bounty, "successful pledge cost is counted once"
+        );
 
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(BOUNTY_TRADER), expectedFree);
-        uint256 wallet = usdc.balanceOf(BOUNTY_TRADER);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(BOUNTY_TRADER), expectedFree);
+        uint256 wallet = settlementToken.balanceOf(BOUNTY_TRADER);
         vm.prank(BOUNTY_TRADER);
         clearinghouse.withdraw(BOUNTY_TRADER, expectedFree);
-        assertEq(usdc.balanceOf(BOUNTY_TRADER) - wallet, expectedFree, "unused terminal reserve after unpaid close");
-        assertEq(clearinghouse.balanceUsdc(BOUNTY_TRADER), 0);
+        assertEq(
+            settlementToken.balanceOf(BOUNTY_TRADER) - wallet,
+            expectedFree,
+            "unused terminal reserve after unpaid close"
+        );
+        assertEq(clearinghouse.balanceAssets(BOUNTY_TRADER), 0);
     }
 
     /// @dev regression; source: ACCOUNTING_SPEC.md#pending-order-reservation-model.
@@ -230,12 +236,12 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         uint64 controlOrder = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
         expected.receipt =
             _bountyExecute(controlOrder, 120_000_000, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
-        expected.cash = usdc.balanceOf(address(pool));
-        expected.claims = engine.totalTraderClaimBalanceUsdc();
-        expected.traderFree = clearinghouse.getFreeBuyingPowerUsdc(BOUNTY_TRADER);
-        uint256 controlLpWallet = usdc.balanceOf(address(this));
+        expected.cash = settlementToken.balanceOf(address(pool));
+        expected.claims = engine.totalTraderClaimBalanceAssets();
+        expected.traderFree = clearinghouse.getFreeBuyingPowerAssets(BOUNTY_TRADER);
+        uint256 controlLpWallet = settlementToken.balanceOf(address(this));
         juniorVault.claimRedeem(epoch, shares, address(this), address(this));
-        expected.payout = usdc.balanceOf(address(this)) - controlLpWallet;
+        expected.payout = settlementToken.balanceOf(address(this)) - controlLpWallet;
         assertTrue(vm.revertToState(snapshot));
 
         uint64 pendingOrder = _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, true, BOUNTY_SIZE, 0);
@@ -245,20 +251,21 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         assertEq(juniorVault.claimableRedeemRequest(epoch, address(this)), shares);
         OrderV3Types.OrderReceipt memory pending =
             _bountyExecute(pendingOrder, 120_000_000, BOUNTY_TRADER, OrderV3Types.LifecycleStatus.Executed);
-        assertEq(usdc.balanceOf(address(pool)), expected.cash, "same success leaves identical LP cash");
-        assertEq(engine.totalTraderClaimBalanceUsdc(), expected.claims);
+        assertEq(settlementToken.balanceOf(address(pool)), expected.cash, "same success leaves identical LP cash");
+        assertEq(engine.totalTraderClaimBalanceAssets(), expected.claims);
         assertEq(
-            pending.economics.close.priceLossWrittenOffUsdc, expected.receipt.economics.close.priceLossWrittenOffUsdc
+            pending.economics.close.priceLossWrittenOffAssets,
+            expected.receipt.economics.close.priceLossWrittenOffAssets
         );
         assertEq(
-            pending.economics.close.pricePnlPledgeConsumedUsdc,
-            expected.receipt.economics.close.pricePnlPledgeConsumedUsdc
+            pending.economics.close.pricePnlPledgeConsumedAssets,
+            expected.receipt.economics.close.pricePnlPledgeConsumedAssets
         );
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(BOUNTY_TRADER), expected.traderFree);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(BOUNTY_TRADER), expected.traderFree);
         assertEq(expected.traderFree, expectedFree);
-        uint256 lpCash = usdc.balanceOf(address(this));
+        uint256 lpCash = settlementToken.balanceOf(address(this));
         juniorVault.claimRedeem(epoch, shares, address(this), address(this));
-        assertEq(usdc.balanceOf(address(this)) - lpCash, expected.payout);
+        assertEq(settlementToken.balanceOf(address(this)) - lpCash, expected.payout);
     }
 
     function _successfulCloseResidual() internal view returns (uint256) {
@@ -266,7 +273,7 @@ contract SourceBoundBountyLpPricingTest is SourceBoundBountyFixture {
         // liquidation reserve releases to free settlement, then pays the 4-bps action fee.
         uint256 notional = (BOUNTY_SIZE * 120_000_000) / 1e20;
         uint256 fee = (notional * engine.executionFeeBps()) / 10_000;
-        return clearinghouse.liquidationReserveUsdc(BOUNTY_TRADER) - fee;
+        return clearinghouse.liquidationReserveAssets(BOUNTY_TRADER) - fee;
     }
 
 }

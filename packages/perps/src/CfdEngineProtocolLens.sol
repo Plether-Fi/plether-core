@@ -14,7 +14,7 @@ import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccounting
 /// @notice Rich protocol-accounting lens for audits, tests, and HousePool integration.
 /// @dev This permissionless, read-only lens exposes conservative solvency and liability views rather than product-level
 ///      summaries. It reads cached state and never refreshes a mark or mutates the engine. Unless stated otherwise,
-///      monetary fields use 6-decimal USDC, prices use 8 decimals, and timestamps/durations use seconds. Dependency
+///      monetary fields use 6-decimal settlement token, prices use 8 decimals, and timestamps/durations use seconds. Dependency
 ///      reverts and ABI-decoding failures are propagated.
 contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
@@ -33,11 +33,11 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
 
     /// @notice Returns the canonical protocol accounting and solvency snapshot.
     /// @dev Maximum liability is the larger side maximum-profit envelope. Withdrawal reserve is that liability plus all
-    ///      trader claims and the liability-scaled settlement buffer; free USDC is pool assets above the reserve; and
+    ///      trader claims and the liability-scaled settlement buffer; free settlement token is pool assets above the reserve; and
     ///      effective solvency assets are pool assets net of trader claims. Net physical assets equal canonical pool
     ///      assets: treasury clearinghouse balances are separate custody and are reported without subtracting them.
     ///      `hasLiveLiability` follows nonzero side maximum-profit envelopes rather than raw open interest.
-    /// @return snapshot Protocol-level accounting, liability, claim, and degraded-mode values in 6-decimal USDC units.
+    /// @return snapshot Protocol-level accounting, liability, claim, and degraded-mode values in 6-decimal settlement token units.
     function getProtocolAccountingSnapshot()
         external
         view
@@ -60,16 +60,16 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         uint256 markStalenessLimit
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
         ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engineContract.terminalNavSnapshot();
-        uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
-        snapshot.physicalAssetsUsdc = poolAssetsUsdc;
-        snapshot.netPhysicalAssetsUsdc = poolAssetsUsdc;
-        snapshot.maxLiabilityUsdc = terminalSnapshot.maxDirectionalLiabilityUsdc;
-        snapshot.supplementalReservedUsdc = SolvencyAccountingLib.settlementBufferTargetUsdc(
-            snapshot.maxLiabilityUsdc, engineContract.settlementBufferBps()
+        uint256 poolAssets = engineContract.pool().totalAssets();
+        snapshot.physicalAssets = poolAssets;
+        snapshot.netPhysicalAssets = poolAssets;
+        snapshot.maxLiabilityAssets = terminalSnapshot.maxDirectionalLiabilityAssets;
+        snapshot.supplementalReservedAssets = SolvencyAccountingLib.settlementBufferTargetAssets(
+            snapshot.maxLiabilityAssets, engineContract.settlementBufferBps()
         );
-        snapshot.terminalLpPriceDeltaUsdc = terminalSnapshot.terminalLpPriceDeltaUsdc;
+        snapshot.terminalLpPriceDeltaAssets = terminalSnapshot.terminalLpPriceDeltaAssets;
         snapshot.terminalNavBookVersion = terminalSnapshot.bookVersion;
-        snapshot.traderClaimBalanceUsdc = terminalSnapshot.totalTraderClaimsUsdc;
+        snapshot.traderClaimBalanceAssets = terminalSnapshot.totalTraderClaimsAssets;
         snapshot.hasOpenPositions = terminalSnapshot.hasOpenPositions;
         snapshot.markFreshnessRequired = terminalSnapshot.hasOpenPositions;
         if (snapshot.markFreshnessRequired) {
@@ -107,39 +107,40 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         view
         returns (ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot)
     {
-        uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
-        uint256 protocolTreasuryBalanceUsdc =
-            engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
+        uint256 poolAssets = engineContract.pool().totalAssets();
+        uint256 protocolTreasuryBalanceAssets =
+            engineContract.clearinghouse().balanceAssets(engineContract.protocolTreasury());
         ICfdEngineTypes.SideState memory longState = _sideState(CfdTypes.Side.LONG);
         ICfdEngineTypes.SideState memory shortState = _sideState(CfdTypes.Side.SHORT);
-        uint256 maxLiabilityUsdc =
-            SolvencyAccountingLib.getMaxLiability(longState.maxProfitUsdc, shortState.maxProfitUsdc);
-        uint256 totalTraderClaimBalanceUsdc = engineContract.totalTraderClaimBalanceUsdc();
+        uint256 maxLiabilityAssets =
+            SolvencyAccountingLib.getMaxLiability(longState.maxProfitAssets, shortState.maxProfitAssets);
+        uint256 totalTraderClaimBalanceAssets = engineContract.totalTraderClaimBalanceAssets();
         SolvencyAccountingLib.SolvencyState memory solvencyState =
-            SolvencyAccountingLib.buildSolvencyState(poolAssetsUsdc, maxLiabilityUsdc, totalTraderClaimBalanceUsdc);
-        snapshot.poolAssetsUsdc = poolAssetsUsdc;
-        snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
-        snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
-        snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
-        uint256 settlementBufferUsdc =
-            SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, engineContract.settlementBufferBps());
-        snapshot.withdrawalReservedUsdc = solvencyState.withdrawalReservedUsdc + settlementBufferUsdc;
-        snapshot.freeUsdc =
-            poolAssetsUsdc > snapshot.withdrawalReservedUsdc ? poolAssetsUsdc - snapshot.withdrawalReservedUsdc : 0;
-        snapshot.protocolTreasuryBalanceUsdc = protocolTreasuryBalanceUsdc;
-        snapshot.totalTraderClaimBalanceUsdc = totalTraderClaimBalanceUsdc;
+            SolvencyAccountingLib.buildSolvencyState(poolAssets, maxLiabilityAssets, totalTraderClaimBalanceAssets);
+        snapshot.poolAssets = poolAssets;
+        snapshot.netPhysicalAssets = solvencyState.netPhysicalAssets;
+        snapshot.maxLiabilityAssets = maxLiabilityAssets;
+        snapshot.effectiveSolvencyAssets = solvencyState.effectiveAssets;
+        uint256 settlementBufferAssets = SolvencyAccountingLib.settlementBufferTargetAssets(
+            maxLiabilityAssets, engineContract.settlementBufferBps()
+        );
+        snapshot.withdrawalReservedAssets = solvencyState.withdrawalReservedAssets + settlementBufferAssets;
+        snapshot.freeAssets =
+            poolAssets > snapshot.withdrawalReservedAssets ? poolAssets - snapshot.withdrawalReservedAssets : 0;
+        snapshot.protocolTreasuryBalanceAssets = protocolTreasuryBalanceAssets;
+        snapshot.totalTraderClaimBalanceAssets = totalTraderClaimBalanceAssets;
         snapshot.degradedMode = engineContract.degradedMode();
-        snapshot.hasLiveLiability = longState.maxProfitUsdc + shortState.maxProfitUsdc > 0;
+        snapshot.hasLiveLiability = longState.maxProfitAssets + shortState.maxProfitAssets > 0;
     }
 
     /// @notice Reconstructs one aggregate side-state tuple from the engine getter.
     /// @param side Side to inspect.
-    /// @return state Maximum profit and aggregate margin in 6-decimal USDC, open interest with 18 decimals, and raw
+    /// @return state Maximum profit and aggregate margin in 6-decimal settlement token, open interest with 18 decimals, and raw
     ///         exact entry cost scaled by `1e20`, with 26-decimal precision.
     function _sideState(
         CfdTypes.Side side
     ) internal view returns (ICfdEngineTypes.SideState memory state) {
-        (state.maxProfitUsdc, state.openInterest, state.entryNotional, state.totalMargin) =
+        (state.maxProfitAssets, state.openInterest, state.entryNotional, state.totalMargin) =
             engineContract.sides(uint8(side));
     }
 

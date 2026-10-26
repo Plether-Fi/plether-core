@@ -267,7 +267,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(params.initMarginBps, 20, "initial margin");
         assertEq(params.fadMarginBps, 300, "fad margin");
         assertEq(params.baseCarryBps, 500, "base carry");
-        assertEq(params.minBountyUsdc, 1e6, "min bounty");
+        assertEq(params.minBountyAssets, 1e6, "min bounty");
         assertEq(params.bountyBps, 10, "bounty bps");
         assertEq(params.keeperShareBps, 5000, "keeper share bps");
         assertEq(params.protocolShareBps, 0, "protocol share bps");
@@ -295,7 +295,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(engine.fadRunwaySeconds(), 1 hours, "fad runway");
         assertEq(address(engine.terminalNavBook()), address(terminalNavBook), "terminal NAV book");
         assertEq(terminalNavBook.SIZE_QUANTUM(), 1e20, "position size quantum");
-        assertEq(genericPool.maxSeniorExposureUsdc(), type(uint256).max, "generic maximum Senior exposure");
+        assertEq(genericPool.maxSeniorExposureAssets(), type(uint256).max, "generic maximum Senior exposure");
         assertEq(genericPool.maxSeniorShareBps(), 10_000, "generic maximum Senior share");
 
         bytes32[] memory feedIds = new bytes32[](1);
@@ -331,10 +331,10 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         assertEq(address(router), expectedRouter, "predicted Router CREATE address");
         assertEq(address(router.lifecycleBook()), address(lifecycleBook), "predeployed lifecycle book");
-        assertEq(router.minOpenNotionalUsdc(), 100_000_000, "generic minimum opening notional");
+        assertEq(router.minOpenNotionalAssets(), 100_000_000, "generic minimum opening notional");
         assertEq(oracle.basketMaxConfidenceRatioBps(), 10, "basket confidence ratio");
         assertEq(oracle.adverseConfidenceMultiplierBps(), 2000, "adverse confidence multiplier");
-        assertEq(router.positionProtectionTriggerBountyUsdc(), 200_000, "position protection trigger bounty");
+        assertEq(router.positionProtectionTriggerBountyAssets(), 200_000, "position protection trigger bounty");
     }
 
     function test_DeploymentGuardsAcceptDistinctCanonicalPositionProtectionBookAndBoundSidecar() public {
@@ -505,7 +505,9 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         bootstrapScript.verifyRouterWiring(wrongHousePool, router);
 
         MockUSDG wrongSettlementToken = new MockUSDG();
-        vm.mockCall(address(engine), abi.encodeWithSignature("USDC()"), abi.encode(address(wrongSettlementToken)));
+        vm.mockCall(
+            address(engine), abi.encodeWithSignature("settlementToken()"), abi.encode(address(wrongSettlementToken))
+        );
         vm.expectRevert(bytes("Engine settlement asset mismatch"));
         deployScript.verifyV2OrderStack(engine, clearinghouse, housePool, evaluator, executionSidecar, router);
         vm.expectRevert(bytes("Engine settlement asset mismatch"));
@@ -817,9 +819,9 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
 
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
-        assertEq(deployed.housePool.maxSeniorExposureUsdc(), 40_000_000e6);
+        assertEq(deployed.housePool.maxSeniorExposureAssets(), 40_000_000e6);
         assertEq(deployed.housePool.maxSeniorShareBps(), 8000);
-        assertEq(deployed.router.minOpenNotionalUsdc(), 1000e6);
+        assertEq(deployed.router.minOpenNotionalAssets(), 1000e6);
         assertEq(deployed.router.pletherOracle().adverseConfidenceMultiplierBps(), 2500);
         assertEq(deployed.housePool.poolConfigActivationTime(), 0);
         OrderRouterAdmin routerAdmin = OrderRouterAdmin(deployed.router.admin());
@@ -833,24 +835,24 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
             markStalenessLimit: deployed.housePool.markStalenessLimit(),
             seniorFrozenLpFeeBps: deployed.housePool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: deployed.housePool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: 41_000_000e6,
+            maxSeniorExposureAssets: 41_000_000e6,
             maxSeniorShareBps: 8000
         });
         vm.prank(owner);
         deployed.housePool.proposePoolConfig(nextPoolConfig);
         assertEq(deployed.housePool.poolConfigActivationTime(), block.timestamp + 48 hours);
-        assertEq(deployed.housePool.maxSeniorExposureUsdc(), 40_000_000e6, "proposal changed live pool config");
+        assertEq(deployed.housePool.maxSeniorExposureAssets(), 40_000_000e6, "proposal changed live pool config");
         vm.expectRevert(bytes("Outstanding HousePool config proposal"));
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
         vm.prank(owner);
         deployed.housePool.cancelPoolConfigProposal();
 
         IOrderRouterAdminHost.RouterConfig memory nextRouterConfig = _activeRouterConfig(deployed.router);
-        nextRouterConfig.minOpenNotionalUsdc = 999e6;
+        nextRouterConfig.minOpenNotionalAssets = 999e6;
         vm.prank(owner);
         routerAdmin.proposeRouterConfig(nextRouterConfig);
         assertEq(routerAdmin.routerConfigActivationTime(), block.timestamp + 48 hours);
-        assertEq(deployed.router.minOpenNotionalUsdc(), 1000e6, "proposal changed live Router config");
+        assertEq(deployed.router.minOpenNotionalAssets(), 1000e6, "proposal changed live Router config");
         vm.expectRevert(bytes("Outstanding Router config proposal"));
         bootstrapScript.verifyInitialReleaseConfig(deployed.housePool, deployed.router);
     }
@@ -865,11 +867,11 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         config.orderSettlementWindow = router.pletherOracle().orderSettlementWindow();
         config.maxComponentPublishTimeDivergence = router.pletherOracle().maxComponentPublishTimeDivergence();
         config.adverseConfidenceMultiplierBps = router.pletherOracle().adverseConfidenceMultiplierBps();
-        config.minOpenNotionalUsdc = router.minOpenNotionalUsdc();
+        config.minOpenNotionalAssets = router.minOpenNotionalAssets();
         config.openOrderExecutionBountyBps = router.openOrderExecutionBountyBps();
-        config.minOpenOrderExecutionBountyUsdc = router.minOpenOrderExecutionBountyUsdc();
-        config.maxOpenOrderExecutionBountyUsdc = router.maxOpenOrderExecutionBountyUsdc();
-        config.positionProtectionTriggerBountyUsdc = router.positionProtectionTriggerBountyUsdc();
+        config.minOpenOrderExecutionBountyAssets = router.minOpenOrderExecutionBountyAssets();
+        config.maxOpenOrderExecutionBountyAssets = router.maxOpenOrderExecutionBountyAssets();
+        config.positionProtectionTriggerBountyAssets = router.positionProtectionTriggerBountyAssets();
         config.maxPendingOrders = router.maxPendingOrders();
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();

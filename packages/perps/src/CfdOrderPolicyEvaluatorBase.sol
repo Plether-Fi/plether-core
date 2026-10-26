@@ -27,25 +27,25 @@ interface ICfdOrderPolicyEngineView {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
         );
 
-    function positionEntryCostUsdcAtoms(
+    function positionEntryCostAssetAtoms(
         address account
     ) external view returns (uint256);
 
     function positionCarryState(
         address account
-    ) external view returns (uint256 borrowBaseUsdc, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
+    ) external view returns (uint256 borrowBaseAssets, uint256 lastCarryIndex, uint64 lastCarryTimestamp);
 
     function sides(
         uint256 index
-    ) external view returns (uint256 maxProfitUsdc, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
+    ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
 
-    function sideBorrowBaseUsdc(
+    function sideBorrowBaseAssets(
         uint256 index
     ) external view returns (uint256);
 
@@ -71,15 +71,15 @@ interface ICfdOrderPolicyEngineView {
 
     function riskParams() external view returns (CfdTypes.RiskParams memory);
 
-    function traderClaimBalanceUsdc(
+    function traderClaimBalanceAssets(
         address account
     ) external view returns (uint256);
 
-    function unsettledCarryUsdc(
+    function unsettledCarryAssets(
         address account
     ) external view returns (uint256);
 
-    function totalTraderClaimBalanceUsdc() external view returns (uint256);
+    function totalTraderClaimBalanceAssets() external view returns (uint256);
 
     function degradedMode() external view returns (bool);
 
@@ -108,24 +108,24 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     uint256 private constant BPS = 10_000;
 
     function _settlementAfterBounty(
-        uint256 settlementUsdc,
-        uint256 bountyUsdc,
+        uint256 settlementAssets,
+        uint256 bountyAssets,
         bool bountyReturnsToAccount
     ) private pure returns (uint256) {
-        if (settlementUsdc < bountyUsdc) {
+        if (settlementAssets < bountyAssets) {
             revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__InsufficientBountyBacking(
-                settlementUsdc, bountyUsdc
+                settlementAssets, bountyAssets
             );
         }
-        return bountyReturnsToAccount ? settlementUsdc : settlementUsdc - bountyUsdc;
+        return bountyReturnsToAccount ? settlementAssets : settlementAssets - bountyAssets;
     }
 
     struct AssessmentContext {
         address engineAddress;
         address executor;
         uint256 currentOraclePrice;
-        uint256 poolDepthUsdc;
-        uint256 executionBountyUsdc;
+        uint256 poolDepthAssets;
+        uint256 executionBountyAssets;
     }
 
     function _assessOrder(
@@ -136,7 +136,7 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         ICfdOrderPolicyEngineView engine = ICfdOrderPolicyEngineView(context.engineAddress);
         ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
         CfdEnginePlanTypes.RawSnapshot memory snapshot =
-            _buildRawSnapshot(engine, planner, order.account, context.poolDepthUsdc);
+            _buildRawSnapshot(engine, planner, order.account, context.poolDepthAssets);
         return _assessSnapshot(context, order, bounds, planner, snapshot);
     }
 
@@ -153,47 +153,49 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         if (order.isClose) {
             CfdEnginePlanTypes.CloseDelta memory closeDelta =
                 planner.planClose(snapshot, order, context.currentOraclePrice);
-            return _evaluateClose(snapshot, closeDelta, boundsCopy, context.executionBountyUsdc, bountyReturnsToAccount);
+            return
+                _evaluateClose(snapshot, closeDelta, boundsCopy, context.executionBountyAssets, bountyReturnsToAccount);
         }
 
         CfdEnginePlanTypes.OpenDelta memory openDelta = planner.planOpen(snapshot, order, context.currentOraclePrice);
-        return _evaluateOpen(snapshot, openDelta, boundsCopy, context.executionBountyUsdc, bountyReturnsToAccount);
+        return _evaluateOpen(snapshot, openDelta, boundsCopy, context.executionBountyAssets, bountyReturnsToAccount);
     }
 
     function _evaluateOpen(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.OpenDelta memory delta,
         OrderV3Types.ExecutionBounds memory bounds,
-        uint256 executionBountyUsdc,
+        uint256 executionBountyAssets,
         bool bountyReturnsToAccount
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidOpenDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
-        assessment = _buildOpenAssessment(snapshot, delta, executionBountyUsdc, bountyReturnsToAccount, assessment.mode);
-        _enforceBounds(assessment, bounds, executionBountyUsdc, false);
+        assessment =
+            _buildOpenAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
+        _enforceBounds(assessment, bounds, executionBountyAssets, false);
     }
 
     function _evaluateClose(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.CloseDelta memory delta,
         OrderV3Types.ExecutionBounds memory bounds,
-        uint256 executionBountyUsdc,
+        uint256 executionBountyAssets,
         bool bountyReturnsToAccount
     ) internal pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         _requireValidCloseDelta(delta);
         assessment.mode = _requireAllowedMode(snapshot, bounds.allowedExecutionModes);
         assessment =
-            _buildCloseAssessment(snapshot, delta, executionBountyUsdc, bountyReturnsToAccount, assessment.mode);
-        _enforceBounds(assessment, bounds, executionBountyUsdc, delta.deletePosition);
+            _buildCloseAssessment(snapshot, delta, executionBountyAssets, bountyReturnsToAccount, assessment.mode);
+        _enforceBounds(assessment, bounds, executionBountyAssets, delta.deletePosition);
     }
 
     function _buildRawSnapshot(
         ICfdOrderPolicyEngineView engine,
         ICfdEnginePlanner planner,
         address account,
-        uint256 poolDepthUsdc
+        uint256 poolDepthAssets
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
-        return _buildRawSnapshot(engine, planner, account, poolDepthUsdc, IHousePool(engine.pool()).totalAssets());
+        return _buildRawSnapshot(engine, planner, account, poolDepthAssets, IHousePool(engine.pool()).totalAssets());
     }
 
     /// @dev Authoritative assessment already read canonical pool cash. Reuse that observation; simulation callers
@@ -202,20 +204,20 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         ICfdOrderPolicyEngineView engine,
         ICfdEnginePlanner planner,
         address account,
-        uint256 poolDepthUsdc,
-        uint256 poolCashUsdc
+        uint256 poolDepthAssets,
+        uint256 poolCashAssets
     ) internal view returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
         (
             snapshot.position.size,
             snapshot.position.margin,
             snapshot.position.entryPrice,
-            snapshot.position.maxProfitUsdc,
+            snapshot.position.maxProfitAssets,
             snapshot.position.side,
             snapshot.position.lastUpdateTime,
             snapshot.position.vpiAccrued
         ) = engine.positions(account);
-        snapshot.positionEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
-        (snapshot.positionBorrowBaseUsdc, snapshot.positionLastCarryIndex, snapshot.position.lastCarryTimestamp) =
+        snapshot.positionEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
+        (snapshot.positionBorrowBaseAssets, snapshot.positionLastCarryIndex, snapshot.position.lastCarryTimestamp) =
             engine.positionCarryState(account);
 
         snapshot.account = account;
@@ -224,26 +226,26 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         snapshot.lastMarkTime = engine.lastMarkTime();
         snapshot.riskParams = engine.riskParams();
 
-        snapshot.poolCashUsdc = poolCashUsdc;
+        snapshot.poolCashAssets = poolCashAssets;
         IHousePool pool = IHousePool(engine.pool());
-        snapshot.poolAdditionalReservedUsdc =
-            pool.pendingRecapitalizationUsdc() + pool.pendingTradingRevenueUsdc() + pool.unassignedAssets();
+        snapshot.poolAdditionalReservedAssets =
+            pool.pendingRecapitalizationAssets() + pool.pendingTradingRevenueAssets() + pool.unassignedAssets();
         snapshot.poolQueuesTradingRevenue = pool.seniorPrincipal() == 0 && pool.juniorPrincipal() == 0;
-        snapshot.totalTraderClaimBalanceUsdc = engine.totalTraderClaimBalanceUsdc();
-        uint256 carryDepthUsdc = PositionRiskAccountingLib.computeNetPoolDepthUsdc(
-            snapshot.poolCashUsdc, snapshot.totalTraderClaimBalanceUsdc
+        snapshot.totalTraderClaimBalanceAssets = engine.totalTraderClaimBalanceAssets();
+        uint256 carryDepthAssets = PositionRiskAccountingLib.computeNetPoolDepthAssets(
+            snapshot.poolCashAssets, snapshot.totalTraderClaimBalanceAssets
         );
         snapshot.longSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, carryDepthUsdc, snapshot.riskParams.baseCarryBps);
+            _sideSnapshot(engine, planner, CfdTypes.Side.LONG, carryDepthAssets, snapshot.riskParams.baseCarryBps);
         snapshot.shortSide =
-            _sideSnapshot(engine, planner, CfdTypes.Side.SHORT, carryDepthUsdc, snapshot.riskParams.baseCarryBps);
-        snapshot.poolAssetsUsdc = poolDepthUsdc;
+            _sideSnapshot(engine, planner, CfdTypes.Side.SHORT, carryDepthAssets, snapshot.riskParams.baseCarryBps);
+        snapshot.poolAssets = poolDepthAssets;
 
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
         CfdEngineCollateralSnapshotLib.load(snapshot, clearinghouse, account, false);
 
-        snapshot.unsettledCarryUsdc = engine.unsettledCarryUsdc(account);
-        snapshot.traderClaimBalanceForAccount = engine.traderClaimBalanceUsdc(account);
+        snapshot.unsettledCarryAssets = engine.unsettledCarryAssets(account);
+        snapshot.traderClaimBalanceForAccount = engine.traderClaimBalanceAssets(account);
         snapshot.degradedMode = engine.degradedMode();
         snapshot.capPrice = engine.CAP_PRICE();
         snapshot.executionFeeBps = engine.executionFeeBps();
@@ -257,19 +259,19 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         ICfdOrderPolicyEngineView engine,
         ICfdEnginePlanner planner,
         CfdTypes.Side side,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         uint256 baseCarryBps
     ) private view returns (CfdEnginePlanTypes.SideSnapshot memory snapshot) {
         uint256 index = uint256(side);
-        (snapshot.maxProfitUsdc, snapshot.openInterest, snapshot.entryNotional, snapshot.totalMargin) =
+        (snapshot.maxProfitAssets, snapshot.openInterest, snapshot.entryNotional, snapshot.totalMargin) =
             engine.sides(index);
-        snapshot.borrowBaseUsdc = engine.sideBorrowBaseUsdc(index);
+        snapshot.borrowBaseAssets = engine.sideBorrowBaseAssets(index);
         snapshot.carryIndex = planner.computeCurrentCarryIndex(
             engine.sideCarryIndex(index),
             engine.sideCarryTimestamp(index),
             block.timestamp,
-            snapshot.borrowBaseUsdc,
-            poolDepthUsdc,
+            snapshot.borrowBaseAssets,
+            poolDepthAssets,
             baseCarryBps
         );
     }
@@ -323,127 +325,128 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _buildOpenAssessment(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.OpenDelta memory delta,
-        uint256 executionBountyUsdc,
+        uint256 executionBountyAssets,
         bool bountyReturnsToAccount,
         OrderV3Types.ExecutionMode mode
     ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
-        uint256 positiveTradeCostUsdc = 0;
-        uint256 tradeRebateUsdc = 0;
-        if (delta.tradeCostUsdc >= 0) {
-            positiveTradeCostUsdc = uint256(delta.tradeCostUsdc);
+        uint256 positiveTradeCostAssets = 0;
+        uint256 tradeRebateAssets = 0;
+        if (delta.tradeCostAssets >= 0) {
+            positiveTradeCostAssets = uint256(delta.tradeCostAssets);
         } else {
-            tradeRebateUsdc = _negativeMagnitude(delta.tradeCostUsdc);
+            tradeRebateAssets = _negativeMagnitude(delta.tradeCostAssets);
         }
 
         // A zero-size snapshot deliberately does not realize an inconsistent stale carry value during Engine apply.
         // slither-disable-next-line incorrect-equality
-        uint256 realizedCarryUsdc = snapshot.position.size == 0 ? 0 : delta.pendingCarryUsdc;
+        uint256 realizedCarryAssets = snapshot.position.size == 0 ? 0 : delta.pendingCarryAssets;
 
         assessment.mode = mode;
-        assessment.executionNotionalUsdc = delta.openState.notionalUsdc;
-        assessment.grossAccountDebitUsdc = realizedCarryUsdc + positiveTradeCostUsdc + executionBountyUsdc;
-        assessment.actionChargeAssessedUsdc = _netOpenActionCharge(realizedCarryUsdc, delta.tradeCostUsdc);
-        assessment.actionChargeCollectedUsdc = realizedCarryUsdc + positiveTradeCostUsdc;
-        assessment.explicitFeesUsdc = delta.executionFeeUsdc;
-        assessment.preSettlementBalanceUsdc = snapshot.accountBuckets.settlementBalanceUsdc;
+        assessment.executionNotionalAssets = delta.openState.notionalAssets;
+        assessment.grossAccountDebitAssets = realizedCarryAssets + positiveTradeCostAssets + executionBountyAssets;
+        assessment.actionChargeAssessedAssets = _netOpenActionCharge(realizedCarryAssets, delta.tradeCostAssets);
+        assessment.actionChargeCollectedAssets = realizedCarryAssets + positiveTradeCostAssets;
+        assessment.explicitFeesAssets = delta.executionFeeAssets;
+        assessment.preSettlementBalanceAssets = snapshot.accountBuckets.settlementBalanceAssets;
 
-        uint256 postSettlementBalanceUsdc = assessment.preSettlementBalanceUsdc - realizedCarryUsdc;
-        if (positiveTradeCostUsdc > 0) {
-            postSettlementBalanceUsdc -= positiveTradeCostUsdc;
-        } else if (tradeRebateUsdc > 0) {
-            postSettlementBalanceUsdc += tradeRebateUsdc;
+        uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - realizedCarryAssets;
+        if (positiveTradeCostAssets > 0) {
+            postSettlementBalanceAssets -= positiveTradeCostAssets;
+        } else if (tradeRebateAssets > 0) {
+            postSettlementBalanceAssets += tradeRebateAssets;
         }
-        assessment.postSettlementBalanceUsdc =
-            _settlementAfterBounty(postSettlementBalanceUsdc, executionBountyUsdc, bountyReturnsToAccount);
+        assessment.postSettlementBalanceAssets =
+            _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
 
-        assessment.vpiUsdc = delta.posVpiAccruedDelta;
-        assessment.carryUsdc = realizedCarryUsdc;
-        assessment.executionFeeUsdc = delta.executionFeeUsdc;
-        assessment.preTraderClaimUsdc = snapshot.traderClaimBalanceForAccount;
-        assessment.postTraderClaimUsdc = snapshot.traderClaimBalanceForAccount;
+        assessment.vpiAssets = delta.posVpiAccruedDelta;
+        assessment.carryAssets = realizedCarryAssets;
+        assessment.executionFeeAssets = delta.executionFeeAssets;
+        assessment.preTraderClaimAssets = snapshot.traderClaimBalanceForAccount;
+        assessment.postTraderClaimAssets = snapshot.traderClaimBalanceForAccount;
         assessment.postPositionSize = delta.newPosSize;
-        assessment.postPositionMarginUsdc = delta.positionMarginAfterOpen;
+        assessment.postPositionMarginAssets = delta.positionMarginAfterOpen;
 
         CfdTypes.Position memory projectedPosition = snapshot.position;
         projectedPosition.side = delta.posSide;
         projectedPosition.size = delta.newPosSize;
         projectedPosition.margin = delta.positionMarginAfterOpen;
         projectedPosition.entryPrice = delta.newPosEntryPrice;
-        projectedPosition.maxProfitUsdc = snapshot.position.maxProfitUsdc + delta.posMaxProfitIncrease;
+        projectedPosition.maxProfitAssets = snapshot.position.maxProfitAssets + delta.posMaxProfitIncrease;
         projectedPosition.vpiAccrued = snapshot.position.vpiAccrued + delta.posVpiAccruedDelta;
 
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             projectedPosition,
-            delta.newPosEntryCostUsdcAtoms,
+            delta.newPosEntryCostAssetAtoms,
             delta.price,
             snapshot.capPrice,
-            assessment.postPositionMarginUsdc + assessment.postTraderClaimUsdc,
+            assessment.postPositionMarginAssets + assessment.postTraderClaimAssets,
             0
         );
-        assessment.postPositionEquityUsdc = riskState.equityUsdc;
-        assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalUsdc, riskState.equityUsdc);
+        assessment.postPositionEquityAssets = riskState.equityAssets;
+        assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalAssets, riskState.equityAssets);
     }
 
     function _buildCloseAssessment(
         CfdEnginePlanTypes.RawSnapshot memory snapshot,
         CfdEnginePlanTypes.CloseDelta memory delta,
-        uint256 executionBountyUsdc,
+        uint256 executionBountyAssets,
         bool bountyReturnsToAccount,
         OrderV3Types.ExecutionMode mode
     ) private pure returns (OrderV3Types.ExecutionAssessment memory assessment) {
         assessment.mode = mode;
         assessment.close = OrderV3Types.CloseEconomics({
-            postFreeSettlementUsdc: 0,
-            safeMarginReleaseUsdc: delta.safeMarginReleaseUsdc,
-            actionChargeFromReleasedMarginUsdc: delta.actionChargeFromReleasedMarginUsdc,
-            netReleasedMarginUsdc: delta.netReleasedMarginUsdc,
-            priceLossUsdc: delta.priceLossUsdc,
-            pricePnlClaimConsumedUsdc: delta.pricePnlClaimConsumedUsdc,
-            pricePnlPledgeConsumedUsdc: delta.pricePnlPledgeConsumedUsdc,
-            priceLossWrittenOffUsdc: delta.priceLossWrittenOffUsdc,
-            actionChargeWithheldUsdc: delta.actionChargeWithheldUsdc,
-            actionChargeWaivedUsdc: delta.actionChargeWaivedUsdc
+            postFreeSettlementAssets: 0,
+            safeMarginReleaseAssets: delta.safeMarginReleaseAssets,
+            actionChargeFromReleasedMarginAssets: delta.actionChargeFromReleasedMarginAssets,
+            netReleasedMarginAssets: delta.netReleasedMarginAssets,
+            priceLossAssets: delta.priceLossAssets,
+            pricePnlClaimConsumedAssets: delta.pricePnlClaimConsumedAssets,
+            pricePnlPledgeConsumedAssets: delta.pricePnlPledgeConsumedAssets,
+            priceLossWrittenOffAssets: delta.priceLossWrittenOffAssets,
+            actionChargeWithheldAssets: delta.actionChargeWithheldAssets,
+            actionChargeWaivedAssets: delta.actionChargeWaivedAssets
         });
-        assessment.executionNotionalUsdc = CfdMath.sizeToLots(delta.sizeDelta) * delta.price;
-        assessment.grossAccountDebitUsdc = delta.pricePnlClaimConsumedUsdc + delta.pricePnlPledgeConsumedUsdc
-            + delta.realizedCarryUsdc + delta.actionChargeCollectedUsdc + executionBountyUsdc;
-        assessment.actionChargeAssessedUsdc = _netOpenActionCharge(
-            delta.realizedCarryUsdc, int256(delta.actionChargeAssessedUsdc) - int256(delta.actionRebateUsdc)
+        assessment.executionNotionalAssets = CfdMath.sizeToLots(delta.sizeDelta) * delta.price;
+        assessment.grossAccountDebitAssets = delta.pricePnlClaimConsumedAssets + delta.pricePnlPledgeConsumedAssets
+            + delta.realizedCarryAssets + delta.actionChargeCollectedAssets + executionBountyAssets;
+        assessment.actionChargeAssessedAssets = _netOpenActionCharge(
+            delta.realizedCarryAssets, int256(delta.actionChargeAssessedAssets) - int256(delta.actionRebateAssets)
         );
-        assessment.actionChargeCollectedUsdc = delta.realizedCarryUsdc + delta.actionChargeCollectedUsdc;
-        assessment.explicitFeesUsdc = delta.closeState.executionFeeUsdc + delta.closeState.frozenSpreadUsdc;
-        assessment.preSettlementBalanceUsdc = snapshot.accountBuckets.settlementBalanceUsdc;
+        assessment.actionChargeCollectedAssets = delta.realizedCarryAssets + delta.actionChargeCollectedAssets;
+        assessment.explicitFeesAssets = delta.closeState.executionFeeAssets + delta.closeState.frozenSpreadAssets;
+        assessment.preSettlementBalanceAssets = snapshot.accountBuckets.settlementBalanceAssets;
 
-        uint256 postSettlementBalanceUsdc = assessment.preSettlementBalanceUsdc - delta.realizedCarryUsdc
-            - delta.pricePnlPledgeConsumedUsdc - delta.actionChargeCollectedUsdc;
+        uint256 postSettlementBalanceAssets = assessment.preSettlementBalanceAssets - delta.realizedCarryAssets
+            - delta.pricePnlPledgeConsumedAssets - delta.actionChargeCollectedAssets;
         if (delta.pricePayoutIsImmediate) {
-            postSettlementBalanceUsdc += delta.pricePayoutUsdc;
+            postSettlementBalanceAssets += delta.pricePayoutAssets;
         }
-        postSettlementBalanceUsdc += delta.actionRebatePaidUsdc;
-        assessment.postSettlementBalanceUsdc =
-            _settlementAfterBounty(postSettlementBalanceUsdc, executionBountyUsdc, bountyReturnsToAccount);
+        postSettlementBalanceAssets += delta.actionRebatePaidAssets;
+        assessment.postSettlementBalanceAssets =
+            _settlementAfterBounty(postSettlementBalanceAssets, executionBountyAssets, bountyReturnsToAccount);
 
-        assessment.realizedPnlUsdc = delta.realizedPnlUsdc;
-        assessment.vpiUsdc = delta.closeState.vpiDeltaUsdc;
-        assessment.carryUsdc = delta.pendingCarryUsdc;
-        assessment.executionFeeUsdc = delta.closeState.executionFeeUsdc;
-        assessment.frozenSpreadUsdc = delta.closeState.frozenSpreadUsdc;
-        assessment.preTraderClaimUsdc = snapshot.traderClaimBalanceForAccount;
-        assessment.postTraderClaimUsdc = snapshot.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedUsdc;
+        assessment.realizedPnlAssets = delta.realizedPnlAssets;
+        assessment.vpiAssets = delta.closeState.vpiDeltaAssets;
+        assessment.carryAssets = delta.pendingCarryAssets;
+        assessment.executionFeeAssets = delta.closeState.executionFeeAssets;
+        assessment.frozenSpreadAssets = delta.closeState.frozenSpreadAssets;
+        assessment.preTraderClaimAssets = snapshot.traderClaimBalanceForAccount;
+        assessment.postTraderClaimAssets = snapshot.traderClaimBalanceForAccount - delta.pricePnlClaimConsumedAssets;
         if (delta.pricePayoutCreatesClaim) {
-            assessment.postTraderClaimUsdc += delta.pricePayoutUsdc;
+            assessment.postTraderClaimAssets += delta.pricePayoutAssets;
         }
         assessment.postPositionSize = delta.closeState.remainingSize;
-        assessment.postPositionMarginUsdc = delta.posMarginAfter;
-        uint256 actionReserveAfter = snapshot.actionReserveUsdc - delta.actionReserveConsumedUsdc
-            - (delta.vpiRebateReserveBeforeUsdc - delta.vpiRebateReserveAfterUsdc);
+        assessment.postPositionMarginAssets = delta.posMarginAfter;
+        uint256 actionReserveAfter = snapshot.actionReserveAssets - delta.actionReserveConsumedAssets
+            - (delta.vpiRebateReserveBeforeAssets - delta.vpiRebateReserveAfterAssets);
         // Pure simulation may omit the reservation; canonical close assessment always authenticates it.
-        actionReserveAfter = actionReserveAfter > executionBountyUsdc ? actionReserveAfter - executionBountyUsdc : 0;
-        uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveUsdc
-            - delta.liquidationReserveReleaseUsdc + snapshot.lockedBuckets.committedOrderMarginUsdc
-            - delta.actionCommittedMarginConsumedUsdc + actionReserveAfter;
-        assessment.close.postFreeSettlementUsdc =
-            assessment.postSettlementBalanceUsdc > lockedAfter ? assessment.postSettlementBalanceUsdc - lockedAfter : 0;
+        actionReserveAfter = actionReserveAfter > executionBountyAssets ? actionReserveAfter - executionBountyAssets : 0;
+        uint256 lockedAfter = delta.posMarginAfter + snapshot.liquidationReserveAssets
+            - delta.liquidationReserveReleaseAssets + snapshot.lockedBuckets.committedOrderMarginAssets
+            - delta.actionCommittedMarginConsumedAssets + actionReserveAfter;
+        assessment.close.postFreeSettlementAssets = assessment.postSettlementBalanceAssets > lockedAfter
+            ? assessment.postSettlementBalanceAssets - lockedAfter
+            : 0;
 
         if (delta.deletePosition) {
             return assessment;
@@ -453,19 +456,19 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         projectedPosition.size = delta.closeState.remainingSize;
         projectedPosition.margin = delta.posMarginAfter;
         projectedPosition.entryPrice = delta.posEntryPriceAfter;
-        projectedPosition.maxProfitUsdc = snapshot.position.maxProfitUsdc - delta.posMaxProfitReduction;
+        projectedPosition.maxProfitAssets = snapshot.position.maxProfitAssets - delta.posMaxProfitReduction;
         projectedPosition.vpiAccrued = snapshot.position.vpiAccrued - delta.posVpiAccruedReduction;
 
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             projectedPosition,
-            delta.posEntryCostAfterUsdcAtoms,
+            delta.posEntryCostAfterAssetAtoms,
             delta.price,
             snapshot.capPrice,
-            assessment.postPositionMarginUsdc + assessment.postTraderClaimUsdc,
+            assessment.postPositionMarginAssets + assessment.postTraderClaimAssets,
             0
         );
-        assessment.postPositionEquityUsdc = riskState.equityUsdc;
-        assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalUsdc, riskState.equityUsdc);
+        assessment.postPositionEquityAssets = riskState.equityAssets;
+        assessment.postLeverageBps = _postLeverageBps(riskState.currentNotionalAssets, riskState.equityAssets);
     }
 
     function _includeCommitment(
@@ -474,10 +477,10 @@ abstract contract CfdOrderPolicyEvaluatorBase {
         OrderV3Types.ExecutionBounds memory bounds,
         uint256 bounty
     ) internal pure {
-        assessment.grossAccountDebitUsdc += effects.carryCollectedUsdc;
-        assessment.actionChargeAssessedUsdc += effects.carryCollectedUsdc;
-        assessment.actionChargeCollectedUsdc += effects.carryCollectedUsdc;
-        assessment.carryUsdc += effects.carryCollectedUsdc;
+        assessment.grossAccountDebitAssets += effects.carryCollectedAssets;
+        assessment.actionChargeAssessedAssets += effects.carryCollectedAssets;
+        assessment.actionChargeCollectedAssets += effects.carryCollectedAssets;
+        assessment.carryAssets += effects.carryCollectedAssets;
         // Zero residual size identifies a full close; strict partial bounds apply to every positive remainder.
         // slither-disable-next-line incorrect-equality
         _enforceBounds(assessment, bounds, bounty, assessment.postPositionSize == 0);
@@ -487,44 +490,50 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     function _enforceBounds(
         OrderV3Types.ExecutionAssessment memory assessment,
         OrderV3Types.ExecutionBounds memory bounds,
-        uint256 executionBountyUsdc,
+        uint256 executionBountyAssets,
         bool fullClose
     ) private pure {
-        _requireMaximum(OrderV3Types.ConstraintKind.ExecutionBounty, executionBountyUsdc, bounds.maxExecutionBountyUsdc);
+        _requireMaximum(
+            OrderV3Types.ConstraintKind.ExecutionBounty, executionBountyAssets, bounds.maxExecutionBountyAssets
+        );
         _requireMaximum(
             OrderV3Types.ConstraintKind.ExecutionNotional,
-            assessment.executionNotionalUsdc,
-            bounds.maxExecutionNotionalUsdc
+            assessment.executionNotionalAssets,
+            bounds.maxExecutionNotionalAssets
         );
         _requireMaximum(
             OrderV3Types.ConstraintKind.GrossAccountDebit,
-            assessment.grossAccountDebitUsdc,
-            bounds.maxGrossAccountDebitUsdc
+            assessment.grossAccountDebitAssets,
+            bounds.maxGrossAccountDebitAssets
         );
         _requireMaximum(
-            OrderV3Types.ConstraintKind.ActionCharge, assessment.actionChargeAssessedUsdc, bounds.maxActionChargeUsdc
+            OrderV3Types.ConstraintKind.ActionCharge,
+            assessment.actionChargeAssessedAssets,
+            bounds.maxActionChargeAssets
         );
         _requireMaximum(
-            OrderV3Types.ConstraintKind.ExplicitFees, assessment.explicitFeesUsdc, bounds.maxExplicitFeesUsdc
+            OrderV3Types.ConstraintKind.ExplicitFees, assessment.explicitFeesAssets, bounds.maxExplicitFeesAssets
         );
         _requireMaximum(
             OrderV3Types.ConstraintKind.PostPositionSize, assessment.postPositionSize, bounds.maxPostPositionSize
         );
         _requireMinimum(
             OrderV3Types.ConstraintKind.PostSettlementBalance,
-            assessment.postSettlementBalanceUsdc,
-            bounds.minPostSettlementBalanceUsdc
+            assessment.postSettlementBalanceAssets,
+            bounds.minPostSettlementBalanceAssets
         );
 
         if (fullClose) {
             return;
         }
 
-        uint256 normalizedEquityUsdc =
-            assessment.postPositionEquityUsdc > 0 ? uint256(assessment.postPositionEquityUsdc) : 0;
-        if (assessment.postPositionEquityUsdc < 0 || normalizedEquityUsdc < bounds.minPostPositionEquityUsdc) {
+        uint256 normalizedEquityAssets =
+            assessment.postPositionEquityAssets > 0 ? uint256(assessment.postPositionEquityAssets) : 0;
+        if (assessment.postPositionEquityAssets < 0 || normalizedEquityAssets < bounds.minPostPositionEquityAssets) {
             revert ICfdOrderPolicyEvaluator.CfdOrderPolicyEvaluator__ConstraintViolation(
-                OrderV3Types.ConstraintKind.PostPositionEquity, normalizedEquityUsdc, bounds.minPostPositionEquityUsdc
+                OrderV3Types.ConstraintKind.PostPositionEquity,
+                normalizedEquityAssets,
+                bounds.minPostPositionEquityAssets
             );
         }
         _requireMaximum(OrderV3Types.ConstraintKind.PostLeverage, assessment.postLeverageBps, bounds.maxPostLeverageBps);
@@ -551,15 +560,15 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     }
 
     function _netOpenActionCharge(
-        uint256 pendingCarryUsdc,
-        int256 tradeCostUsdc
-    ) private pure returns (uint256 actionChargeUsdc) {
-        if (tradeCostUsdc >= 0) {
+        uint256 pendingCarryAssets,
+        int256 tradeCostAssets
+    ) private pure returns (uint256 actionChargeAssets) {
+        if (tradeCostAssets >= 0) {
             // forge-lint: disable-next-line(unsafe-typecast)
-            return pendingCarryUsdc + uint256(tradeCostUsdc);
+            return pendingCarryAssets + uint256(tradeCostAssets);
         }
-        uint256 rebateUsdc = _negativeMagnitude(tradeCostUsdc);
-        return pendingCarryUsdc > rebateUsdc ? pendingCarryUsdc - rebateUsdc : 0;
+        uint256 rebateAssets = _negativeMagnitude(tradeCostAssets);
+        return pendingCarryAssets > rebateAssets ? pendingCarryAssets - rebateAssets : 0;
     }
 
     function _negativeMagnitude(
@@ -569,14 +578,14 @@ abstract contract CfdOrderPolicyEvaluatorBase {
     }
 
     function _postLeverageBps(
-        uint256 postNotionalUsdc,
-        int256 postEquityUsdc
+        uint256 postNotionalAssets,
+        int256 postEquityAssets
     ) private pure returns (uint256 leverageBps) {
-        if (postEquityUsdc <= 0) {
+        if (postEquityAssets <= 0) {
             return type(uint256).max;
         }
         // forge-lint: disable-next-line(unsafe-typecast)
-        return Math.mulDiv(postNotionalUsdc, BPS, uint256(postEquityUsdc), Math.Rounding.Ceil);
+        return Math.mulDiv(postNotionalAssets, BPS, uint256(postEquityAssets), Math.Rounding.Ceil);
     }
 
 }

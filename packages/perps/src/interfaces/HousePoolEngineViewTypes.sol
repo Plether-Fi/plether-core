@@ -6,30 +6,30 @@ pragma solidity 0.8.35;
 library HousePoolEngineViewTypes {
 
     /// @notice Engine-derived accounting inputs used for pool reconciliation, deposits, and withdrawals.
-    /// @dev Monetary fields use USDC's 6 decimals. The signed terminal LP price delta is the canonical mark-to-close
+    /// @dev Monetary fields use settlement token's 6 decimals. The signed terminal LP price delta is the canonical mark-to-close
     ///      adjustment shared by LP entry and exit pricing: positive values are collectible by LPs, while negative
     ///      values are payable by LPs.
-    /// @param physicalAssetsUsdc Canonical assets recognized by the HousePool before engine-side reservations.
-    /// @param netPhysicalAssetsUsdc Canonical pool assets, equal to physicalAssetsUsdc. Treasury settlement is held
+    /// @param physicalAssets Canonical assets recognized by the HousePool before engine-side reservations.
+    /// @param netPhysicalAssets Canonical pool assets, equal to physicalAssets. Treasury settlement is held
     ///        separately in the clearinghouse and must not be subtracted again; trader claims are also separate.
-    /// @param maxLiabilityUsdc Larger of the long-side and short-side maximum-profit envelopes.
-    /// @param supplementalReservedUsdc Additional senior reservation supplied by the engine, including protected
+    /// @param maxLiabilityAssets Larger of the long-side and short-side maximum-profit envelopes.
+    /// @param supplementalReservedAssets Additional senior reservation supplied by the engine, including protected
     ///        settlement headroom that does not affect terminal NAV.
-    /// @param terminalLpPriceDeltaUsdc Signed terminal mark-to-close delta attributable to LPs.
+    /// @param terminalLpPriceDeltaAssets Signed terminal mark-to-close delta attributable to LPs.
     /// @param terminalNavBookVersion Monotonic terminal-NAV book version captured with the engine snapshot.
-    /// @param traderClaimBalanceUsdc Aggregate unpaid trader claims senior to fresh discretionary payouts.
+    /// @param traderClaimBalanceAssets Aggregate unpaid trader claims senior to fresh discretionary payouts.
     /// @param hasOpenPositions Whether either side has nonzero open interest.
     /// @param markFreshnessRequired Whether any open position requires a fresh mark, including zero-profit endpoints.
     /// @param maxMarkStaleness Maximum permitted mark age for the active calendar regime, in seconds; zero when
     ///        `markFreshnessRequired` is false.
     struct HousePoolInputSnapshot {
-        uint256 physicalAssetsUsdc;
-        uint256 netPhysicalAssetsUsdc;
-        uint256 maxLiabilityUsdc;
-        uint256 supplementalReservedUsdc;
-        int256 terminalLpPriceDeltaUsdc;
+        uint256 physicalAssets;
+        uint256 netPhysicalAssets;
+        uint256 maxLiabilityAssets;
+        uint256 supplementalReservedAssets;
+        int256 terminalLpPriceDeltaAssets;
         uint64 terminalNavBookVersion;
-        uint256 traderClaimBalanceUsdc;
+        uint256 traderClaimBalanceAssets;
         bool hasOpenPositions;
         bool markFreshnessRequired;
         uint256 maxMarkStaleness;

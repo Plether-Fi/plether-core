@@ -11,13 +11,14 @@ The current target network is Arbitrum Sepolia with:
 MockUSDG is the release-local test token in `script/DeployPerpsArbitrumSepolia.s.sol`. Anyone may call
 `mint(address,uint256)` repeatedly; it has no redemption value, issuer backing, EIP-2612 permit, EIP-3009
 authorization, or rewards. It is distinct from official USDG. All clearinghouse, Engine, HousePool, vault, and lens
-asset bindings use the same token address. Public `USDC()` getters, `*Usdc` receipt fields, and SDK `usdc` inputs
-remain legacy names for the configured six-decimal settlement token; price, margin, liquidation, carry, and tranche
-math remain unchanged. Historical releases retain their original token and manifests.
+asset bindings use the same token address. Public APIs use `settlementToken()` getters, `*Assets` receipt fields,
+`*AssetAtoms` for exact base-unit quantities, and SDK `settlementToken` address inputs. Settlement amounts use six
+decimals: `1_000_000` base units is one token. Price, margin, liquidation, carry, and tranche math remain unchanged.
+This is a deliberate breaking API change with no token-specific compatibility aliases. Deploy and consume one
+matching contract, ABI, SDK, and app release; historical deployments retain their original tokens and archived ABIs.
 
-The current implementation stage permits local tests and no-broadcast simulations only. Deployment, minting on a
-public testnet, bootstrap, and activation commands below are future operator instructions; do not execute them as
-part of this implementation.
+The current stage prepares source and metadata only. Deployment, public-testnet minting, bootstrap, activation,
+and validation runs below are future operator instructions; do not execute them as part of the API rename.
 
 ## Settlement-token release metadata
 
@@ -26,8 +27,10 @@ New manifests use schema version `4`. The canonical contract entry is `contracts
 metadata records `name: "Mock USDG"`, `symbol: "USDG"`, `decimals: 6`, `isMock: true`,
 `supportsReceiveWithAuthorization: false`, and `supportsBridgeFunding: false`. Applications should display
 `Mock USDG`, use the manifest address for balances and approvals, and gate funding routes by those capabilities.
-Do not relabel an address from an older USDC deployment. Historical `contracts.mockUsdc` manifests and their ABI
-exports remain historical evidence; export new artifacts into a fresh directory from the reviewed source revision.
+Do not relabel an address from an older USDC deployment or route it through the new ABI. Historical
+`contracts.mockUsdc` manifests and their ABI exports remain historical evidence. The current runtime uses a fresh
+schema-4 prepared manifest with addresses unset and funding disabled until a reviewed deployment is supplied.
+Export new artifacts into a fresh directory from the reviewed source revision.
 
 Bootstrap and verification read `PERPS_SETTLEMENT_TOKEN`; seed inputs are `SENIOR_SEED_ASSETS` and
 `JUNIOR_SEED_ASSETS`. Do not put the new token into `PERPS_USDC`: spot scripts may inherit that old setting.
@@ -344,7 +347,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `initMarginBps` | `20` |
 | `fadMarginBps` | `300` |
 | `baseCarryBps` | `500` |
-| `minBountyUsdc` | `1e6` |
+| `minBountyAssets` | `1e6` |
 | `bountyBps` | `10` total liquidation-charge rate |
 | `keeperShareBps` | `5_000` (50% of collected charge to keeper) |
 | `protocolShareBps` | `0` (protocol liquidation fee disabled; remaining 50% goes to LPs) |
@@ -354,13 +357,13 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `fadRunwaySeconds` | `1 hours` |
 | `basketMaxConfidenceRatioBps` | `10` |
 | `adverseConfidenceMultiplierBps` | `2_500` (release-oracle constructor initialization) |
-| `minOpenNotionalUsdc` | `1_000e6` (release-Router constructor initialization) |
+| `minOpenNotionalAssets` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` (unchanged) |
 | Close execution bounty | Always zero; no configuration field or getter |
-| `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDG`) |
+| `positionProtectionTriggerBountyAssets` | `200_000` (`0.20 USDG`) |
 | `juniorMaintenanceFeeAprBps` | `0` nominal APR (disabled at deployment) |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
-| `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
+| `maxSeniorExposureAssets` | `40_000_000e6` (release-HousePool constructor initialization) |
 | `maxSeniorShareBps` | `8_000` (release-HousePool constructor initialization) |
 | Senior / Junior seed | `1e6` each |
 
@@ -655,7 +658,7 @@ cast send "$PERPS_SETTLEMENT_TOKEN" 'mint(address,uint256)' "$PERPS_TRADING_ACCO
 `testnet-funder` is a locally configured Foundry keystore account. Any gas-funded account may mint; no token-owner
 role, faucet allowance, daily limit, or deployment rerun is required. Minting adds tokens only to the recipient's
 wallet balance, not its clearinghouse margin balance. Use `buildSmartAccountBalanceDepositAction` with the
-configured token passed through its legacy `usdc` input to approve and call `depositMargin` from the trading
+configured token passed through its `settlementToken` input to approve and call `depositMargin` from the trading
 account. If tokens were minted to an owner EOA instead, transfer them to the canonical trading account first.
 Do not mint or transfer directly to the clearinghouse to fund an account.
 

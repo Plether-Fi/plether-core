@@ -6,8 +6,10 @@ and junior vaults.
 
 The next Arbitrum Sepolia deployment uses **Mock USDG** (`USDG`), a six-decimal ERC-20 with unrestricted test
 minting. It is not official USDG and has no redemption value or GDN rewards. Existing deployments keep their
-original settlement assets. Public identifiers such as `USDC()`, `*Usdc`, and SDK `usdc` inputs are retained for
-compatibility and refer to the configured six-decimal settlement token, not a hardcoded USDC address.
+original settlement assets. The new stack uses token-neutral APIs: `settlementToken()` for token bindings,
+`*Assets` for settlement amounts, and SDK `settlementToken` address inputs. Amounts are integer six-decimal base
+units: `1_000_000` means one token. This is a deliberate breaking API change for a fresh deployment; no old
+token-specific aliases are exposed. Integrations must use matching current ABIs and SDK types.
 
 The market uses a capped price range to bound potential trader payouts. Orders execute through a delayed queue,
 and traders pay carry for the LP capital supporting their positions.

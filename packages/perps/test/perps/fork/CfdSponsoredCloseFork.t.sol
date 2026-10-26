@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {
+    ILegacyCloseClearinghouse,
     ILegacyClosePolicy,
     ILegacyClosePreview,
     ILegacyCloseRouter,
@@ -13,7 +14,6 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
 
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
-import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {Test} from "forge-std/Test.sol";
 
 interface ISponsoredSimpleAccount {
@@ -90,7 +90,7 @@ contract CfdSponsoredCloseForkTest is Test {
         bool isPartial
     ) internal {
         OrderV3Types.OrderRequest memory r = _request(isPartial);
-        uint256 free = IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
+        uint256 free = ILegacyCloseClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         require(free < 200_000, "Fork fixture no longer needs assistance");
         uint256 amount = 200_000 - free;
         uint256 price = ENGINE.lastMarkPrice();
@@ -148,7 +148,7 @@ contract CfdSponsoredCloseForkTest is Test {
 
     function testFork_DeployedAccountRollsBackMintOnCommitFailure() public {
         OrderV3Types.OrderRequest memory r = _request(false);
-        uint256 free = IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
+        uint256 free = ILegacyCloseClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc;
         uint256 supply = IERC20(TOKEN).totalSupply();
         vm.mockCallRevert(
             address(ROUTER),
@@ -160,7 +160,7 @@ contract CfdSponsoredCloseForkTest is Test {
         vm.prank(owner);
         ISponsoredSimpleAccount(ACCOUNT).executeBatch(_calls(r, 200_000 - free));
         assertEq(IERC20(TOKEN).totalSupply(), supply);
-        assertEq(IMarginClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, free);
+        assertEq(ILegacyCloseClearinghouse(HOUSE).getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, free);
     }
 
 }

@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {OrderRouterDebugLens} from "../../../utils/OrderRouterDebugLens.sol";
 import {RecordedOrderReceipts} from "../../../utils/RecordedOrderReceipts.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
@@ -24,7 +25,6 @@ import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.s
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
@@ -153,7 +153,7 @@ abstract contract PerpActionHandler is Test {
     ) internal {
         try router.settleLpEpoch(data) {}
         catch (bytes memory reason) {
-            // Available USDC can still be below the amount required to fund one redeem share, or deposits held
+            // Available settlement token can still be below the amount required to fund one redeem share, or deposits held
             // by the frozen calendar. Deterministic tests separately require eligible epochs to make progress.
             if (reason.length != 4 || bytes4(reason) != IHousePool.HousePool__NoLpEpochProgress.selector) {
                 revert UnexpectedActionRevert(reason);
@@ -167,7 +167,7 @@ abstract contract PerpActionHandler is Test {
 
 contract PerpHandler is PerpActionHandler {
 
-    MockUSDC public usdc;
+    MockSettlementToken public settlementToken;
     CfdEngine public engine;
     CfdEngineLens public engineLens;
     HousePool public pool;
@@ -185,14 +185,14 @@ contract PerpHandler is PerpActionHandler {
     uint256 public ghost_totalLpWithdrawn;
 
     constructor(
-        MockUSDC _usdc,
+        MockSettlementToken _settlementToken,
         CfdEngine _engine,
         HousePool _pool,
         MarginClearinghouse _clearinghouse,
         LegacyOrderRouterHarness _router,
         TrancheVault _juniorVault
     ) {
-        usdc = _usdc;
+        settlementToken = _settlementToken;
         engine = _engine;
         engineLens = new CfdEngineLens(address(_engine));
         pool = _pool;
@@ -221,9 +221,9 @@ contract PerpHandler is PerpActionHandler {
 
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
 
-        usdc.mint(trader, marginFuzz);
+        settlementToken.mint(trader, marginFuzz);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), marginFuzz);
+        settlementToken.approve(address(clearinghouse), marginFuzz);
         clearinghouse.deposit(account, marginFuzz);
         vm.stopPrank();
         ghost_totalDeposited += marginFuzz;
@@ -288,9 +288,9 @@ contract PerpHandler is PerpActionHandler {
         uint256 upperBound = maxAssets < 100_000e6 ? maxAssets : 100_000e6;
         uint256 assets = bound(amountFuzz, 1000e6, upperBound);
 
-        usdc.mint(lp, assets);
+        settlementToken.mint(lp, assets);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         juniorVault.requestDeposit(assets, lp, lp);
         vm.stopPrank();
 
@@ -306,7 +306,7 @@ contract PerpHandler is PerpActionHandler {
         }
 
         uint256 shares = bound(amountFuzz, 1, maxShares);
-        if (juniorVault.estimateRedeemAssets(shares) < pool.minTrancheDepositUsdc() && shares < maxShares) {
+        if (juniorVault.estimateRedeemAssets(shares) < pool.minTrancheDepositAssets() && shares < maxShares) {
             shares = maxShares;
         }
 
@@ -391,7 +391,7 @@ contract PerpHandler is PerpActionHandler {
     function _hasSettleableJuniorLpWork() internal view returns (bool) {
         uint256 cutoffEpoch = pool.currentLpEpoch();
         (, uint256 redeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
-        if (redeemShares != 0 && pool.getFreeUSDC() != 0) {
+        if (redeemShares != 0 && pool.getFreeAssets() != 0) {
             return true;
         }
 
@@ -416,7 +416,7 @@ contract PerpInvariantTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -434,7 +434,7 @@ contract PerpInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpHandler(usdc, engine, pool, clearinghouse, router, juniorVault);
+        handler = new PerpHandler(settlementToken, engine, pool, clearinghouse, router, juniorVault);
 
         for (uint256 i = 0; i < 3; i++) {
             address trader = handler.traders(i);
@@ -482,13 +482,13 @@ contract PerpInvariantTest is BasePerpTest {
         assertEq(handler.ghost_successfulExecutions(), 1, "Mutation must follow an executed fee-bearing order");
         this.checkTreasuryCustody();
         address treasury = engine.protocolTreasury();
-        uint256 credit = clearinghouse.balanceUsdc(treasury);
+        uint256 credit = clearinghouse.balanceAssets(treasury);
         assertGt(credit, 0, "Fixture must earn a treasury fee");
-        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(treasury)
+        stdstore.target(address(clearinghouse)).sig("balanceAssets(address)").with_key(treasury)
             .checked_write(uint256(int256(credit) + delta));
 
         // Both corrupt credits remain below total custody, so the former bound alone would accept them.
-        assertLe(clearinghouse.balanceUsdc(treasury), usdc.balanceOf(address(clearinghouse)));
+        assertLe(clearinghouse.balanceAssets(treasury), settlementToken.balanceOf(address(clearinghouse)));
         vm.expectRevert();
         this.checkTreasuryCustody();
     }
@@ -564,11 +564,11 @@ contract PerpInvariantTest is BasePerpTest {
         uint256 claimed = pool.seniorPrincipal() + pool.juniorPrincipal();
         uint256 terminalAssets = pool.totalAssets();
         ICfdEngineTypes.TerminalNavSnapshot memory terminal = engine.terminalNavSnapshot();
-        uint256 terminalLiabilities = terminal.totalTraderClaimsUsdc;
-        if (terminal.terminalLpPriceDeltaUsdc >= 0) {
-            terminalAssets += uint256(terminal.terminalLpPriceDeltaUsdc);
+        uint256 terminalLiabilities = terminal.totalTraderClaimsAssets;
+        if (terminal.terminalLpPriceDeltaAssets >= 0) {
+            terminalAssets += uint256(terminal.terminalLpPriceDeltaAssets);
         } else {
-            terminalLiabilities += uint256(-(terminal.terminalLpPriceDeltaUsdc + 1)) + 1;
+            terminalLiabilities += uint256(-(terminal.terminalLpPriceDeltaAssets + 1)) + 1;
         }
         uint256 terminalEquity = terminalAssets > terminalLiabilities ? terminalAssets - terminalLiabilities : 0;
         assertLe(claimed, terminalEquity, "Freshly reconciled principal cannot exceed exact terminal LP equity");
@@ -578,14 +578,14 @@ contract PerpInvariantTest is BasePerpTest {
         // This campaign's only settlement accounts are its three traders, the handler (keeper), and treasury.
         // Derive treasury backing from token custody less everyone else's credits, never from treasury itself.
         // Fee amounts and withdrawals have a separate independent model in PerpFeeFlowInvariantTest.
-        uint256 otherCredits = clearinghouse.balanceUsdc(address(handler));
+        uint256 otherCredits = clearinghouse.balanceAssets(address(handler));
         for (uint256 i; i < 3; ++i) {
-            otherCredits += clearinghouse.balanceUsdc(handler.traders(i));
+            otherCredits += clearinghouse.balanceAssets(handler.traders(i));
         }
-        uint256 custody = usdc.balanceOf(address(clearinghouse));
+        uint256 custody = settlementToken.balanceOf(address(clearinghouse));
         assertGe(custody, otherCredits, "Other settlement accounts must be fully clearinghouse-custodied");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             custody - otherCredits,
             "Treasury credit must equal custody remaining after other settlement liabilities"
         );
@@ -593,11 +593,13 @@ contract PerpInvariantTest is BasePerpTest {
 
     function _assertInvariant_WithdrawalAccountingMatchesEngineReserve() internal view {
         uint256 poolAssets = pool.totalAssets();
-        uint256 reserved = _withdrawalReservedUsdc();
+        uint256 reserved = _withdrawalReservedAssets();
         uint256 expectedFree = poolAssets > reserved ? poolAssets - reserved : 0;
 
-        assertEq(pool.getFreeUSDC(), expectedFree, "HousePool free USDC must match engine withdrawal reserve");
-        assertLe(pool.getFreeUSDC(), poolAssets, "Free USDC cannot exceed physical assets");
+        assertEq(
+            pool.getFreeAssets(), expectedFree, "HousePool free settlementToken must match engine withdrawal reserve"
+        );
+        assertLe(pool.getFreeAssets(), poolAssets, "Free settlementToken cannot exceed physical assets");
     }
 
     function _assertInvariant_HousePoolPendingStateMatchesReconcileFirstState() internal {
@@ -628,35 +630,35 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function _assertInvariant_PendingKeeperReservesBackedByClearinghouseReservations() internal view {
-        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody queued keeper reserves");
+        assertEq(settlementToken.balanceOf(address(router)), 0, "Router must not custody queued keeper reserves");
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
-            uint256 protectedActionReserveUsdc =
-                clearinghouse.vpiRebateReserveUsdc(account) + _pendingExecutionBountyUsdc(account);
+            uint256 protectedActionReserveAssets =
+                clearinghouse.vpiRebateReserveAssets(account) + _pendingExecutionBountyAssets(account);
             assertEq(
-                clearinghouse.actionReserveUsdc(account),
-                protectedActionReserveUsdc,
+                clearinghouse.actionReserveAssets(account),
+                protectedActionReserveAssets,
                 "Action reserve must exactly back negative VPI and pending keeper bounties"
             );
         }
     }
 
-    function _assertInvariant_KnownActorUsdcConservation() internal view {
-        uint256 actorBalances =
-            usdc.balanceOf(address(handler)) + usdc.balanceOf(handler.lp()) + usdc.balanceOf(address(this));
+    function _assertInvariant_KnownActorAssetsConservation() internal view {
+        uint256 actorBalances = settlementToken.balanceOf(address(handler)) + settlementToken.balanceOf(handler.lp())
+            + settlementToken.balanceOf(address(this));
         for (uint256 i = 0; i < 3; i++) {
-            actorBalances += usdc.balanceOf(handler.traders(i));
+            actorBalances += settlementToken.balanceOf(handler.traders(i));
         }
 
-        uint256 contractBalances = usdc.balanceOf(address(pool)) + usdc.balanceOf(address(router))
-            + usdc.balanceOf(address(clearinghouse)) + usdc.balanceOf(address(seniorVault))
-            + usdc.balanceOf(address(juniorVault));
+        uint256 contractBalances = settlementToken.balanceOf(address(pool)) + settlementToken.balanceOf(address(router))
+            + settlementToken.balanceOf(address(clearinghouse)) + settlementToken.balanceOf(address(seniorVault))
+            + settlementToken.balanceOf(address(juniorVault));
 
-        uint256 expectedSupply = usdc.totalSupply();
+        uint256 expectedSupply = settlementToken.totalSupply();
         assertEq(
             actorBalances + contractBalances,
             expectedSupply,
-            "Known actors plus protocol contracts must conserve the minted USDC supply"
+            "Known actors plus protocol contracts must conserve the minted settlementToken supply"
         );
     }
 
@@ -688,14 +690,14 @@ contract PerpInvariantTest is BasePerpTest {
             address account = handler.traders(i);
             AccountLensViewTypes.AccountLedgerSnapshot memory positionView =
                 engineAccountLens.getAccountLedgerSnapshot(account);
-            (uint256 size, uint256 margin, uint256 entryPrice, uint256 maxProfitUsdc, CfdTypes.Side side,,) =
+            (uint256 size, uint256 margin, uint256 entryPrice, uint256 maxProfitAssets, CfdTypes.Side side,,) =
                 engine.positions(account);
 
             assertEq(positionView.hasPosition, size > 0, "Position view existence must match stored size");
             if (size == 0) {
                 assertEq(margin, 0, "Empty positions must not retain margin");
                 assertEq(entryPrice, 0, "Empty positions must not retain entry price");
-                assertEq(positionView.unrealizedPnlUsdc, 0, "Empty positions must not retain bounded profit");
+                assertEq(positionView.unrealizedPnlAssets, 0, "Empty positions must not retain bounded profit");
                 continue;
             }
 
@@ -704,24 +706,24 @@ contract PerpInvariantTest is BasePerpTest {
                 "Live positions must encode exactly one directional side"
             );
 
-            _assertExactProfitEnvelope(account, size, maxProfitUsdc, side, capPrice);
+            _assertExactProfitEnvelope(account, size, maxProfitAssets, side, capPrice);
         }
     }
 
     function _assertExactProfitEnvelope(
         address account,
         uint256 size,
-        uint256 maxProfitUsdc,
+        uint256 maxProfitAssets,
         CfdTypes.Side side,
         uint256 capPrice
     ) internal view {
         uint256 lots = CfdMath.sizeToLots(size);
         assertEq(
-            maxProfitUsdc,
-            CfdMath.calculateExactMaxProfit(lots, engine.positionEntryCostUsdcAtoms(account), side, capPrice),
+            maxProfitAssets,
+            CfdMath.calculateExactMaxProfit(lots, engine.positionEntryCostAssetAtoms(account), side, capPrice),
             "Stored max profit must match the exact entry-cost payoff envelope"
         );
-        assertLe(maxProfitUsdc, lots * capPrice, "Live positions must remain bounded by CAP");
+        assertLe(maxProfitAssets, lots * capPrice, "Live positions must remain bounded by CAP");
     }
 
     function _assertInvariant_EntryNotionalsMatchPositions() internal view {
@@ -733,7 +735,7 @@ contract PerpInvariantTest is BasePerpTest {
             address account = trader;
             (uint256 size,,,, CfdTypes.Side side,,) = engine.positions(account);
             if (size > 0) {
-                uint256 exactEntryNotional = engine.positionEntryCostUsdcAtoms(account) * CfdMath.USDC_TO_TOKEN_SCALE;
+                uint256 exactEntryNotional = engine.positionEntryCostAssetAtoms(account) * CfdMath.ASSETS_TO_TOKEN_SCALE;
                 if (side == CfdTypes.Side.LONG) {
                     sumLongNotional += exactEntryNotional;
                 } else {
@@ -752,7 +754,7 @@ contract PerpInvariantTest is BasePerpTest {
             address account = trader;
             (uint256 size, uint256 margin,,,,,) = engine.positions(account);
             IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
-            uint256 locked = clearinghouse.lockedMarginUsdc(account);
+            uint256 locked = clearinghouse.lockedMarginAssets(account);
 
             if (size > 0) {
                 assertGe(locked, margin, "Clearinghouse must back position margin");
@@ -760,7 +762,7 @@ contract PerpInvariantTest is BasePerpTest {
 
             assertGe(
                 locked,
-                margin + reservation.committedMarginUsdc,
+                margin + reservation.committedMarginAssets,
                 "Locked margin must back open-position margin plus pending committed margin"
             );
         }
@@ -796,7 +798,7 @@ contract PerpInvariantTest is BasePerpTest {
     }
 
     function _assertInvariant_LivePositionsRetainMinimumLiquidationReserve() internal view {
-        (,,,,,, uint256 minBountyUsdc,,,) = engine.riskParams();
+        (,,,,,, uint256 minBountyAssets,,,) = engine.riskParams();
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
             (uint256 size,,,,,,) = engine.positions(account);
@@ -804,8 +806,8 @@ contract PerpInvariantTest is BasePerpTest {
                 continue;
             }
             assertGe(
-                clearinghouse.liquidationReserveUsdc(account),
-                minBountyUsdc,
+                clearinghouse.liquidationReserveAssets(account),
+                minBountyAssets,
                 "Every live position must retain the dedicated minimum liquidation reserve"
             );
         }
@@ -814,21 +816,21 @@ contract PerpInvariantTest is BasePerpTest {
     function _assertInvariant_ClearinghouseBucketsConserveTrackedState() internal view {
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+            IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
 
             assertEq(
-                buckets.settlementBalanceUsdc,
-                buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc,
+                buckets.settlementBalanceAssets,
+                buckets.freeSettlementAssets + buckets.totalLockedMarginAssets,
                 "Settlement buckets must sum to tracked balance"
             );
             assertEq(
-                buckets.totalLockedMarginUsdc,
-                buckets.activePositionMarginUsdc + buckets.otherLockedMarginUsdc,
+                buckets.totalLockedMarginAssets,
+                buckets.activePositionMarginAssets + buckets.otherLockedMarginAssets,
                 "Locked buckets must split into active and other locked margin"
             );
             assertEq(
-                clearinghouse.lockedMarginUsdc(account),
-                buckets.totalLockedMarginUsdc,
+                clearinghouse.lockedMarginAssets(account),
+                buckets.totalLockedMarginAssets,
                 "Bucket view must match locked margin storage"
             );
         }
@@ -837,11 +839,11 @@ contract PerpInvariantTest is BasePerpTest {
     function _assertInvariant_TraderOwnedCollateralRemainsTerminallyReachable() internal view {
         for (uint256 i = 0; i < 3; i++) {
             address account = handler.traders(i);
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+            IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
 
             assertEq(
-                _terminalReachableUsdc(account),
-                buckets.settlementBalanceUsdc,
+                _terminalReachableAssets(account),
+                buckets.settlementBalanceAssets,
                 "All trader-owned settlement collateral should remain terminally reachable"
             );
         }
@@ -864,7 +866,7 @@ contract PerpInvariantTest is BasePerpTest {
 
             IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
             assertEq(
-                reservation.committedMarginUsdc,
+                reservation.committedMarginAssets,
                 rawQueuedCommitted,
                 "Account reservation must equal the residual committed margin stored on queued orders"
             );
@@ -875,32 +877,32 @@ contract PerpInvariantTest is BasePerpTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
-        assertEq(protocolView.poolAssetsUsdc, pool.totalAssets(), "Protocol view pool assets must match pool assets");
-        assertEq(protocolView.maxLiabilityUsdc, _maxLiability(), "Protocol view liability must match accessor");
+        assertEq(protocolView.poolAssets, pool.totalAssets(), "Protocol view pool assets must match pool assets");
+        assertEq(protocolView.maxLiabilityAssets, _maxLiability(), "Protocol view liability must match accessor");
         assertEq(
-            protocolView.withdrawalReservedUsdc,
-            _withdrawalReservedUsdc(),
+            protocolView.withdrawalReservedAssets,
+            _withdrawalReservedAssets(),
             "Protocol view withdrawal reserve must match accessor"
         );
         assertEq(
-            protocolView.protocolTreasuryBalanceUsdc,
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            protocolView.protocolTreasuryBalanceAssets,
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             "Protocol view fees must match accessor"
         );
         assertEq(
-            protocolView.totalTraderClaimBalanceUsdc,
-            engine.totalTraderClaimBalanceUsdc(),
+            protocolView.totalTraderClaimBalanceAssets,
+            engine.totalTraderClaimBalanceAssets(),
             "Protocol view trader trader claims must match storage"
         );
     }
 
     function _assertInvariant_WithdrawalReserveIncludesTraderClaimLiabilities() internal view {
         uint256 maxLiability = _maxLiability();
-        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceUsdc()
-            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiability, engine.settlementBufferBps());
+        uint256 expectedReserved = maxLiability + engine.totalTraderClaimBalanceAssets()
+            + SolvencyAccountingLib.settlementBufferTargetAssets(maxLiability, engine.settlementBufferBps());
 
         assertEq(
-            _withdrawalReservedUsdc(),
+            _withdrawalReservedAssets(),
             expectedReserved,
             "Withdrawal reserve must include liabilities, trader claims, and settlement headroom"
         );
@@ -911,13 +913,15 @@ contract PerpInvariantTest is BasePerpTest {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory protocolView =
             engineProtocolLens.getProtocolAccountingSnapshot();
 
-        assertEq(poolView.totalAssetsUsdc, protocolView.poolAssetsUsdc, "Pool and engine must agree on pool assets");
+        assertEq(poolView.totalAssets, protocolView.poolAssets, "Pool and engine must agree on pool assets");
         assertEq(
-            poolView.withdrawalReservedUsdc,
-            protocolView.withdrawalReservedUsdc,
+            poolView.withdrawalReservedAssets,
+            protocolView.withdrawalReservedAssets,
             "Pool and engine must agree on withdrawal reserves"
         );
-        assertEq(poolView.freeUsdc, protocolView.freeUsdc, "Pool free USDC must match engine accounting view");
+        assertEq(
+            poolView.freeAssets, protocolView.freeAssets, "Pool free settlementToken must match engine accounting view"
+        );
     }
 
     function _assertInvariant_LiquidationPreviewMatchesPositionView() internal view {
@@ -941,9 +945,9 @@ contract PerpInvariantTest is BasePerpTest {
         }
     }
 
-    function _pendingExecutionBountyUsdc(
+    function _pendingExecutionBountyAssets(
         address account
-    ) private view returns (uint256 pendingExecutionBountyUsdc) {
+    ) private view returns (uint256 pendingExecutionBountyAssets) {
         uint64 nextCommitId = router.nextCommitId();
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
             OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
@@ -951,7 +955,7 @@ contract PerpInvariantTest is BasePerpTest {
                 record.status == IOrderRouterAccounting.OrderStatus.Pending && record.core.account == account
                     && record.core.sizeDelta != 0
             ) {
-                pendingExecutionBountyUsdc += record.executionBountyUsdc;
+                pendingExecutionBountyAssets += record.executionBountyAssets;
             }
         }
     }
@@ -973,7 +977,7 @@ contract PerpInvariantTest is BasePerpTest {
         _assertInvariant_HousePoolPendingStateMatchesReconcileFirstState();
         _assertInvariant_LiveLiabilityFlagMatchesDirectionalExposure();
         _assertInvariant_PendingKeeperReservesBackedByClearinghouseReservations();
-        _assertInvariant_KnownActorUsdcConservation();
+        _assertInvariant_KnownActorAssetsConservation();
         _assertInvariant_AggregateOIMatchesPositions();
         _assertInvariant_LivePositionsRemainSingleDirectionAndBounded();
         _assertInvariant_EntryNotionalsMatchPositions();
@@ -996,18 +1000,18 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
     struct PendingBatchOrder {
         uint64 orderId;
         address account;
-        uint256 bountyUsdc;
-        uint256 freeFundedUsdc;
-        uint256 committedMarginUsdc;
+        uint256 bountyAssets;
+        uint256 freeFundedAssets;
+        uint256 committedMarginAssets;
     }
 
     struct BatchObservation {
         uint64 head;
-        uint256 keeperBalanceUsdc;
+        uint256 keeperBalanceAssets;
         PendingBatchOrder[] orders;
     }
 
-    MockUSDC public usdc;
+    MockSettlementToken public settlementToken;
     CfdEngine public engine;
     CfdEngineLens public engineLens;
     HousePool public pool;
@@ -1025,7 +1029,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
     uint256 public ghost_batchFailedOrders;
     uint256 public ghost_batchTerminalOrders;
     uint256 public ghost_batchBlockedAttempts;
-    uint256 public ghost_batchBountyCreditsUsdc;
+    uint256 public ghost_batchBountyCreditsAssets;
     OrderV3Types.PendingReason public ghost_lastBatchStopReason;
     uint256 public ghost_executedOrders;
     uint256 public ghost_starvationEvents;
@@ -1035,18 +1039,18 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
     uint64 public ghost_lastRetryableSlippageBeforeExecuteId;
     uint64 public ghost_lastRetryableSlippageAfterExecuteId;
     uint8 public ghost_lastRetryableSlippageOrderStatus;
-    uint256 public ghost_lastRetryableSlippageReservationUsdc;
-    uint256 public ghost_lastRetryableSlippageRouterBalanceUsdc;
+    uint256 public ghost_lastRetryableSlippageReservationAssets;
+    uint256 public ghost_lastRetryableSlippageRouterBalanceAssets;
 
     constructor(
-        MockUSDC _usdc,
+        MockSettlementToken _settlementToken,
         CfdEngine _engine,
         HousePool _pool,
         MarginClearinghouse _clearinghouse,
         LegacyOrderRouterHarness _router,
         TrancheVault _juniorVault
     ) {
-        usdc = _usdc;
+        settlementToken = _settlementToken;
         engine = _engine;
         engineLens = new CfdEngineLens(address(_engine));
         pool = _pool;
@@ -1073,9 +1077,9 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         uint256 amount
     ) internal {
         address account = _account(actor);
-        usdc.mint(actor, amount);
+        settlementToken.mint(actor, amount);
         vm.startPrank(actor);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
     }
@@ -1087,9 +1091,9 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
             return 0;
         }
 
-        usdc.mint(lp, amount);
+        settlementToken.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), type(uint256).max);
+        settlementToken.approve(address(juniorVault), type(uint256).max);
         requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
     }
@@ -1114,7 +1118,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         uint256 size = bound(sizeFuzz, 10, 250) * CfdTypes.SIZE_QUANTUM;
         uint256 margin = bound(marginFuzz, 200e6, 5000e6);
 
-        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < margin + 1e6) {
+        if (clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets < margin + 1e6) {
             _seedTrader(actor, margin + 5e6);
         }
 
@@ -1137,7 +1141,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         address account = _account(actor);
         uint256 count = bound(countFuzz, 1, 6);
 
-        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < count * 101e6) {
+        if (clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets < count * 101e6) {
             _seedTrader(actor, count * 150e6);
         }
 
@@ -1170,7 +1174,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
 
         uint256 amount = bound(amountFuzz, 1e6, poolAssets - 10e6);
         vm.prank(address(pool));
-        usdc.transfer(sink, amount);
+        settlementToken.transfer(sink, amount);
         ghost_starvationEvents++;
     }
 
@@ -1249,7 +1253,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
     function _hasSettleableJuniorLpWork() internal view returns (bool) {
         uint256 cutoffEpoch = pool.currentLpEpoch();
         (, uint256 redeemShares) = juniorVault.getMaturedRedeemHead(cutoffEpoch);
-        if (redeemShares != 0 && pool.getFreeUSDC() != 0) {
+        if (redeemShares != 0 && pool.getFreeAssets() != 0) {
             return true;
         }
 
@@ -1264,7 +1268,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         address actor = actors[ghost_batchAttempts % actors.length];
         address account = _account(actor);
 
-        if (clearinghouse.getAccountUsdcBuckets(account).freeSettlementUsdc < 2005e6) {
+        if (clearinghouse.getAccountAssetBuckets(account).freeSettlementAssets < 2005e6) {
             _seedTrader(actor, 2500e6);
         }
 
@@ -1317,8 +1321,8 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
                 ghost_lastRetryableSlippageBatch++;
                 ghost_lastRetryableSlippageAfterExecuteId = afterExecute;
                 ghost_lastRetryableSlippageOrderStatus = uint8(postRecord.status);
-                ghost_lastRetryableSlippageReservationUsdc = postRecord.executionBountyUsdc;
-                ghost_lastRetryableSlippageRouterBalanceUsdc = usdc.balanceOf(address(router));
+                ghost_lastRetryableSlippageReservationAssets = postRecord.executionBountyAssets;
+                ghost_lastRetryableSlippageRouterBalanceAssets = settlementToken.balanceOf(address(router));
             }
         }
 
@@ -1332,7 +1336,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         uint256 batchSize
     ) internal view returns (BatchObservation memory observed) {
         observed.head = router.nextExecuteId();
-        observed.keeperBalanceUsdc = clearinghouse.balanceUsdc(address(this));
+        observed.keeperBalanceAssets = clearinghouse.balanceAssets(address(this));
         observed.orders = new PendingBatchOrder[](batchSize);
         uint64 cursor = observed.head;
         uint256 count;
@@ -1344,9 +1348,9 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
             observed.orders[count++] = PendingBatchOrder({
                 orderId: cursor,
                 account: record.core.account,
-                bountyUsdc: record.executionBountyUsdc,
-                freeFundedUsdc: funding.freeFundedUsdc,
-                committedMarginUsdc: clearinghouse.getOrderReservation(cursor).remainingAmountUsdc
+                bountyAssets: record.executionBountyAssets,
+                freeFundedAssets: funding.freeFundedAssets,
+                committedMarginAssets: clearinghouse.getOrderReservation(cursor).remainingAmountAssets
             });
             cursor = record.nextGlobalOrderId;
         }
@@ -1357,7 +1361,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         OrderV3Types.BatchResult memory result
     ) internal {
         uint256 terminalCount;
-        uint256 keeperCreditUsdc;
+        uint256 keeperCreditAssets;
         for (uint256 i; i < beforeBatch.orders.length; ++i) {
             PendingBatchOrder memory pending = beforeBatch.orders[i];
             if (pending.orderId == 0) {
@@ -1371,7 +1375,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
                 status == OrderV3Types.LifecycleStatus.Executed || status == OrderV3Types.LifecycleStatus.Failed,
                 "Pending order must remain pending or acquire a terminal outcome"
             );
-            keeperCreditUsdc += _verifyTerminalBatchOrder(pending);
+            keeperCreditAssets += _verifyTerminalBatchOrder(pending);
             ++terminalCount;
             if (status == OrderV3Types.LifecycleStatus.Executed) {
                 ++ghost_batchExecutedOrders;
@@ -1383,12 +1387,12 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         assertEq(result.terminalCount, terminalCount, "Batch result must count observed terminal transitions");
         assertEq(result.nextOrderId, router.nextExecuteId(), "Batch result must report the actual queue head");
         assertEq(
-            clearinghouse.balanceUsdc(address(this)),
-            beforeBatch.keeperBalanceUsdc + keeperCreditUsdc,
+            clearinghouse.balanceAssets(address(this)),
+            beforeBatch.keeperBalanceAssets + keeperCreditAssets,
             "Terminal bounty credits must equal independently snapshotted reservations"
         );
         ghost_batchTerminalOrders += terminalCount;
-        ghost_batchBountyCreditsUsdc += keeperCreditUsdc;
+        ghost_batchBountyCreditsAssets += keeperCreditAssets;
         if (terminalCount == 0) {
             // Eligibility depends on time, oracle availability, regime and gas. A documented nonterminal stop is
             // legitimate; silently doing nothing or releasing a still-pending order's custody is not.
@@ -1396,13 +1400,13 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
             assertEq(router.nextExecuteId(), beforeBatch.head, "Nonterminal stop must preserve the queue head");
             PendingBatchOrder memory head = beforeBatch.orders[0];
             assertEq(
-                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, head.orderId).amountUsdc,
-                head.bountyUsdc,
+                clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, head.orderId).amountAssets,
+                head.bountyAssets,
                 "Nonterminal stop must preserve the head bounty"
             );
             assertEq(
-                clearinghouse.getOrderReservation(head.orderId).remainingAmountUsdc,
-                head.committedMarginUsdc,
+                clearinghouse.getOrderReservation(head.orderId).remainingAmountAssets,
+                head.committedMarginAssets,
                 "Nonterminal stop must preserve the head margin"
             );
             ++ghost_batchBlockedAttempts;
@@ -1413,12 +1417,12 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
 
     function _verifyTerminalBatchOrder(
         PendingBatchOrder memory pending
-    ) internal returns (uint256 keeperCreditUsdc) {
+    ) internal returns (uint256 keeperCreditAssets) {
         OrderV3Types.CompactOutcome memory receipt = _verifiedOutcome(router.lifecycleBook(), pending.orderId);
         assertEq(receipt.account, pending.account);
         assertEq(receipt.executor, address(this));
-        assertEq(receipt.bountyUsdc, pending.bountyUsdc, "Receipt must account for the original bounty reservation");
-        if (pending.bountyUsdc == 0) {
+        assertEq(receipt.bountyAssets, pending.bountyAssets, "Receipt must account for the original bounty reservation");
+        if (pending.bountyAssets == 0) {
             assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.None));
             assertEq(receipt.bountyRecipient, address(0));
         } else if (receipt.reason == OrderV3Types.TerminalReason.RiskOff) {
@@ -1428,19 +1432,19 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
             // This handler creates ordinary orders. It never creates protection attempts or liquidates within a batch.
             assertEq(uint8(receipt.bountyDisposition), uint8(OrderV3Types.BountyDisposition.Paid));
             assertEq(receipt.bountyRecipient, address(this));
-            keeperCreditUsdc = pending.bountyUsdc;
+            keeperCreditAssets = pending.bountyAssets;
         }
-        assertEq(pending.freeFundedUsdc, pending.bountyUsdc, "bounty is fully funded from free settlement");
+        assertEq(pending.freeFundedAssets, pending.bountyAssets, "bounty is fully funded from free settlement");
         OrderV3Types.OrderReceipt memory fullReceipt = _verifiedReceipt(router.lifecycleBook(), pending.orderId);
-        assertEq(fullReceipt.bounty.bountyPaidUsdc, keeperCreditUsdc);
-        assertEq(fullReceipt.bounty.bountyRefundedUsdc, pending.bountyUsdc - keeperCreditUsdc);
-        assertEq(fullReceipt.bounty.bountyForfeitedUsdc, 0);
+        assertEq(fullReceipt.bounty.bountyPaidAssets, keeperCreditAssets);
+        assertEq(fullReceipt.bounty.bountyRefundedAssets, pending.bountyAssets - keeperCreditAssets);
+        assertEq(fullReceipt.bounty.bountyForfeitedAssets, 0);
         IMarginClearinghouse.BountyReservation memory bounty =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, pending.orderId);
-        assertEq(bounty.amountUsdc, 0, "Terminal order cannot retain a bounty reservation");
+        assertEq(bounty.amountAssets, 0, "Terminal order cannot retain a bounty reservation");
         assertEq(uint8(bounty.state), uint8(IMarginClearinghouse.BountyReservationState.Settled));
         IMarginClearinghouse.OrderReservation memory margin = clearinghouse.getOrderReservation(pending.orderId);
-        assertEq(margin.remainingAmountUsdc, 0, "Terminal order cannot retain committed margin");
+        assertEq(margin.remainingAmountAssets, 0, "Terminal order cannot retain committed margin");
         assertTrue(margin.status != IMarginClearinghouse.ReservationStatus.Active);
     }
 
@@ -1513,7 +1517,7 @@ contract AdversarialPerpHandler is PerpActionHandler, RecordedOrderReceipts {
         uint256 oraclePrice = bound(priceFuzz, 80_000_000, 125_000_000);
         bytes[] memory priceData = _nextBlockPriceData(oraclePrice);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, oraclePrice);
-        if (!preview.liquidatable || preview.keeperBountyUsdc == 0) {
+        if (!preview.liquidatable || preview.keeperBountyAssets == 0) {
             return;
         }
 
@@ -1542,7 +1546,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -1560,7 +1564,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new AdversarialPerpHandler(usdc, engine, pool, clearinghouse, router, juniorVault);
+        handler = new AdversarialPerpHandler(settlementToken, engine, pool, clearinghouse, router, juniorVault);
         handler.seedActors(10_000e6);
 
         targetContract(address(handler));
@@ -1584,33 +1588,33 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         handler.openPosition(0, 0, 250, 4950e6);
 
         address actor = handler.actors(0);
-        uint256 free = clearinghouse.getFreeBuyingPowerUsdc(actor);
+        uint256 free = clearinghouse.getFreeBuyingPowerAssets(actor);
         assertGt(free, 0);
         vm.prank(actor);
         clearinghouse.withdraw(actor, free);
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(actor), 0);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(actor), 0);
 
         uint64 nextCommitIdBefore = router.nextCommitId();
         uint256 accountPendingBefore = router.pendingOrderCounts(actor);
-        uint256 bountyBefore = clearinghouse.totalBountyReservationsUsdc(actor);
+        uint256 bountyBefore = clearinghouse.totalBountyReservationsAssets(actor);
         uint256 expectedRejectionsBefore = handler.ghost_expectedCommitRejections();
         handler.queueBadClose(0);
 
         assertEq(handler.ghost_expectedCommitRejections(), expectedRejectionsBefore);
         assertEq(router.nextCommitId(), nextCommitIdBefore + 1);
         assertEq(router.pendingOrderCounts(actor), accountPendingBefore + 1);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(actor), bountyBefore);
+        assertEq(clearinghouse.totalBountyReservationsAssets(actor), bountyBefore);
         _assertAllInvariants();
     }
 
     function test_AdversarialStarvedBatchesSettleFailuresAndBountiesWithoutSuccessfulExecution() public {
         handler.starveLiquidity(pool.totalAssets() - 10e6);
         assertEq(pool.totalAssets(), 10e6);
-        uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 treasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         uint256[4] memory balancesBefore;
         for (uint256 i; i < 4; ++i) {
-            balancesBefore[i] = clearinghouse.balanceUsdc(handler.actors(i));
+            balancesBefore[i] = clearinghouse.balanceAssets(handler.actors(i));
         }
         for (uint256 i; i < 33; ++i) {
             // Stale marks defer predictable-open validation to execution. Each batch refreshes the mark, so age it
@@ -1631,16 +1635,16 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         assertEq(handler.ghost_batchFailedOrders(), 33);
         assertEq(handler.ghost_batchExecutedOrders(), 0);
         assertEq(handler.ghost_batchBlockedAttempts(), 0);
-        assertEq(handler.ghost_batchBountyCreditsUsdc(), 33 * 200_000);
-        assertEq(clearinghouse.balanceUsdc(address(handler)), 33 * 200_000);
-        assertEq(clearinghouse.balanceUsdc(engine.protocolTreasury()), treasuryBefore);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore);
+        assertEq(handler.ghost_batchBountyCreditsAssets(), 33 * 200_000);
+        assertEq(clearinghouse.balanceAssets(address(handler)), 33 * 200_000);
+        assertEq(clearinghouse.balanceAssets(engine.protocolTreasury()), treasuryBefore);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore);
         assertEq(router.nextExecuteId(), 0);
         for (uint256 i; i < 4; ++i) {
             address actor = handler.actors(i);
-            assertEq(clearinghouse.balanceUsdc(actor), balancesBefore[i] - (i == 0 ? 9 : 8) * 200_000);
-            assertEq(clearinghouse.lockedMarginUsdc(actor), 0);
-            assertEq(clearinghouse.totalBountyReservationsUsdc(actor), 0);
+            assertEq(clearinghouse.balanceAssets(actor), balancesBefore[i] - (i == 0 ? 9 : 8) * 200_000);
+            assertEq(clearinghouse.lockedMarginAssets(actor), 0);
+            assertEq(clearinghouse.totalBountyReservationsAssets(actor), 0);
             assertEq(router.pendingOrderCounts(actor), 0);
         }
     }
@@ -1653,8 +1657,8 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         address actor = handler.actors(0);
         vm.prank(actor);
         uint64 orderId = router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 2000e6, 1e8, false);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(actor);
-        uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
+        uint256 balanceBefore = clearinghouse.balanceAssets(actor);
+        uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
         vm.warp(beforeFad + 1);
         assertTrue(engine.isFadWindow());
         handler.processBatch(1, 1e8);
@@ -1665,11 +1669,13 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
         assertEq(handler.ghost_batchTerminalOrders(), 0);
         assertEq(router.nextExecuteId(), orderId);
         assertEq(uint8(router.lifecycleBook().lifecycleStatus(orderId)), uint8(OrderV3Types.LifecycleStatus.Pending));
-        assertEq(clearinghouse.getOrderReservation(orderId).remainingAmountUsdc, 2000e6);
-        assertEq(clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId).amountUsdc, 200_000);
-        assertEq(clearinghouse.balanceUsdc(actor), balanceBefore);
-        assertEq(clearinghouse.balanceUsdc(address(handler)), 0);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore);
+        assertEq(clearinghouse.getOrderReservation(orderId).remainingAmountAssets, 2000e6);
+        assertEq(
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId).amountAssets, 200_000
+        );
+        assertEq(clearinghouse.balanceAssets(actor), balanceBefore);
+        assertEq(clearinghouse.balanceAssets(address(handler)), 0);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore);
         _assertAllInvariants();
     }
 
@@ -1719,11 +1725,11 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             engineProtocolLens.getProtocolAccountingSnapshot();
         IHousePool.PoolLiquidityView memory poolView = pool.getPoolLiquidityView();
 
-        assertEq(poolView.totalAssetsUsdc, protocolView.poolAssetsUsdc, "Pool and engine must agree on assets");
-        assertEq(poolView.freeUsdc, protocolView.freeUsdc, "Pool and engine must agree on free liquidity");
+        assertEq(poolView.totalAssets, protocolView.poolAssets, "Pool and engine must agree on assets");
+        assertEq(poolView.freeAssets, protocolView.freeAssets, "Pool and engine must agree on free liquidity");
         assertEq(
-            poolView.withdrawalReservedUsdc,
-            protocolView.withdrawalReservedUsdc,
+            poolView.withdrawalReservedAssets,
+            protocolView.withdrawalReservedAssets,
             "Pool and engine must agree on reserved liquidity"
         );
     }
@@ -1739,12 +1745,12 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
             "Terminal slippage failure must mark the head order failed"
         );
         assertEq(
-            handler.ghost_lastRetryableSlippageReservationUsdc(),
+            handler.ghost_lastRetryableSlippageReservationAssets(),
             0,
             "Terminal slippage failure must clear reserved bounty"
         );
         assertEq(
-            handler.ghost_lastRetryableSlippageRouterBalanceUsdc(),
+            handler.ghost_lastRetryableSlippageRouterBalanceAssets(),
             0,
             "Router must not custody bounty reserves after slippage failure"
         );
@@ -1794,28 +1800,28 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
     function _assertInvariant_AdversarialQueuedKeeperReserveNeverReturnsToTraderCollateral() internal view {
         for (uint256 i = 0; i < 4; i++) {
             address account = handler.actors(i);
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-            assertEq(buckets.freeSettlementUsdc + buckets.totalLockedMarginUsdc, buckets.settlementBalanceUsdc);
+            IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
+            assertEq(buckets.freeSettlementAssets + buckets.totalLockedMarginAssets, buckets.settlementBalanceAssets);
         }
     }
 
     function _assertActionReserveBacking() private view {
-        assertEq(usdc.balanceOf(address(router)), 0, "Router must not custody adversarial keeper reserves");
+        assertEq(settlementToken.balanceOf(address(router)), 0, "Router must not custody adversarial keeper reserves");
         for (uint256 i = 0; i < 4; i++) {
             address account = handler.actors(i);
-            uint256 protectedActionReserveUsdc =
-                clearinghouse.vpiRebateReserveUsdc(account) + _pendingExecutionBountyUsdc(account);
+            uint256 protectedActionReserveAssets =
+                clearinghouse.vpiRebateReserveAssets(account) + _pendingExecutionBountyAssets(account);
             assertEq(
-                clearinghouse.actionReserveUsdc(account),
-                protectedActionReserveUsdc,
+                clearinghouse.actionReserveAssets(account),
+                protectedActionReserveAssets,
                 "Action reserve must exactly back negative VPI and pending keeper bounties"
             );
         }
     }
 
-    function _pendingExecutionBountyUsdc(
+    function _pendingExecutionBountyAssets(
         address account
-    ) private view returns (uint256 pendingExecutionBountyUsdc) {
+    ) private view returns (uint256 pendingExecutionBountyAssets) {
         uint64 nextCommitId = router.nextCommitId();
         for (uint64 orderId = 1; orderId < nextCommitId; orderId++) {
             OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
@@ -1823,7 +1829,7 @@ contract AdversarialPerpInvariantTest is BasePerpTest {
                 record.status == IOrderRouterAccounting.OrderStatus.Pending && record.core.account == account
                     && record.core.sizeDelta != 0
             ) {
-                pendingExecutionBountyUsdc += record.executionBountyUsdc;
+                pendingExecutionBountyAssets += record.executionBountyAssets;
             }
         }
     }

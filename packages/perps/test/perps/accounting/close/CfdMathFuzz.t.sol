@@ -8,7 +8,7 @@ import {Test} from "forge-std/Test.sol";
 contract CfdMathFuzzTest is Test {
 
     uint256 constant CAP_PRICE = 2e8;
-    uint256 constant USDC_TO_TOKEN_SCALE = 1e20;
+    uint256 constant ASSETS_TO_TOKEN_SCALE = 1e20;
 
     CfdTypes.RiskParams params;
 
@@ -20,7 +20,7 @@ contract CfdMathFuzzTest is Test {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -28,16 +28,16 @@ contract CfdMathFuzzTest is Test {
     }
 
     function testFuzz_VpiExtremeDepthArithmeticDoesNotRevert(
-        uint256 depthUsdc,
+        uint256 depthAssets,
         uint256 preSkew,
         uint256 postSkew
     ) public view {
-        depthUsdc = bound(depthUsdc, 1, 1e6);
-        preSkew = bound(preSkew, 0, depthUsdc);
-        postSkew = bound(postSkew, 0, depthUsdc * 2);
+        depthAssets = bound(depthAssets, 1, 1e6);
+        preSkew = bound(preSkew, 0, depthAssets);
+        postSkew = bound(postSkew, 0, depthAssets * 2);
 
         // This property checks bounded arithmetic liveness; it does not assert the VPI amount or sign.
-        CfdMath.calculateVPI(preSkew, postSkew, depthUsdc, params.vpiFactor);
+        CfdMath.calculateVPI(preSkew, postSkew, depthAssets, params.vpiFactor);
     }
 
     function testFuzz_PnlNeverExceedsMaxProfit(
@@ -55,14 +55,14 @@ contract CfdMathFuzzTest is Test {
             size: size,
             margin: 0,
             entryPrice: entryPrice,
-            maxProfitUsdc: 0,
+            maxProfitAssets: 0,
             side: side,
             lastUpdateTime: 0,
             lastCarryTimestamp: 0,
             vpiAccrued: 0
         });
 
-        (bool isProfit, uint256 pnlUsdc) = CfdMath.calculateExactPnl(
+        (bool isProfit, uint256 pnlAssets) = CfdMath.calculateExactPnl(
             pos.size / CfdTypes.SIZE_QUANTUM,
             (pos.size / CfdTypes.SIZE_QUANTUM) * pos.entryPrice,
             pos.side,
@@ -74,7 +74,7 @@ contract CfdMathFuzzTest is Test {
         );
 
         if (isProfit) {
-            assertLe(pnlUsdc, maxProfit, "PnL exceeds max profit");
+            assertLe(pnlAssets, maxProfit, "PnL exceeds max profit");
         }
     }
 
@@ -91,7 +91,7 @@ contract CfdMathFuzzTest is Test {
             (size) / CfdTypes.SIZE_QUANTUM, ((size) / CfdTypes.SIZE_QUANTUM) * (entryPrice), side, CAP_PRICE
         );
 
-        assertLe(maxProfit, (size * CAP_PRICE) / USDC_TO_TOKEN_SCALE, "Max profit exceeds upper bound");
+        assertLe(maxProfit, (size * CAP_PRICE) / ASSETS_TO_TOKEN_SCALE, "Max profit exceeds upper bound");
     }
 
 }

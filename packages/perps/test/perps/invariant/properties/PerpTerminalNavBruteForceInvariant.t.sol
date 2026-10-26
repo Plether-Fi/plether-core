@@ -22,7 +22,7 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
     function setUp() public override {
         super.setUp();
 
-        handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
+        handler = new PerpAccountingHandler(settlementToken, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
 
         // Start every campaign with independently priced positions on both sides. This prevents an empty-book
@@ -110,8 +110,8 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         _assertSideEnumeration(CfdTypes.Side.LONG, totals.long);
         _assertSideEnumeration(CfdTypes.Side.SHORT, totals.short);
         assertEq(
-            totals.totalTraderClaimsUsdc,
-            engine.totalTraderClaimBalanceUsdc(),
+            totals.totalTraderClaimsAssets,
+            engine.totalTraderClaimBalanceAssets(),
             "Tracked accounts must exhaust Engine trader claims"
         );
 
@@ -126,13 +126,13 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         );
         assertEq(uint256(bookState.totalLots), totals.totalLots, "Book lots must match canonical Engine size");
         assertEq(
-            uint256(bookState.totalEntryCostUsdcAtoms),
-            totals.totalEntryCostUsdcAtoms,
+            uint256(bookState.totalEntryCostAssetAtoms),
+            totals.totalEntryCostAssetAtoms,
             "Book entry basis must match exact canonical basis"
         );
         assertEq(
-            uint256(bookState.totalEffectiveCapUsdcAtoms),
-            totals.totalEffectiveCapUsdcAtoms,
+            uint256(bookState.totalEffectiveCapAssetAtoms),
+            totals.totalEffectiveCapAssetAtoms,
             "Book cap budget must match canonical pledge, claim and contingent escrow caps"
         );
 
@@ -166,16 +166,18 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
 
         for (uint256 i = 0; i < markCount; ++i) {
             int256 expected = TerminalNavBruteForceModel.aggregateDeltaAt(accountStates, marks[i], capPrice);
-            int256 actual = book.terminalLpPriceDeltaUsdcAtoms(uint32(marks[i]));
+            int256 actual = book.terminalLpPriceDeltaAssetAtoms(uint32(marks[i]));
             assertEq(actual, expected, "Radix NAV must equal direct account payoff enumeration");
         }
 
         ICfdEngineTypes.TerminalNavSnapshot memory snapshot = engine.terminalNavSnapshot();
         int256 expectedLiveDelta =
             TerminalNavBruteForceModel.aggregateDeltaAt(accountStates, engine.lastMarkPrice(), capPrice);
-        assertEq(snapshot.terminalLpPriceDeltaUsdc, expectedLiveDelta, "Engine snapshot must expose brute-force delta");
+        assertEq(
+            snapshot.terminalLpPriceDeltaAssets, expectedLiveDelta, "Engine snapshot must expose brute-force delta"
+        );
         assertEq(uint256(snapshot.markPrice), engine.lastMarkPrice(), "Snapshot mark must be canonical Engine mark");
-        assertEq(snapshot.totalTraderClaimsUsdc, totals.totalTraderClaimsUsdc, "Snapshot claims must reconcile");
+        assertEq(snapshot.totalTraderClaimsAssets, totals.totalTraderClaimsAssets, "Snapshot claims must reconcile");
         assertEq(
             snapshot.hasOpenPositions,
             totals.activePositionCount != 0,
@@ -197,16 +199,16 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         CfdTypes.Side side,
         TerminalNavBruteForceModel.SideTotals memory expected
     ) internal view {
-        (uint256 maxProfitUsdc, uint256 openInterest, uint256 entryNotional, uint256 totalMargin) =
+        (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin) =
             engine.sides(uint256(side));
         assertEq(expected.size, openInterest, "Tracked positions must exhaust side open interest");
         assertEq(
-            expected.entryCostUsdcAtoms * CfdTypes.SIZE_QUANTUM,
+            expected.entryCostAssetAtoms * CfdTypes.SIZE_QUANTUM,
             entryNotional,
             "Tracked exact bases must exhaust side entry notional"
         );
-        assertEq(expected.maxProfitUsdc, maxProfitUsdc, "Tracked positions must exhaust side max profit");
-        assertEq(expected.pnlPledgeUsdc, totalMargin, "Tracked PnL pledges must exhaust side margin");
+        assertEq(expected.maxProfitAssets, maxProfitAssets, "Tracked positions must exhaust side max profit");
+        assertEq(expected.pnlPledgeAssets, totalMargin, "Tracked PnL pledges must exhaust side margin");
     }
 
     function _appendNeighborhood(
@@ -256,13 +258,13 @@ contract PerpTerminalNavBruteForceInvariantTest is BasePerpInvariantTest {
         address account = handler.actorAt(0);
         (uint256 size,, uint256 displayEntryPrice,,,,) = engine.positions(account);
         uint256 lots = size / CfdTypes.SIZE_QUANTUM;
-        uint256 exactEntryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
+        uint256 exactEntryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
         assertEq(lots, 20, "Partial-close seed must leave the intended residual lots");
         assertGt(
-            exactEntryCostUsdcAtoms, lots * displayEntryPrice, "Partial-close seed must preserve exact entry-cost dust"
+            exactEntryCostAssetAtoms, lots * displayEntryPrice, "Partial-close seed must preserve exact entry-cost dust"
         );
         assertGt(
-            engine.traderClaimBalanceUsdc(account),
+            engine.traderClaimBalanceAssets(account),
             0,
             "Partial-close seed must leave a same-account claim on a live position"
         );

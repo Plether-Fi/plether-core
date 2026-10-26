@@ -26,7 +26,7 @@ interface ICfdClosePreviewRouter {
     function liquidationBatchSidecar() external view returns (address);
     function lifecycleBook() external view returns (IOrderLifecycleBook);
 
-    function minOpenNotionalUsdc() external view returns (uint256);
+    function minOpenNotionalAssets() external view returns (uint256);
 
 }
 
@@ -39,7 +39,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
 
     struct ClosePreview {
         CfdEnginePlanTypes.CloseCommitment commitment;
-        uint256 commitmentCarryUsdc;
+        uint256 commitmentCarryAssets;
         OrderV3Types.ExecutionAssessment assessment;
         /// @notice Nonzero for an exact retry: commitment and assessment remain empty because no new close is submitted.
         uint64 replayOrderId;
@@ -64,7 +64,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         if (preview.replayOrderId != 0) {
             return preview;
         }
-        if (request.bounds.minPostSettlementBalanceUsdc != 0) {
+        if (request.bounds.minPostSettlementBalanceAssets != 0) {
             revert IOrderRouterErrors.OrderRouter__SettlementFloorUnsupported();
         }
         CfdEnginePlanTypes.RawSnapshot memory snapshot;
@@ -79,7 +79,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
             ICfdEnginePlanner planner = ICfdEnginePlanner(engine.planner());
             snapshot = _buildRawSnapshot(engine, planner, account, IHousePool(engine.pool()).totalAssets());
             preview.commitment = CloseCommitmentLib.project(snapshot, request.sizeDelta);
-            preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
+            preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
             delta = planner.planClose(snapshot, _requestOrder(account, request), executionPrice);
         }
         preview.assessment = _evaluateClose(snapshot, delta, request.bounds, 0, executor == account);
@@ -107,7 +107,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
     }
 
     /// @notice Projects commitment now and close execution at the supplied price, using canonical pool depth.
-    /// @dev Includes commitment carry in the assessment and reports it separately in commitmentCarryUsdc. No future
+    /// @dev Includes commitment carry in the assessment and reports it separately in commitmentCarryAssets. No future
     ///      carry, oracle update, router queue admission, deadline or config-hash validation is simulated. Side and dust
     ///      checks use the live position; pending opens/closes can change the router's queued projection. Re-preview
     ///      if state changes.
@@ -156,7 +156,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
     ) private view returns (ClosePreview memory preview) {
         _validateRouterCommit(snapshot, order, router);
         preview.commitment = CloseCommitmentLib.project(snapshot, order.sizeDelta);
-        preview.commitmentCarryUsdc = preview.commitment.carryCollectedUsdc;
+        preview.commitmentCarryAssets = preview.commitment.carryCollectedAssets;
         CfdEnginePlanTypes.CloseDelta memory delta = planner.planClose(snapshot, order, executionPrice);
         preview.assessment = _evaluateClose(snapshot, delta, bounds, 0, executor == order.account);
         _includeCommitment(preview.assessment, preview.commitment, bounds, 0);
@@ -187,7 +187,7 @@ contract CfdClosePreview is CfdOrderPolicyEvaluatorBase {
         commitPrice = Math.min(commitPrice, snapshot.capPrice);
         if (
             Math.mulDiv(order.sizeDelta, commitPrice, CfdTypes.SIZE_QUANTUM)
-                < ICfdClosePreviewRouter(router).minOpenNotionalUsdc()
+                < ICfdClosePreviewRouter(router).minOpenNotionalAssets()
         ) {
             revert IOrderRouterErrors.OrderRouter__CommitValidation(11);
         }

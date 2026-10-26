@@ -32,7 +32,7 @@ abstract contract OrderValidation is OrderBountyAccounting {
         request.executor = executor;
         request.observedConfigHash = lifecycleBook.currentExecutionConfigHash();
         request.neutralMarkPrice = neutralMarkPrice;
-        request.poolDepthUsdc = housePool.totalAssets();
+        request.poolDepthAssets = housePool.totalAssets();
         request.bountyAccountingPrice = neutralMarkPrice;
         request.bountyAccountingPublishTime = engine.lastMarkTime();
         return IOrderRouterExecutionHost(address(this)).executeOrderItemFromSidecar(request);

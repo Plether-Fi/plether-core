@@ -23,19 +23,19 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
 
     function _protectionBountiesToForfeitOnLiquidation(
         address account
-    ) internal override(PositionProtectionHandler, OrderBountyAccounting) returns (uint256 forfeitedUsdc) {
+    ) internal override(PositionProtectionHandler, OrderBountyAccounting) returns (uint256 forfeitedAssets) {
         return PositionProtectionHandler._protectionBountiesToForfeitOnLiquidation(account);
     }
 
     function _failPendingOpenProtectionForRiskOff(
         uint64 parentOrderId,
         address account
-    ) internal returns (uint256 refundableProtectionBountyUsdc) {
+    ) internal returns (uint256 refundableProtectionBountyAssets) {
         return positionProtectionBook.failPendingOpenForRiskOff(parentOrderId, account);
     }
 
     /// @notice Applies the pre-oracle portion of a finalized configuration after admin authentication.
-    /// @dev Time values are seconds, monetary values are 6-decimal USDC, ratios are basis points, gas is
+    /// @dev Time values are seconds, monetary values are 6-decimal settlement token, ratios are basis points, gas is
     ///      unscaled gas units, and count limits are unscaled. The admin validates bounds before forwarding.
     /// @param config Timelocked configuration finalized by this router's admin.
     function _applyRouterConfig(
@@ -43,7 +43,7 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
     ) internal {
         _onlyAdmin();
         maxExecutionWindowSeconds = config.maxExecutionWindowSeconds;
-        minOpenNotionalUsdc = config.minOpenNotionalUsdc;
+        minOpenNotionalAssets = config.minOpenNotionalAssets;
     }
 
     /// @notice Applies the post-oracle Router fields of an authenticated finalized configuration.
@@ -53,9 +53,9 @@ abstract contract OrderHandler is PositionProtectionHandler, OrderExecutionHandl
         IOrderRouterAdminHost.RouterConfig calldata config
     ) internal {
         openOrderExecutionBountyBps = config.openOrderExecutionBountyBps;
-        minOpenOrderExecutionBountyUsdc = config.minOpenOrderExecutionBountyUsdc;
-        maxOpenOrderExecutionBountyUsdc = config.maxOpenOrderExecutionBountyUsdc;
-        positionProtectionTriggerBountyUsdc = config.positionProtectionTriggerBountyUsdc;
+        minOpenOrderExecutionBountyAssets = config.minOpenOrderExecutionBountyAssets;
+        maxOpenOrderExecutionBountyAssets = config.maxOpenOrderExecutionBountyAssets;
+        positionProtectionTriggerBountyAssets = config.positionProtectionTriggerBountyAssets;
         maxPendingOrders = config.maxPendingOrders;
         minEngineGas = config.minEngineGas;
         maxPruneOrdersPerCall = config.maxPruneOrdersPerCall;

@@ -21,7 +21,7 @@ import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAc
 /// @notice Rich per-account diagnostic lens for audits, tests, and operator tooling.
 /// @dev This permissionless lens is intentionally wider than the product-facing `PerpsPublicLens` surface. It reads
 ///      cached engine and dependency state only: it does not fetch an oracle update, refresh the mark, checkpoint carry,
-///      or mutate account state. Unless stated otherwise, USDC amounts use 6 decimals, prices use 8 decimals, sizes use
+///      or mutate account state. Unless stated otherwise, settlement token amounts use 6 decimals, prices use 8 decimals, sizes use
 ///      18 decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds. Dependency reverts
 ///      and ABI-decoding failures are propagated.
 contract CfdEngineAccountLens is ICfdEngineAccountLens {
@@ -40,35 +40,35 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     }
 
     /// @notice Returns clearinghouse custody buckets, settlement reachability, and the exact terminal price cap.
-    /// @dev `settlementBalanceUsdc` includes locked value; `lockedMarginUsdc` is the sum of all typed locked buckets;
-    ///      `closeReachableUsdc` is exactly free settlement, not a complete close-settlement bound; and terminal
+    /// @dev `settlementBalanceAssets` includes locked value; `lockedMarginAssets` is the sum of all typed locked buckets;
+    ///      `closeReachableAssets` is exactly free settlement, not a complete close-settlement bound; and terminal
     ///      liquidation settlement reachability is `max(settlement balance - router execution-bounty reserve, 0)`.
     ///      That liquidation-only value can include buckets released by liquidation; it is distinct from the exact
     ///      terminal price collectible cap, which is the live position's PnL pledge plus same-account claim clipped to
-    ///      its maximum endpoint loss. `accountEquityUsdc` is clearinghouse settlement balance rather than mark-to-market
+    ///      its maximum endpoint loss. `accountEquityAssets` is clearinghouse settlement balance rather than mark-to-market
     ///      equity, while free buying power excludes all locked buckets. This function does not project PnL or carry.
     ///      The execution-bounty reserve is read directly from the clearinghouse.
     /// @param account Clearinghouse account to inspect.
-    /// @return viewData Current custody and claim values; every monetary field uses 6-decimal USDC units.
+    /// @return viewData Current custody and claim values; every monetary field uses 6-decimal settlement token units.
     function getAccountCollateralView(
         address account
     ) external view returns (ICfdEngineTypes.AccountCollateralView memory viewData) {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            engineContract.clearinghouse().getAccountUsdcBuckets(account);
-        viewData.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
-        viewData.lockedMarginUsdc = buckets.totalLockedMarginUsdc;
-        viewData.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
-        viewData.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
-        viewData.freeSettlementUsdc = buckets.freeSettlementUsdc;
-        viewData.closeReachableUsdc = buckets.freeSettlementUsdc;
-        uint256 executionBountyReserveUsdc = engineContract.clearinghouse().totalBountyReservationsUsdc(account);
-        viewData.liquidationReachableSettlementUsdc = buckets.settlementBalanceUsdc > executionBountyReserveUsdc
-            ? buckets.settlementBalanceUsdc - executionBountyReserveUsdc
+        IMarginClearinghouse.AccountAssetBuckets memory buckets =
+            engineContract.clearinghouse().getAccountAssetBuckets(account);
+        viewData.settlementBalanceAssets = buckets.settlementBalanceAssets;
+        viewData.lockedMarginAssets = buckets.totalLockedMarginAssets;
+        viewData.activePositionMarginAssets = buckets.activePositionMarginAssets;
+        viewData.otherLockedMarginAssets = buckets.otherLockedMarginAssets;
+        viewData.freeSettlementAssets = buckets.freeSettlementAssets;
+        viewData.closeReachableAssets = buckets.freeSettlementAssets;
+        uint256 executionBountyReserveAssets = engineContract.clearinghouse().totalBountyReservationsAssets(account);
+        viewData.liquidationReachableSettlementAssets = buckets.settlementBalanceAssets > executionBountyReserveAssets
+            ? buckets.settlementBalanceAssets - executionBountyReserveAssets
             : 0;
-        viewData.terminalPriceCollectibleCapUsdc = _terminalPriceCollectibleCapUsdc(account, _position(account));
-        viewData.accountEquityUsdc = buckets.settlementBalanceUsdc;
-        viewData.freeBuyingPowerUsdc = buckets.freeSettlementUsdc;
-        viewData.traderClaimBalanceUsdc = engineContract.traderClaimBalanceUsdc(account);
+        viewData.terminalPriceCollectibleCapAssets = _terminalPriceCollectibleCapAssets(account, _position(account));
+        viewData.accountEquityAssets = buckets.settlementBalanceAssets;
+        viewData.freeBuyingPowerAssets = buckets.freeSettlementAssets;
+        viewData.traderClaimBalanceAssets = engineContract.traderClaimBalanceAssets(account);
     }
 
     /// @notice Estimates the same-state withdrawal ceiling under the engine's open-position risk policy.
@@ -83,28 +83,28 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ///      is withdrawable only when the position clears the stricter of initial margin and the active FAD or maintenance
     ///      requirement. This view does not checkpoint carry.
     /// @param account Clearinghouse account to inspect.
-    /// @return withdrawableUsdc Estimated upper bound in 6-decimal USDC units.
-    function getWithdrawableUsdc(
+    /// @return withdrawableAssets Estimated upper bound in 6-decimal settlement token units.
+    function getWithdrawableAssets(
         address account
-    ) external view returns (uint256 withdrawableUsdc) {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets =
-            engineContract.clearinghouse().getAccountUsdcBuckets(account);
-        withdrawableUsdc = buckets.freeSettlementUsdc;
+    ) external view returns (uint256 withdrawableAssets) {
+        IMarginClearinghouse.AccountAssetBuckets memory buckets =
+            engineContract.clearinghouse().getAccountAssetBuckets(account);
+        withdrawableAssets = buckets.freeSettlementAssets;
 
         CfdTypes.Position memory pos = _position(account);
         if (pos.size == 0) {
             (, uint256 minimum, uint256 maxDebit) = OrderSettlementFloorLib.load(engineContract.orderRouter(), account);
             if (minimum != 0) {
-                uint256 balance = buckets.settlementBalanceUsdc;
+                uint256 balance = buckets.settlementBalanceAssets;
                 if (balance < minimum || balance - minimum < maxDebit) {
                     return 0;
                 }
                 uint256 surplus = balance - minimum - maxDebit;
-                if (surplus < withdrawableUsdc) {
-                    withdrawableUsdc = surplus;
+                if (surplus < withdrawableAssets) {
+                    withdrawableAssets = surplus;
                 }
             }
-            return withdrawableUsdc;
+            return withdrawableAssets;
         }
         if (engineContract.degradedMode()) {
             return 0;
@@ -134,36 +134,37 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
 
         MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
         (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
-        if (carryConsumption.uncoveredUsdc != 0) {
+        if (carryConsumption.uncoveredAssets != 0) {
             return 0;
         }
 
-        withdrawableUsdc = buckets.freeSettlementUsdc;
-        if (!_isWithdrawablePositionHealthy(account, pos, buckets.activePositionMarginUsdc, price)) {
+        withdrawableAssets = buckets.freeSettlementAssets;
+        if (!_isWithdrawablePositionHealthy(account, pos, buckets.activePositionMarginAssets, price)) {
             return 0;
         }
-        return withdrawableUsdc;
+        return withdrawableAssets;
     }
 
     function _isWithdrawablePositionHealthy(
         address account,
         CfdTypes.Position memory pos,
-        uint256 activePositionMarginUsdc,
+        uint256 activePositionMarginAssets,
         uint256 price
     ) private view returns (bool) {
         CfdTypes.RiskParams memory params = _riskParams();
         uint256 currentMarginBps = engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps;
         uint256 effectiveMarginBps = params.initMarginBps > currentMarginBps ? params.initMarginBps : currentMarginBps;
-        if (engineContract.clearinghouse().vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(pos.vpiAccrued)) {
+        if (engineContract.clearinghouse().vpiRebateReserveAssets(account) < _negativeVpiReserveTarget(pos.vpiAccrued))
+        {
             return false;
         }
-        uint256 riskCollateralUsdc = activePositionMarginUsdc + engineContract.traderClaimBalanceUsdc(account);
+        uint256 riskCollateralAssets = activePositionMarginAssets + engineContract.traderClaimBalanceAssets(account);
         PositionRiskAccountingLib.PositionRiskState memory riskState = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,
-            engineContract.positionEntryCostUsdcAtoms(account),
+            engineContract.positionEntryCostAssetAtoms(account),
             price,
             engineContract.CAP_PRICE(),
-            riskCollateralUsdc,
+            riskCollateralAssets,
             effectiveMarginBps
         );
         return !riskState.liquidatable;
@@ -174,18 +175,18 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ///      therefore requires a configured ABI-compatible order router and, when nonzero borrow-base carry must be
     ///      projected for an open position, a compatible pool.
     /// @param account Clearinghouse account to inspect.
-    /// @return viewData Custody, router reservation, claim, and pending-order values; monetary fields use 6-decimal USDC.
+    /// @return viewData Custody, router reservation, claim, and pending-order values; monetary fields use 6-decimal settlement token.
     function getAccountLedgerView(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerView memory viewData) {
         AccountLensViewTypes.AccountLedgerSnapshot memory snapshot = _buildAccountLedgerSnapshot(account);
-        viewData.settlementBalanceUsdc = snapshot.settlementBalanceUsdc;
-        viewData.freeSettlementUsdc = snapshot.freeSettlementUsdc;
-        viewData.activePositionMarginUsdc = snapshot.activePositionMarginUsdc;
-        viewData.otherLockedMarginUsdc = snapshot.otherLockedMarginUsdc;
-        viewData.executionBountyReserveUsdc = snapshot.executionBountyReserveUsdc;
-        viewData.committedMarginUsdc = snapshot.committedMarginUsdc;
-        viewData.traderClaimBalanceUsdc = snapshot.traderClaimBalanceUsdc;
+        viewData.settlementBalanceAssets = snapshot.settlementBalanceAssets;
+        viewData.freeSettlementAssets = snapshot.freeSettlementAssets;
+        viewData.activePositionMarginAssets = snapshot.activePositionMarginAssets;
+        viewData.otherLockedMarginAssets = snapshot.otherLockedMarginAssets;
+        viewData.executionBountyReserveAssets = snapshot.executionBountyReserveAssets;
+        viewData.committedMarginAssets = snapshot.committedMarginAssets;
+        viewData.traderClaimBalanceAssets = snapshot.traderClaimBalanceAssets;
         viewData.pendingOrderCount = snapshot.pendingOrderCount;
     }
 
@@ -202,7 +203,7 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ///      including net equity, at its zero default. Projecting nonzero borrow-base carry additionally requires a
     ///      compatible pool.
     /// @param account Clearinghouse account to inspect.
-    /// @return snapshot Expanded account snapshot; USDC values use 6 decimals, size 18, and entry price 8.
+    /// @return snapshot Expanded account snapshot; settlement token values use 6 decimals, size 18, and entry price 8.
     function getAccountLedgerSnapshot(
         address account
     ) external view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
@@ -217,38 +218,39 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     ) internal view returns (AccountLensViewTypes.AccountLedgerSnapshot memory snapshot) {
         CfdTypes.Position memory pos = _position(account);
         IMarginClearinghouse clearinghouse = engineContract.clearinghouse();
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedBuckets = clearinghouse.getLockedMarginBuckets(account);
         IOrderRouterAccounting.AccountReservationView memory reservation =
             IOrderRouterAccounting(engineContract.orderRouter()).getAccountReservations(account);
 
-        snapshot.settlementBalanceUsdc = buckets.settlementBalanceUsdc;
-        snapshot.freeSettlementUsdc = buckets.freeSettlementUsdc;
-        snapshot.activePositionMarginUsdc = buckets.activePositionMarginUsdc;
-        snapshot.otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
-        snapshot.positionMarginBucketUsdc = lockedBuckets.positionMarginUsdc;
-        snapshot.committedOrderMarginBucketUsdc = lockedBuckets.committedOrderMarginUsdc;
-        snapshot.reservedSettlementBucketUsdc = lockedBuckets.reservedSettlementUsdc;
-        snapshot.executionBountyReserveUsdc = reservation.executionBountyUsdc;
-        snapshot.committedMarginUsdc = reservation.committedMarginUsdc;
-        snapshot.traderClaimBalanceUsdc = engineContract.traderClaimBalanceUsdc(account);
+        snapshot.settlementBalanceAssets = buckets.settlementBalanceAssets;
+        snapshot.freeSettlementAssets = buckets.freeSettlementAssets;
+        snapshot.activePositionMarginAssets = buckets.activePositionMarginAssets;
+        snapshot.otherLockedMarginAssets = buckets.otherLockedMarginAssets;
+        snapshot.positionMarginBucketAssets = lockedBuckets.positionMarginAssets;
+        snapshot.committedOrderMarginBucketAssets = lockedBuckets.committedOrderMarginAssets;
+        snapshot.reservedSettlementBucketAssets = lockedBuckets.reservedSettlementAssets;
+        snapshot.executionBountyReserveAssets = reservation.executionBountyAssets;
+        snapshot.committedMarginAssets = reservation.committedMarginAssets;
+        snapshot.traderClaimBalanceAssets = engineContract.traderClaimBalanceAssets(account);
         snapshot.pendingOrderCount = reservation.pendingOrderCount;
-        snapshot.closeReachableUsdc = buckets.freeSettlementUsdc;
-        uint256 reservationExcludedSettlementUsdc = buckets.settlementBalanceUsdc > reservation.executionBountyUsdc
-            ? buckets.settlementBalanceUsdc - reservation.executionBountyUsdc
+        snapshot.closeReachableAssets = buckets.freeSettlementAssets;
+        uint256 reservationExcludedSettlementAssets = buckets.settlementBalanceAssets
+            > reservation.executionBountyAssets
+            ? buckets.settlementBalanceAssets - reservation.executionBountyAssets
             : 0;
-        IMarginClearinghouse.AccountUsdcBuckets memory terminalBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: reservationExcludedSettlementUsdc,
-            totalLockedMarginUsdc: buckets.totalLockedMarginUsdc,
-            activePositionMarginUsdc: buckets.activePositionMarginUsdc,
-            otherLockedMarginUsdc: buckets.otherLockedMarginUsdc,
-            freeSettlementUsdc: buckets.freeSettlementUsdc
+        IMarginClearinghouse.AccountAssetBuckets memory terminalBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: reservationExcludedSettlementAssets,
+            totalLockedMarginAssets: buckets.totalLockedMarginAssets,
+            activePositionMarginAssets: buckets.activePositionMarginAssets,
+            otherLockedMarginAssets: buckets.otherLockedMarginAssets,
+            freeSettlementAssets: buckets.freeSettlementAssets
         });
-        snapshot.liquidationReachableSettlementUsdc =
-            MarginClearinghouseAccountingLib.getTerminalReachableUsdc(terminalBuckets);
-        snapshot.terminalPriceCollectibleCapUsdc = _terminalPriceCollectibleCapUsdc(account, pos);
-        snapshot.accountEquityUsdc = buckets.settlementBalanceUsdc;
-        snapshot.freeBuyingPowerUsdc = buckets.freeSettlementUsdc;
+        snapshot.liquidationReachableSettlementAssets =
+            MarginClearinghouseAccountingLib.getTerminalReachableAssets(terminalBuckets);
+        snapshot.terminalPriceCollectibleCapAssets = _terminalPriceCollectibleCapAssets(account, pos);
+        snapshot.accountEquityAssets = buckets.settlementBalanceAssets;
+        snapshot.freeBuyingPowerAssets = buckets.freeSettlementAssets;
 
         if (pos.size == 0) {
             return snapshot;
@@ -259,10 +261,10 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
         snapshot.hasPosition = true;
         snapshot.side = pos.side;
         snapshot.size = pos.size;
-        snapshot.margin = lockedBuckets.positionMarginUsdc;
+        snapshot.margin = lockedBuckets.positionMarginAssets;
         snapshot.entryPrice = pos.entryPrice;
-        snapshot.unrealizedPnlUsdc = riskState.unrealizedPnlUsdc;
-        snapshot.netEquityUsdc = riskState.equityUsdc;
+        snapshot.unrealizedPnlAssets = riskState.unrealizedPnlAssets;
+        snapshot.netEquityAssets = riskState.equityAssets;
         snapshot.liquidatable = riskState.liquidatable;
     }
 
@@ -276,24 +278,25 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function _buildSnapshotRiskState(
         address account,
         CfdTypes.Position memory pos,
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+        IMarginClearinghouse.AccountAssetBuckets memory buckets
     ) internal view returns (PositionRiskAccountingLib.PositionRiskState memory) {
         CfdTypes.RiskParams memory params = _riskParams();
         MarginClearinghouseAccountingLib.SettlementConsumption memory carryConsumption;
         (carryConsumption, buckets) = _projectAccountCarry(account, pos, buckets);
         bool vpiReserveUnderfunded =
-            engineContract.clearinghouse().vpiRebateReserveUsdc(account) < _negativeVpiReserveTarget(pos.vpiAccrued);
-        uint256 riskCollateralUsdc = buckets.activePositionMarginUsdc + engineContract.traderClaimBalanceUsdc(account);
+            engineContract.clearinghouse().vpiRebateReserveAssets(account) < _negativeVpiReserveTarget(pos.vpiAccrued);
+        uint256 riskCollateralAssets =
+            buckets.activePositionMarginAssets + engineContract.traderClaimBalanceAssets(account);
 
         PositionRiskAccountingLib.PositionRiskState memory state = PositionRiskAccountingLib.buildExactPriceRiskState(
             pos,
-            engineContract.positionEntryCostUsdcAtoms(account),
+            engineContract.positionEntryCostAssetAtoms(account),
             engineContract.lastMarkPrice(),
             engineContract.CAP_PRICE(),
-            riskCollateralUsdc,
+            riskCollateralAssets,
             engineContract.isFadWindow() ? params.fadMarginBps : params.maintMarginBps
         );
-        if (carryConsumption.uncoveredUsdc != 0 || vpiReserveUnderfunded) {
+        if (carryConsumption.uncoveredAssets != 0 || vpiReserveUnderfunded) {
             state.liquidatable = true;
         }
         return state;
@@ -303,47 +306,49 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function _projectAccountCarry(
         address account,
         CfdTypes.Position memory pos,
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets
+        IMarginClearinghouse.AccountAssetBuckets memory buckets
     )
         private
         view
         returns (
             MarginClearinghouseAccountingLib.SettlementConsumption memory consumption,
-            IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets
+            IMarginClearinghouse.AccountAssetBuckets memory afterBuckets
         )
     {
         return MarginClearinghouseAccountingLib.projectCarryLoss(
-            buckets, engineContract.unsettledCarryUsdc(account) + _elapsedCarryUsdc(account, pos)
+            buckets, engineContract.unsettledCarryAssets(account) + _elapsedCarryAssets(account, pos)
         );
     }
 
     function _negativeVpiReserveTarget(
-        int256 vpiAccruedUsdc
-    ) private pure returns (uint256 targetUsdc) {
-        if (vpiAccruedUsdc < 0) {
-            targetUsdc = uint256(-(vpiAccruedUsdc + 1)) + 1;
+        int256 vpiAccruedAssets
+    ) private pure returns (uint256 targetAssets) {
+        if (vpiAccruedAssets < 0) {
+            targetAssets = uint256(-(vpiAccruedAssets + 1)) + 1;
         }
     }
 
     /// @notice Returns the exact account-local cap committed to the terminal price-PnL book.
     /// @dev Only the PnL pledge and same-account claim contribute for a live position. The cap is clipped at the
     ///      side endpoint; action reserves and zero-bounty close records do not add price-loss backing.
-    function _terminalPriceCollectibleCapUsdc(
+    function _terminalPriceCollectibleCapAssets(
         address account,
         CfdTypes.Position memory pos
-    ) internal view returns (uint256 effectiveCapUsdc) {
+    ) internal view returns (uint256 effectiveCapAssets) {
         if (pos.size == 0) {
             return 0;
         }
 
         uint256 lots = CfdMath.sizeToLots(pos.size);
-        uint256 entryCostUsdcAtoms = engineContract.positionEntryCostUsdcAtoms(account);
-        uint256 maximumCollectibleUsdc = pos.side == CfdTypes.Side.LONG
-            ? lots * engineContract.CAP_PRICE() - entryCostUsdcAtoms
-            : entryCostUsdcAtoms;
+        uint256 entryCostAssetAtoms = engineContract.positionEntryCostAssetAtoms(account);
+        uint256 maximumCollectibleAssets = pos.side == CfdTypes.Side.LONG
+            ? lots * engineContract.CAP_PRICE() - entryCostAssetAtoms
+            : entryCostAssetAtoms;
         IMarginClearinghouse clearinghouse = engineContract.clearinghouse();
-        uint256 candidateCapUsdc = clearinghouse.pnlPledgeUsdc(account) + engineContract.traderClaimBalanceUsdc(account);
-        effectiveCapUsdc = candidateCapUsdc < maximumCollectibleUsdc ? candidateCapUsdc : maximumCollectibleUsdc;
+        uint256 candidateCapAssets =
+            clearinghouse.pnlPledgeAssets(account) + engineContract.traderClaimBalanceAssets(account);
+        effectiveCapAssets =
+            candidateCapAssets < maximumCollectibleAssets ? candidateCapAssets : maximumCollectibleAssets;
     }
 
     /// @notice Reconstructs the current position plus its separately stored carry timestamp.
@@ -352,32 +357,32 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
     function _position(
         address account
     ) internal view returns (CfdTypes.Position memory pos) {
-        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitUsdc, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
+        (pos.size, pos.margin, pos.entryPrice, pos.maxProfitAssets, pos.side, pos.lastUpdateTime, pos.vpiAccrued) =
             engineContract.positions(account);
         (,, pos.lastCarryTimestamp) = engineContract.positionCarryState(account);
     }
 
     /// @notice Computes indexed carry accrued since the position's last side-index checkpoint.
-    /// @dev This excludes carry already stored in `unsettledCarryUsdc`.
+    /// @dev This excludes carry already stored in `unsettledCarryAssets`.
     /// @param account Account whose carry basis is loaded.
     /// @param pos Current position, used to select the side index.
-    /// @return Elapsed carry in 6-decimal USDC units.
-    function _elapsedCarryUsdc(
+    /// @return Elapsed carry in 6-decimal settlement token units.
+    function _elapsedCarryAssets(
         address account,
         CfdTypes.Position memory pos
     ) internal view returns (uint256) {
         if (pos.size == 0) {
             return 0;
         }
-        (uint256 borrowBaseUsdc, uint256 startIndex,) = engineContract.positionCarryState(account);
-        if (borrowBaseUsdc == 0) {
+        (uint256 borrowBaseAssets, uint256 startIndex,) = engineContract.positionCarryState(account);
+        if (borrowBaseAssets == 0) {
             return 0;
         }
         uint256 endIndex = _currentSideCarryIndex(pos.side);
         if (endIndex <= startIndex) {
             return 0;
         }
-        return PositionRiskAccountingLib.computeIndexedCarryUsdc(borrowBaseUsdc, endIndex - startIndex);
+        return PositionRiskAccountingLib.computeIndexedCarryAssets(borrowBaseAssets, endIndex - startIndex);
     }
 
     /// @notice Projects a side's cumulative carry index through the current block timestamp.
@@ -392,9 +397,9 @@ contract CfdEngineAccountLens is ICfdEngineAccountLens {
             engineContract.sideCarryIndex(sideIndex),
             engineContract.sideCarryTimestamp(sideIndex),
             block.timestamp,
-            engineContract.sideBorrowBaseUsdc(sideIndex),
-            PositionRiskAccountingLib.computeNetPoolDepthUsdc(
-                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceUsdc()
+            engineContract.sideBorrowBaseAssets(sideIndex),
+            PositionRiskAccountingLib.computeNetPoolDepthAssets(
+                engineContract.pool().totalAssets(), engineContract.totalTraderClaimBalanceAssets()
             ),
             baseCarryBps
         );

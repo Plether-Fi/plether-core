@@ -4,9 +4,9 @@ pragma solidity 0.8.35;
 import {LiquidationReferenceMath} from "../../invariant/ghost/LiquidationReferenceMath.sol";
 import {Test} from "forge-std/Test.sol";
 
-/// @notice Literal liquidation vectors checked in USDC atoms independently of production accounting.
+/// @notice Literal liquidation vectors checked in settlement token atoms independently of production accounting.
 /// @dev Inputs start after direct carry collection. A lot is 100 tokens, so lots times an eight-decimal
-/// price is a six-decimal USDC amount. No execution fixture, production helper, or Python runtime is required.
+/// price is a six-decimal settlement token amount. No execution fixture, production helper, or Python runtime is required.
 contract LiquidationReferenceMathTest is Test {
 
     function test_ClaimFirstLossLeavesOldClaimAndPledgeIntact() public pure {

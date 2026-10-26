@@ -28,13 +28,13 @@ contract FullCloseActionChargePlanTest is Test {
         uint256 action
     ) private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         snap = _positionSnapshot(pledge);
-        snap.liquidationReserveUsdc = liquidationReserve;
-        snap.actionReserveUsdc = action;
-        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountUsdcBuckets(
+        snap.liquidationReserveAssets = liquidationReserve;
+        snap.actionReserveAssets = action;
+        snap.accountBuckets = MarginClearinghouseAccountingLib.buildIsolatedAccountAssetBuckets(
             pledge + liquidationReserve + free + committed + action, pledge, liquidationReserve, committed, action
         );
         snap.lockedBuckets = IMarginClearinghouse.LockedMarginBuckets(
-            pledge, committed, action, snap.accountBuckets.totalLockedMarginUsdc
+            pledge, committed, action, snap.accountBuckets.totalLockedMarginAssets
         );
     }
 
@@ -45,20 +45,20 @@ contract FullCloseActionChargePlanTest is Test {
         snap.account = address(0xA11CE);
         snap.capPrice = 2e8;
         snap.position = CfdTypes.Position(SIZE, pledge, PRICE, 10_000e6, CfdTypes.Side.LONG, 1, 1, 0);
-        snap.positionEntryCostUsdcAtoms = CfdMath.sizeToLots(SIZE) * PRICE;
-        snap.positionBorrowBaseUsdc = pledge < 10_000e6 ? 10_000e6 - pledge : 0;
+        snap.positionEntryCostAssetAtoms = CfdMath.sizeToLots(SIZE) * PRICE;
+        snap.positionBorrowBaseAssets = pledge < 10_000e6 ? 10_000e6 - pledge : 0;
         snap.longSide = CfdEnginePlanTypes.SideSnapshot(
             10_000e6,
             SIZE,
-            snap.positionEntryCostUsdcAtoms * CfdMath.USDC_TO_TOKEN_SCALE,
+            snap.positionEntryCostAssetAtoms * CfdMath.ASSETS_TO_TOKEN_SCALE,
             pledge,
-            snap.positionBorrowBaseUsdc,
+            snap.positionBorrowBaseAssets,
             0
         );
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = snap.poolAssetsUsdc;
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = snap.poolAssets;
         snap.executionFeeBps = 10;
-        snap.riskParams.minBountyUsdc = 1e6;
+        snap.riskParams.minBountyAssets = 1e6;
         snap.riskParams.bountyBps = 10;
         snap.riskParams.maintMarginBps = 100;
     }
@@ -93,25 +93,25 @@ contract FullCloseActionChargePlanTest is Test {
     ) private view {
         CfdEnginePlanTypes.CloseDelta memory d = _plan(_snapshot(pledge, reserve, 0, 0, 0), PRICE, SIZE);
         assertTrue(d.valid);
-        assertEq(d.actionChargeAssessedUsdc, FEE);
-        assertEq(d.actionChargeCollectedUsdc, collected);
-        assertEq(d.actionChargeWaivedUsdc, waived);
-        assertEq(d.safeMarginReleaseUsdc, pledge);
-        assertEq(d.actionChargeFromReleasedMarginUsdc, collected > reserve ? collected - reserve : 0);
-        assertEq(d.netReleasedMarginUsdc, pledge - d.actionChargeFromReleasedMarginUsdc);
+        assertEq(d.actionChargeAssessedAssets, FEE);
+        assertEq(d.actionChargeCollectedAssets, collected);
+        assertEq(d.actionChargeWaivedAssets, waived);
+        assertEq(d.safeMarginReleaseAssets, pledge);
+        assertEq(d.actionChargeFromReleasedMarginAssets, collected > reserve ? collected - reserve : 0);
+        assertEq(d.netReleasedMarginAssets, pledge - d.actionChargeFromReleasedMarginAssets);
         assertEq(d.posMarginAfter, 0);
-        assertEq(d.priceLossWrittenOffUsdc, 0);
+        assertEq(d.priceLossWrittenOffAssets, 0);
     }
 
     function test_FullClose_SurplusPrecedesCommittedMarginAndProtectsBounty() public view {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(3e6, 2e6, 1e6, 100e6, 21e6);
-        snap.protectedExecutionBountyUsdc = 20e6;
+        snap.protectedExecutionBountyAssets = 20e6;
         CfdEnginePlanTypes.CloseDelta memory d = _plan(snap, PRICE, SIZE);
         assertTrue(d.valid);
-        assertEq(d.actionReserveConsumedUsdc, 1e6);
-        assertEq(d.actionCommittedMarginConsumedUsdc, 3e6);
-        assertEq(d.actionChargeCollectedUsdc, FEE);
-        assertEq(d.actionChargeWaivedUsdc, 0);
+        assertEq(d.actionReserveConsumedAssets, 1e6);
+        assertEq(d.actionCommittedMarginConsumedAssets, 3e6);
+        assertEq(d.actionChargeCollectedAssets, FEE);
+        assertEq(d.actionChargeWaivedAssets, 0);
     }
 
     function test_Close_NearFullCannotUseLiquidationReserveOrCommittedMargin() public view {
@@ -122,60 +122,60 @@ contract FullCloseActionChargePlanTest is Test {
             uint8(partialClose.revertCode),
             uint8(CfdEnginePlanTypes.CloseRevertCode.PARTIAL_ACTION_CHARGE_UNCOLLECTIBLE)
         );
-        assertGt(partialClose.unlockMarginUsdc, 0);
-        assertEq(partialClose.actionCommittedMarginConsumedUsdc, 0);
+        assertGt(partialClose.unlockMarginAssets, 0);
+        assertEq(partialClose.actionCommittedMarginConsumedAssets, 0);
         CfdEnginePlanTypes.CloseDelta memory full = _plan(snap, PRICE, SIZE);
         assertTrue(full.valid);
-        assertEq(full.actionChargeWaivedUsdc, 0);
-        assertEq(full.actionCommittedMarginConsumedUsdc, 0);
+        assertEq(full.actionChargeWaivedAssets, 0);
+        assertEq(full.actionCommittedMarginConsumedAssets, 0);
     }
 
     function test_FullClose_PriceLossCapCannotReachLiquidationReserve() public view {
         CfdEnginePlanTypes.CloseDelta memory d = _plan(_snapshot(1e6, 100e6, 0, 0, 0), 101_000_000, SIZE);
         assertTrue(d.valid);
-        assertEq(d.priceLossUsdc, 100e6);
-        assertEq(d.pricePnlPledgeConsumedUsdc, 1e6);
-        assertEq(d.priceLossWrittenOffUsdc, 99e6);
-        assertEq(d.actionChargeCollectedUsdc, d.actionChargeAssessedUsdc);
-        assertEq(d.unlockMarginUsdc, 0);
+        assertEq(d.priceLossAssets, 100e6);
+        assertEq(d.pricePnlPledgeConsumedAssets, 1e6);
+        assertEq(d.priceLossWrittenOffAssets, 99e6);
+        assertEq(d.actionChargeCollectedAssets, d.actionChargeAssessedAssets);
+        assertEq(d.unlockMarginAssets, 0);
     }
 
     function test_FullClose_CarryPrecedesSurplusAndDoesNotSpendClaim() public view {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(20e6, 8e6, 5e6, 0, 2e6);
-        snap.protectedExecutionBountyUsdc = 2e6;
-        snap.unsettledCarryUsdc = 30e6;
+        snap.protectedExecutionBountyAssets = 2e6;
+        snap.unsettledCarryAssets = 30e6;
         snap.traderClaimBalanceForAccount = 1000e6;
-        snap.totalTraderClaimBalanceUsdc = 1000e6;
+        snap.totalTraderClaimBalanceAssets = 1000e6;
         CfdEnginePlanTypes.CloseDelta memory d = _plan(snap, PRICE, SIZE);
         assertTrue(d.valid);
-        assertEq(d.realizedCarryUsdc, 25e6);
-        assertEq(d.unlockMarginUsdc, 0);
-        assertEq(d.actionChargeAssessedUsdc, FEE + 5e6);
-        assertEq(d.actionChargeCollectedUsdc, 8e6);
-        assertEq(d.actionChargeWaivedUsdc, 7e6);
-        assertEq(d.actionReserveConsumedUsdc, 0);
-        assertEq(d.existingTraderClaimConsumedUsdc, 0);
-        assertEq(d.existingTraderClaimRemainingUsdc, 1000e6);
+        assertEq(d.realizedCarryAssets, 25e6);
+        assertEq(d.unlockMarginAssets, 0);
+        assertEq(d.actionChargeAssessedAssets, FEE + 5e6);
+        assertEq(d.actionChargeCollectedAssets, 8e6);
+        assertEq(d.actionChargeWaivedAssets, 7e6);
+        assertEq(d.actionReserveConsumedAssets, 0);
+        assertEq(d.existingTraderClaimConsumedAssets, 0);
+        assertEq(d.existingTraderClaimRemainingAssets, 1000e6);
     }
 
     function test_FullClose_VpiClawbackAndReleasedBackingAreNotDoubleCounted() public view {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot(20e6, 2e6, 0, 0, 7e6);
         snap.position.vpiAccrued = -5e6;
-        snap.vpiRebateReserveUsdc = 5e6;
-        snap.protectedExecutionBountyUsdc = 2e6;
+        snap.vpiRebateReserveAssets = 5e6;
+        snap.protectedExecutionBountyAssets = 2e6;
         CfdEnginePlanTypes.CloseDelta memory flat = _plan(snap, PRICE, SIZE);
-        assertEq(flat.vpiRebateReserveConsumedUsdc, 5e6);
-        assertEq(flat.actionChargeCollectedUsdc, FEE + 5e6);
-        assertEq(flat.actionReserveConsumedUsdc, 0);
-        assertEq(flat.actionChargeWaivedUsdc, 0);
+        assertEq(flat.vpiRebateReserveConsumedAssets, 5e6);
+        assertEq(flat.actionChargeCollectedAssets, FEE + 5e6);
+        assertEq(flat.actionReserveConsumedAssets, 0);
+        assertEq(flat.actionChargeWaivedAssets, 0);
         // A $6 price gain withholds the entire clawback, releasing its backing into free settlement.
         CfdEnginePlanTypes.CloseDelta memory gain = _plan(snap, 99_940_000, SIZE);
-        assertEq(gain.actionChargeWithheldUsdc, 6e6);
-        assertEq(gain.vpiRebateReserveConsumedUsdc, 0);
-        assertEq(gain.vpiRebateReserveAfterUsdc, 0);
-        assertEq(gain.actionChargeWithheldUsdc + gain.actionChargeCollectedUsdc, gain.actionChargeAssessedUsdc);
-        assertEq(gain.actionChargeWaivedUsdc, 0);
-        assertEq(gain.actionProtocolFeeCreditedUsdc + gain.protocolFeeTopUpUsdc, gain.executionFeeUsdc);
+        assertEq(gain.actionChargeWithheldAssets, 6e6);
+        assertEq(gain.vpiRebateReserveConsumedAssets, 0);
+        assertEq(gain.vpiRebateReserveAfterAssets, 0);
+        assertEq(gain.actionChargeWithheldAssets + gain.actionChargeCollectedAssets, gain.actionChargeAssessedAssets);
+        assertEq(gain.actionChargeWaivedAssets, 0);
+        assertEq(gain.actionProtocolFeeCreditedAssets + gain.protocolFeeTopUpAssets, gain.executionFeeAssets);
     }
 
     function test_FullClose_PositiveAndNegativeVpiUseSurplusAfterNetting() public view {
@@ -184,21 +184,21 @@ contract FullCloseActionChargePlanTest is Test {
         snap.position.vpiAccrued = 100e6;
         CfdEnginePlanTypes.CloseDelta memory reducing = _plan(snap, PRICE, SIZE);
         assertTrue(reducing.valid);
-        assertLt(reducing.closeState.vpiDeltaUsdc, 0);
-        assertGt(reducing.actionChargeAssessedUsdc, 0);
-        assertLt(reducing.actionChargeAssessedUsdc, FEE);
-        assertEq(reducing.actionChargeCollectedUsdc, reducing.actionChargeAssessedUsdc);
-        assertEq(reducing.actionChargeWaivedUsdc, 0);
+        assertLt(reducing.closeState.vpiDeltaAssets, 0);
+        assertGt(reducing.actionChargeAssessedAssets, 0);
+        assertLt(reducing.actionChargeAssessedAssets, FEE);
+        assertEq(reducing.actionChargeCollectedAssets, reducing.actionChargeAssessedAssets);
+        assertEq(reducing.actionChargeWaivedAssets, 0);
         // Closing the long now worsens net short skew instead of reducing net long skew.
         snap.shortSide.openInterest = 2 * SIZE;
         snap.shortSide.entryNotional = 2 * snap.longSide.entryNotional;
-        snap.shortSide.maxProfitUsdc = 20_000e6;
+        snap.shortSide.maxProfitAssets = 20_000e6;
         CfdEnginePlanTypes.CloseDelta memory increasing = _plan(snap, PRICE, SIZE);
         assertTrue(increasing.valid);
-        assertGt(increasing.closeState.vpiDeltaUsdc, 0);
-        assertGt(increasing.actionChargeAssessedUsdc, FEE);
-        assertEq(increasing.actionChargeCollectedUsdc, increasing.actionChargeAssessedUsdc);
-        assertEq(increasing.actionChargeWaivedUsdc, 0);
+        assertGt(increasing.closeState.vpiDeltaAssets, 0);
+        assertGt(increasing.actionChargeAssessedAssets, FEE);
+        assertEq(increasing.actionChargeCollectedAssets, increasing.actionChargeAssessedAssets);
+        assertEq(increasing.actionChargeWaivedAssets, 0);
     }
 
     function testFuzz_FullClose_CashPlacementDoesNotChangeRecovery(
@@ -213,12 +213,12 @@ contract FullCloseActionChargePlanTest is Test {
         CfdEnginePlanTypes.CloseDelta memory locked = _plan(_snapshot(funds, 10e6, 0, 0, 0), price, SIZE);
         CfdEnginePlanTypes.CloseDelta memory free = _plan(_snapshot(funds - movable, 10e6, movable, 0, 0), price, SIZE);
         assertTrue(locked.valid && free.valid);
-        assertEq(locked.pricePnlPledgeConsumedUsdc, free.pricePnlPledgeConsumedUsdc);
-        assertEq(locked.actionChargeCollectedUsdc, free.actionChargeCollectedUsdc);
-        assertEq(locked.actionChargeWaivedUsdc, 0);
-        assertEq(free.actionChargeWaivedUsdc, 0);
-        assertEq(locked.freshTraderPayoutUsdc, free.freshTraderPayoutUsdc);
-        assertEq(locked.solvency.effectiveAssetsAfterUsdc, free.solvency.effectiveAssetsAfterUsdc);
+        assertEq(locked.pricePnlPledgeConsumedAssets, free.pricePnlPledgeConsumedAssets);
+        assertEq(locked.actionChargeCollectedAssets, free.actionChargeCollectedAssets);
+        assertEq(locked.actionChargeWaivedAssets, 0);
+        assertEq(free.actionChargeWaivedAssets, 0);
+        assertEq(locked.freshTraderPayoutAssets, free.freshTraderPayoutAssets);
+        assertEq(locked.solvency.effectiveAssetsAfterAssets, free.solvency.effectiveAssetsAfterAssets);
     }
 
 }

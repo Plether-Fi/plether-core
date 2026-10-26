@@ -40,7 +40,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     /// @notice An unrecognized, malformed, empty, or panic external failure must leave the order pending.
     error OrderRouterExecutionSidecar__RetryableFailure(address target, bytes4 selector, uint256 returndataLength);
     /// @notice Router settlement did not consume exactly the lifecycle-book bounty.
-    error OrderRouterExecutionSidecar__BountyMismatch(uint256 expectedUsdc, uint256 actualUsdc);
+    error OrderRouterExecutionSidecar__BountyMismatch(uint256 expectedAssets, uint256 actualAssets);
     /// @notice Evaluator output disagreed with the actual pre- or post-settlement protocol state.
     error OrderRouterExecutionSidecar__AssessmentStateMismatch(uint8 field, uint256 expected, uint256 actual);
 
@@ -53,10 +53,10 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     address public immutable SELF;
 
     struct AccountState {
-        uint256 settlementBalanceUsdc;
-        uint256 traderClaimUsdc;
+        uint256 settlementBalanceAssets;
+        uint256 traderClaimAssets;
         uint256 positionSize;
-        uint256 positionMarginUsdc;
+        uint256 positionMarginAssets;
     }
 
     struct TerminalClassification {
@@ -547,7 +547,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
                 request.bountyAccountingPrice,
                 request.bountyAccountingPublishTime
             );
-        _requireBounty(context.pending.executionBountyUsdc, bountySettlement.bountyUsdc);
+        _requireBounty(context.pending.executionBountyAssets, bountySettlement.bountyAssets);
     }
 
     function _callPolicyEvaluator(
@@ -596,7 +596,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     ) private returns (bool engineSucceeded, bytes memory engineData) {
         bytes memory engineCall = abi.encodeCall(
             ICfdEngineCore.processOrderTyped,
-            (context.order, request.executionPrice, request.poolDepthUsdc, request.oraclePublishTime)
+            (context.order, request.executionPrice, request.poolDepthAssets, request.oraclePublishTime)
         );
         uint256 callGas = _engineCallGas(engineAddress, context.minimumEngineGas);
         return engineAddress.call{gas: callGas}(engineCall);
@@ -644,7 +644,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
                 request.bountyAccountingPrice,
                 request.bountyAccountingPublishTime
             );
-        _requireBounty(context.pending.executionBountyUsdc, bountySettlement.bountyUsdc);
+        _requireBounty(context.pending.executionBountyAssets, bountySettlement.bountyAssets);
         AccountState memory postState = _accountState(ICfdEngineCore(context.host.engine()), context.order.account);
         OrderV3Types.OrderReceipt memory receipt =
             _preparedBaseReceipt(context, request, classification.reason, request.executionMode, priceReachedEngine);
@@ -670,8 +670,8 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         IOrderRouterExecutionHost.ItemRequest calldata request,
         uint64 riskOffCutoff
     ) private returns (OrderV3Types.ExecutionResult memory result) {
-        uint256 bountyUsdc = host.refundRiskOffOrderFromSidecar(order.orderId, riskOffCutoff);
-        _requireBounty(pending.executionBountyUsdc, bountyUsdc);
+        uint256 bountyAssets = host.refundRiskOffOrderFromSidecar(order.orderId, riskOffCutoff);
+        _requireBounty(pending.executionBountyAssets, bountyAssets);
         // Risk-off only releases reservation classifications: settlement balance, trader claim, and position state
         // cannot change. Read the normalized receipt state once after cleanup instead of duplicating four external
         // reads for every order in the bounded emergency batch.
@@ -687,12 +687,12 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             OrderV3Types.PriceSource.None,
             0,
             request.neutralMarkPrice,
-            request.poolDepthUsdc,
+            request.poolDepthAssets,
             0,
             false
         );
-        receipt.bountyUsdc = bountyUsdc;
-        if (bountyUsdc != 0) {
+        receipt.bountyAssets = bountyAssets;
+        if (bountyAssets != 0) {
             receipt.bountyRecipient = order.account;
             receipt.bountyDisposition = OrderV3Types.BountyDisposition.RefundedToAccount;
         }
@@ -710,12 +710,12 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         OrderV3Types.PriceSource priceSource,
         uint256 executionPrice,
         uint256 neutralMarkPrice,
-        uint256 poolDepthUsdc,
+        uint256 poolDepthAssets,
         uint64 oraclePublishTime,
         bool priceReachedEngine
     ) private pure returns (OrderV3Types.OrderReceipt memory receipt) {
         receipt.commitment = pending.commitment;
-        receipt.bounty.bountyEntitlementUsdc = pending.executionBountyUsdc;
+        receipt.bounty.bountyEntitlementAssets = pending.executionBountyAssets;
         receipt.orderId = orderId;
         receipt.account = pending.account;
         receipt.clientOrderId = pending.clientOrderId;
@@ -730,7 +730,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         receipt.priceSource = priceSource;
         receipt.executionPrice = executionPrice;
         receipt.neutralMarkPrice = neutralMarkPrice;
-        receipt.poolDepthUsdc = poolDepthUsdc;
+        receipt.poolDepthAssets = poolDepthAssets;
         receipt.oraclePublishTime = oraclePublishTime;
         receipt.priceReachedEngine = priceReachedEngine;
     }
@@ -752,7 +752,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             request.priceSource,
             request.executionPrice,
             request.neutralMarkPrice,
-            request.poolDepthUsdc,
+            request.poolDepthAssets,
             request.oraclePublishTime,
             priceReachedEngine
         );
@@ -764,11 +764,11 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     ) private returns (OrderV3Types.ExecutionResult memory result) {
         if (receipt.reason != OrderV3Types.TerminalReason.ExpiredReservationMismatch) {
             if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Paid) {
-                receipt.bounty.bountyPaidUsdc = receipt.bountyUsdc - receipt.bounty.bountyRefundedUsdc;
+                receipt.bounty.bountyPaidAssets = receipt.bountyAssets - receipt.bounty.bountyRefundedAssets;
             } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.Forfeited) {
-                receipt.bounty.bountyForfeitedUsdc = receipt.bountyUsdc - receipt.bounty.bountyRefundedUsdc;
+                receipt.bounty.bountyForfeitedAssets = receipt.bountyAssets - receipt.bounty.bountyRefundedAssets;
             } else if (receipt.bountyDisposition == OrderV3Types.BountyDisposition.RefundedToAccount) {
-                receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
+                receipt.bounty.bountyRefundedAssets = receipt.bountyAssets;
             }
         }
         bytes32 receiptHash = book.finalize(receipt);
@@ -784,22 +784,22 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         AccountState memory postState
     ) private pure returns (OrderV3Types.OrderEconomics memory economics) {
         economics.close = assessment.close;
-        economics.executionNotionalUsdc = assessment.executionNotionalUsdc;
-        economics.realizedPnlUsdc = assessment.realizedPnlUsdc;
-        economics.vpiUsdc = assessment.vpiUsdc;
-        economics.carryUsdc = int256(assessment.carryUsdc);
-        economics.executionFeeUsdc = assessment.executionFeeUsdc;
-        economics.frozenSpreadUsdc = assessment.frozenSpreadUsdc;
-        economics.actionChargeAssessedUsdc = assessment.actionChargeAssessedUsdc;
-        economics.actionChargeCollectedUsdc = assessment.actionChargeCollectedUsdc;
-        economics.grossAccountDebitUsdc = assessment.grossAccountDebitUsdc;
-        economics.preSettlementBalanceUsdc = preState.settlementBalanceUsdc;
-        economics.postSettlementBalanceUsdc = postState.settlementBalanceUsdc;
-        economics.preTraderClaimBalanceUsdc = preState.traderClaimUsdc;
-        economics.postTraderClaimBalanceUsdc = postState.traderClaimUsdc;
+        economics.executionNotionalAssets = assessment.executionNotionalAssets;
+        economics.realizedPnlAssets = assessment.realizedPnlAssets;
+        economics.vpiAssets = assessment.vpiAssets;
+        economics.carryAssets = int256(assessment.carryAssets);
+        economics.executionFeeAssets = assessment.executionFeeAssets;
+        economics.frozenSpreadAssets = assessment.frozenSpreadAssets;
+        economics.actionChargeAssessedAssets = assessment.actionChargeAssessedAssets;
+        economics.actionChargeCollectedAssets = assessment.actionChargeCollectedAssets;
+        economics.grossAccountDebitAssets = assessment.grossAccountDebitAssets;
+        economics.preSettlementBalanceAssets = preState.settlementBalanceAssets;
+        economics.postSettlementBalanceAssets = postState.settlementBalanceAssets;
+        economics.preTraderClaimBalanceAssets = preState.traderClaimAssets;
+        economics.postTraderClaimBalanceAssets = postState.traderClaimAssets;
         economics.postPositionSize = postState.positionSize;
-        economics.postPositionMarginUsdc = postState.positionMarginUsdc;
-        economics.postPositionEquityUsdc = assessment.postPositionEquityUsdc;
+        economics.postPositionMarginAssets = postState.positionMarginAssets;
+        economics.postPositionEquityAssets = assessment.postPositionEquityAssets;
         economics.postLeverageBps = assessment.postLeverageBps;
     }
 
@@ -807,21 +807,21 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         AccountState memory preState,
         AccountState memory postState
     ) private pure returns (OrderV3Types.OrderEconomics memory economics) {
-        economics.preSettlementBalanceUsdc = preState.settlementBalanceUsdc;
-        economics.postSettlementBalanceUsdc = postState.settlementBalanceUsdc;
-        economics.preTraderClaimBalanceUsdc = preState.traderClaimUsdc;
-        economics.postTraderClaimBalanceUsdc = postState.traderClaimUsdc;
+        economics.preSettlementBalanceAssets = preState.settlementBalanceAssets;
+        economics.postSettlementBalanceAssets = postState.settlementBalanceAssets;
+        economics.preTraderClaimBalanceAssets = preState.traderClaimAssets;
+        economics.postTraderClaimBalanceAssets = postState.traderClaimAssets;
         economics.postPositionSize = postState.positionSize;
-        economics.postPositionMarginUsdc = postState.positionMarginUsdc;
+        economics.postPositionMarginAssets = postState.positionMarginAssets;
     }
 
     function _accountState(
         ICfdEngineCore engine_,
         address account
     ) private view returns (AccountState memory state) {
-        state.settlementBalanceUsdc = IMarginClearinghouse(engine_.clearinghouse()).balanceUsdc(account);
-        state.traderClaimUsdc = ICfdOrderReceiptEngineView(address(engine_)).traderClaimBalanceUsdc(account);
-        (state.positionSize, state.positionMarginUsdc,,,,,) = engine_.positions(account);
+        state.settlementBalanceAssets = IMarginClearinghouse(engine_.clearinghouse()).balanceAssets(account);
+        state.traderClaimAssets = ICfdOrderReceiptEngineView(address(engine_)).traderClaimBalanceAssets(account);
+        (state.positionSize, state.positionMarginAssets,,,,,) = engine_.positions(account);
     }
 
     function _classifyTypedFailure(
@@ -930,7 +930,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         request.executor = executor;
         request.observedConfigHash = IOrderLifecycleBook(host.lifecycleBook()).currentExecutionConfigHash();
         request.neutralMarkPrice = engine_.lastMarkPrice();
-        request.poolDepthUsdc = IHousePool(engine_.pool()).totalAssets();
+        request.poolDepthAssets = IHousePool(engine_.pool()).totalAssets();
         request.bountyAccountingPrice = _bountyAccountingStoredMark(engine_);
         request.bountyAccountingPublishTime = engine_.lastMarkTime();
     }
@@ -950,7 +950,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         request.priceSource = OrderV3Types.PriceSource.OracleExecution;
         request.executionPrice = oracleResult.executionPrice;
         request.neutralMarkPrice = oracleResult.neutralMarkPrice;
-        request.poolDepthUsdc = IHousePool(engine_.pool()).totalAssets();
+        request.poolDepthAssets = IHousePool(engine_.pool()).totalAssets();
         request.oraclePublishTime = oracleResult.publishTime;
         request.bountyAccountingPrice = oracleResult.neutralMarkPrice;
         request.bountyAccountingPublishTime = oracleResult.publishTime;
@@ -1218,12 +1218,12 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         AccountState memory postState
     ) private pure {
         _assertAssessmentField(1, uint256(requestedMode), uint256(assessment.mode));
-        _assertAssessmentField(2, preState.settlementBalanceUsdc, assessment.preSettlementBalanceUsdc);
-        _assertAssessmentField(3, postState.settlementBalanceUsdc, assessment.postSettlementBalanceUsdc);
-        _assertAssessmentField(4, preState.traderClaimUsdc, assessment.preTraderClaimUsdc);
-        _assertAssessmentField(5, postState.traderClaimUsdc, assessment.postTraderClaimUsdc);
+        _assertAssessmentField(2, preState.settlementBalanceAssets, assessment.preSettlementBalanceAssets);
+        _assertAssessmentField(3, postState.settlementBalanceAssets, assessment.postSettlementBalanceAssets);
+        _assertAssessmentField(4, preState.traderClaimAssets, assessment.preTraderClaimAssets);
+        _assertAssessmentField(5, postState.traderClaimAssets, assessment.postTraderClaimAssets);
         _assertAssessmentField(6, postState.positionSize, assessment.postPositionSize);
-        _assertAssessmentField(7, postState.positionMarginUsdc, assessment.postPositionMarginUsdc);
+        _assertAssessmentField(7, postState.positionMarginAssets, assessment.postPositionMarginAssets);
     }
 
     function _assertAssessmentField(
@@ -1268,8 +1268,8 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         OrderV3Types.OrderReceipt memory receipt,
         IOrderRouterExecutionHost.BountySettlement memory settlement
     ) private pure {
-        receipt.bountyUsdc = settlement.bountyUsdc;
-        receipt.bounty.bountyRefundedUsdc = settlement.bountyRefundedUsdc;
+        receipt.bountyAssets = settlement.bountyAssets;
+        receipt.bounty.bountyRefundedAssets = settlement.bountyRefundedAssets;
         receipt.bountyRecipient = settlement.bountyRecipient;
         receipt.bountyDisposition = settlement.bountyDisposition;
     }
@@ -1344,7 +1344,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
 /// @dev Engine receipt-read surface intentionally omitted from the size-constrained core interface.
 interface ICfdOrderReceiptEngineView {
 
-    function traderClaimBalanceUsdc(
+    function traderClaimBalanceAssets(
         address account
     ) external view returns (uint256);
 

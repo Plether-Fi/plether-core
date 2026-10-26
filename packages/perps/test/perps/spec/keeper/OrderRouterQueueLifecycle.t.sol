@@ -41,7 +41,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         assertEq(size, 0, "Position should not exist");
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             10_000 * 1e6 - 200_000,
             "Protocol-state invalidation should preserve the post-commit settlement baseline under the current refund path"
         );
@@ -152,7 +152,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         assertEq(record.core.orderId, 1);
         assertEq(record.core.account, alice);
         assertEq(_remainingCommittedMargin(1), 1000 * 1e6);
-        assertEq(record.executionBountyUsdc, 200_000);
+        assertEq(record.executionBountyAssets, 200_000);
         assertEq(record.nextMarginOrderId, 0);
         assertEq(record.prevMarginOrderId, 0);
         assertTrue(record.inMarginQueue, "Positive-margin pending order should advertise margin-queue membership");
@@ -175,7 +175,7 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         assertEq(uint8(outcome.status), uint8(OrderV3Types.LifecycleStatus.Executed));
         assertEq(uint8(outcome.reason), uint8(OrderV3Types.TerminalReason.Executed));
         assertEq(_remainingCommittedMargin(1), 0, "Executed order should clear committed margin reservation");
-        assertEq(record.executionBountyUsdc, 0, "Executed order should clear execution bounty reservation");
+        assertEq(record.executionBountyAssets, 0, "Executed order should clear execution bounty reservation");
         assertFalse(record.inMarginQueue, "Executed order should not remain linked in the margin queue");
     }
 
@@ -192,11 +192,11 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         assertEq(pending.length, 2);
         assertEq(pending[0].orderId, 1);
         assertFalse(pending[0].isClose);
-        assertEq(pending[0].committedMarginUsdc, 1000 * 1e6);
-        assertEq(pending[0].executionBountyUsdc, 200_000);
+        assertEq(pending[0].committedMarginAssets, 1000 * 1e6);
+        assertEq(pending[0].executionBountyAssets, 200_000);
         assertEq(pending[1].orderId, 2);
         assertFalse(pending[1].isClose);
-        assertEq(pending[1].executionBountyUsdc, 200_000);
+        assertEq(pending[1].executionBountyAssets, 200_000);
     }
 
     function test_PendingOrderPointers_LinkPerAccountInFIFOOrder() public {
@@ -250,9 +250,9 @@ contract OrderRouterQueueLifecycleTest is OrderRouterTestBase {
         address aliceAccount = alice;
         address carolAccount = carol;
 
-        usdc.mint(carol, 20_000 * 1e6);
+        settlementToken.mint(carol, 20_000 * 1e6);
         vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(carolAccount, 20_000 * 1e6);
         vm.stopPrank();
 

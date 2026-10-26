@@ -4,57 +4,57 @@ pragma solidity 0.8.35;
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 
 /// @title MarginClearinghouseAccountingLib
-/// @notice Pure plans for classifying account USDC, applying open costs, consuming losses, and settling liquidations.
-/// @dev All amounts use 6-decimal USDC. A clearinghouse settlement balance includes its locked margin; bucket helpers
+/// @notice Pure plans for classifying account settlement token, applying open costs, consuming losses, and settling liquidations.
+/// @dev All amounts use 6-decimal settlement token. A clearinghouse settlement balance includes its locked margin; bucket helpers
 ///      classify portions of that balance rather than adding independent assets. Callers must supply internally
 ///      consistent snapshots and apply returned mutations atomically.
 library MarginClearinghouseAccountingLib {
 
     /// @notice Priority breakdown for a requested settlement loss.
-    /// @param freeSettlementConsumedUsdc Portion consumed from unlocked settlement under the selected loss policy.
-    /// @param activeMarginConsumedUsdc Portion consumed from active-position margin under the selected loss policy.
-    /// @param otherLockedMarginConsumedUsdc Portion consumed from other locked margin; zero on the carry-loss path.
-    /// @param totalConsumedUsdc Total settlement balance to debit.
-    /// @param uncoveredUsdc Requested loss not covered by eligible settlement balance.
+    /// @param freeSettlementConsumedAssets Portion consumed from unlocked settlement under the selected loss policy.
+    /// @param activeMarginConsumedAssets Portion consumed from active-position margin under the selected loss policy.
+    /// @param otherLockedMarginConsumedAssets Portion consumed from other locked margin; zero on the carry-loss path.
+    /// @param totalConsumedAssets Total settlement balance to debit.
+    /// @param uncoveredAssets Requested loss not covered by eligible settlement balance.
     struct SettlementConsumption {
-        uint256 freeSettlementConsumedUsdc;
-        uint256 activeMarginConsumedUsdc;
-        uint256 otherLockedMarginConsumedUsdc;
-        uint256 totalConsumedUsdc;
-        uint256 uncoveredUsdc;
+        uint256 freeSettlementConsumedAssets;
+        uint256 activeMarginConsumedAssets;
+        uint256 otherLockedMarginConsumedAssets;
+        uint256 totalConsumedAssets;
+        uint256 uncoveredAssets;
     }
 
     /// @notice Clearinghouse mutation corresponding to a consumption plan.
-    /// @param settlementDebitUsdc Total account settlement balance to remove.
-    /// @param positionMarginUnlockedUsdc Active-position margin removed from lock classification; loss paths consume it
+    /// @param settlementDebitAssets Total account settlement balance to remove.
+    /// @param positionMarginUnlockedAssets Active-position margin removed from lock classification; loss paths consume it
     ///        toward the debit, while liquidation may leave some unlocked settlement retained by the account.
-    /// @param otherLockedMarginUnlockedUsdc Other locked margin consumed and removed from lock classification.
+    /// @param otherLockedMarginUnlockedAssets Other locked margin consumed and removed from lock classification.
     struct BucketMutation {
-        uint256 settlementDebitUsdc;
-        uint256 positionMarginUnlockedUsdc;
-        uint256 otherLockedMarginUnlockedUsdc;
+        uint256 settlementDebitAssets;
+        uint256 positionMarginUnlockedAssets;
+        uint256 otherLockedMarginUnlockedAssets;
     }
 
     /// @notice Planned settlement and position-margin mutations for an open or increase.
     /// @dev Resulting balances are populated only when both insufficiency flags are false. Mutation fields populated
     ///      before a failing check are diagnostic and must not be applied.
-    /// @param netMarginChangeUsdc Nonnegative PnL-pledge increase funded by this action's margin contribution after
+    /// @param netMarginChangeAssets Nonnegative PnL-pledge increase funded by this action's margin contribution after
     ///        its positive trade cost; rebates never increase pledge and costs never decrease pre-existing pledge.
-    /// @param settlementCreditUsdc Rebate credited when trade cost is negative.
-    /// @param settlementDebitUsdc Positive trade cost debited from settlement.
-    /// @param positionMarginLockedUsdc Active margin added when net margin change is positive.
-    /// @param resultingSettlementBalanceUsdc Settlement balance after rebate or positive-cost debit.
-    /// @param resultingPositionMarginUsdc Active-position margin after unlock or lock.
-    /// @param resultingFreeSettlementUsdc Free settlement after every planned mutation.
+    /// @param settlementCreditAssets Rebate credited when trade cost is negative.
+    /// @param settlementDebitAssets Positive trade cost debited from settlement.
+    /// @param positionMarginLockedAssets Active margin added when net margin change is positive.
+    /// @param resultingSettlementBalanceAssets Settlement balance after rebate or positive-cost debit.
+    /// @param resultingPositionMarginAssets Active-position margin after unlock or lock.
+    /// @param resultingFreeSettlementAssets Free settlement after every planned mutation.
     /// @param insufficientFreeEquity Whether a debit or margin lock exceeds free settlement.
     struct OpenCostPlan {
-        int256 netMarginChangeUsdc;
-        uint256 settlementCreditUsdc;
-        uint256 settlementDebitUsdc;
-        uint256 positionMarginLockedUsdc;
-        uint256 resultingSettlementBalanceUsdc;
-        uint256 resultingPositionMarginUsdc;
-        uint256 resultingFreeSettlementUsdc;
+        int256 netMarginChangeAssets;
+        uint256 settlementCreditAssets;
+        uint256 settlementDebitAssets;
+        uint256 positionMarginLockedAssets;
+        uint256 resultingSettlementBalanceAssets;
+        uint256 resultingPositionMarginAssets;
+        uint256 resultingFreeSettlementAssets;
         bool insufficientFreeEquity;
     }
 
@@ -65,43 +65,45 @@ library MarginClearinghouseAccountingLib {
     }
 
     /// @notice Classifies settlement under the V3 PnL-isolation bucket model.
-    /// @dev `pnlPledgeUsdc` is the only active margin reachable by position price-loss paths. Liquidation, order, and
-    ///      action reserves are all reported in `otherLockedMarginUsdc` and remain excluded unless a dedicated path
+    /// @dev `pnlPledgeAssets` is the only active margin reachable by position price-loss paths. Liquidation, order, and
+    ///      action reserves are all reported in `otherLockedMarginAssets` and remain excluded unless a dedicated path
     ///      explicitly consumes them.
-    function buildIsolatedAccountUsdcBuckets(
-        uint256 settlementBalanceUsdc,
-        uint256 pnlPledgeUsdc,
-        uint256 liquidationReserveUsdc,
-        uint256 orderMarginUsdc,
-        uint256 actionReserveUsdc
-    ) internal pure returns (IMarginClearinghouse.AccountUsdcBuckets memory buckets) {
-        buckets.settlementBalanceUsdc = settlementBalanceUsdc;
-        buckets.activePositionMarginUsdc = pnlPledgeUsdc;
-        buckets.otherLockedMarginUsdc = liquidationReserveUsdc + orderMarginUsdc + actionReserveUsdc;
-        buckets.totalLockedMarginUsdc = pnlPledgeUsdc + liquidationReserveUsdc + orderMarginUsdc + actionReserveUsdc;
+    function buildIsolatedAccountAssetBuckets(
+        uint256 settlementBalanceAssets,
+        uint256 pnlPledgeAssets,
+        uint256 liquidationReserveAssets,
+        uint256 orderMarginAssets,
+        uint256 actionReserveAssets
+    ) internal pure returns (IMarginClearinghouse.AccountAssetBuckets memory buckets) {
+        buckets.settlementBalanceAssets = settlementBalanceAssets;
+        buckets.activePositionMarginAssets = pnlPledgeAssets;
+        buckets.otherLockedMarginAssets = liquidationReserveAssets + orderMarginAssets + actionReserveAssets;
+        buckets.totalLockedMarginAssets =
+            pnlPledgeAssets + liquidationReserveAssets + orderMarginAssets + actionReserveAssets;
 
-        uint256 encumberedUsdc = buckets.totalLockedMarginUsdc;
-        buckets.freeSettlementUsdc =
-            buckets.settlementBalanceUsdc > encumberedUsdc ? buckets.settlementBalanceUsdc - encumberedUsdc : 0;
+        uint256 encumberedAssets = buckets.totalLockedMarginAssets;
+        buckets.freeSettlementAssets =
+            buckets.settlementBalanceAssets > encumberedAssets ? buckets.settlementBalanceAssets - encumberedAssets : 0;
     }
 
     /// @notice Plans carry-loss collection from active position margin, then free settlement.
     /// @dev Other locked buckets and trader claims remain protected. Uncovered carry is retained until collection or
     ///      terminal recovery/waiver; it is never converted into position price-loss debt.
     /// @param buckets Account bucket snapshot.
-    /// @param lossUsdc Carry loss requested for collection.
+    /// @param lossAssets Carry loss requested for collection.
     /// @return consumption Free/active consumption, total debit, and uncovered remainder.
     function planCarryLossConsumption(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 lossUsdc
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 lossAssets
     ) internal pure returns (SettlementConsumption memory consumption) {
-        consumption.activeMarginConsumedUsdc =
-            buckets.activePositionMarginUsdc < lossUsdc ? buckets.activePositionMarginUsdc : lossUsdc;
-        uint256 remainderUsdc = lossUsdc - consumption.activeMarginConsumedUsdc;
-        consumption.freeSettlementConsumedUsdc =
-            buckets.freeSettlementUsdc < remainderUsdc ? buckets.freeSettlementUsdc : remainderUsdc;
-        consumption.totalConsumedUsdc = consumption.activeMarginConsumedUsdc + consumption.freeSettlementConsumedUsdc;
-        consumption.uncoveredUsdc = lossUsdc - consumption.totalConsumedUsdc;
+        consumption.activeMarginConsumedAssets =
+            buckets.activePositionMarginAssets < lossAssets ? buckets.activePositionMarginAssets : lossAssets;
+        uint256 remainderAssets = lossAssets - consumption.activeMarginConsumedAssets;
+        consumption.freeSettlementConsumedAssets =
+            buckets.freeSettlementAssets < remainderAssets ? buckets.freeSettlementAssets : remainderAssets;
+        consumption.totalConsumedAssets =
+            consumption.activeMarginConsumedAssets + consumption.freeSettlementConsumedAssets;
+        consumption.uncoveredAssets = lossAssets - consumption.totalConsumedAssets;
     }
 
     /// @notice Projects carry allocation and the resulting account collateral without changing the input snapshot.
@@ -109,20 +111,20 @@ library MarginClearinghouseAccountingLib {
     ///      custody for diagnostics while using projected margin for price equity and projected free cash for actions.
     ///      Claims and other locked buckets are not carry funding sources. Uncovered carry remains an obligation.
     function projectCarryLoss(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 pendingCarryUsdc
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 pendingCarryAssets
     )
         internal
         pure
-        returns (SettlementConsumption memory consumption, IMarginClearinghouse.AccountUsdcBuckets memory afterBuckets)
+        returns (SettlementConsumption memory consumption, IMarginClearinghouse.AccountAssetBuckets memory afterBuckets)
     {
-        consumption = planCarryLossConsumption(buckets, pendingCarryUsdc);
-        afterBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: buckets.settlementBalanceUsdc - consumption.totalConsumedUsdc,
-            totalLockedMarginUsdc: buckets.totalLockedMarginUsdc - consumption.activeMarginConsumedUsdc,
-            activePositionMarginUsdc: buckets.activePositionMarginUsdc - consumption.activeMarginConsumedUsdc,
-            otherLockedMarginUsdc: buckets.otherLockedMarginUsdc,
-            freeSettlementUsdc: buckets.freeSettlementUsdc - consumption.freeSettlementConsumedUsdc
+        consumption = planCarryLossConsumption(buckets, pendingCarryAssets);
+        afterBuckets = IMarginClearinghouse.AccountAssetBuckets({
+            settlementBalanceAssets: buckets.settlementBalanceAssets - consumption.totalConsumedAssets,
+            totalLockedMarginAssets: buckets.totalLockedMarginAssets - consumption.activeMarginConsumedAssets,
+            activePositionMarginAssets: buckets.activePositionMarginAssets - consumption.activeMarginConsumedAssets,
+            otherLockedMarginAssets: buckets.otherLockedMarginAssets,
+            freeSettlementAssets: buckets.freeSettlementAssets - consumption.freeSettlementConsumedAssets
         });
     }
 
@@ -131,80 +133,81 @@ library MarginClearinghouseAccountingLib {
     ///      from pre-existing free settlement. It never unlocks existing pledge. A negative cost is credited as free
     ///      settlement and never increases pledge. Other locked buckets remain protected throughout.
     /// @param buckets Account bucket snapshot before the open/increase.
-    /// @param marginDeltaUsdc Margin supplied by the order.
-    /// @param tradeCostUsdc Signed VPI plus fee; positive is a debit and negative is a rebate.
+    /// @param marginDeltaAssets Margin supplied by the order.
+    /// @param tradeCostAssets Signed VPI plus fee; positive is a debit and negative is a rebate.
     /// @return plan Planned mutations and resulting balances, or an insufficiency flag.
     function planOpenCostApplication(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 marginDeltaUsdc,
-        int256 tradeCostUsdc
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 marginDeltaAssets,
+        int256 tradeCostAssets
     ) internal pure returns (OpenCostPlan memory plan) {
-        uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
-        uint256 positionMarginUsdc = buckets.activePositionMarginUsdc;
-        uint256 otherLockedMarginUsdc = buckets.otherLockedMarginUsdc;
+        uint256 settlementBalanceAssets = buckets.settlementBalanceAssets;
+        uint256 positionMarginAssets = buckets.activePositionMarginAssets;
+        uint256 otherLockedMarginAssets = buckets.otherLockedMarginAssets;
 
-        if (tradeCostUsdc < 0) {
-            plan.settlementCreditUsdc = uint256(-tradeCostUsdc);
-            settlementBalanceUsdc += plan.settlementCreditUsdc;
+        if (tradeCostAssets < 0) {
+            plan.settlementCreditAssets = uint256(-tradeCostAssets);
+            settlementBalanceAssets += plan.settlementCreditAssets;
         }
 
-        uint256 totalLockedMarginUsdc = positionMarginUsdc + otherLockedMarginUsdc;
-        uint256 freeSettlementUsdc =
-            settlementBalanceUsdc > totalLockedMarginUsdc ? settlementBalanceUsdc - totalLockedMarginUsdc : 0;
+        uint256 totalLockedMarginAssets = positionMarginAssets + otherLockedMarginAssets;
+        uint256 freeSettlementAssets =
+            settlementBalanceAssets > totalLockedMarginAssets ? settlementBalanceAssets - totalLockedMarginAssets : 0;
 
-        if (tradeCostUsdc > 0) {
-            plan.settlementDebitUsdc = uint256(tradeCostUsdc);
-            if (plan.settlementDebitUsdc > freeSettlementUsdc) {
+        if (tradeCostAssets > 0) {
+            plan.settlementDebitAssets = uint256(tradeCostAssets);
+            if (plan.settlementDebitAssets > freeSettlementAssets) {
                 plan.insufficientFreeEquity = true;
                 return plan;
             }
-            settlementBalanceUsdc -= plan.settlementDebitUsdc;
-            freeSettlementUsdc -= plan.settlementDebitUsdc;
+            settlementBalanceAssets -= plan.settlementDebitAssets;
+            freeSettlementAssets -= plan.settlementDebitAssets;
         }
 
-        uint256 actionCostFundedByMarginUsdc;
-        if (tradeCostUsdc > 0) {
-            uint256 positiveCostUsdc = uint256(tradeCostUsdc);
-            actionCostFundedByMarginUsdc = positiveCostUsdc < marginDeltaUsdc ? positiveCostUsdc : marginDeltaUsdc;
+        uint256 actionCostFundedByMarginAssets;
+        if (tradeCostAssets > 0) {
+            uint256 positiveCostAssets = uint256(tradeCostAssets);
+            actionCostFundedByMarginAssets =
+                positiveCostAssets < marginDeltaAssets ? positiveCostAssets : marginDeltaAssets;
         }
-        plan.positionMarginLockedUsdc = marginDeltaUsdc - actionCostFundedByMarginUsdc;
-        plan.netMarginChangeUsdc = int256(plan.positionMarginLockedUsdc);
-        if (plan.positionMarginLockedUsdc > 0) {
-            if (plan.positionMarginLockedUsdc > freeSettlementUsdc) {
+        plan.positionMarginLockedAssets = marginDeltaAssets - actionCostFundedByMarginAssets;
+        plan.netMarginChangeAssets = int256(plan.positionMarginLockedAssets);
+        if (plan.positionMarginLockedAssets > 0) {
+            if (plan.positionMarginLockedAssets > freeSettlementAssets) {
                 plan.insufficientFreeEquity = true;
                 return plan;
             }
-            positionMarginUsdc += plan.positionMarginLockedUsdc;
-            freeSettlementUsdc -= plan.positionMarginLockedUsdc;
+            positionMarginAssets += plan.positionMarginLockedAssets;
+            freeSettlementAssets -= plan.positionMarginLockedAssets;
         }
 
-        plan.resultingSettlementBalanceUsdc = settlementBalanceUsdc;
-        plan.resultingPositionMarginUsdc = positionMarginUsdc;
-        plan.resultingFreeSettlementUsdc = freeSettlementUsdc;
+        plan.resultingSettlementBalanceAssets = settlementBalanceAssets;
+        plan.resultingPositionMarginAssets = positionMarginAssets;
+        plan.resultingFreeSettlementAssets = freeSettlementAssets;
     }
 
     /// @notice Returns all settlement balance reachable during terminal position settlement.
-    /// @dev Equivalent to `getSettlementReachableUsdc(buckets, 0)`; lock classifications do not protect value.
+    /// @dev Equivalent to `getSettlementReachableAssets(buckets, 0)`; lock classifications do not protect value.
     /// @param buckets Account bucket snapshot.
-    /// @return reachableUsdc Entire `settlementBalanceUsdc`.
-    function getTerminalReachableUsdc(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets
-    ) internal pure returns (uint256 reachableUsdc) {
-        reachableUsdc = getSettlementReachableUsdc(buckets, 0);
+    /// @return reachableAssets Entire `settlementBalanceAssets`.
+    function getTerminalReachableAssets(
+        IMarginClearinghouse.AccountAssetBuckets memory buckets
+    ) internal pure returns (uint256 reachableAssets) {
+        reachableAssets = getSettlementReachableAssets(buckets, 0);
     }
 
     /// @notice Returns settlement balance above an explicitly protected locked amount.
     /// @dev The subtraction saturates at zero and does not inspect which lock bucket supplies the protected amount.
     /// @param buckets Account bucket snapshot.
-    /// @param protectedLockedMarginUsdc Settlement amount that must remain unreachable.
-    /// @return reachableUsdc `max(settlementBalanceUsdc - protectedLockedMarginUsdc, 0)`.
-    function getSettlementReachableUsdc(
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets,
-        uint256 protectedLockedMarginUsdc
-    ) internal pure returns (uint256 reachableUsdc) {
-        uint256 protectedBalance = protectedLockedMarginUsdc;
-        uint256 settlementBalanceUsdc = buckets.settlementBalanceUsdc;
-        reachableUsdc = settlementBalanceUsdc > protectedBalance ? settlementBalanceUsdc - protectedBalance : 0;
+    /// @param protectedLockedMarginAssets Settlement amount that must remain unreachable.
+    /// @return reachableAssets `max(settlementBalanceAssets - protectedLockedMarginAssets, 0)`.
+    function getSettlementReachableAssets(
+        IMarginClearinghouse.AccountAssetBuckets memory buckets,
+        uint256 protectedLockedMarginAssets
+    ) internal pure returns (uint256 reachableAssets) {
+        uint256 protectedBalance = protectedLockedMarginAssets;
+        uint256 settlementBalanceAssets = buckets.settlementBalanceAssets;
+        reachableAssets = settlementBalanceAssets > protectedBalance ? settlementBalanceAssets - protectedBalance : 0;
     }
 
     /// @notice Converts a carry-loss consumption plan into clearinghouse mutation amounts.
@@ -214,8 +217,8 @@ library MarginClearinghouseAccountingLib {
     function applyCarryLossMutation(
         SettlementConsumption memory consumption
     ) internal pure returns (BucketMutation memory mutation) {
-        mutation.settlementDebitUsdc = consumption.totalConsumedUsdc;
-        mutation.positionMarginUnlockedUsdc = consumption.activeMarginConsumedUsdc;
+        mutation.settlementDebitAssets = consumption.totalConsumedAssets;
+        mutation.positionMarginUnlockedAssets = consumption.activeMarginConsumedAssets;
     }
 
 }

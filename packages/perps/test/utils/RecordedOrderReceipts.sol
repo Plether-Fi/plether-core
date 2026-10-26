@@ -89,7 +89,7 @@ abstract contract RecordedOrderReceipts is Test {
         outcome.executor = receipt.executor;
         outcome.bountyRecipient = receipt.bountyRecipient;
         outcome.executionPrice = receipt.executionPrice;
-        outcome.bountyUsdc = receipt.bountyUsdc;
+        outcome.bountyAssets = receipt.bountyAssets;
         outcome.failureSelector = receipt.failure.selector;
         outcome.failureCategory = receipt.failure.category;
         outcome.failureCode = receipt.failure.code;

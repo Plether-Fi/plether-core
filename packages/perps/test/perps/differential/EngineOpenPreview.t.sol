@@ -26,17 +26,17 @@ contract EngineOpenPreviewTest is CfdEngineTestBase {
                 engineLens.previewOpen(trader, CfdTypes.Side.LONG, 10_000e18, 50e6, 0.8e8);
             assertFalse(preview.valid);
             assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN));
-            assertEq(preview.maintenanceMarginUsdc, i == 0 ? 240e6 : 80e6);
+            assertEq(preview.maintenanceMarginAssets, i == 0 ? 240e6 : 80e6);
             assertEq(preview.postHealthBps, 0, "Rejected plan must not invent post-health diagnostics");
             preview = engineLens.previewOpen(trader, CfdTypes.Side.SHORT, 10_000e18, 50e6, 1.2e8);
             assertFalse(preview.valid);
-            assertEq(preview.maintenanceMarginUsdc, i == 0 ? 360e6 : 120e6);
+            assertEq(preview.maintenanceMarginAssets, i == 0 ? 360e6 : 120e6);
             preview = engineLens.previewOpen(trader, CfdTypes.Side.LONG, 1, 50e6, 0.8e8);
             assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.INVALID_SIZE_QUANTUM));
-            assertEq(preview.maintenanceMarginUsdc, 0, "No constructed economics on size rejection");
+            assertEq(preview.maintenanceMarginAssets, 0, "No constructed economics on size rejection");
             preview = engineLens.previewOpen(trader, CfdTypes.Side.LONG, 10_000e18, type(uint256).max, 0.8e8);
             assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
-            assertEq(preview.maintenanceMarginUsdc, 0, "No constructed economics on numeric rejection");
+            assertEq(preview.maintenanceMarginAssets, 0, "No constructed economics on numeric rejection");
         }
     }
 
@@ -47,7 +47,7 @@ contract EngineOpenPreviewTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint256 sizeDelta = 10_000e18;
-        uint256 marginDelta = _freeSettlementUsdc(account);
+        uint256 marginDelta = _freeSettlementAssets(account);
         CfdTypes.Order memory order = CfdTypes.Order({
             account: account,
             sizeDelta: sizeDelta,

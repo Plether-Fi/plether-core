@@ -19,7 +19,7 @@ library OrderSettlementFloorLib {
     function load(
         address router,
         address account
-    ) internal view returns (uint64 orderId, uint256 minimumUsdc, uint256 maxGrossDebitUsdc) {
+    ) internal view returns (uint64 orderId, uint256 minimumAssets, uint256 maxGrossDebitAssets) {
         if (router == address(0)) {
             return (0, 0, 0);
         }
@@ -29,7 +29,7 @@ library OrderSettlementFloorLib {
             return (0, 0, 0);
         }
         OrderV3Types.ExecutionBounds memory bounds = host.lifecycleBook().pendingPolicy(orderId);
-        return (orderId, bounds.minPostSettlementBalanceUsdc, bounds.maxGrossAccountDebitUsdc);
+        return (orderId, bounds.minPostSettlementBalanceAssets, bounds.maxGrossAccountDebitAssets);
     }
 
 }

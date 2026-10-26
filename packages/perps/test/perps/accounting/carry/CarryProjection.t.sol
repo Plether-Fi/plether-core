@@ -37,8 +37,9 @@ contract CarryProjectionTest is BasePerpTest {
         // Synthetic claims must retain the production ordering: close the old net-depth carry interval first.
         engine.checkpointCarryIndexes();
         bytes32 oldHash = terminalNavBook.curveHashOf(ACCOUNT);
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(ACCOUNT).checked_write(amount);
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(amount);
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(ACCOUNT)
+            .checked_write(amount);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(amount);
         vm.prank(address(engine));
         terminalNavBook.syncFromEngine(ACCOUNT, oldHash);
     }
@@ -46,7 +47,7 @@ contract CarryProjectionTest is BasePerpTest {
     function _arrears(
         uint256 amount
     ) private {
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(ACCOUNT).checked_write(amount);
+        stdstore.target(address(engine)).sig("unsettledCarryAssets(address)").with_key(ACCOUNT).checked_write(amount);
     }
 
     function _checkpoint() private {
@@ -76,12 +77,12 @@ contract CarryProjectionTest is BasePerpTest {
         assertEq(
             uint256(delta.revertCode),
             uint256(
-                snap.unsettledCarryUsdc > 0
+                snap.unsettledCarryAssets > 0
                     ? CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES
                     : CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING
             )
         );
-        return delta.pendingCarryUsdc;
+        return delta.pendingCarryAssets;
     }
 
     function testFuzz_PlannerProjectionMatchesLiveCollection(
@@ -100,16 +101,16 @@ contract CarryProjectionTest is BasePerpTest {
         for (uint256 side; side < 2; ++side) {
             uint256 clean = vm.snapshotState();
             _fixture(side == 1);
-            IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(ACCOUNT);
+            IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(ACCOUNT);
             for (uint256 scenario; scenario < 6; ++scenario) {
                 uint256 state = vm.snapshotState();
                 uint256 due = scenario == 0
                     ? 0
                     : scenario == 1
-                        ? buckets.activePositionMarginUsdc
-                        : buckets.activePositionMarginUsdc + buckets.freeSettlementUsdc / 2;
+                        ? buckets.activePositionMarginAssets
+                        : buckets.activePositionMarginAssets + buckets.freeSettlementAssets / 2;
                 if (scenario >= 3) {
-                    due = buckets.activePositionMarginUsdc + buckets.freeSettlementUsdc;
+                    due = buckets.activePositionMarginAssets + buckets.freeSettlementAssets;
                 }
                 if (scenario >= 4) {
                     due += 1e6;
@@ -130,29 +131,29 @@ contract CarryProjectionTest is BasePerpTest {
             uint256 state = vm.snapshotState();
             _fixture(scenario >= 2);
             _claim(2000e6);
-            _arrears(clearinghouse.pnlPledgeUsdc(ACCOUNT) + _freeSettlementUsdc(ACCOUNT) + 100e6);
+            _arrears(clearinghouse.pnlPledgeAssets(ACCOUNT) + _freeSettlementAssets(ACCOUNT) + 100e6);
             if (scenario % 2 == 0) {
                 vm.prank(ACCOUNT);
                 engine.settleTraderClaim(ACCOUNT);
-                assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 2000e6);
+                assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 2000e6);
             } else {
                 vm.prank(address(router));
                 clearinghouse.lockReservedSettlement(OTHER, 2000e6);
                 vm.prank(address(router));
                 engine.creditBounty(OTHER, ACCOUNT, 2000e6, 1e8, uint64(block.timestamp));
-                assertEq(_freeSettlementUsdc(ACCOUNT), 2000e6);
+                assertEq(_freeSettlementAssets(ACCOUNT), 2000e6);
             }
             assertEq(
-                engine.unsettledCarryUsdc(ACCOUNT), 100e6, "incoming credit remains intact until a later checkpoint"
+                engine.unsettledCarryAssets(ACCOUNT), 100e6, "incoming credit remains intact until a later checkpoint"
             );
             _assertProjectionMatchesCollection();
-            assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
+            assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
             assertTrue(vm.revertToState(state));
         }
     }
 
     function _assertProjectionMatchesCollection() private {
-        uint256 pending = engine.unsettledCarryUsdc(ACCOUNT) + _expectedIndexedCarryUsdc(ACCOUNT);
+        uint256 pending = engine.unsettledCarryAssets(ACCOUNT) + _expectedIndexedCarryAssets(ACCOUNT);
         CfdEnginePlanTypes.RawSnapshot memory projected = _snapshot(pool.totalAssets());
         bytes32 otherBefore = keccak256(
             abi.encode(projected.position.side == CfdTypes.Side.LONG ? projected.shortSide : projected.longSide)
@@ -170,20 +171,20 @@ contract CarryProjectionTest is BasePerpTest {
         assertEq(keccak256(abi.encode(projected.accountBuckets)), keccak256(abi.encode(actual.accountBuckets)));
         assertEq(keccak256(abi.encode(projected.lockedBuckets)), keccak256(abi.encode(actual.lockedBuckets)));
         assertEq(projected.position.margin, actual.position.margin);
-        assertEq(projected.positionBorrowBaseUsdc, actual.positionBorrowBaseUsdc);
+        assertEq(projected.positionBorrowBaseAssets, actual.positionBorrowBaseAssets);
         if (pending > 0) {
             assertEq(projected.positionLastCarryIndex, actual.positionLastCarryIndex);
         }
         assertEq(keccak256(abi.encode(projected.longSide)), keccak256(abi.encode(actual.longSide)));
         assertEq(keccak256(abi.encode(projected.shortSide)), keccak256(abi.encode(actual.shortSide)));
-        assertEq(projected.poolAssetsUsdc, actual.poolAssetsUsdc);
-        assertEq(projected.poolCashUsdc, actual.poolCashUsdc);
-        assertEq(projected.unsettledCarryUsdc, actual.unsettledCarryUsdc);
-        assertEq(projected.liquidationReserveUsdc, actual.liquidationReserveUsdc);
-        assertEq(projected.actionReserveUsdc, actual.actionReserveUsdc);
-        assertEq(projected.vpiRebateReserveUsdc, actual.vpiRebateReserveUsdc);
+        assertEq(projected.poolAssets, actual.poolAssets);
+        assertEq(projected.poolCashAssets, actual.poolCashAssets);
+        assertEq(projected.unsettledCarryAssets, actual.unsettledCarryAssets);
+        assertEq(projected.liquidationReserveAssets, actual.liquidationReserveAssets);
+        assertEq(projected.actionReserveAssets, actual.actionReserveAssets);
+        assertEq(projected.vpiRebateReserveAssets, actual.vpiRebateReserveAssets);
         assertEq(projected.traderClaimBalanceForAccount, actual.traderClaimBalanceForAccount);
-        assertEq(projected.totalTraderClaimBalanceUsdc, actual.totalTraderClaimBalanceUsdc);
+        assertEq(projected.totalTraderClaimBalanceAssets, actual.totalTraderClaimBalanceAssets);
         vm.prank(address(engine));
         terminalNavBook.authenticateEngineState(ACCOUNT);
         engine.terminalNavSnapshot();
@@ -197,73 +198,78 @@ contract CarryProjectionTest is BasePerpTest {
         CfdEnginePlanTypes.RawSnapshot memory live = _snapshot(liveDepth);
         CfdEnginePlanTypes.RawSnapshot memory hypothetical = _snapshot(hypotheticalDepth);
         // Lens simulation supplies hypothetical cash as well as depth. Carry indexes still use the live pool.
-        hypothetical.poolCashUsdc = hypotheticalDepth;
-        uint256 expectedCarry = _expectedIndexedCarryUsdc(ACCOUNT);
+        hypothetical.poolCashAssets = hypotheticalDepth;
+        uint256 expectedCarry = _expectedIndexedCarryAssets(ACCOUNT);
         assertGt(expectedCarry, 0);
         assertEq(_project(live), expectedCarry);
         assertEq(_project(hypothetical), expectedCarry);
         assertEq(keccak256(abi.encode(live.accountBuckets)), keccak256(abi.encode(hypothetical.accountBuckets)));
-        assertEq(live.poolAssetsUsdc, liveDepth + expectedCarry);
-        assertEq(live.poolCashUsdc, liveDepth + expectedCarry);
-        assertEq(hypothetical.poolAssetsUsdc, hypotheticalDepth + expectedCarry);
-        assertEq(hypothetical.poolCashUsdc, hypotheticalDepth + expectedCarry);
+        assertEq(live.poolAssets, liveDepth + expectedCarry);
+        assertEq(live.poolCashAssets, liveDepth + expectedCarry);
+        assertEq(hypothetical.poolAssets, hypotheticalDepth + expectedCarry);
+        assertEq(hypothetical.poolCashAssets, hypotheticalDepth + expectedCarry);
     }
 
     function test_WithdrawalAndRiskViewsRetainRawDiagnostics() public {
         _fixture(false);
         _claim(2000e6);
-        IMarginClearinghouse.AccountUsdcBuckets memory raw = clearinghouse.getAccountUsdcBuckets(ACCOUNT);
-        uint256 terminalCap = engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).terminalPriceCollectibleCapUsdc;
+        IMarginClearinghouse.AccountAssetBuckets memory raw = clearinghouse.getAccountAssetBuckets(ACCOUNT);
+        uint256 terminalCap = engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).terminalPriceCollectibleCapAssets;
         // Claims preserve price health after the margin is exhausted; half the free settlement remains withdrawable.
-        uint256 carry = raw.activePositionMarginUsdc + raw.freeSettlementUsdc / 2;
+        uint256 carry = raw.activePositionMarginAssets + raw.freeSettlementAssets / 2;
         _arrears(carry);
-        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).settlementBalanceUsdc, raw.settlementBalanceUsdc);
-        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).margin, raw.activePositionMarginUsdc);
         assertEq(
-            engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).activePositionMarginUsdc, raw.activePositionMarginUsdc
+            engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).settlementBalanceAssets, raw.settlementBalanceAssets
         );
-        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).freeSettlementUsdc, raw.freeSettlementUsdc);
-        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).terminalPriceCollectibleCapUsdc, terminalCap);
-        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).netEquityUsdc, 2000e6);
+        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).margin, raw.activePositionMarginAssets);
+        assertEq(
+            engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).activePositionMarginAssets,
+            raw.activePositionMarginAssets
+        );
+        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).freeSettlementAssets, raw.freeSettlementAssets);
+        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).terminalPriceCollectibleCapAssets, terminalCap);
+        assertEq(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).netEquityAssets, 2000e6);
         assertFalse(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
-        uint256 ceiling = engineAccountLens.getWithdrawableUsdc(ACCOUNT);
-        assertEq(ceiling, raw.freeSettlementUsdc - raw.freeSettlementUsdc / 2);
+        uint256 ceiling = engineAccountLens.getWithdrawableAssets(ACCOUNT);
+        assertEq(ceiling, raw.freeSettlementAssets - raw.freeSettlementAssets / 2);
         bytes32 bookBefore = keccak256(abi.encode(terminalNavBook.bookState()));
         vm.expectRevert();
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, ceiling + 1);
-        assertEq(keccak256(abi.encode(clearinghouse.getAccountUsdcBuckets(ACCOUNT))), keccak256(abi.encode(raw)));
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), carry);
+        assertEq(keccak256(abi.encode(clearinghouse.getAccountAssetBuckets(ACCOUNT))), keccak256(abi.encode(raw)));
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), carry);
         assertEq(keccak256(abi.encode(terminalNavBook.bookState())), bookBefore);
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, ceiling);
-        assertEq(_freeSettlementUsdc(ACCOUNT), 0);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 0);
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 2000e6);
+        assertEq(_freeSettlementAssets(ACCOUNT), 0);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 0);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 2000e6);
     }
 
     function test_ProjectedMaintenanceAndUnpaidCarryAgreeWithLiveHealth() public {
         _fixture(true);
-        uint256 margin = clearinghouse.pnlPledgeUsdc(ACCOUNT);
+        uint256 margin = clearinghouse.pnlPledgeAssets(ACCOUNT);
         _arrears(margin - 1000e6 - 1);
         assertFalse(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
         assertFalse(engineLens.previewLiquidation(ACCOUNT, 1e8).liquidatable);
-        assertEq(engineAccountLens.getWithdrawableUsdc(ACCOUNT), 0, "initial margin remains stricter than maintenance");
+        assertEq(
+            engineAccountLens.getWithdrawableAssets(ACCOUNT), 0, "initial margin remains stricter than maintenance"
+        );
         _arrears(margin - 1000e6);
         assertTrue(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
         assertTrue(engineLens.previewLiquidation(ACCOUNT, 1e8).liquidatable);
-        assertEq(engineAccountLens.getWithdrawableUsdc(ACCOUNT), 0);
+        assertEq(engineAccountLens.getWithdrawableAssets(ACCOUNT), 0);
         _checkpoint();
         assertTrue(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
         _claim(2000e6);
         assertFalse(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
-        _arrears(1000e6 + _freeSettlementUsdc(ACCOUNT) + 1);
+        _arrears(1000e6 + _freeSettlementAssets(ACCOUNT) + 1);
         assertTrue(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable, "claims cannot fund carry");
         assertTrue(engineLens.previewLiquidation(ACCOUNT, 1e8).liquidatable);
-        assertEq(engineAccountLens.getWithdrawableUsdc(ACCOUNT), 0);
+        assertEq(engineAccountLens.getWithdrawableAssets(ACCOUNT), 0);
         _checkpoint();
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 1);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 1);
         assertTrue(engineAccountLens.getAccountLedgerSnapshot(ACCOUNT).liquidatable);
     }
 

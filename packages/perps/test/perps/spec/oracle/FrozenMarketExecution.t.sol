@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 // Category: spec. All cases assert current documented behavior and are expected to pass.
 // Source of truth: packages/perps/PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
@@ -15,7 +16,6 @@ import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract FrozenCloseEligibilityTest is BasePerpTest {
 
@@ -43,7 +43,7 @@ contract FrozenCloseEligibilityTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -55,22 +55,22 @@ contract FrozenCloseEligibilityTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -179,7 +179,9 @@ contract FrozenLpRedemptionTest is BasePerpTest {
         uint256 withdrawnAssets = juniorVault.claimRedeem(requestId, claimableShares, bob, bob);
 
         assertGt(withdrawnAssets, 0, "LP withdrawal must work during FAD window");
-        assertEq(usdc.balanceOf(bob), withdrawnAssets, "funded FAD exit should remain independently claimable");
+        assertEq(
+            settlementToken.balanceOf(bob), withdrawnAssets, "funded FAD exit should remain independently claimable"
+        );
     }
 
 }
@@ -211,7 +213,7 @@ contract ExpiredHeadFrozenQueueTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -223,19 +225,22 @@ contract ExpiredHeadFrozenQueueTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         terminalNavBook = new TerminalNavBookV2(address(engine), uint32(CAP_PRICE));
         engine.setTerminalNavBook(address(terminalNavBook));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "sUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), false, "Junior", "jUSDC", 0, address(0));
+        seniorVault =
+            new TrancheVault(IERC20(address(settlementToken)), address(pool), true, "Senior", "sAssets", 0, address(0));
+        juniorVault = new TrancheVault(
+            IERC20(address(settlementToken)), address(pool), false, "Junior", "jAssets", 0, address(0)
+        );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));

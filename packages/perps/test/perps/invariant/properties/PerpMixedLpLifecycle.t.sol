@@ -33,7 +33,7 @@ contract PerpMixedLpLifecycleTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
         handler = new MixedLpTestHarness(
-            usdc,
+            settlementToken,
             baseMockPyth,
             engine,
             clearinghouse,
@@ -400,8 +400,8 @@ contract PerpMixedLpLifecycleTest is BasePerpTest {
         vm.clearMockedCalls();
         handler.assertModel();
         vm.mockCall(
-            address(usdc),
-            abi.encodeCall(usdc.balanceOf, (handler.lpAt(1))),
+            address(settlementToken),
+            abi.encodeCall(settlementToken.balanceOf, (handler.lpAt(1))),
             abi.encode(handler.lpState(1).wallet + lp.redeemedAssets)
         );
         vm.expectRevert();
@@ -516,12 +516,22 @@ contract PerpMixedLpLifecycleTest is BasePerpTest {
         assertFalse(handler.lpState(0).redeemFundingClaimed);
         assertFalse(handler.lpState(1).redeemFundingClaimed);
         // This coherent premature transfer preserves total cash, so ownership/timing assertions must detect it.
-        vm.mockCall(address(usdc), abi.encodeCall(usdc.balanceOf, (address(juniorVault))), abi.encode(escrow - dust));
-        vm.mockCall(address(usdc), abi.encodeCall(usdc.balanceOf, (address(pool))), abi.encode(rawPool + dust));
+        vm.mockCall(
+            address(settlementToken),
+            abi.encodeCall(settlementToken.balanceOf, (address(juniorVault))),
+            abi.encode(escrow - dust)
+        );
+        vm.mockCall(
+            address(settlementToken),
+            abi.encodeCall(settlementToken.balanceOf, (address(pool))),
+            abi.encode(rawPool + dust)
+        );
         vm.mockCall(
             address(juniorVault), abi.encodeCall(juniorVault.withdrawalEscrowAssets, ()), abi.encode(escrow - dust)
         );
-        assertEq(usdc.balanceOf(address(juniorVault)) + usdc.balanceOf(address(pool)), escrow + rawPool);
+        assertEq(
+            settlementToken.balanceOf(address(juniorVault)) + settlementToken.balanceOf(address(pool)), escrow + rawPool
+        );
         vm.expectRevert();
         handler.assertModel();
         vm.clearMockedCalls();

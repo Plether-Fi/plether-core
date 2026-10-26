@@ -6,7 +6,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @title PositionRiskAccountingLib
 /// @notice Pure borrow-utilization, carry-index, equity, and liquidation-threshold accounting for perps positions.
-/// @dev USDC values use 6 decimals, prices use 8 decimals, sizes use 18 decimals, basis points use a 10,000
+/// @dev settlement token values use 6 decimals, prices use 8 decimals, sizes use 18 decimals, basis points use a 10,000
 ///      denominator, carry indexes use 1e18 precision, and time values use seconds. Integer divisions round down.
 library PositionRiskAccountingLib {
 
@@ -18,57 +18,57 @@ library PositionRiskAccountingLib {
     /// @notice Returns economic pool depth after reserving outstanding trader claims.
     /// @dev Physical assets remain gross in custody and solvency snapshots. Only carry, skew and VPI use this depth;
     ///      open-position liabilities and the settlement buffer are not deducted again.
-    function computeNetPoolDepthUsdc(
-        uint256 physicalAssetsUsdc,
-        uint256 traderClaimsUsdc
+    function computeNetPoolDepthAssets(
+        uint256 physicalAssets,
+        uint256 traderClaimsAssets
     ) internal pure returns (uint256) {
-        return physicalAssetsUsdc > traderClaimsUsdc ? physicalAssetsUsdc - traderClaimsUsdc : 0;
+        return physicalAssets > traderClaimsAssets ? physicalAssets - traderClaimsAssets : 0;
     }
 
     /// @notice Price-risk state for one position at a supplied collateral and margin policy.
-    /// @param unrealizedPnlUsdc Signed capped price PnL; positive values increase trader equity.
-    /// @param equityUsdc Signed post-carry PnL pledge plus same-account nettable claim and exact price PnL.
-    /// @param currentNotionalUsdc Position notional at the supplied price.
-    /// @param maintenanceMarginUsdc Requirement at `requiredBps`; the field may represent maintenance, FAD, or another
+    /// @param unrealizedPnlAssets Signed capped price PnL; positive values increase trader equity.
+    /// @param equityAssets Signed post-carry PnL pledge plus same-account nettable claim and exact price PnL.
+    /// @param currentNotionalAssets Position notional at the supplied price.
+    /// @param maintenanceMarginAssets Requirement at `requiredBps`; the field may represent maintenance, FAD, or another
     ///        caller-selected threshold despite its historical name.
     /// @param liquidatable Whether equity is less than or equal to the requirement.
     struct PositionRiskState {
-        int256 unrealizedPnlUsdc;
-        int256 equityUsdc;
-        uint256 currentNotionalUsdc;
-        uint256 maintenanceMarginUsdc;
+        int256 unrealizedPnlAssets;
+        int256 equityAssets;
+        uint256 currentNotionalAssets;
+        uint256 maintenanceMarginAssets;
         bool liquidatable;
     }
 
     /// @notice Computes the LP-backed maximum-profit amount on which carry accrues.
     /// @dev Subtraction saturates at zero: position margin funds the maximum-profit envelope before LP assets do.
-    /// @param maxProfitUsdc Position maximum-profit envelope.
-    /// @param marginUsdc Canonical position margin.
-    /// @return LP-funded borrow base `max(maxProfitUsdc - marginUsdc, 0)`.
-    function computeBorrowBaseUsdc(
-        uint256 maxProfitUsdc,
-        uint256 marginUsdc
+    /// @param maxProfitAssets Position maximum-profit envelope.
+    /// @param marginAssets Canonical position margin.
+    /// @return LP-funded borrow base `max(maxProfitAssets - marginAssets, 0)`.
+    function computeBorrowBaseAssets(
+        uint256 maxProfitAssets,
+        uint256 marginAssets
     ) internal pure returns (uint256) {
-        return maxProfitUsdc > marginUsdc ? maxProfitUsdc - marginUsdc : 0;
+        return maxProfitAssets > marginAssets ? maxProfitAssets - marginAssets : 0;
     }
 
     /// @notice Computes pool utilization by the aggregate borrow base, capped at 100%.
     /// @dev Returns zero for zero borrow base. A positive borrow base against zero pool assets is treated as 100%
     ///      utilization. Otherwise division rounds down before the 10,000-bps cap is applied.
-    /// @param borrowBaseUsdc LP-backed amount using pool capacity.
-    /// @param poolAssetsUsdc Economic pool depth after reserving outstanding trader claims.
+    /// @param borrowBaseAssets LP-backed amount using pool capacity.
+    /// @param poolAssets Economic pool depth after reserving outstanding trader claims.
     /// @return utilizationBps Utilization in basis points, within `[0, 10_000]`.
     function computeBorrowUtilizationBps(
-        uint256 borrowBaseUsdc,
-        uint256 poolAssetsUsdc
+        uint256 borrowBaseAssets,
+        uint256 poolAssets
     ) internal pure returns (uint256 utilizationBps) {
-        if (borrowBaseUsdc == 0) {
+        if (borrowBaseAssets == 0) {
             return 0;
         }
-        if (poolAssetsUsdc == 0) {
+        if (poolAssets == 0) {
             return UTILIZATION_BPS;
         }
-        utilizationBps = (borrowBaseUsdc * UTILIZATION_BPS) / poolAssetsUsdc;
+        utilizationBps = (borrowBaseAssets * UTILIZATION_BPS) / poolAssets;
         if (utilizationBps > UTILIZATION_BPS) {
             utilizationBps = UTILIZATION_BPS;
         }
@@ -82,24 +82,24 @@ library PositionRiskAccountingLib {
     /// @param storedIndex Last stored cumulative carry index, scaled by 1e18.
     /// @param previousTimestamp Timestamp through which `storedIndex` has accrued, in Unix seconds.
     /// @param currentTimestamp Timestamp to accrue through, in Unix seconds.
-    /// @param borrowBaseUsdc Aggregate LP-funded borrow base during the interval.
-    /// @param poolAssetsUsdc Economic pool depth after reserving outstanding trader claims.
+    /// @param borrowBaseAssets Aggregate LP-funded borrow base during the interval.
+    /// @param poolAssets Economic pool depth after reserving outstanding trader claims.
     /// @param baseCarryBps Annualized rate at full utilization, in basis points.
     /// @return index Current cumulative carry index, scaled by 1e18 and rounded down at the increment.
     function computeCurrentCarryIndex(
         uint256 storedIndex,
         uint64 previousTimestamp,
         uint256 currentTimestamp,
-        uint256 borrowBaseUsdc,
-        uint256 poolAssetsUsdc,
+        uint256 borrowBaseAssets,
+        uint256 poolAssets,
         uint256 baseCarryBps
     ) internal pure returns (uint256 index) {
         index = storedIndex;
-        if (currentTimestamp <= previousTimestamp || borrowBaseUsdc == 0 || baseCarryBps == 0) {
+        if (currentTimestamp <= previousTimestamp || borrowBaseAssets == 0 || baseCarryBps == 0) {
             return index;
         }
 
-        uint256 utilizationBps = computeBorrowUtilizationBps(borrowBaseUsdc, poolAssetsUsdc);
+        uint256 utilizationBps = computeBorrowUtilizationBps(borrowBaseAssets, poolAssets);
         if (utilizationBps == 0) {
             return index;
         }
@@ -108,19 +108,19 @@ library PositionRiskAccountingLib {
             / (CfdMath.SECONDS_PER_YEAR * UTILIZATION_BPS * 10_000);
     }
 
-    /// @notice Converts a carry-index delta into USDC carry on a fixed borrow base.
+    /// @notice Converts a carry-index delta into settlement token carry on a fixed borrow base.
     /// @dev Returns zero when either input is zero and otherwise rounds down by the 1e18 index scale.
-    /// @param borrowBaseUsdc Position or aggregate borrow base.
+    /// @param borrowBaseAssets Position or aggregate borrow base.
     /// @param carryIndexDelta Increase in the cumulative carry index, scaled by 1e18.
-    /// @return Carry due in 6-decimal USDC.
-    function computeIndexedCarryUsdc(
-        uint256 borrowBaseUsdc,
+    /// @return Carry due in 6-decimal settlement token.
+    function computeIndexedCarryAssets(
+        uint256 borrowBaseAssets,
         uint256 carryIndexDelta
     ) internal pure returns (uint256) {
-        if (borrowBaseUsdc == 0 || carryIndexDelta == 0) {
+        if (borrowBaseAssets == 0 || carryIndexDelta == 0) {
             return 0;
         }
-        return (borrowBaseUsdc * carryIndexDelta) / CARRY_INDEX_SCALE;
+        return (borrowBaseAssets * carryIndexDelta) / CARRY_INDEX_SCALE;
     }
 
     /// @notice Builds canonical V3 price-risk equity without mixing action charges into PnL backing.
@@ -128,19 +128,20 @@ library PositionRiskAccountingLib {
     ///      carry collection or projection; carry must not be deducted again here. VPI backing is checked separately.
     function buildExactPriceRiskState(
         CfdTypes.Position memory pos,
-        uint256 entryCostUsdcAtoms,
+        uint256 entryCostAssetAtoms,
         uint256 price,
         uint256 capPrice,
-        uint256 priceCollateralUsdc,
+        uint256 priceCollateralAssets,
         uint256 requiredBps
     ) internal pure returns (PositionRiskState memory state) {
         uint256 lots = CfdMath.sizeToLots(pos.size);
-        (bool isProfit, uint256 pnlAbs) = CfdMath.calculateExactPnl(lots, entryCostUsdcAtoms, pos.side, price, capPrice);
-        state.unrealizedPnlUsdc = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
-        state.equityUsdc = int256(priceCollateralUsdc) + state.unrealizedPnlUsdc;
-        state.currentNotionalUsdc = lots * (price > capPrice ? capPrice : price);
-        state.maintenanceMarginUsdc = (state.currentNotionalUsdc * requiredBps) / 10_000;
-        state.liquidatable = state.equityUsdc <= int256(state.maintenanceMarginUsdc);
+        (bool isProfit, uint256 pnlAbs) =
+            CfdMath.calculateExactPnl(lots, entryCostAssetAtoms, pos.side, price, capPrice);
+        state.unrealizedPnlAssets = isProfit ? int256(pnlAbs) : -int256(pnlAbs);
+        state.equityAssets = int256(priceCollateralAssets) + state.unrealizedPnlAssets;
+        state.currentNotionalAssets = lots * (price > capPrice ? capPrice : price);
+        state.maintenanceMarginAssets = (state.currentNotionalAssets * requiredBps) / 10_000;
+        state.liquidatable = state.equityAssets <= int256(state.maintenanceMarginAssets);
     }
 
 }

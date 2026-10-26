@@ -25,7 +25,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
 
         uint256 keeperBefore = _settlementBalance(address(this));
         address aliceAccount = alice;
-        uint256 aliceSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 aliceSettlementBefore = clearinghouse.balanceAssets(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
@@ -39,7 +39,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Keeper should receive bounty on protocol-state failure under current policy"
         );
         assertEq(
-            aliceSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            aliceSettlementBefore - clearinghouse.balanceAssets(aliceAccount),
             200_000,
             "Trader should pay the reserved bounty under current policy"
         );
@@ -48,7 +48,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
     function test_CommitOrder_RevertsOnPredictableSkewInvalidation() public {
         _startRecordingLogs();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 800_000e6);
+        settlementToken.transfer(address(0xDEAD), 800_000e6);
 
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -68,7 +68,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         _fundTrader(alice, 40_000e6);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 700_000e6);
+        settlementToken.transfer(address(0xDEAD), 700_000e6);
 
         vm.prank(alice);
         vm.expectRevert();
@@ -81,12 +81,12 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 800_000e6);
+        settlementToken.transfer(address(0xDEAD), 800_000e6);
         vm.warp(block.timestamp + 6);
 
         address aliceAccount = alice;
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
@@ -100,7 +100,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Keeper should receive bounty on skew invalidation under current policy"
         );
         assertEq(
-            traderSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            traderSettlementBefore - clearinghouse.balanceAssets(aliceAccount),
             200_000,
             "Trader should pay the reserved bounty on skew invalidation"
         );
@@ -120,11 +120,11 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 350_000e18, 35_000e6, 1e8, false);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 700_000e6);
+        settlementToken.transfer(address(0xDEAD), 700_000e6);
         vm.warp(block.timestamp + 6);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 7);
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
@@ -138,7 +138,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Keeper should receive bounty on solvency invalidation under current policy"
         );
         assertEq(
-            traderSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            traderSettlementBefore - clearinghouse.balanceAssets(aliceAccount),
             200_000,
             "Trader should pay the reserved bounty on solvency invalidation"
         );
@@ -169,7 +169,9 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             200_000,
             "Keeper should receive bounty on post-commit margin-drain invalidation as clearinghouse credit"
         );
-        assertEq(usdc.balanceOf(alice), 0, "Trader should not receive bounty refund on margin-drain invalidation");
+        assertEq(
+            settlementToken.balanceOf(alice), 0, "Trader should not receive bounty refund on margin-drain invalidation"
+        );
     }
 
     function test_StaleCachedMark_DoesNotBlockMarginDrainInvalidationExecution() public {
@@ -235,7 +237,9 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Batch clearer should receive bounty on post-commit margin-drain invalidation as clearinghouse credit"
         );
         assertEq(
-            usdc.balanceOf(alice), 0, "Batch execution should not refund trader bounty on margin-drain invalidation"
+            settlementToken.balanceOf(alice),
+            0,
+            "Batch execution should not refund trader bounty on margin-drain invalidation"
         );
     }
 
@@ -286,12 +290,12 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8, false);
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 800_000e6);
+        settlementToken.transfer(address(0xDEAD), 800_000e6);
         vm.warp(block.timestamp + 6);
 
         address aliceAccount = alice;
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 traderSettlementBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 traderSettlementBefore = clearinghouse.balanceAssets(aliceAccount);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), uint64(block.timestamp));
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
@@ -305,7 +309,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Batch execution should pay the clearer on skew invalidation under current policy"
         );
         assertEq(
-            traderSettlementBefore - clearinghouse.balanceUsdc(aliceAccount),
+            traderSettlementBefore - clearinghouse.balanceAssets(aliceAccount),
             200_000,
             "Batch invalidation should debit the reserved trader bounty"
         );
@@ -332,7 +336,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         vm.roll(block.number + 1);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         vm.roll(block.number + 1);
         router.executeOrder(closeOrderId, empty);
 
@@ -342,7 +346,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Keeper should recover the full expired close-order bounty"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - feesBefore,
             0,
             "Expired close-order bounty should not be routed to protocol revenue"
         );
@@ -366,7 +370,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         vm.roll(block.number + 1);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         router.executeOrder(closeOrderId, empty);
 
         assertEq(
@@ -375,7 +379,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Invalid close-order failure should pay the reserved clearer bounty"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - feesBefore,
             0,
             "Invalid close-order failure should not book protocol revenue"
         );
@@ -397,15 +401,19 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         uint256 partialCloseSize = 1000e18;
         _open(account, CfdTypes.Side.LONG, positionSize, 50_000e6, 1e8, depth);
 
-        uint256 freeSettlementBeforeCommit = _freeSettlementUsdc(account);
+        uint256 freeSettlementBeforeCommit = _freeSettlementAssets(account);
         assertGt(freeSettlementBeforeCommit, 200_000, "setup must leave free settlement to back the bounty");
-        assertEq(usdc.balanceOf(trader), 0, "trader wallet should start empty after depositing into the clearinghouse");
+        assertEq(
+            settlementToken.balanceOf(trader),
+            0,
+            "trader wallet should start empty after depositing into the clearinghouse"
+        );
 
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, partialCloseSize, 0, 0, true);
 
         assertEq(
-            _freeSettlementUsdc(account),
+            _freeSettlementAssets(account),
             freeSettlementBeforeCommit - 0,
             "commit should temporarily seize the close bounty from free settlement"
         );
@@ -418,11 +426,13 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         router.executeOrder(1, empty);
 
         assertGt(
-            _freeSettlementUsdc(account),
+            _freeSettlementAssets(account),
             freeSettlementBeforeCommit - 0,
             "successful partial close should release proportional PnL pledge into free settlement"
         );
-        assertEq(usdc.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet");
+        assertEq(
+            settlementToken.balanceOf(trader), 0, "free-backed bounty refund should not escape to the trader wallet"
+        );
         assertEq(
             _settlementBalance(address(this)) - keeperBefore,
             0,
@@ -448,7 +458,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         vm.roll(block.number + 1);
 
         uint256 keeperBefore = _settlementBalance(address(this));
-        uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 feesBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         router.executeOrder(closeOrderId, empty);
 
         assertEq(
@@ -457,7 +467,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             "Terminal close slippage miss should still credit the clearer through the carry-aware keeper settlement path"
         );
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()) - feesBefore,
+            clearinghouse.balanceAssets(engine.protocolTreasury()) - feesBefore,
             0,
             "Slippage-failed close order should not additionally book protocol revenue in this path"
         );
@@ -486,7 +496,7 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
             feedIds, int64(100_000_000), 0, int32(-8), historicalPublishTime, pending.commitTime
         );
 
-        uint256 keeperSettlementBefore = clearinghouse.balanceUsdc(address(this));
+        uint256 keeperSettlementBefore = clearinghouse.balanceAssets(address(this));
         vm.roll(block.number + 1);
         router.executeOrder(1, _pythUpdateData());
 
@@ -496,8 +506,8 @@ contract OrderRouterExecutionPaymentsTest is OrderRouterPythTestBase {
         assertEq(engine.lastMarkTime(), refreshedPublishTime, "Bounty credit must not roll back the cached mark");
         assertEq(router.nextExecuteId(), 0, "Executed order should clear the FIFO head");
         assertEq(
-            clearinghouse.balanceUsdc(address(this)) - keeperSettlementBefore,
-            pending.executionBountyUsdc,
+            clearinghouse.balanceAssets(address(this)) - keeperSettlementBefore,
+            pending.executionBountyAssets,
             "Keeper should receive the reserved execution bounty"
         );
     }

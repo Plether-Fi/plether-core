@@ -67,9 +67,9 @@ contract BootstrapPerpsArbitrumSepolia is Script {
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint256 internal constant RELEASE_SENIOR_SEED_ASSETS = 1e6;
     uint256 internal constant RELEASE_JUNIOR_SEED_ASSETS = 1e6;
-    uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_USDC = 40_000_000e6;
+    uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_ASSETS = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
-    uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_USDC = 1000e6;
+    uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
     uint256 internal constant RELEASE_BASKET_MAX_CONFIDENCE_RATIO_BPS = 10;
     uint256 internal constant RELEASE_MAX_PENDING_ORDERS = 5;
@@ -161,14 +161,15 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         console.log("HousePool pauser:", housePool.pauser());
         console.log("Router pauser:", routerAdmin.pauser());
         console.log(
-            "Position protection trigger bounty (settlement-token units):", router.positionProtectionTriggerBountyUsdc()
+            "Position protection trigger bounty (settlement-token units):",
+            router.positionProtectionTriggerBountyAssets()
         );
         console.log("Emergency guardian:", emergencyCoordinator.guardian());
         console.log("Risk-off order cutoff:", routerAdmin.riskOffOrderCutoff());
         console.log("LP epoch settlement paused:", housePool.lpEpochSettlementPaused());
-        console.log("Maximum senior exposure (settlement-token units):", housePool.maxSeniorExposureUsdc());
+        console.log("Maximum senior exposure (settlement-token units):", housePool.maxSeniorExposureAssets());
         console.log("Maximum senior share (bps):", housePool.maxSeniorShareBps());
-        console.log("Minimum opening notional (settlement-token units):", router.minOpenNotionalUsdc());
+        console.log("Minimum opening notional (settlement-token units):", router.minOpenNotionalAssets());
         console.log("Adverse confidence multiplier (bps):", router.pletherOracle().adverseConfidenceMultiplierBps());
         console.log("LP epoch duration:", housePool.LP_EPOCH_DURATION());
         console.log("Maximum LP epochs per settlement phase:", housePool.MAX_LP_EPOCHS_PER_PHASE());
@@ -212,8 +213,14 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
         MarginClearinghouse clearinghouse = MarginClearinghouse(address(engine.clearinghouse()));
         require(clearinghouse.engine() == address(engine), "Clearinghouse Engine mismatch");
-        require(address(engine.USDC()) == address(housePool.USDC()), "Engine settlement asset mismatch");
-        require(clearinghouse.settlementAsset() == address(housePool.USDC()), "Clearinghouse settlement asset mismatch");
+        require(
+            address(engine.settlementToken()) == address(housePool.settlementToken()),
+            "Engine settlement asset mismatch"
+        );
+        require(
+            clearinghouse.settlementAsset() == address(housePool.settlementToken()),
+            "Clearinghouse settlement asset mismatch"
+        );
         require(engine.orderRouter() == address(router), "Engine OrderRouter mismatch");
         require(address(router.pletherOracle()).code.length > 0, "PletherOracle has no code");
         require(address(router.pletherOracle().engine()) == address(engine), "PletherOracle Engine mismatch");
@@ -267,11 +274,12 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         OrderRouterAdmin routerAdmin
     ) internal view {
         require(
-            housePool.maxSeniorExposureUsdc() == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Unexpected maximum senior exposure"
+            housePool.maxSeniorExposureAssets() == RELEASE_MAX_SENIOR_EXPOSURE_ASSETS,
+            "Unexpected maximum senior exposure"
         );
         require(housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Unexpected maximum senior share");
         require(housePool.poolConfigActivationTime() == 0, "Outstanding HousePool config proposal");
-        require(router.minOpenNotionalUsdc() == RELEASE_MIN_OPEN_NOTIONAL_USDC, "Unexpected opening notional");
+        require(router.minOpenNotionalAssets() == RELEASE_MIN_OPEN_NOTIONAL_ASSETS, "Unexpected opening notional");
         require(
             router.pletherOracle().adverseConfidenceMultiplierBps() == RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS,
             "Unexpected adverse multiplier"
@@ -304,7 +312,9 @@ contract BootstrapPerpsArbitrumSepolia is Script {
         HousePool housePool,
         address settlementToken
     ) internal view {
-        require(address(housePool.USDC()) == settlementToken, "PERPS_SETTLEMENT_TOKEN does not match HousePool");
+        require(
+            address(housePool.settlementToken()) == settlementToken, "PERPS_SETTLEMENT_TOKEN does not match HousePool"
+        );
         require(housePool.LP_EPOCH_DURATION() == 1 hours, "Unexpected LP epoch duration");
         require(housePool.MAX_LP_EPOCHS_PER_PHASE() == 16, "Unexpected LP epoch bound");
 

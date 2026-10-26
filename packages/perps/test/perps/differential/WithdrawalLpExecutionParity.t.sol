@@ -19,16 +19,16 @@ contract WithdrawalLpExecutionParityTest is BasePerpTest {
         uint256 timeBefore = block.timestamp;
         uint256 markBefore = engine.lastMarkPrice();
         PerpsViewTypes.TraderAccountView memory preview = publicLens.getTraderAccount(ACCOUNT);
-        assertGt(preview.withdrawableUsdc, 0);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
-        uint256 custodyBefore = usdc.balanceOf(address(clearinghouse));
-        uint256 walletBefore = usdc.balanceOf(ACCOUNT);
+        assertGt(preview.withdrawableAssets, 0);
+        uint256 settlementBefore = clearinghouse.balanceAssets(ACCOUNT);
+        uint256 custodyBefore = settlementToken.balanceOf(address(clearinghouse));
+        uint256 walletBefore = settlementToken.balanceOf(ACCOUNT);
         vm.prank(ACCOUNT);
-        clearinghouse.withdraw(ACCOUNT, preview.withdrawableUsdc);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), settlementBefore - preview.withdrawableUsdc);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custodyBefore - preview.withdrawableUsdc);
-        assertEq(usdc.balanceOf(ACCOUNT), walletBefore + preview.withdrawableUsdc);
-        assertEq(publicLens.getTraderAccount(ACCOUNT).withdrawableUsdc, 0);
+        clearinghouse.withdraw(ACCOUNT, preview.withdrawableAssets);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), settlementBefore - preview.withdrawableAssets);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custodyBefore - preview.withdrawableAssets);
+        assertEq(settlementToken.balanceOf(ACCOUNT), walletBefore + preview.withdrawableAssets);
+        assertEq(publicLens.getTraderAccount(ACCOUNT).withdrawableAssets, 0);
         assertEq(block.timestamp, timeBefore);
         assertEq(engine.lastMarkPrice(), markBefore);
     }
@@ -44,36 +44,36 @@ contract WithdrawalLpExecutionParityTest is BasePerpTest {
         (,,, uint256 pendingCapacity) = pool.getPendingTrancheState();
         assertGt(expectedAssets, 0);
         assertGe(pendingCapacity, expectedAssets, "Fixture must have enough cash for the full request");
-        uint256 cashBefore = usdc.balanceOf(address(pool));
-        uint256 escrowBefore = usdc.balanceOf(address(juniorVault));
+        uint256 cashBefore = settlementToken.balanceOf(address(pool));
+        uint256 escrowBefore = settlementToken.balanceOf(address(juniorVault));
         IHousePool.LpEpochSettlementResult memory actual = _settleLpEpochForTest();
         assertEq(actual.juniorFundedShares, shares);
         assertEq(actual.juniorFundedAssets, expectedAssets, "Pending NAV quote must match same-state funding");
-        assertEq(usdc.balanceOf(address(pool)), cashBefore - expectedAssets);
-        assertEq(usdc.balanceOf(address(juniorVault)), escrowBefore + expectedAssets);
+        assertEq(settlementToken.balanceOf(address(pool)), cashBefore - expectedAssets);
+        assertEq(settlementToken.balanceOf(address(juniorVault)), escrowBefore + expectedAssets);
         assertEq(juniorVault.claimableRedeemRequest(requestId, LP), shares);
-        uint256 walletBefore = usdc.balanceOf(LP);
+        uint256 walletBefore = settlementToken.balanceOf(LP);
         vm.prank(LP);
         uint256 paid = juniorVault.claimRedeem(requestId, shares, LP, LP);
         assertEq(paid, expectedAssets);
-        assertEq(usdc.balanceOf(LP), walletBefore + expectedAssets);
-        assertEq(usdc.balanceOf(address(juniorVault)), escrowBefore);
+        assertEq(settlementToken.balanceOf(LP), walletBefore + expectedAssets);
+        assertEq(settlementToken.balanceOf(address(juniorVault)), escrowBefore);
         assertEq(juniorVault.claimableRedeemRequest(requestId, LP), 0);
     }
 
     function test_WithdrawalQuoteIsNotPromiseAfterMarkChanges() public {
         _fundTrader(ACCOUNT, 20_000e6);
         _open(ACCOUNT, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
-        assertGt(publicLens.getTraderAccount(ACCOUNT).withdrawableUsdc, 0);
+        assertGt(publicLens.getTraderAccount(ACCOUNT).withdrawableAssets, 0);
         _ensureLaterOracleTime();
         vm.prank(address(router));
         engine.updateMarkPrice(110_000_000, uint64(vm.getBlockTimestamp()));
-        assertEq(publicLens.getTraderAccount(ACCOUNT).withdrawableUsdc, 0, "Adverse mark invalidates prior quote");
-        uint256 settlementBefore = clearinghouse.balanceUsdc(ACCOUNT);
+        assertEq(publicLens.getTraderAccount(ACCOUNT).withdrawableAssets, 0, "Adverse mark invalidates prior quote");
+        uint256 settlementBefore = clearinghouse.balanceAssets(ACCOUNT);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__WithdrawBlockedByOpenPosition.selector);
         vm.prank(ACCOUNT);
         clearinghouse.withdraw(ACCOUNT, 1);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), settlementBefore);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), settlementBefore);
     }
 
 }

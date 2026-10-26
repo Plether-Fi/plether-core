@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "./MockSettlementToken.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
-/// @dev Preserve MockUSDC storage while probing the Engine during its carry revenue transfer.
-contract CarryNavProbeToken is MockUSDC {
+/// @dev Preserve MockSettlementToken storage while probing the Engine during its carry revenue transfer.
+contract CarryNavProbeToken is MockSettlementToken {
 
     address private immutable ENGINE;
     bool private immutable FAIL_AFTER_READ;

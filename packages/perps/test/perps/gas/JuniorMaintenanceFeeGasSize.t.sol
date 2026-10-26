@@ -187,16 +187,16 @@ contract JuniorMaintenanceFeeGasSizeTest is BasePerpTest {
     function _newDriver(
         bool isSenior
     ) internal returns (TrancheVaultMaintenanceFeeGasDriver driver) {
-        driver = new TrancheVaultMaintenanceFeeGasDriver(IERC20(address(usdc)), address(pool), isSenior);
+        driver = new TrancheVaultMaintenanceFeeGasDriver(IERC20(address(settlementToken)), address(pool), isSenior);
     }
 
     function _requestJuniorDepositForGas(
         address owner,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(owner, assets);
+        settlementToken.mint(owner, assets);
         vm.startPrank(owner);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         requestId = juniorVault.requestDeposit(assets, owner, owner);
         vm.stopPrank();
     }

@@ -361,7 +361,7 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
         assertEq(juniorVault.totalSupply(), supplyBeforeRoute, "routing must not mint or burn shares");
 
         _warpToEpoch(redeemRequestId);
-        usdc.mint(address(juniorVault), fundedAssets);
+        settlementToken.mint(address(juniorVault), fundedAssets);
         vm.prank(address(pool));
         juniorVault.fundRedeemEpoch(redeemRequestId, shares, fundedAssets);
 
@@ -370,7 +370,7 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
         vm.prank(ALICE);
         assertEq(juniorVault.claimRedeem(redeemRequestId, shares, ALICE, ALICE), fundedAssets);
 
-        assertEq(usdc.balanceOf(ALICE), fundedAssets);
+        assertEq(settlementToken.balanceOf(ALICE), fundedAssets);
         assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
         assertEq(juniorVault.withdrawalEscrowAssets(), 0);
     }
@@ -472,9 +472,9 @@ contract ClaimableDepositRedeemTest is BasePerpTest {
         address controller,
         uint256 assets
     ) internal returns (uint256 requestId) {
-        usdc.mint(controller, assets);
+        settlementToken.mint(controller, assets);
         vm.startPrank(controller);
-        usdc.approve(address(juniorVault), assets);
+        settlementToken.approve(address(juniorVault), assets);
         requestId = juniorVault.requestDeposit(assets, controller, controller);
         vm.stopPrank();
     }

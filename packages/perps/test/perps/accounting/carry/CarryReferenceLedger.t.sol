@@ -47,7 +47,7 @@ contract CarryReferenceArithmeticTest is Test {
             );
             assertEq(actualIndex, v.expectedIndex, "production index vs offline Fraction");
             assertEq(
-                PositionRiskAccountingLib.computeIndexedCarryUsdc(
+                PositionRiskAccountingLib.computeIndexedCarryAssets(
                     v.positionBorrowBase, actualIndex - v.lastPositionIndex
                 ),
                 v.expectedAmount,
@@ -72,7 +72,7 @@ contract CarryReferenceArithmeticTest is Test {
         uint256 actualIndex = PositionRiskAccountingLib.computeCurrentCarryIndex(0, 0, elapsed, base, depth, rate);
         assertEq(actualIndex, expectedIndex, "independent reduced-rational index");
         assertEq(
-            PositionRiskAccountingLib.computeIndexedCarryUsdc(positionBase, actualIndex),
+            PositionRiskAccountingLib.computeIndexedCarryAssets(positionBase, actualIndex),
             referenceLedger.amountFromIndex(positionBase, expectedIndex),
             "independent reduced-rational assessment"
         );
@@ -454,7 +454,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         vm.warp(vm.getBlockTimestamp() + bound(secondInterval, 1, 365 days));
         uint256 expectedDepthAfterDonation = referenceLedger.poolDepth() + 50_000e6;
         // accountExcess checkpoints the old effective assets before booking this external donation.
-        usdc.mint(address(pool), 50_000e6);
+        settlementToken.mint(address(pool), 50_000e6);
         pool.accountExcess();
         referenceLedger.changeDepth(expectedDepthAfterDonation, vm.getBlockTimestamp());
         _assertSystem();
@@ -475,22 +475,22 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         assertEq(exhausted.pledge, 0);
         assertEq(exhausted.free, 0);
         assertEq(exhausted.protectedFunds, 1080e6);
-        assertEq(clearinghouse.orderMarginUsdc(ALICE), 1000e6);
-        assertEq(clearinghouse.liquidationReserveUsdc(ALICE), 80e6);
+        assertEq(clearinghouse.orderMarginAssets(ALICE), 1000e6);
+        assertEq(clearinghouse.liquidationReserveAssets(ALICE), 80e6);
 
         vm.prank(address(router));
         engine.creditBounty(SOURCE, ALICE, 75e6, PRICE, uint64(vm.getBlockTimestamp()));
         referenceLedger.creditFree(ALICE, 75e6, vm.getBlockTimestamp());
         _assertSystem();
-        assertEq(engine.unsettledCarryUsdc(ALICE), exhausted.arrears, "new bounty is not immediately recollected");
-        assertEq(_freeSettlementUsdc(ALICE), 75e6);
+        assertEq(engine.unsettledCarryAssets(ALICE), exhausted.arrears, "new bounty is not immediately recollected");
+        assertEq(_freeSettlementAssets(ALICE), 75e6);
 
         _fundTrader(ALICE, 1e6);
         referenceLedger.deposit(ALICE, 1e6, vm.getBlockTimestamp());
         _assertSystem();
-        assertEq(engine.unsettledCarryUsdc(ALICE), exhausted.arrears - 76e6);
-        assertEq(_freeSettlementUsdc(ALICE), 0, "post-deposit collector can use both new deposit and earlier bounty");
-        assertEq(clearinghouse.orderMarginUsdc(ALICE), 1000e6);
+        assertEq(engine.unsettledCarryAssets(ALICE), exhausted.arrears - 76e6);
+        assertEq(_freeSettlementAssets(ALICE), 0, "post-deposit collector can use both new deposit and earlier bounty");
+        assertEq(clearinghouse.orderMarginAssets(ALICE), 1000e6);
     }
 
     function test_UnpaidExpiryPreservesCarryBasisForLaterCollection() public {
@@ -524,7 +524,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
 
         _assertSystem();
 
-        uint256 custodyBeforeRefund = clearinghouse.balanceUsdc(ALICE);
+        uint256 custodyBeforeRefund = clearinghouse.balanceAssets(ALICE);
         uint256 poolBeforeRefund = referenceLedger.poolDepth();
         vm.warp(vm.getBlockTimestamp() + interval);
 
@@ -534,8 +534,8 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         OrderV3Types.ExecutionResult memory result = router.expireOrder(id);
         assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Expired));
         _assertSystem();
-        assertEq(clearinghouse.balanceUsdc(ALICE), custodyBeforeRefund);
-        assertEq(engine.unsettledCarryUsdc(ALICE), retained, "restoring pledge does not pay or erase carry");
+        assertEq(clearinghouse.balanceAssets(ALICE), custodyBeforeRefund);
+        assertEq(engine.unsettledCarryAssets(ALICE), retained, "restoring pledge does not pay or erase carry");
 
         assertEq(pool.totalAssets(), poolBeforeRefund, "unpaid expiry performs no carry collection or credit");
         vm.warp(vm.getBlockTimestamp() + 7 days);
@@ -567,14 +567,14 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         referenceLedger.advance(vm.getBlockTimestamp());
         referenceLedger.creditFree(recipient, 75e6, vm.getBlockTimestamp());
         _assertSystem();
-        assertEq(_freeSettlementUsdc(recipient), referenceLedger.accountState(recipient).free);
+        assertEq(_freeSettlementAssets(recipient), referenceLedger.accountState(recipient).free);
 
         vm.warp(vm.getBlockTimestamp() + 1 days);
         vm.prank(address(router));
         engine.creditBounty(SOURCE, recipient, 25e6, PRICE, publication);
         referenceLedger.creditFree(recipient, 25e6, vm.getBlockTimestamp());
         _assertSystem();
-        assertEq(_freeSettlementUsdc(recipient), 100e6);
+        assertEq(_freeSettlementAssets(recipient), 100e6);
         assertEq(engine.sideCarryTimestamp(0), publication, "flat old-mark credit leaves carry clocks alone");
     }
 
@@ -606,7 +606,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         assertGt(expected.totalCollected, 0, "control requires real accrued and collected carry");
         vm.mockCall(
             address(clearinghouse),
-            abi.encodeCall(clearinghouse.pnlPledgeUsdc, (ALICE)),
+            abi.encodeCall(clearinghouse.pnlPledgeAssets, (ALICE)),
             abi.encode(expected.pledge - expected.totalCollected)
         );
         vm.expectRevert();
@@ -617,7 +617,7 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         vm.warp(vm.getBlockTimestamp() + 500 * 365 days);
         _collect(ALICE);
         assertGt(referenceLedger.accountState(ALICE).arrears, 0, "control requires reachable unpaid carry");
-        vm.mockCall(address(engine), abi.encodeCall(engine.unsettledCarryUsdc, (ALICE)), abi.encode(uint256(0)));
+        vm.mockCall(address(engine), abi.encodeCall(engine.unsettledCarryAssets, (ALICE)), abi.encode(uint256(0)));
         vm.expectRevert();
         this.assertReferenceSystem();
         vm.clearMockedCalls();
@@ -652,13 +652,15 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         _assertAccount(BOB);
         for (uint8 side; side < 2; ++side) {
             CarryReferenceLedger.Side memory expected = referenceLedger.sideState(side);
-            assertEq(engine.sideBorrowBaseUsdc(side), expected.borrowBase, "independent aggregate borrow base");
+            assertEq(engine.sideBorrowBaseAssets(side), expected.borrowBase, "independent aggregate borrow base");
             assertEq(engine.sideCarryIndex(side), expected.index, "independent directional index");
             assertEq(engine.sideCarryTimestamp(side), expected.timestamp, "directional accrual clock");
         }
         assertEq(pool.totalAssets(), referenceLedger.poolDepth(), "independent effective pool depth");
         assertEq(
-            usdc.balanceOf(address(pool)), referenceLedger.poolDepth(), "collected carry reaches physical pool custody"
+            settlementToken.balanceOf(address(pool)),
+            referenceLedger.poolDepth(),
+            "collected carry reaches physical pool custody"
         );
         assertEq(
             referenceLedger.totalNewCarry(),
@@ -676,11 +678,11 @@ contract CarryReferenceExecutionTest is BasePerpTest {
         assertEq(base, expected.borrowBase, "independent position borrow base");
         assertEq(index, expected.lastIndex, "position checkpoint index");
         assertEq(timestamp, expected.lastTime, "position checkpoint time");
-        assertEq(clearinghouse.pnlPledgeUsdc(account), expected.pledge, "margin-first carry collection");
-        assertEq(_freeSettlementUsdc(account), expected.free, "free cash pays only after pledge");
-        assertEq(engine.unsettledCarryUsdc(account), expected.arrears, "independent uncollected carry");
+        assertEq(clearinghouse.pnlPledgeAssets(account), expected.pledge, "margin-first carry collection");
+        assertEq(_freeSettlementAssets(account), expected.free, "free cash pays only after pledge");
+        assertEq(engine.unsettledCarryAssets(account), expected.arrears, "independent uncollected carry");
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             expected.pledge + expected.free + expected.protectedFunds,
             "settlement custody partitions exactly"
         );
@@ -703,11 +705,11 @@ contract CarryReferenceExecutionTest is BasePerpTest {
     function _productionDigest() private view returns (bytes32) {
         return keccak256(
             abi.encode(
-                clearinghouse.getAccountUsdcBuckets(ALICE),
-                clearinghouse.getAccountUsdcBuckets(BOB),
+                clearinghouse.getAccountAssetBuckets(ALICE),
+                clearinghouse.getAccountAssetBuckets(BOB),
                 _productionCarryDigest(ALICE),
                 _productionCarryDigest(BOB),
-                engine.unsettledCarryUsdc(ALICE),
+                engine.unsettledCarryAssets(ALICE),
                 engine.sideCarryIndex(0),
                 engine.sideCarryIndex(1),
                 pool.totalAssets(),

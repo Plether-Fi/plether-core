@@ -21,8 +21,8 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
 
+import {MockSettlementToken} from "../../utils/MockSettlementToken.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
 abstract contract OrderRouterTestBase is BasePerpTest {
@@ -40,7 +40,7 @@ abstract contract OrderRouterTestBase is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -63,17 +63,17 @@ abstract contract OrderRouterTestBase is BasePerpTest {
         super.setUp();
 
         uint256 seedAmount = 1000e6;
-        usdc.mint(address(this), seedAmount * 2);
-        usdc.approve(address(pool), seedAmount * 2);
+        settlementToken.mint(address(this), seedAmount * 2);
+        settlementToken.approve(address(pool), seedAmount * 2);
         pool.initializeSeedPosition(false, seedAmount, address(this));
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
 
         _fundJunior(bob, 1_000_000 * 1e6);
 
-        usdc.mint(alice, 10_000 * 1e6);
+        settlementToken.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
@@ -84,8 +84,8 @@ abstract contract OrderRouterTestBase is BasePerpTest {
     ) internal view returns (uint256 assets) {
         uint256 ownerShares = juniorVault.maxRequestRedeem(owner);
         uint256 ownerAssets = juniorVault.estimateRedeemAssets(ownerShares);
-        (,,, uint256 maxJuniorWithdrawUsdc) = pool.getPendingTrancheState();
-        assets = ownerAssets < maxJuniorWithdrawUsdc ? ownerAssets : maxJuniorWithdrawUsdc;
+        (,,, uint256 maxJuniorWithdrawAssets) = pool.getPendingTrancheState();
+        assets = ownerAssets < maxJuniorWithdrawAssets ? ownerAssets : maxJuniorWithdrawAssets;
     }
 
     function _settleJuniorWithdrawal(
@@ -133,7 +133,7 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -144,9 +144,9 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
         address lp,
         uint256 amount
     ) internal {
-        usdc.mint(lp, amount);
+        settlementToken.mint(lp, amount);
         vm.startPrank(lp);
-        usdc.approve(address(juniorVault), amount);
+        settlementToken.approve(address(juniorVault), amount);
         uint256 requestId = juniorVault.requestDeposit(amount, lp, lp);
         vm.stopPrank();
 
@@ -159,21 +159,21 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -197,8 +197,8 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
         _bypassAllTimelocks();
 
         uint256 seedAmount = 1000e6;
-        usdc.mint(address(this), seedAmount * 2);
-        usdc.approve(address(pool), seedAmount * 2);
+        settlementToken.mint(address(this), seedAmount * 2);
+        settlementToken.approve(address(pool), seedAmount * 2);
         pool.initializeSeedPosition(false, seedAmount, address(this));
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
@@ -210,9 +210,9 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, 1);
 
-        usdc.mint(alice, 10_000 * 1e6);
+        settlementToken.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
@@ -220,12 +220,12 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
 
     function _forcePnlPledgeForMarginDrain(
         address account,
-        uint256 nextPledgeUsdc
+        uint256 nextPledgeAssets
     ) internal {
         // These tests model a protocol-authorized post-commit margin mutation. Keep the V2 terminal commitment in
         // lockstep with the deliberately forced clearinghouse state so the fixture does not model torn accounting.
-        stdstore.target(address(clearinghouse)).sig("pnlPledgeUsdc(address)").with_key(account)
-            .checked_write(nextPledgeUsdc);
+        stdstore.target(address(clearinghouse)).sig("pnlPledgeAssets(address)").with_key(account)
+            .checked_write(nextPledgeAssets);
 
         ITerminalNavBookV2 book = engine.terminalNavBook();
         (uint256 size,,,,,,) = engine.positions(account);

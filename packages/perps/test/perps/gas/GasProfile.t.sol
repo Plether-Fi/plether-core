@@ -189,7 +189,7 @@ contract GasProfileTest is RecordedOrderReceipts {
     TrancheVault juniorVault;
     LegacyOrderRouterHarness router;
     ControllablePythGas pyth;
-    address usdc;
+    address settlementToken;
 
     bytes32[] feedIds;
 
@@ -201,8 +201,8 @@ contract GasProfileTest is RecordedOrderReceipts {
     address lp2 = makeAddr("lp2");
 
     function setUp() public {
-        usdc = address(new MockUSDC6());
-        vm.label(usdc, "MockUSDC");
+        settlementToken = address(new MockSettlementToken6());
+        vm.label(settlementToken, "MockSettlementToken");
 
         CfdTypes.RiskParams memory params = CfdTypes.RiskParams({
             vpiFactor: 0.0005e18,
@@ -211,14 +211,14 @@ contract GasProfileTest is RecordedOrderReceipts {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5e6,
+            minBountyAssets: 5e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
         });
 
-        clearinghouse = new MarginClearinghouse(usdc);
-        engine = new CfdEngine(usdc, address(clearinghouse), CAP_PRICE, params, 50);
+        clearinghouse = new MarginClearinghouse(settlementToken);
+        engine = new CfdEngine(settlementToken, address(clearinghouse), CAP_PRICE, params, 50);
         CfdEnginePlanner planner = new CfdEnginePlanner();
         CfdEngineSettlementSidecar settlement = new CfdEngineSettlementSidecar(address(engine));
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
@@ -227,10 +227,12 @@ contract GasProfileTest is RecordedOrderReceipts {
         engine.setTerminalNavBook(address(terminalNavBook));
         engineAccountLens = new CfdEngineAccountLens(address(engine));
         engineLens = new CfdEngineLens(address(engine));
-        pool = new HousePool(usdc, address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(settlementToken, address(engine), address(new HousePoolRedemptionMathSidecar()));
 
-        seniorVault = new TrancheVault(IERC20(usdc), address(pool), true, "Senior LP", "senUSDC", 0, address(0));
-        juniorVault = new TrancheVault(IERC20(usdc), address(pool), false, "Junior LP", "junUSDC", 0, address(0));
+        seniorVault =
+            new TrancheVault(IERC20(settlementToken), address(pool), true, "Senior LP", "senAssets", 0, address(0));
+        juniorVault =
+            new TrancheVault(IERC20(settlementToken), address(pool), false, "Junior LP", "junAssets", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
         engine.setPool(address(pool));
@@ -269,7 +271,7 @@ contract GasProfileTest is RecordedOrderReceipts {
             markStalenessLimit: pool.markStalenessLimit(),
             seniorFrozenLpFeeBps: pool.seniorFrozenLpFeeBps(),
             juniorFrozenLpFeeBps: pool.juniorFrozenLpFeeBps(),
-            maxSeniorExposureUsdc: type(uint256).max - 1,
+            maxSeniorExposureAssets: type(uint256).max - 1,
             maxSeniorShareBps: 9999
         });
         pool.proposePoolConfig(poolConfig);
@@ -277,8 +279,8 @@ contract GasProfileTest is RecordedOrderReceipts {
         pool.finalizePoolConfig();
 
         uint256 seedAmount = 1000e6;
-        _mintUsdc(address(this), seedAmount * 2);
-        IERC20(usdc).approve(address(pool), seedAmount * 2);
+        _mintAssets(address(this), seedAmount * 2);
+        IERC20(settlementToken).approve(address(pool), seedAmount * 2);
         pool.initializeSeedPosition(false, seedAmount, address(this));
         pool.initializeSeedPosition(true, seedAmount, address(this));
         pool.activateTrading();
@@ -333,13 +335,13 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         uint256 g0 = gasleft();
         OrderV3Types.ExecutionResult memory result = router.executeOrder(1, updateData);
         uint256 gas = g0 - gasleft();
         _assertExecutedOrder(result);
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
         emit log_named_uint("03_executeOrder_open_first", gas);
     }
 
@@ -360,13 +362,13 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         uint256 g0 = gasleft();
         OrderV3Types.ExecutionResult memory result = router.executeOrder(2, updateData);
         uint256 gas = g0 - gasleft();
         _assertExecutedOrder(result);
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
         emit log_named_uint("04_executeOrder_open_increase", gas);
     }
 
@@ -387,13 +389,13 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         uint256 g0 = gasleft();
         OrderV3Types.ExecutionResult memory result = router.executeOrder(2, updateData);
         uint256 gas = g0 - gasleft();
         _assertExecutedOrder(result);
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
         emit log_named_uint("05_executeOrder_close_full", gas);
     }
 
@@ -414,13 +416,13 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         uint256 g0 = gasleft();
         OrderV3Types.ExecutionResult memory result = router.executeOrder(2, updateData);
         uint256 gas = g0 - gasleft();
         _assertExecutedOrder(result);
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
         emit log_named_uint("06_executeOrder_close_partial", gas);
     }
 
@@ -450,7 +452,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         uint256 g0 = gasleft();
         OrderV3Types.BatchResult memory result = router.executeOrderBatch(3, updateData);
@@ -466,8 +468,8 @@ contract GasProfileTest is RecordedOrderReceipts {
 
         // Withdraw free margin so position is thinly margined
         address aliceAccount = _account(alice);
-        uint256 balance = clearinghouse.balanceUsdc(aliceAccount);
-        uint256 locked = clearinghouse.lockedMarginUsdc(aliceAccount);
+        uint256 balance = clearinghouse.balanceAssets(aliceAccount);
+        uint256 locked = clearinghouse.lockedMarginAssets(aliceAccount);
         if (balance > locked) {
             vm.prank(alice);
             clearinghouse.withdraw(aliceAccount, balance - locked);
@@ -479,25 +481,25 @@ contract GasProfileTest is RecordedOrderReceipts {
         pyth.setAllPrices(feedIds, int64(110_000_000), int32(-8), liqTs);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(aliceAccount, 1.1e8);
         assertTrue(preview.liquidatable, "sample must start with a liquidatable position");
         LiquidationAccountingSnapshot memory beforeLiquidation = LiquidationAccountingSnapshot({
-            balance: clearinghouse.balanceUsdc(aliceAccount),
-            poolCash: IERC20(usdc).balanceOf(address(pool)),
-            custody: IERC20(usdc).balanceOf(address(clearinghouse)),
-            treasury: clearinghouse.balanceUsdc(engine.protocolTreasury())
+            balance: clearinghouse.balanceAssets(aliceAccount),
+            poolCash: IERC20(settlementToken).balanceOf(address(pool)),
+            custody: IERC20(settlementToken).balanceOf(address(clearinghouse)),
+            treasury: clearinghouse.balanceAssets(engine.protocolTreasury())
         });
         vm.prank(keeper);
         uint256 g0 = gasleft();
         router.executeLiquidation(aliceAccount, updateData);
         uint256 gas = g0 - gasleft();
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, preview.keeperBountyUsdc);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, preview.keeperBountyAssets);
         (uint256 size, uint256 margin,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 0, "liquidation must remove the position");
         assertEq(margin, 0);
         assertEq(router.pendingOrderCounts(aliceAccount), 0);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(aliceAccount), 0);
+        assertEq(clearinghouse.totalBountyReservationsAssets(aliceAccount), 0);
         _assertLiquidationAccounting(aliceAccount, beforeLiquidation, preview);
         emit log_named_uint("08_executeLiquidation", gas);
     }
@@ -509,7 +511,7 @@ contract GasProfileTest is RecordedOrderReceipts {
 
         address aliceAccount = _account(alice);
         (uint256 sizeBefore, uint256 marginBefore,,,,,) = engine.positions(aliceAccount);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 balanceBefore = clearinghouse.balanceAssets(aliceAccount);
 
         vm.prank(alice);
         uint256 g0 = gasleft();
@@ -518,7 +520,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         (uint256 sizeAfter, uint256 marginAfter,,,,,) = engine.positions(aliceAccount);
         assertEq(sizeAfter, sizeBefore);
         assertEq(marginAfter, marginBefore + 1000e6, "sample must pledge the requested additional margin");
-        assertEq(clearinghouse.balanceUsdc(aliceAccount), balanceBefore);
+        assertEq(clearinghouse.balanceAssets(aliceAccount), balanceBefore);
         emit log_named_uint("09_addMargin", gas);
     }
 
@@ -530,49 +532,49 @@ contract GasProfileTest is RecordedOrderReceipts {
         address aliceAccount = _account(alice);
 
         // Drain pool to force trader claim
-        uint256 poolAssets = IERC20(usdc).balanceOf(address(pool));
+        uint256 poolAssets = IERC20(settlementToken).balanceOf(address(pool));
         vm.prank(address(pool));
-        IERC20(usdc).transfer(address(0xDEAD), poolAssets - 9000e6);
+        IERC20(settlementToken).transfer(address(0xDEAD), poolAssets - 9000e6);
 
         // Close at profit; payout becomes a trader claim (use external call for clean timestamp reads)
         this._closeAtPrice(alice, CfdTypes.Side.LONG, 100_000e18, int64(80_000_000));
 
-        uint256 traderClaim = engine.traderClaimBalanceUsdc(aliceAccount);
+        uint256 traderClaim = engine.traderClaimBalanceAssets(aliceAccount);
         require(traderClaim > 0, "Setup failed: no trader claim balance");
 
         // Replenish pool so claim can succeed
-        _mintUsdc(address(pool), traderClaim);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(aliceAccount);
-        uint256 claimsBefore = engine.totalTraderClaimBalanceUsdc();
-        uint256 poolCashBefore = IERC20(usdc).balanceOf(address(pool));
-        uint256 custodyBefore = IERC20(usdc).balanceOf(address(clearinghouse));
+        _mintAssets(address(pool), traderClaim);
+        uint256 balanceBefore = clearinghouse.balanceAssets(aliceAccount);
+        uint256 claimsBefore = engine.totalTraderClaimBalanceAssets();
+        uint256 poolCashBefore = IERC20(settlementToken).balanceOf(address(pool));
+        uint256 custodyBefore = IERC20(settlementToken).balanceOf(address(clearinghouse));
 
         vm.prank(alice);
         uint256 g0 = gasleft();
         engine.settleTraderClaim(aliceAccount);
         uint256 gas = g0 - gasleft();
-        assertEq(engine.traderClaimBalanceUsdc(aliceAccount), 0);
-        assertEq(engine.totalTraderClaimBalanceUsdc(), claimsBefore - traderClaim);
-        assertEq(clearinghouse.balanceUsdc(aliceAccount), balanceBefore + traderClaim);
-        assertEq(IERC20(usdc).balanceOf(address(pool)), poolCashBefore - traderClaim);
-        assertEq(IERC20(usdc).balanceOf(address(clearinghouse)), custodyBefore + traderClaim);
+        assertEq(engine.traderClaimBalanceAssets(aliceAccount), 0);
+        assertEq(engine.totalTraderClaimBalanceAssets(), claimsBefore - traderClaim);
+        assertEq(clearinghouse.balanceAssets(aliceAccount), balanceBefore + traderClaim);
+        assertEq(IERC20(settlementToken).balanceOf(address(pool)), poolCashBefore - traderClaim);
+        assertEq(IERC20(settlementToken).balanceOf(address(clearinghouse)), custodyBefore + traderClaim);
         emit log_named_uint("10_settleTraderClaim", gas);
     }
 
     // --- 11. clearinghouse.deposit ---
     function test_gas_11_clearinghouse_deposit() public {
-        _mintUsdc(alice, 10_000e6);
+        _mintAssets(alice, 10_000e6);
         vm.startPrank(alice);
-        IERC20(usdc).approve(address(clearinghouse), type(uint256).max);
+        IERC20(settlementToken).approve(address(clearinghouse), type(uint256).max);
 
         address aliceAccount = _account(alice);
         uint256 g0 = gasleft();
         clearinghouse.deposit(aliceAccount, 5000e6);
         uint256 gas = g0 - gasleft();
         vm.stopPrank();
-        assertEq(clearinghouse.balanceUsdc(aliceAccount), 5000e6);
-        assertEq(IERC20(usdc).balanceOf(alice), 5000e6);
-        assertEq(IERC20(usdc).balanceOf(address(clearinghouse)), 5000e6);
+        assertEq(clearinghouse.balanceAssets(aliceAccount), 5000e6);
+        assertEq(IERC20(settlementToken).balanceOf(alice), 5000e6);
+        assertEq(IERC20(settlementToken).balanceOf(address(clearinghouse)), 5000e6);
         emit log_named_uint("11_clearinghouse_deposit", gas);
     }
 
@@ -585,9 +587,9 @@ contract GasProfileTest is RecordedOrderReceipts {
         uint256 g0 = gasleft();
         clearinghouse.withdraw(aliceAccount, 5000e6);
         uint256 gas = g0 - gasleft();
-        assertEq(clearinghouse.balanceUsdc(aliceAccount), 5000e6);
-        assertEq(IERC20(usdc).balanceOf(alice), 5000e6);
-        assertEq(IERC20(usdc).balanceOf(address(clearinghouse)), 5000e6);
+        assertEq(clearinghouse.balanceAssets(aliceAccount), 5000e6);
+        assertEq(IERC20(settlementToken).balanceOf(alice), 5000e6);
+        assertEq(IERC20(settlementToken).balanceOf(address(clearinghouse)), 5000e6);
         emit log_named_uint("12_clearinghouse_withdraw", gas);
     }
 
@@ -633,7 +635,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         _openPosition(alice, CfdTypes.Side.LONG, 50_000e18, 5000e6, 1e8);
 
         address aliceAccount = _account(alice);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 balanceBefore = clearinghouse.balanceAssets(aliceAccount);
         uint256 g0 = gasleft();
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(aliceAccount, 50_000e18, 0.95e8);
         uint256 gas = g0 - gasleft();
@@ -641,18 +643,18 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(uint256(preview.invalidReason), uint256(CfdTypes.CloseInvalidReason.None));
         assertEq(preview.executionPrice, 95_000_000);
         assertEq(preview.sizeDelta, 50_000e18);
-        assertEq(preview.realizedPnlUsdc, 2500e6);
+        assertEq(preview.realizedPnlAssets, 2500e6);
         // The nominal 4-bps fee is $19; the skew-reducing VPI rebate offsets part of fee collection.
-        assertGt(preview.executionFeeUsdc, 0);
-        assertLe(preview.executionFeeUsdc, 19e6);
-        assertEq(int256(preview.freshTraderPayoutUsdc), int256(2500e6 - 19e6) - preview.vpiDeltaUsdc);
+        assertGt(preview.executionFeeAssets, 0);
+        assertLe(preview.executionFeeAssets, 19e6);
+        assertEq(int256(preview.freshTraderPayoutAssets), int256(2500e6 - 19e6) - preview.vpiDeltaAssets);
         assertEq(preview.remainingSize, 0);
         assertEq(preview.remainingMargin, 0);
-        assertEq(preview.traderClaimBalanceUsdc, 0);
-        assertEq(preview.immediatePayoutUsdc, preview.freshTraderPayoutUsdc);
+        assertEq(preview.traderClaimBalanceAssets, 0);
+        assertEq(preview.immediatePayoutAssets, preview.freshTraderPayoutAssets);
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 50_000e18, "preview leaves the live position intact");
-        assertEq(clearinghouse.balanceUsdc(aliceAccount), balanceBefore);
+        assertEq(clearinghouse.balanceAssets(aliceAccount), balanceBefore);
         emit log_named_uint("17_previewClose", gas);
     }
 
@@ -662,25 +664,25 @@ contract GasProfileTest is RecordedOrderReceipts {
         _openPosition(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6, 1e8);
 
         address aliceAccount = _account(alice);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(aliceAccount);
+        uint256 balanceBefore = clearinghouse.balanceAssets(aliceAccount);
         uint256 g0 = gasleft();
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(aliceAccount, 1.1e8);
         uint256 gas = g0 - gasleft();
         assertTrue(preview.liquidatable, "preview sample must evaluate an insolvent position");
         assertEq(preview.oraclePrice, 110_000_000);
-        assertEq(preview.pnlUsdc, -10_000e6);
-        assertLt(preview.equityUsdc, 0);
-        assertGt(preview.seizedCollateralUsdc, 0);
-        assertGt(preview.keeperBountyUsdc, 0);
+        assertEq(preview.pnlAssets, -10_000e6);
+        assertLt(preview.equityAssets, 0);
+        assertGt(preview.seizedCollateralAssets, 0);
+        assertGt(preview.keeperBountyAssets, 0);
         assertEq(
-            preview.liquidationChargeUsdc,
-            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc
+            preview.liquidationChargeAssets,
+            preview.keeperBountyAssets + preview.protocolLiquidationFeeAssets + preview.lpLiquidationFeeAssets
         );
-        assertEq(preview.immediatePayoutUsdc, 0);
-        assertEq(preview.traderClaimBalanceUsdc, 0);
+        assertEq(preview.immediatePayoutAssets, 0);
+        assertEq(preview.traderClaimBalanceAssets, 0);
         (uint256 size,,,,,,) = engine.positions(aliceAccount);
         assertEq(size, 100_000e18, "preview leaves the live position intact");
-        assertEq(clearinghouse.balanceUsdc(aliceAccount), balanceBefore);
+        assertEq(clearinghouse.balanceAssets(aliceAccount), balanceBefore);
         emit log_named_uint("18_previewLiquidation", gas);
     }
 
@@ -698,18 +700,19 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(snapshot.size, 50_000e18);
         assertEq(uint256(snapshot.side), uint256(CfdTypes.Side.LONG));
         assertEq(snapshot.entryPrice, 1e8);
-        assertEq(snapshot.unrealizedPnlUsdc, 0);
-        assertEq(snapshot.settlementBalanceUsdc, clearinghouse.balanceUsdc(aliceAccount));
-        assertEq(snapshot.margin, clearinghouse.pnlPledgeUsdc(aliceAccount));
-        assertEq(snapshot.positionMarginBucketUsdc, snapshot.margin);
-        assertEq(snapshot.activePositionMarginUsdc, snapshot.margin);
+        assertEq(snapshot.unrealizedPnlAssets, 0);
+        assertEq(snapshot.settlementBalanceAssets, clearinghouse.balanceAssets(aliceAccount));
+        assertEq(snapshot.margin, clearinghouse.pnlPledgeAssets(aliceAccount));
+        assertEq(snapshot.positionMarginBucketAssets, snapshot.margin);
+        assertEq(snapshot.activePositionMarginAssets, snapshot.margin);
         assertEq(
-            snapshot.freeSettlementUsdc, snapshot.settlementBalanceUsdc - clearinghouse.lockedMarginUsdc(aliceAccount)
+            snapshot.freeSettlementAssets,
+            snapshot.settlementBalanceAssets - clearinghouse.lockedMarginAssets(aliceAccount)
         );
         assertEq(snapshot.pendingOrderCount, 0);
-        assertEq(snapshot.committedMarginUsdc, 0);
-        assertEq(snapshot.executionBountyReserveUsdc, 0);
-        assertEq(snapshot.traderClaimBalanceUsdc, 0);
+        assertEq(snapshot.committedMarginAssets, 0);
+        assertEq(snapshot.executionBountyReserveAssets, 0);
+        assertEq(snapshot.traderClaimBalanceAssets, 0);
         assertFalse(snapshot.liquidatable);
         emit log_named_uint("19_getAccountLedgerSnapshot", gas);
     }
@@ -725,17 +728,17 @@ contract GasProfileTest is RecordedOrderReceipts {
         uint256 g0 = gasleft();
         IHousePool.PoolLiquidityView memory liquidity = pool.getPoolLiquidityView();
         uint256 gas = g0 - gasleft();
-        assertEq(liquidity.totalAssetsUsdc, pool.totalAssets());
-        assertEq(liquidity.seniorPrincipalUsdc, pool.seniorPrincipal());
-        assertEq(liquidity.juniorPrincipalUsdc, pool.juniorPrincipal());
-        assertEq(liquidity.seniorHighWaterMarkUsdc, pool.seniorHighWaterMark());
-        assertGt(liquidity.seniorPrincipalUsdc, 0, "liquidity sample includes Senior capital");
-        assertGt(liquidity.juniorPrincipalUsdc, 0, "liquidity sample includes Junior capital");
-        assertGt(liquidity.withdrawalReservedUsdc, 0, "live position must reserve pool liquidity");
-        assertEq(liquidity.freeUsdc + liquidity.withdrawalReservedUsdc, liquidity.totalAssetsUsdc);
-        assertEq(liquidity.pendingRecapitalizationUsdc, pool.pendingRecapitalizationUsdc());
-        assertEq(liquidity.pendingTradingRevenueUsdc, pool.pendingTradingRevenueUsdc());
-        assertEq(liquidity.currentTerminalDeficitUsdc, 0);
+        assertEq(liquidity.totalAssets, pool.totalAssets());
+        assertEq(liquidity.seniorPrincipalAssets, pool.seniorPrincipal());
+        assertEq(liquidity.juniorPrincipalAssets, pool.juniorPrincipal());
+        assertEq(liquidity.seniorHighWaterMarkAssets, pool.seniorHighWaterMark());
+        assertGt(liquidity.seniorPrincipalAssets, 0, "liquidity sample includes Senior capital");
+        assertGt(liquidity.juniorPrincipalAssets, 0, "liquidity sample includes Junior capital");
+        assertGt(liquidity.withdrawalReservedAssets, 0, "live position must reserve pool liquidity");
+        assertEq(liquidity.freeAssets + liquidity.withdrawalReservedAssets, liquidity.totalAssets);
+        assertEq(liquidity.pendingRecapitalizationAssets, pool.pendingRecapitalizationAssets());
+        assertEq(liquidity.pendingTradingRevenueAssets, pool.pendingTradingRevenueAssets());
+        assertEq(liquidity.currentTerminalDeficitAssets, 0);
         assertTrue(liquidity.markFresh);
         assertFalse(liquidity.oracleFrozen);
         assertFalse(liquidity.degradedMode);
@@ -762,7 +765,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.warp(timestamp + 7);
         vm.roll(block.number + 2);
         bytes[] memory data = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         OrderV3Types.BatchResult memory result = router.executeOrderBatch(id, data);
 
@@ -772,7 +775,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         OrderV3Types.TerminalOutcome memory outcome = router.lifecycleBook().terminalOutcome(id);
         assertEq(uint256(outcome.status), uint256(OrderV3Types.LifecycleStatus.Failed));
         assertEq(uint256(outcome.reason), uint256(OrderV3Types.TerminalReason.Slippage));
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedOrders[id].bounty);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedOrders[id].bounty);
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0);
         vm.expectRevert(GasProfile__OrderDidNotExecute.selector);
@@ -794,7 +797,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.warp(timestamp + 7);
         vm.roll(block.number + 2);
         bytes[] memory data = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         OrderV3Types.BatchResult memory result = router.executeOrderBatch{gas: 5_000_000}(3, data);
 
@@ -809,7 +812,7 @@ contract GasProfileTest is RecordedOrderReceipts {
             _assertExecutedReceipt(id, prefixLogs);
             expectedCredit += expectedOrders[id].bounty;
         }
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedCredit);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedCredit);
         for (uint64 id = result.nextOrderId; id <= 3; ++id) {
             assertEq(router.pendingOrderCounts(expectedOrders[id].account), 1);
             (uint256 size,,,,,,) = engine.positions(expectedOrders[id].account);
@@ -817,12 +820,12 @@ contract GasProfileTest is RecordedOrderReceipts {
             IMarginClearinghouse.BountyReservation memory reservation =
                 clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, id);
             assertEq(uint256(reservation.state), uint256(IMarginClearinghouse.BountyReservationState.Active));
-            assertEq(reservation.amountUsdc, expectedOrders[id].bounty);
+            assertEq(reservation.amountAssets, expectedOrders[id].bounty);
         }
         vm.expectRevert(GasProfile__BatchDidNotComplete.selector);
         this.assertCompletedBatchForControl(result, 1, 3, keeperBefore);
 
-        uint256 keeperBeforeResume = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBeforeResume = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         OrderV3Types.BatchResult memory resumed = router.executeOrderBatch(3, data);
         assertEq(resumed.terminalCount, 3 - result.terminalCount);
@@ -862,7 +865,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         uint256 g0 = gasleft();
         OrderV3Types.BatchResult memory result = router.executeOrderBatch(uint64(n), updateData);
@@ -890,7 +893,7 @@ contract GasProfileTest is RecordedOrderReceipts {
         expectedOrders[orderId] = ExpectedOrder({
             account: account,
             finalSize: isClose ? size - sizeDelta : size + sizeDelta,
-            bounty: pending.executionBountyUsdc,
+            bounty: pending.executionBountyAssets,
             side: intendedSide
         });
         assertEq(pending.orderId, orderId, "commit must create the intended pending order");
@@ -899,16 +902,16 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(pending.isClose, isClose);
         assertEq(uint256(pending.side), uint256(intendedSide));
         if (isClose) {
-            assertEq(pending.executionBountyUsdc, 0, "close is unpaid");
+            assertEq(pending.executionBountyAssets, 0, "close is unpaid");
         } else {
-            assertGt(pending.executionBountyUsdc, 0, "open must reserve a bounty");
+            assertGt(pending.executionBountyAssets, 0, "open must reserve a bounty");
         }
         IMarginClearinghouse.BountyReservation memory reservation =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
         assertEq(reservation.account, account);
         assertEq(uint256(reservation.state), uint256(IMarginClearinghouse.BountyReservationState.Active));
-        assertEq(reservation.amountUsdc, pending.executionBountyUsdc);
-        assertEq(pending.committedMarginUsdc, pending.isClose ? 0 : pending.marginDelta);
+        assertEq(reservation.amountAssets, pending.executionBountyAssets);
+        assertEq(pending.committedMarginAssets, pending.isClose ? 0 : pending.marginDelta);
         assertEq(router.pendingOrderCounts(account), 1);
     }
 
@@ -947,7 +950,7 @@ contract GasProfileTest is RecordedOrderReceipts {
             uint256(outcome.bountyDisposition),
             uint256(expected.bounty == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid)
         );
-        assertEq(outcome.bountyUsdc, expected.bounty, "receipt must consume the exact committed bounty");
+        assertEq(outcome.bountyAssets, expected.bounty, "receipt must consume the exact committed bounty");
         _assertExecutedPositionAndReservation(orderId);
         if (tradeAccountingBefore[orderId].recorded) {
             bool checked;
@@ -975,16 +978,16 @@ contract GasProfileTest is RecordedOrderReceipts {
         address account = expectedOrders[orderId].account;
         TradeAccountingSnapshot storage beforeTrade = tradeAccountingBefore[orderId];
         (beforeTrade.size, beforeTrade.margin,,,,,) = engine.positions(account);
-        beforeTrade.balance = clearinghouse.balanceUsdc(account);
-        beforeTrade.entryCost = engine.positionEntryCostUsdcAtoms(account);
-        beforeTrade.liquidationReserve = clearinghouse.liquidationReserveUsdc(account);
+        beforeTrade.balance = clearinghouse.balanceAssets(account);
+        beforeTrade.entryCost = engine.positionEntryCostAssetAtoms(account);
+        beforeTrade.liquidationReserve = clearinghouse.liquidationReserveAssets(account);
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(orderId);
         beforeTrade.sizeDelta = pending.sizeDelta;
         beforeTrade.marginDelta = pending.marginDelta;
         beforeTrade.isClose = pending.isClose;
         beforeTrade.deferredProfit = deferredProfit;
         beforeTrade.recorded = true;
-        assertEq(engine.traderClaimBalanceUsdc(account), 0, "trade fixture starts without a claim");
+        assertEq(engine.traderClaimBalanceAssets(account), 0, "trade fixture starts without a claim");
     }
 
     /// @dev Operation proof, not a second carry/VPI model: authenticated charges reconcile the submitted trade's
@@ -995,15 +998,15 @@ contract GasProfileTest is RecordedOrderReceipts {
         TradeAccountingSnapshot memory beforeTrade = tradeAccountingBefore[receipt.orderId];
         OrderV3Types.OrderEconomics memory economics = receipt.economics;
         uint256 notional = beforeTrade.sizeDelta / CfdTypes.SIZE_QUANTUM * receipt.executionPrice;
-        assertEq(economics.executionFeeUsdc, notional * 4 / 10_000, "trade pays its exact 4-bps fee");
-        assertEq(economics.frozenSpreadUsdc, 0, "trade sample uses live execution");
-        assertGe(economics.carryUsdc, 0);
-        uint256 carry = uint256(economics.carryUsdc);
+        assertEq(economics.executionFeeAssets, notional * 4 / 10_000, "trade pays its exact 4-bps fee");
+        assertEq(economics.frozenSpreadAssets, 0, "trade sample uses live execution");
+        assertGe(economics.carryAssets, 0);
+        uint256 carry = uint256(economics.carryAssets);
         // Close receipts include commitment-time carry, while this snapshot is taken after commitment.
         if (beforeTrade.isClose) {
-            carry -= receipt.commitment.carryCollectedUsdc;
+            carry -= receipt.commitment.carryCollectedAssets;
         }
-        int256 action = economics.vpiUsdc + int256(economics.executionFeeUsdc);
+        int256 action = economics.vpiAssets + int256(economics.executionFeeAssets);
         uint256 charge = action > 0 ? uint256(action) : 0;
         uint256 expectedMargin;
         uint256 expectedClaim;
@@ -1037,22 +1040,22 @@ contract GasProfileTest is RecordedOrderReceipts {
                 - (reserve - beforeTrade.liquidationReserve);
         }
         int256 expectedCash =
-            int256(beforeTrade.balance) - int256(carry) - action + pnl - int256(expectedClaim + receipt.bountyUsdc);
+            int256(beforeTrade.balance) - int256(carry) - action + pnl - int256(expectedClaim + receipt.bountyAssets);
         assertGe(expectedCash, 0);
-        assertEq(economics.realizedPnlUsdc, pnl, "trade realizes the submitted position's price profit");
-        assertEq(clearinghouse.balanceUsdc(receipt.account), uint256(expectedCash), "trade reconciles custody");
-        assertEq(clearinghouse.pnlPledgeUsdc(receipt.account), expectedMargin, "trade installs intended pledge");
-        assertEq(clearinghouse.liquidationReserveUsdc(receipt.account), reserve);
-        assertEq(engine.traderClaimBalanceUsdc(receipt.account), expectedClaim, "trade uses intended payout mode");
-        assertEq(engine.unsettledCarryUsdc(receipt.account), 0, "funded samples retain no carry arrears");
-        assertEq(economics.postSettlementBalanceUsdc, uint256(expectedCash));
-        assertEq(economics.postPositionMarginUsdc, expectedMargin);
-        assertEq(economics.postTraderClaimBalanceUsdc, expectedClaim);
+        assertEq(economics.realizedPnlAssets, pnl, "trade realizes the submitted position's price profit");
+        assertEq(clearinghouse.balanceAssets(receipt.account), uint256(expectedCash), "trade reconciles custody");
+        assertEq(clearinghouse.pnlPledgeAssets(receipt.account), expectedMargin, "trade installs intended pledge");
+        assertEq(clearinghouse.liquidationReserveAssets(receipt.account), reserve);
+        assertEq(engine.traderClaimBalanceAssets(receipt.account), expectedClaim, "trade uses intended payout mode");
+        assertEq(engine.unsettledCarryAssets(receipt.account), 0, "funded samples retain no carry arrears");
+        assertEq(economics.postSettlementBalanceAssets, uint256(expectedCash));
+        assertEq(economics.postPositionMarginAssets, expectedMargin);
+        assertEq(economics.postTraderClaimBalanceAssets, expectedClaim);
         uint256 expectedEntryCost = beforeTrade.isClose
             ? beforeTrade.entryCost - beforeTrade.entryCost * beforeTrade.sizeDelta / beforeTrade.size
             : beforeTrade.entryCost + notional;
         assertEq(
-            engine.positionEntryCostUsdcAtoms(receipt.account), expectedEntryCost, "trade installs exact entry basis"
+            engine.positionEntryCostAssetAtoms(receipt.account), expectedEntryCost, "trade installs exact entry basis"
         );
     }
 
@@ -1070,11 +1073,11 @@ contract GasProfileTest is RecordedOrderReceipts {
         IMarginClearinghouse.BountyReservation memory reservation =
             clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.Order, orderId);
         assertEq(uint256(reservation.state), uint256(IMarginClearinghouse.BountyReservationState.Settled));
-        assertEq(reservation.amountUsdc, 0);
+        assertEq(reservation.amountAssets, 0);
         IOrderRouterAccounting.AccountReservationView memory remaining = router.getAccountReservations(expected.account);
         assertEq(remaining.pendingOrderCount, 0);
-        assertEq(remaining.committedMarginUsdc, 0);
-        assertEq(remaining.executionBountyUsdc, 0);
+        assertEq(remaining.committedMarginAssets, 0);
+        assertEq(remaining.executionBountyAssets, 0);
     }
 
     function _assertCompletedBatch(
@@ -1129,7 +1132,7 @@ contract GasProfileTest is RecordedOrderReceipts {
                     expected.bounty == 0 ? OrderV3Types.BountyDisposition.None : OrderV3Types.BountyDisposition.Paid
                 )
             );
-            assertEq(receipt.bountyUsdc, expected.bounty);
+            assertEq(receipt.bountyAssets, expected.bounty);
             _assertExecutedPositionAndReservation(receipt.orderId);
             assertTrue(
                 tradeAccountingBefore[receipt.orderId].recorded, "batch item needs a pre-trade accounting snapshot"
@@ -1139,7 +1142,9 @@ contract GasProfileTest is RecordedOrderReceipts {
             ++verifiedCount;
         }
         assertEq(verifiedCount, count, "every executed item needs an authenticated receipt");
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedCredit, "batch must pay every exact bounty");
+        assertEq(
+            clearinghouse.balanceAssets(keeper) - keeperBefore, expectedCredit, "batch must pay every exact bounty"
+        );
     }
 
     function _assertLiquidationAccounting(
@@ -1148,30 +1153,30 @@ contract GasProfileTest is RecordedOrderReceipts {
         ICfdEngineTypes.LiquidationPreview memory preview
     ) internal view {
         assertEq(
-            clearinghouse.balanceUsdc(account),
-            preview.settlementRetainedUsdc,
+            clearinghouse.balanceAssets(account),
+            preview.settlementRetainedAssets,
             "liquidation preserves exactly the modeled residual settlement"
         );
-        assertEq(engine.traderClaimBalanceUsdc(account), preview.traderClaimBalanceUsdc);
-        assertEq(engine.totalTraderClaimBalanceUsdc(), preview.traderClaimBalanceUsdc);
-        assertEq(engine.positionEntryCostUsdcAtoms(account), 0);
-        assertEq(engine.unsettledCarryUsdc(account), 0);
+        assertEq(engine.traderClaimBalanceAssets(account), preview.traderClaimBalanceAssets);
+        assertEq(engine.totalTraderClaimBalanceAssets(), preview.traderClaimBalanceAssets);
+        assertEq(engine.positionEntryCostAssetAtoms(account), 0);
+        assertEq(engine.unsettledCarryAssets(account), 0);
         (uint256 borrowBase, uint256 index, uint64 timestamp) = engine.positionCarryState(account);
         assertEq(borrowBase, 0);
         assertEq(index, 0);
         assertEq(timestamp, 0);
-        assertEq(clearinghouse.lockedMarginUsdc(account), 0);
-        assertEq(clearinghouse.liquidationReserveUsdc(account), 0);
-        assertEq(clearinghouse.vpiRebateReserveUsdc(account), 0);
-        assertEq(clearinghouse.actionReserveUsdc(account), 0);
+        assertEq(clearinghouse.lockedMarginAssets(account), 0);
+        assertEq(clearinghouse.liquidationReserveAssets(account), 0);
+        assertEq(clearinghouse.vpiRebateReserveAssets(account), 0);
+        assertEq(clearinghouse.actionReserveAssets(account), 0);
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
-            beforeLiquidation.treasury + preview.protocolLiquidationFeeUsdc
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
+            beforeLiquidation.treasury + preview.protocolLiquidationFeeAssets
         );
-        uint256 poolInflow = beforeLiquidation.balance - preview.settlementRetainedUsdc - preview.keeperBountyUsdc
-            - preview.protocolLiquidationFeeUsdc;
-        assertEq(IERC20(usdc).balanceOf(address(pool)), beforeLiquidation.poolCash + poolInflow);
-        assertEq(IERC20(usdc).balanceOf(address(clearinghouse)), beforeLiquidation.custody - poolInflow);
+        uint256 poolInflow = beforeLiquidation.balance - preview.settlementRetainedAssets - preview.keeperBountyAssets
+            - preview.protocolLiquidationFeeAssets;
+        assertEq(IERC20(settlementToken).balanceOf(address(pool)), beforeLiquidation.poolCash + poolInflow);
+        assertEq(IERC20(settlementToken).balanceOf(address(clearinghouse)), beforeLiquidation.custody - poolInflow);
     }
 
     function _profileRequestDeposit(
@@ -1180,17 +1185,17 @@ contract GasProfileTest is RecordedOrderReceipts {
         bool cutoffWindow,
         string memory label
     ) internal {
-        _mintUsdc(lp2, assets);
+        _mintAssets(lp2, assets);
         vm.prank(lp2);
-        IERC20(usdc).approve(address(vault), type(uint256).max);
+        IERC20(settlementToken).approve(address(vault), type(uint256).max);
 
         _warpToRequestWindowSide(vault, cutoffWindow);
         _refreshMark();
         RequestEscrowSnapshot memory beforeRequest;
         (beforeRequest.epoch,) = vault.getRequestEpochWindow();
-        beforeRequest.providerBalance = IERC20(usdc).balanceOf(lp2);
+        beforeRequest.providerBalance = IERC20(settlementToken).balanceOf(lp2);
         beforeRequest.pendingEscrow = vault.pendingDepositEscrowAssets();
-        beforeRequest.vaultBalance = IERC20(usdc).balanceOf(address(vault));
+        beforeRequest.vaultBalance = IERC20(settlementToken).balanceOf(address(vault));
 
         vm.prank(lp2);
         uint256 g0 = gasleft();
@@ -1199,8 +1204,8 @@ contract GasProfileTest is RecordedOrderReceipts {
         assertEq(requestId, beforeRequest.epoch, "deposit must enter the intended cutoff epoch");
         assertEq(vault.pendingDepositRequest(requestId, lp2), assets);
         assertEq(vault.pendingDepositEscrowAssets(), beforeRequest.pendingEscrow + assets);
-        assertEq(IERC20(usdc).balanceOf(lp2), beforeRequest.providerBalance - assets);
-        assertEq(IERC20(usdc).balanceOf(address(vault)), beforeRequest.vaultBalance + assets);
+        assertEq(IERC20(settlementToken).balanceOf(lp2), beforeRequest.providerBalance - assets);
+        assertEq(IERC20(settlementToken).balanceOf(address(vault)), beforeRequest.vaultBalance + assets);
         emit log_named_uint(label, gas);
     }
 
@@ -1249,9 +1254,9 @@ contract GasProfileTest is RecordedOrderReceipts {
         address provider,
         uint256 assets
     ) internal returns (uint256 shares) {
-        _mintUsdc(provider, assets);
+        _mintAssets(provider, assets);
         vm.startPrank(provider);
-        IERC20(usdc).approve(address(vault), assets);
+        IERC20(settlementToken).approve(address(vault), assets);
         uint256 requestId = vault.requestDeposit(assets, provider, provider);
         vm.stopPrank();
 
@@ -1275,20 +1280,20 @@ contract GasProfileTest is RecordedOrderReceipts {
         engine.updateMarkPrice(markPrice == 0 ? 1e8 : markPrice, uint64(block.timestamp));
     }
 
-    function _mintUsdc(
+    function _mintAssets(
         address to,
         uint256 amount
     ) internal {
-        MockUSDC6(usdc).mint(to, amount);
+        MockSettlementToken6(settlementToken).mint(to, amount);
     }
 
     function _depositToClearinghouse(
         address trader,
         uint256 amount
     ) internal {
-        _mintUsdc(trader, amount);
+        _mintAssets(trader, amount);
         vm.startPrank(trader);
-        IERC20(usdc).approve(address(clearinghouse), amount);
+        IERC20(settlementToken).approve(address(clearinghouse), amount);
         clearinghouse.deposit(_account(trader), amount);
         vm.stopPrank();
     }
@@ -1313,11 +1318,11 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
         _assertExecutedOrder(result);
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
     }
 
     function _closeAtPrice(
@@ -1340,11 +1345,11 @@ contract GasProfileTest is RecordedOrderReceipts {
         vm.roll(block.number + 2);
 
         bytes[] memory updateData = _pythUpdateData();
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         vm.prank(keeper);
         OrderV3Types.ExecutionResult memory result = router.executeOrder(orderId, updateData);
         _assertExecutedOrder(result);
-        assertEq(clearinghouse.balanceUsdc(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, expectedOrders[result.orderId].bounty);
     }
 
     function _account(
@@ -1364,10 +1369,10 @@ contract GasProfileTest is RecordedOrderReceipts {
 
 }
 
-contract MockUSDC6 {
+contract MockSettlementToken6 {
 
-    string public constant name = "Mock USDC";
-    string public constant symbol = "USDC";
+    string public constant name = "Mock Settlement Token";
+    string public constant symbol = "SETTLEMENT";
     uint8 public constant decimals = 6;
     uint256 public totalSupply;
 

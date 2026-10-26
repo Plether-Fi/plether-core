@@ -41,7 +41,7 @@ contract TerminalNavBookV2GasTest is TerminalNavBookV2TestFixture {
     function test_Gas_MaximumRadixReadStaysWithinBookGate() public {
         (, TerminalNavBookV2 maxBook) = _deployBook(type(uint32).max);
         uint256 gasBefore = gasleft();
-        maxBook.terminalLpPriceDeltaUsdcAtoms(type(uint32).max);
+        maxBook.terminalLpPriceDeltaAssetAtoms(type(uint32).max);
         uint256 queryGas = gasBefore - gasleft();
         if (!vm.isContext(VmSafe.ForgeContext.Coverage)) {
             assertLt(queryGas, 400_000);

@@ -18,17 +18,17 @@ interface ITerminalNavBruteForceEngine {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
         );
 
-    function positionEntryCostUsdcAtoms(
+    function positionEntryCostAssetAtoms(
         address account
     ) external view returns (uint256);
 
-    function traderClaimBalanceUsdc(
+    function traderClaimBalanceAssets(
         address account
     ) external view returns (uint256);
 
@@ -37,7 +37,7 @@ interface ITerminalNavBruteForceEngine {
 /// @notice Minimal canonical clearinghouse surface used by the independent terminal-NAV reference model.
 interface ITerminalNavBruteForceClearinghouse {
 
-    function pnlPledgeUsdc(
+    function pnlPledgeAssets(
         address account
     ) external view returns (uint256);
 
@@ -52,7 +52,7 @@ library TerminalNavBruteForceModel {
     error TerminalNavBruteForceModel__DuplicateAccount(address account);
     error TerminalNavBruteForceModel__InvalidPositionSize(address account, uint256 size);
     error TerminalNavBruteForceModel__InvalidEntryCost(address account, uint256 entryCost, uint256 maximumEntryCost);
-    error TerminalNavBruteForceModel__OrphanPnlPledge(address account, uint256 pnlPledgeUsdc);
+    error TerminalNavBruteForceModel__OrphanPnlPledge(address account, uint256 pnlPledgeAssets);
     error TerminalNavBruteForceModel__MarkPriceAboveCap(uint256 markPrice, uint256 capPrice);
     error TerminalNavBruteForceModel__SignedValueOverflow(uint256 magnitude);
 
@@ -60,29 +60,29 @@ library TerminalNavBruteForceModel {
         address account;
         uint256 size;
         uint256 lots;
-        uint256 entryCostUsdcAtoms;
-        uint256 maxProfitUsdc;
-        uint256 pnlPledgeUsdc;
-        uint256 traderClaimBalanceUsdc;
-        uint256 collectibleCapUsdcAtoms;
-        uint256 effectiveCapUsdcAtoms;
+        uint256 entryCostAssetAtoms;
+        uint256 maxProfitAssets;
+        uint256 pnlPledgeAssets;
+        uint256 traderClaimBalanceAssets;
+        uint256 collectibleCapAssetAtoms;
+        uint256 effectiveCapAssetAtoms;
         CfdTypes.Side side;
         bool active;
     }
 
     struct SideTotals {
         uint256 size;
-        uint256 entryCostUsdcAtoms;
-        uint256 maxProfitUsdc;
-        uint256 pnlPledgeUsdc;
+        uint256 entryCostAssetAtoms;
+        uint256 maxProfitAssets;
+        uint256 pnlPledgeAssets;
     }
 
     struct PortfolioTotals {
         uint256 activePositionCount;
         uint256 totalLots;
-        uint256 totalEntryCostUsdcAtoms;
-        uint256 totalEffectiveCapUsdcAtoms;
-        uint256 totalTraderClaimsUsdc;
+        uint256 totalEntryCostAssetAtoms;
+        uint256 totalEffectiveCapAssetAtoms;
+        uint256 totalTraderClaimsAssets;
         SideTotals long;
         SideTotals short;
     }
@@ -107,21 +107,21 @@ library TerminalNavBruteForceModel {
 
             AccountState memory state = _loadAccount(engine, clearinghouse, account, capPrice);
             states[i] = state;
-            totals.totalTraderClaimsUsdc += state.traderClaimBalanceUsdc;
+            totals.totalTraderClaimsAssets += state.traderClaimBalanceAssets;
             if (!state.active) {
                 continue;
             }
 
             totals.activePositionCount++;
             totals.totalLots += state.lots;
-            totals.totalEntryCostUsdcAtoms += state.entryCostUsdcAtoms;
-            totals.totalEffectiveCapUsdcAtoms += state.effectiveCapUsdcAtoms;
+            totals.totalEntryCostAssetAtoms += state.entryCostAssetAtoms;
+            totals.totalEffectiveCapAssetAtoms += state.effectiveCapAssetAtoms;
 
             SideTotals memory sideTotals = state.side == CfdTypes.Side.LONG ? totals.long : totals.short;
             sideTotals.size += state.size;
-            sideTotals.entryCostUsdcAtoms += state.entryCostUsdcAtoms;
-            sideTotals.maxProfitUsdc += state.maxProfitUsdc;
-            sideTotals.pnlPledgeUsdc += state.pnlPledgeUsdc;
+            sideTotals.entryCostAssetAtoms += state.entryCostAssetAtoms;
+            sideTotals.maxProfitAssets += state.maxProfitAssets;
+            sideTotals.pnlPledgeAssets += state.pnlPledgeAssets;
             if (state.side == CfdTypes.Side.LONG) {
                 totals.long = sideTotals;
             } else {
@@ -135,12 +135,12 @@ library TerminalNavBruteForceModel {
         AccountState[] memory states,
         uint256 markPrice,
         uint256 capPrice
-    ) internal pure returns (int256 terminalLpPriceDeltaUsdc) {
+    ) internal pure returns (int256 terminalLpPriceDeltaAssets) {
         if (markPrice > capPrice) {
             revert TerminalNavBruteForceModel__MarkPriceAboveCap(markPrice, capPrice);
         }
         for (uint256 i = 0; i < states.length; ++i) {
-            terminalLpPriceDeltaUsdc += accountDeltaAt(states[i], markPrice);
+            terminalLpPriceDeltaAssets += accountDeltaAt(states[i], markPrice);
         }
     }
 
@@ -149,31 +149,31 @@ library TerminalNavBruteForceModel {
     function accountDeltaAt(
         AccountState memory state,
         uint256 markPrice
-    ) internal pure returns (int256 terminalLpPriceDeltaUsdc) {
+    ) internal pure returns (int256 terminalLpPriceDeltaAssets) {
         if (!state.active) {
             return 0;
         }
 
-        uint256 exitValueUsdcAtoms = state.lots * markPrice;
+        uint256 exitValueAssetAtoms = state.lots * markPrice;
         uint256 positiveValue;
         uint256 negativeValue;
         if (state.side == CfdTypes.Side.LONG) {
-            if (exitValueUsdcAtoms >= state.entryCostUsdcAtoms) {
-                positiveValue = exitValueUsdcAtoms - state.entryCostUsdcAtoms;
+            if (exitValueAssetAtoms >= state.entryCostAssetAtoms) {
+                positiveValue = exitValueAssetAtoms - state.entryCostAssetAtoms;
             } else {
-                negativeValue = state.entryCostUsdcAtoms - exitValueUsdcAtoms;
+                negativeValue = state.entryCostAssetAtoms - exitValueAssetAtoms;
             }
-        } else if (state.entryCostUsdcAtoms >= exitValueUsdcAtoms) {
-            positiveValue = state.entryCostUsdcAtoms - exitValueUsdcAtoms;
+        } else if (state.entryCostAssetAtoms >= exitValueAssetAtoms) {
+            positiveValue = state.entryCostAssetAtoms - exitValueAssetAtoms;
         } else {
-            negativeValue = exitValueUsdcAtoms - state.entryCostUsdcAtoms;
+            negativeValue = exitValueAssetAtoms - state.entryCostAssetAtoms;
         }
 
         if (negativeValue != 0) {
             return -_toInt256(negativeValue);
         }
         uint256 collectibleValue =
-            positiveValue < state.collectibleCapUsdcAtoms ? positiveValue : state.collectibleCapUsdcAtoms;
+            positiveValue < state.collectibleCapAssetAtoms ? positiveValue : state.collectibleCapAssetAtoms;
         return _toInt256(collectibleValue);
     }
 
@@ -184,7 +184,7 @@ library TerminalNavBruteForceModel {
         if (!state.active) {
             return 0;
         }
-        return _ceilDiv(state.entryCostUsdcAtoms, state.lots);
+        return _ceilDiv(state.entryCostAssetAtoms, state.lots);
     }
 
     /// @notice Returns the account-local collectible-cap transition when it lies strictly inside the raw payoff.
@@ -197,16 +197,16 @@ library TerminalNavBruteForceModel {
         }
 
         uint256 maximumCollectible = state.side == CfdTypes.Side.LONG
-            ? state.lots * capPrice - state.entryCostUsdcAtoms
-            : state.entryCostUsdcAtoms;
-        if (state.effectiveCapUsdcAtoms >= maximumCollectible) {
+            ? state.lots * capPrice - state.entryCostAssetAtoms
+            : state.entryCostAssetAtoms;
+        if (state.effectiveCapAssetAtoms >= maximumCollectible) {
             return (false, 0);
         }
 
         if (state.side == CfdTypes.Side.LONG) {
-            boundary = _ceilDiv(state.entryCostUsdcAtoms + state.effectiveCapUsdcAtoms, state.lots);
+            boundary = _ceilDiv(state.entryCostAssetAtoms + state.effectiveCapAssetAtoms, state.lots);
         } else {
-            boundary = _ceilDiv(state.entryCostUsdcAtoms - state.effectiveCapUsdcAtoms, state.lots);
+            boundary = _ceilDiv(state.entryCostAssetAtoms - state.effectiveCapAssetAtoms, state.lots);
         }
         hasTransition = true;
     }
@@ -217,25 +217,25 @@ library TerminalNavBruteForceModel {
         address account,
         uint256 capPrice
     ) private view returns (AccountState memory state) {
-        (uint256 size,,, uint256 maxProfitUsdc, CfdTypes.Side side,,) = engine.positions(account);
-        uint256 pnlPledgeUsdc = clearinghouse.pnlPledgeUsdc(account);
-        uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
-        uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
+        (uint256 size,,, uint256 maxProfitAssets, CfdTypes.Side side,,) = engine.positions(account);
+        uint256 pnlPledgeAssets = clearinghouse.pnlPledgeAssets(account);
+        uint256 traderClaimBalanceAssets = engine.traderClaimBalanceAssets(account);
+        uint256 entryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
 
         state.account = account;
         state.size = size;
-        state.entryCostUsdcAtoms = entryCostUsdcAtoms;
-        state.maxProfitUsdc = maxProfitUsdc;
-        state.pnlPledgeUsdc = pnlPledgeUsdc;
-        state.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
+        state.entryCostAssetAtoms = entryCostAssetAtoms;
+        state.maxProfitAssets = maxProfitAssets;
+        state.pnlPledgeAssets = pnlPledgeAssets;
+        state.traderClaimBalanceAssets = traderClaimBalanceAssets;
         state.side = side;
 
         if (size == 0) {
-            if (entryCostUsdcAtoms != 0) {
-                revert TerminalNavBruteForceModel__InvalidEntryCost(account, entryCostUsdcAtoms, 0);
+            if (entryCostAssetAtoms != 0) {
+                revert TerminalNavBruteForceModel__InvalidEntryCost(account, entryCostAssetAtoms, 0);
             }
-            if (pnlPledgeUsdc != 0) {
-                revert TerminalNavBruteForceModel__OrphanPnlPledge(account, pnlPledgeUsdc);
+            if (pnlPledgeAssets != 0) {
+                revert TerminalNavBruteForceModel__OrphanPnlPledge(account, pnlPledgeAssets);
             }
             return state;
         }
@@ -245,15 +245,15 @@ library TerminalNavBruteForceModel {
         state.active = true;
         state.lots = size / CfdTypes.SIZE_QUANTUM;
         uint256 maximumEntryCost = state.lots * capPrice;
-        if (entryCostUsdcAtoms > maximumEntryCost) {
-            revert TerminalNavBruteForceModel__InvalidEntryCost(account, entryCostUsdcAtoms, maximumEntryCost);
+        if (entryCostAssetAtoms > maximumEntryCost) {
+            revert TerminalNavBruteForceModel__InvalidEntryCost(account, entryCostAssetAtoms, maximumEntryCost);
         }
 
-        state.collectibleCapUsdcAtoms = pnlPledgeUsdc + traderClaimBalanceUsdc;
+        state.collectibleCapAssetAtoms = pnlPledgeAssets + traderClaimBalanceAssets;
         uint256 maximumCollectible =
-            side == CfdTypes.Side.LONG ? maximumEntryCost - entryCostUsdcAtoms : entryCostUsdcAtoms;
-        state.effectiveCapUsdcAtoms =
-            state.collectibleCapUsdcAtoms < maximumCollectible ? state.collectibleCapUsdcAtoms : maximumCollectible;
+            side == CfdTypes.Side.LONG ? maximumEntryCost - entryCostAssetAtoms : entryCostAssetAtoms;
+        state.effectiveCapAssetAtoms =
+            state.collectibleCapAssetAtoms < maximumCollectible ? state.collectibleCapAssetAtoms : maximumCollectible;
     }
 
     function _ceilDiv(

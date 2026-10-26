@@ -21,7 +21,7 @@ five pending orders per account cap remain Router responsibilities.
 A record is keyed by `(BountyKind, id)` and contains its account, amount, free-funded amount, and lifecycle state.
 Numeric ids may overlap between `Order` and `ProtectionTrigger`; those are the only current bounty kinds. The legacy
 pledge-funded and source-position-epoch fields are absent from the current record ABI.
-`totalBountyReservationsUsdc(account)` sums active nonzero records and changes on creation or take.
+`totalBountyReservationsAssets(account)` sums active nonzero records and changes on creation or take.
 
 | Transition | Caller | Canonical change | Funding/custody |
 | --- | --- | --- | --- |
@@ -59,7 +59,7 @@ foreign records do not authorize a refund. Identifiable inconsistent backing rem
 zero close record still requires matching account, kind, id, and Active state. No administrator can guess or rewrite
 a disputed owner.
 
-Generic action-reserve consumption protects `VPI reserve + totalBountyReservationsUsdc(account)` using only local
+Generic action-reserve consumption protects `VPI reserve + totalBountyReservationsAssets(account)` using only local
 clearinghouse accounting. No Router queue scan or accounting callback supplies that floor. Engine and lens snapshots
 read the same aggregate. Router account views combine it with Router-owned pending counts and clearinghouse margin
 summaries in constant work. Protection views project the canonical bounty records into their existing public shape.
@@ -77,7 +77,7 @@ Existing trader order/protection input and view shapes remain unchanged; margin 
 records. Rebuild clients that consume the internal accounting interface and do not reuse old raw-storage decoders.
 
 The current zero-close implementation removes the source-bound pledged-close escrow and its internal mutation paths.
-`BountyReservation` has no pledge or source-epoch fields, and `BountyRecovery` reports only `freeUsdc` and
+`BountyReservation` has no pledge or source-epoch fields, and `BountyRecovery` reports only `freeAssets` and
 `discrepancy`. Current receipts omit retained bounty and the mixed disposition variants; normal close receipts use
 `None` with zero amounts. Decode older releases with their archived ABIs. See
 [Close-order bounty policy](ACCOUNTING_SPEC.md#close-order-bounty-policy).

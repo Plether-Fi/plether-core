@@ -3,9 +3,9 @@ pragma solidity 0.8.35;
 
 import {ArbitrumEventEmitterRuntime} from "../fixtures/across-direct-funding/ArbitrumEventEmitterRuntime.sol";
 import {ArbitrumMulticallHandlerRuntime} from "../fixtures/across-direct-funding/ArbitrumMulticallHandlerRuntime.sol";
+import {MockSettlementToken} from "../utils/MockSettlementToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -55,7 +55,7 @@ interface IPinnedAcrossEventEmitter {
 }
 
 /// @dev Token failure controls isolate the economic calls without substituting a mock clearinghouse or handler.
-contract AcrossDirectFundingToken is MockUSDC {
+contract AcrossDirectFundingToken is MockSettlementToken {
 
     error RejectedTransfer();
     error RejectedApproval();
@@ -125,12 +125,12 @@ contract AcrossDirectFundingTest is Test {
     bytes32 private constant DRAINED = keccak256("DrainedTokens(address,address,uint256)");
     bytes32 private constant METADATA = keccak256("MetadataEmitted(bytes)");
 
-    AcrossDirectFundingToken private usdc;
+    AcrossDirectFundingToken private settlementToken;
     MarginClearinghouse private clearinghouse;
 
     function setUp() public {
-        usdc = new AcrossDirectFundingToken();
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        settlementToken = new AcrossDirectFundingToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         vm.etch(HANDLER, ArbitrumMulticallHandlerRuntime.runtimeCode());
         // The verified deployment's only storage is OZ v4 ReentrancyGuard._status, initialized to 1 by its constructor.
         vm.store(HANDLER, bytes32(0), bytes32(uint256(1)));
@@ -143,7 +143,7 @@ contract AcrossDirectFundingTest is Test {
 
     function test_DynamicBalanceCreditsActualDeliveredAmountAndLeavesNoAllowance() public {
         uint256 delivered = 103e6 + 7;
-        usdc.mint(HANDLER, delivered);
+        settlementToken.mint(HANDLER, delivered);
         assertEq(BENEFICIARY.code.length, 0, "counterfactual beneficiary does not need code");
         vm.recordLogs();
         // The callback amount is deliberately different: makeCallWithBalance reads the actual token balance.
@@ -153,19 +153,19 @@ contract AcrossDirectFundingTest is Test {
         _assertMarker(logs);
         assertEq(_count(logs, HANDLER, CALLS_FAILED), 0);
         assertEq(_count(logs, HANDLER, DRAINED), 0);
-        assertEq(usdc.balanceOf(HANDLER), 0);
-        assertEq(usdc.balanceOf(BENEFICIARY), 0);
-        assertEq(usdc.balanceOf(SOURCE_OWNER), 0);
-        assertEq(usdc.balanceOf(address(clearinghouse)), delivered);
-        assertEq(usdc.allowance(HANDLER, address(clearinghouse)), 0);
-        assertEq(clearinghouse.balanceUsdc(BENEFICIARY), delivered);
-        assertEq(clearinghouse.balanceUsdc(HANDLER), 0);
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(BENEFICIARY), delivered);
+        assertEq(settlementToken.balanceOf(HANDLER), 0);
+        assertEq(settlementToken.balanceOf(BENEFICIARY), 0);
+        assertEq(settlementToken.balanceOf(SOURCE_OWNER), 0);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), delivered);
+        assertEq(settlementToken.allowance(HANDLER, address(clearinghouse)), 0);
+        assertEq(clearinghouse.balanceAssets(BENEFICIARY), delivered);
+        assertEq(clearinghouse.balanceAssets(HANDLER), 0);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(BENEFICIARY), delivered);
     }
 
     function test_DepositFailureRollsBackApprovalAndFallsBackToTradingAccount() public {
-        usdc.mint(HANDLER, 9e6);
-        usdc.setFailures(true, false, false);
+        settlementToken.mint(HANDLER, 9e6);
+        settlementToken.setFailures(true, false, false);
         vm.recordLogs();
         _deliver(_message(_calls(), BENEFICIARY), 9e6);
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -175,9 +175,9 @@ contract AcrossDirectFundingTest is Test {
     }
 
     function test_FinalAllowanceResetFailureRollsBackSuccessfulDepositBeforeFallback() public {
-        usdc.mint(HANDLER, 11e6);
+        settlementToken.mint(HANDLER, 11e6);
         // The dynamic approval and deposit succeed, but the third call reverts. The handler must undo both.
-        usdc.setFailures(false, true, false);
+        settlementToken.setFailures(false, true, false);
         vm.recordLogs();
         _deliver(_message(_calls(), BENEFICIARY), 11e6);
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -190,7 +190,7 @@ contract AcrossDirectFundingTest is Test {
     }
 
     function test_FailureAfterMarkerRollsBackCreditAndFallsBack() public {
-        usdc.mint(HANDLER, 12e6);
+        settlementToken.mint(HANDLER, 12e6);
         IPinnedAcrossMulticallHandler.Call[] memory baseCalls = _calls();
         IPinnedAcrossMulticallHandler.Call[] memory calls = new IPinnedAcrossMulticallHandler.Call[](5);
         for (uint256 i; i < baseCalls.length; ++i) {
@@ -211,8 +211,8 @@ contract AcrossDirectFundingTest is Test {
     }
 
     function test_FallbackDrainsActualBalanceIncludingPreexistingDust() public {
-        usdc.mint(HANDLER, 9e6 + 7);
-        usdc.setFailures(true, false, false);
+        settlementToken.mint(HANDLER, 9e6 + 7);
+        settlementToken.setFailures(true, false, false);
         vm.recordLogs();
         _deliver(_message(_calls(), BENEFICIARY), 9e6);
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -221,7 +221,7 @@ contract AcrossDirectFundingTest is Test {
     }
 
     function test_SuccessfulPartialConsumptionDrainsLeftoversAndClearsAllowance() public {
-        usdc.mint(HANDLER, 13e6);
+        settlementToken.mint(HANDLER, 13e6);
         IPinnedAcrossMulticallHandler.Call[] memory calls = _calls();
         calls[1] = IPinnedAcrossMulticallHandler.Call({
             target: address(clearinghouse),
@@ -235,36 +235,36 @@ contract AcrossDirectFundingTest is Test {
         _assertMarker(logs);
         assertEq(_count(logs, HANDLER, CALLS_FAILED), 0);
         _assertDrained(logs, 5e6);
-        assertEq(clearinghouse.balanceUsdc(BENEFICIARY), 8e6);
-        assertEq(usdc.balanceOf(BENEFICIARY), 5e6);
-        assertEq(usdc.balanceOf(HANDLER), 0);
-        assertEq(usdc.allowance(HANDLER, address(clearinghouse)), 0);
+        assertEq(clearinghouse.balanceAssets(BENEFICIARY), 8e6);
+        assertEq(settlementToken.balanceOf(BENEFICIARY), 5e6);
+        assertEq(settlementToken.balanceOf(HANDLER), 0);
+        assertEq(settlementToken.allowance(HANDLER, address(clearinghouse)), 0);
     }
 
     function test_UnsendableFallbackRevertsWholeCallbackInsteadOfReportingCredit() public {
-        usdc.mint(HANDLER, 17e6);
-        usdc.setFailures(true, false, true);
+        settlementToken.mint(HANDLER, 17e6);
+        settlementToken.setFailures(true, false, true);
         vm.expectRevert();
         _deliver(_message(_calls(), BENEFICIARY), 17e6);
-        assertEq(usdc.balanceOf(HANDLER), 17e6);
-        assertEq(usdc.balanceOf(BENEFICIARY), 0);
-        assertEq(usdc.balanceOf(address(clearinghouse)), 0);
-        assertEq(clearinghouse.balanceUsdc(BENEFICIARY), 0);
-        assertEq(usdc.allowance(HANDLER, address(clearinghouse)), 0);
+        assertEq(settlementToken.balanceOf(HANDLER), 17e6);
+        assertEq(settlementToken.balanceOf(BENEFICIARY), 0);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), 0);
+        assertEq(clearinghouse.balanceAssets(BENEFICIARY), 0);
+        assertEq(settlementToken.allowance(HANDLER, address(clearinghouse)), 0);
     }
 
     function test_ZeroFallbackPropagatesActionFailure() public {
-        usdc.mint(HANDLER, 19e6);
-        usdc.setFailures(true, false, false);
+        settlementToken.mint(HANDLER, 19e6);
+        settlementToken.setFailures(true, false, false);
         vm.expectRevert();
         _deliver(_message(_calls(), address(0)), 19e6);
-        assertEq(usdc.balanceOf(HANDLER), 19e6);
-        assertEq(clearinghouse.balanceUsdc(BENEFICIARY), 0);
-        assertEq(usdc.allowance(HANDLER, address(clearinghouse)), 0);
+        assertEq(settlementToken.balanceOf(HANDLER), 19e6);
+        assertEq(clearinghouse.balanceAssets(BENEFICIARY), 0);
+        assertEq(settlementToken.allowance(HANDLER, address(clearinghouse)), 0);
     }
 
     function test_EmptyReplayCannotCreateSecondCredit() public {
-        usdc.mint(HANDLER, 23e6);
+        settlementToken.mint(HANDLER, 23e6);
         bytes memory message = _message(_calls(), BENEFICIARY);
         _deliver(message, 23e6);
         vm.recordLogs();
@@ -273,16 +273,16 @@ contract AcrossDirectFundingTest is Test {
         assertEq(_count(logs, HANDLER, CALLS_FAILED), 1, "zero deposit is caught by handler");
         assertEq(_count(logs, address(clearinghouse), DEPOSIT), 0);
         assertEq(_count(logs, EVENT_EMITTER, METADATA), 0);
-        assertEq(clearinghouse.balanceUsdc(BENEFICIARY), 23e6);
-        assertEq(usdc.allowance(HANDLER, address(clearinghouse)), 0);
+        assertEq(clearinghouse.balanceAssets(BENEFICIARY), 23e6);
+        assertEq(settlementToken.allowance(HANDLER, address(clearinghouse)), 0);
     }
 
     function test_InnerBalanceHelperCannotBeCalledDirectly() public {
-        IPinnedAcrossMulticallHandler.Replacement[] memory replacements = _replacements(address(usdc));
+        IPinnedAcrossMulticallHandler.Replacement[] memory replacements = _replacements(address(settlementToken));
         vm.expectRevert(bytes4(keccak256("NotSelf()")));
         IPinnedAcrossMulticallHandler(HANDLER)
             .makeCallWithBalance(
-                address(usdc), abi.encodeCall(IERC20.approve, (address(clearinghouse), 0)), 0, replacements
+                address(settlementToken), abi.encodeCall(IERC20.approve, (address(clearinghouse), 0)), 0, replacements
             );
     }
 
@@ -300,16 +300,16 @@ contract AcrossDirectFundingTest is Test {
         uint96 rawAmount
     ) public {
         uint256 amount = bound(rawAmount, 1, 1e15);
-        usdc.mint(HANDLER, amount);
+        settlementToken.mint(HANDLER, amount);
         _deliver(_message(_calls(), BENEFICIARY), 1);
-        assertEq(clearinghouse.balanceUsdc(BENEFICIARY), amount);
-        assertEq(usdc.balanceOf(address(clearinghouse)), amount);
-        assertEq(usdc.balanceOf(HANDLER), 0);
-        assertEq(usdc.allowance(HANDLER, address(clearinghouse)), 0);
+        assertEq(clearinghouse.balanceAssets(BENEFICIARY), amount);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), amount);
+        assertEq(settlementToken.balanceOf(HANDLER), 0);
+        assertEq(settlementToken.allowance(HANDLER, address(clearinghouse)), 0);
     }
 
     function _calls() private view returns (IPinnedAcrossMulticallHandler.Call[] memory calls) {
-        return _callsFor(address(usdc), address(clearinghouse), BENEFICIARY);
+        return _callsFor(address(settlementToken), address(clearinghouse), BENEFICIARY);
     }
 
     function _callsFor(
@@ -365,7 +365,8 @@ contract AcrossDirectFundingTest is Test {
         uint256 declaredAmount
     ) private {
         vm.prank(RELAYER);
-        IPinnedAcrossMulticallHandler(HANDLER).handleV3AcrossMessage(address(usdc), declaredAmount, RELAYER, message);
+        IPinnedAcrossMulticallHandler(HANDLER)
+            .handleV3AcrossMessage(address(settlementToken), declaredAmount, RELAYER, message);
     }
 
     function _assertFallback(
@@ -374,12 +375,12 @@ contract AcrossDirectFundingTest is Test {
     ) private view {
         assertEq(_count(logs, HANDLER, CALLS_FAILED), 1);
         _assertDrained(logs, amount);
-        assertEq(usdc.balanceOf(BENEFICIARY), amount);
-        assertEq(usdc.balanceOf(SOURCE_OWNER), 0, "destination fallback is not the source wallet");
-        assertEq(usdc.balanceOf(HANDLER), 0);
-        assertEq(usdc.balanceOf(address(clearinghouse)), 0);
-        assertEq(clearinghouse.balanceUsdc(BENEFICIARY), 0);
-        assertEq(usdc.allowance(HANDLER, address(clearinghouse)), 0);
+        assertEq(settlementToken.balanceOf(BENEFICIARY), amount);
+        assertEq(settlementToken.balanceOf(SOURCE_OWNER), 0, "destination fallback is not the source wallet");
+        assertEq(settlementToken.balanceOf(HANDLER), 0);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), 0);
+        assertEq(clearinghouse.balanceAssets(BENEFICIARY), 0);
+        assertEq(settlementToken.allowance(HANDLER, address(clearinghouse)), 0);
     }
 
     function _assertDeposit(
@@ -411,7 +412,7 @@ contract AcrossDirectFundingTest is Test {
                 continue;
             }
             assertEq(logs[i].topics[1], bytes32(uint256(uint160(BENEFICIARY))));
-            assertEq(logs[i].topics[2], bytes32(uint256(uint160(address(usdc)))));
+            assertEq(logs[i].topics[2], bytes32(uint256(uint160(address(settlementToken)))));
             assertEq(logs[i].topics[3], bytes32(amount));
         }
     }

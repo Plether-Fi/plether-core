@@ -20,10 +20,10 @@ contract ExistingHolderDustDepositsTest is BasePerpTest {
 
         vm.warp(block.timestamp + 50 minutes);
 
-        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
-        usdc.mint(attacker, minimumDeposit);
+        uint256 minimumDeposit = pool.minTrancheDepositAssets();
+        settlementToken.mint(attacker, minimumDeposit);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), minimumDeposit);
+        settlementToken.approve(address(juniorVault), minimumDeposit);
         uint256 requestId = juniorVault.requestDeposit(minimumDeposit, attacker);
         vm.stopPrank();
 
@@ -79,9 +79,9 @@ contract ExistingHolderTopUpTest is BasePerpTest {
     function test_SmallThirdPartyTopUpForExistingHolderReverts() public {
         _fundJunior(alice, 100_000e6);
 
-        usdc.mint(helper, 4999e6);
+        settlementToken.mint(helper, 4999e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 4999e6);
+        settlementToken.approve(address(juniorVault), 4999e6);
         uint256 requestId = juniorVault.requestDeposit(4999e6, helper);
         vm.stopPrank();
 
@@ -107,14 +107,14 @@ contract IntermediatedTopUpTest is BasePerpTest {
         TrancheCooldownBypassReceiver receiver = new TrancheCooldownBypassReceiver();
         address receiverAddr = address(receiver);
 
-        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
+        uint256 minimumDeposit = pool.minTrancheDepositAssets();
         _fundJunior(receiverAddr, minimumDeposit);
 
         vm.warp(block.timestamp + 1 hours + 1);
 
-        usdc.mint(attacker, 10_000e6);
+        settlementToken.mint(attacker, 10_000e6);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), 10_000e6);
+        settlementToken.approve(address(juniorVault), 10_000e6);
         uint256 requestId = juniorVault.requestDeposit(10_000e6, attacker);
         vm.stopPrank();
 
@@ -142,9 +142,9 @@ contract ThirdPartyActivationCooldownTest is BasePerpTest {
 
     /// @dev spec; source: ACCOUNTING_SPEC.md#lp-request-admission-maturity-and-oracle-boundaries.
     function test_ThirdPartyDepositMustNotBypassCooldown() public {
-        usdc.mint(helper, 100_000e6);
+        settlementToken.mint(helper, 100_000e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 100_000e6);
+        settlementToken.approve(address(juniorVault), 100_000e6);
         uint256 depositRequestId = juniorVault.requestDeposit(100_000e6, alice, helper);
         vm.stopPrank();
 
@@ -178,9 +178,9 @@ contract ThirdPartyCooldownMutationsTest is BasePerpTest {
         _fundJunior(alice, 100_000e6);
         vm.warp(block.timestamp + 1 hours + 1);
 
-        usdc.mint(helper, 1000e6);
+        settlementToken.mint(helper, 1000e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 1000e6);
+        settlementToken.approve(address(juniorVault), 1000e6);
         uint256 requestId = juniorVault.requestDeposit(1000e6, helper);
         vm.stopPrank();
 
@@ -244,9 +244,9 @@ contract MaterialThirdPartyTopUpTest is BasePerpTest {
 
         vm.warp(block.timestamp + 50 minutes);
 
-        usdc.mint(attacker, 5000e6);
+        settlementToken.mint(attacker, 5000e6);
         vm.startPrank(attacker);
-        usdc.approve(address(juniorVault), 5000e6);
+        settlementToken.approve(address(juniorVault), 5000e6);
         uint256 requestId = juniorVault.requestDeposit(5000e6, attacker);
         vm.stopPrank();
 
@@ -277,7 +277,7 @@ contract CarryAndMarginCheckpointCooldownTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -307,9 +307,9 @@ contract ProxyDepositCooldownTest is BasePerpTest {
     function test_ThirdPartyDepositIntoProxyMustStillStartCooldown() public {
         CooldownBypassReceiver receiver = new CooldownBypassReceiver();
 
-        usdc.mint(helper, 100_000e6);
+        settlementToken.mint(helper, 100_000e6);
         vm.startPrank(helper);
-        usdc.approve(address(juniorVault), 100_000e6);
+        settlementToken.approve(address(juniorVault), 100_000e6);
         uint256 requestId = juniorVault.requestDeposit(100_000e6, address(receiver), helper);
         vm.stopPrank();
 

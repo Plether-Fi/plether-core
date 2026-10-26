@@ -33,21 +33,21 @@ contract LiquidationTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        usdc.mint(alice, 10_000 * 1e6);
+        settlementToken.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.stopPrank();
     }
 
-    function _withdrawFreeUsdc(
+    function _withdrawFreeAssets(
         address trader,
-        uint256 reserveUsdc
+        uint256 reserveAssets
     ) internal {
         address account = trader;
-        uint256 balance = clearinghouse.balanceUsdc(account);
-        uint256 locked = clearinghouse.lockedMarginUsdc(account);
-        uint256 withdrawable = balance > locked + reserveUsdc ? balance - locked - reserveUsdc : 0;
+        uint256 balance = clearinghouse.balanceAssets(account);
+        uint256 locked = clearinghouse.lockedMarginAssets(account);
+        uint256 withdrawable = balance > locked + reserveAssets ? balance - locked - reserveAssets : 0;
         if (withdrawable > 0) {
             vm.prank(trader);
             clearinghouse.withdraw(account, withdrawable);
@@ -122,7 +122,7 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 0);
+        _withdrawFreeAssets(alice, 0);
 
         vm.warp(block.timestamp + 2);
         cachedMarkTime = uint64(block.timestamp - 1);
@@ -156,14 +156,14 @@ contract LiquidationTest is BasePerpTest {
 
     function test_FridayAutoDeleverage() public {
         vm.warp(WEDNESDAY_NOON);
-        assertEq(_maintenanceMarginUsdc(100_000 * 1e18, 1e8), 1000 * 1e6, "MMR should be 1.0% ($1k) on Wednesday");
+        assertEq(_maintenanceMarginAssets(100_000 * 1e18, 1e8), 1000 * 1e6, "MMR should be 1.0% ($1k) on Wednesday");
 
         // Alice opens 50x LONG (Size $100k, Margin $2k)
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 10e6);
+        _withdrawFreeAssets(alice, 10e6);
 
         address account = alice;
 
@@ -177,12 +177,12 @@ contract LiquidationTest is BasePerpTest {
         // FAD Window activates
         vm.warp(FRIDAY_EVENING);
         assertEq(
-            _maintenanceMarginUsdc(100_000 * 1e18, 1e8), 3000 * 1e6, "MMR should jump to 3.0% ($3k) on Friday evening"
+            _maintenanceMarginAssets(100_000 * 1e18, 1e8), 3000 * 1e6, "MMR should jump to 3.0% ($3k) on Friday evening"
         );
 
         // Keeper liquidates. $3k required but only ~$2k margin → liquidatable.
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
-        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 protocolTreasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1e8);
 
         vm.startPrank(keeper);
@@ -193,21 +193,21 @@ contract LiquidationTest is BasePerpTest {
         assertEq(size, 0, "Position should be wiped");
 
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
-        assertEq(preview.liquidationChargeUsdc, 100 * 1e6, "Liquidation should retain the 10 bps total charge");
+        assertEq(preview.liquidationChargeAssets, 100 * 1e6, "Liquidation should retain the 10 bps total charge");
         assertEq(bounty, 50 * 1e6, "Keeper should receive 5 bps of the $100k notional");
-        assertEq(preview.protocolLiquidationFeeUsdc, 0, "Protocol liquidation fee should default to zero");
+        assertEq(preview.protocolLiquidationFeeAssets, 0, "Protocol liquidation fee should default to zero");
         assertEq(
-            clearinghouse.balanceUsdc(engine.protocolTreasury()),
+            clearinghouse.balanceAssets(engine.protocolTreasury()),
             protocolTreasuryBefore,
             "Default liquidation should not credit the protocol treasury"
         );
-        assertEq(preview.lpLiquidationFeeUsdc, 50 * 1e6, "LPs should receive the other 5 bps");
+        assertEq(preview.lpLiquidationFeeAssets, 50 * 1e6, "LPs should receive the other 5 bps");
 
         // Ethical: Alice keeps surplus equity after the total charge and carry accrued between open and FAD liquidation.
-        uint256 chBalance = clearinghouse.balanceUsdc(account);
+        uint256 chBalance = clearinghouse.balanceAssets(account);
         assertApproxEqAbs(
             chBalance,
-            preview.settlementRetainedUsdc,
+            preview.settlementRetainedAssets,
             20,
             "Live retained equity should match preview up to execution-time carry"
         );
@@ -218,7 +218,7 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 0);
+        _withdrawFreeAssets(alice, 0);
 
         address account = alice;
 
@@ -245,7 +245,7 @@ contract LiquidationTest is BasePerpTest {
         // PnL = -$1500, Margin = $1960 (after 4 bps fee), Equity = $460
         // The dedicated liquidation reserve was fixed at $100 from the opening notional.
         // Residual = $460 - $100 = $360.
-        uint256 chBalance = clearinghouse.balanceUsdc(account);
+        uint256 chBalance = clearinghouse.balanceAssets(account);
         assertApproxEqAbs(chBalance, 360_000_000, 20, "Alice retains equity net of the charge and one-second carry");
     }
 
@@ -256,7 +256,7 @@ contract LiquidationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 50_000 * 1e18, 2000 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 1e6);
+        _withdrawFreeAssets(alice, 1e6);
 
         address account = alice;
 
@@ -351,7 +351,7 @@ contract LiquidationTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 6000 * 1e18, 200 * 1e6, 1e8, false);
 
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 0);
+        _withdrawFreeAssets(alice, 0);
 
         address account = alice;
         (, uint256 posMargin,,,,,) = engine.positions(account);
@@ -362,7 +362,7 @@ contract LiquidationTest is BasePerpTest {
         bytes[] memory pythData = new bytes[](1);
         pythData[0] = abi.encode(1.06e8);
 
-        uint256 poolBefore = usdc.balanceOf(address(pool));
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(keeper);
@@ -372,7 +372,7 @@ contract LiquidationTest is BasePerpTest {
         // The $6.36 marked charge is capped by the $6 opening reserve; the keeper receives its configured share.
         assertGt(bounty, 0, "Keeper still incentivized on negative-equity liquidation");
         assertLe(bounty, posMargin, "Bounty never exceeds margin pool can seize");
-        assertGe(usdc.balanceOf(address(pool)), poolBefore, "Pool never pays more than it seizes");
+        assertGe(settlementToken.balanceOf(address(pool)), poolBefore, "Pool never pays more than it seizes");
     }
 
     function test_LiquidationCharge_SplitsEquallyBetweenKeeperAndLps() public {
@@ -381,13 +381,13 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 0);
+        _withdrawFreeAssets(alice, 0);
 
         address account = alice;
-        uint256 poolBefore = usdc.balanceOf(address(pool));
-        uint256 chBefore = clearinghouse.balanceUsdc(account);
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
+        uint256 chBefore = clearinghouse.balanceAssets(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
-        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 protocolTreasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.015e8);
 
         bytes[] memory pythData = new bytes[](1);
@@ -398,21 +398,21 @@ contract LiquidationTest is BasePerpTest {
         router.executeLiquidation(account, pythData);
 
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
-        uint256 chAfter = clearinghouse.balanceUsdc(account);
-        uint256 poolAfter = usdc.balanceOf(address(pool));
-        uint256 protocolFee = clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore;
+        uint256 chAfter = clearinghouse.balanceAssets(account);
+        uint256 poolAfter = settlementToken.balanceOf(address(pool));
+        uint256 protocolFee = clearinghouse.balanceAssets(engine.protocolTreasury()) - protocolTreasuryBefore;
 
         uint256 userSeized = chBefore - chAfter;
-        assertEq(bounty, preview.keeperBountyUsdc, "Keeper should receive the previewed half of the charge");
+        assertEq(bounty, preview.keeperBountyAssets, "Keeper should receive the previewed half of the charge");
         assertEq(protocolFee, 0, "Protocol liquidation fee should default to zero");
         assertEq(
-            preview.keeperBountyUsdc,
-            preview.lpLiquidationFeeUsdc,
+            preview.keeperBountyAssets,
+            preview.lpLiquidationFeeAssets,
             "Even-micro liquidation charge should split exactly 50/50"
         );
         assertEq(
-            preview.liquidationChargeUsdc,
-            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            preview.liquidationChargeAssets,
+            preview.keeperBountyAssets + preview.protocolLiquidationFeeAssets + preview.lpLiquidationFeeAssets,
             "Keeper, protocol, and LP shares should conserve the total charge"
         );
         assertEq(
@@ -432,13 +432,13 @@ contract LiquidationTest is BasePerpTest {
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 100_000 * 1e18, 2000 * 1e6, 1e8, false);
         router.executeOrder(1, _mockPythUpdateData());
-        _withdrawFreeUsdc(alice, 0);
+        _withdrawFreeAssets(alice, 0);
 
         address account = alice;
-        uint256 poolBefore = usdc.balanceOf(address(pool));
-        uint256 chBefore = clearinghouse.balanceUsdc(account);
+        uint256 poolBefore = settlementToken.balanceOf(address(pool));
+        uint256 chBefore = clearinghouse.balanceAssets(account);
         uint256 keeperSettlementBefore = _settlementBalance(keeper);
-        uint256 protocolTreasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 protocolTreasuryBefore = clearinghouse.balanceAssets(engine.protocolTreasury());
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 1.015e8);
 
         bytes[] memory pythData = new bytes[](1);
@@ -448,20 +448,20 @@ contract LiquidationTest is BasePerpTest {
         router.executeLiquidation(account, pythData);
 
         uint256 bounty = _settlementBalance(keeper) - keeperSettlementBefore;
-        uint256 chAfter = clearinghouse.balanceUsdc(account);
-        uint256 poolAfter = usdc.balanceOf(address(pool));
+        uint256 chAfter = clearinghouse.balanceAssets(account);
+        uint256 poolAfter = settlementToken.balanceOf(address(pool));
         uint256 userSeized = chBefore - chAfter;
-        uint256 protocolFee = clearinghouse.balanceUsdc(engine.protocolTreasury()) - protocolTreasuryBefore;
+        uint256 protocolFee = clearinghouse.balanceAssets(engine.protocolTreasury()) - protocolTreasuryBefore;
 
-        assertEq(preview.liquidationChargeUsdc, 100_000_000, "Charge must stay capped by the opening reserve");
-        assertEq(preview.keeperBountyUsdc, 25_000_000, "Keeper should receive 25% of the charge");
-        assertEq(preview.protocolLiquidationFeeUsdc, 25_000_000, "Protocol should receive 25% of the charge");
-        assertEq(preview.lpLiquidationFeeUsdc, 50_000_000, "LPs should receive 50% of the charge");
-        assertEq(bounty, preview.keeperBountyUsdc, "Live keeper credit should match the configured preview share");
-        assertEq(protocolFee, preview.protocolLiquidationFeeUsdc, "Live treasury credit should match the preview");
+        assertEq(preview.liquidationChargeAssets, 100_000_000, "Charge must stay capped by the opening reserve");
+        assertEq(preview.keeperBountyAssets, 25_000_000, "Keeper should receive 25% of the charge");
+        assertEq(preview.protocolLiquidationFeeAssets, 25_000_000, "Protocol should receive 25% of the charge");
+        assertEq(preview.lpLiquidationFeeAssets, 50_000_000, "LPs should receive 50% of the charge");
+        assertEq(bounty, preview.keeperBountyAssets, "Live keeper credit should match the configured preview share");
+        assertEq(protocolFee, preview.protocolLiquidationFeeAssets, "Live treasury credit should match the preview");
         assertEq(
-            preview.liquidationChargeUsdc,
-            preview.keeperBountyUsdc + preview.protocolLiquidationFeeUsdc + preview.lpLiquidationFeeUsdc,
+            preview.liquidationChargeAssets,
+            preview.keeperBountyAssets + preview.protocolLiquidationFeeAssets + preview.lpLiquidationFeeAssets,
             "Configured allocations should conserve the total charge"
         );
         assertEq(

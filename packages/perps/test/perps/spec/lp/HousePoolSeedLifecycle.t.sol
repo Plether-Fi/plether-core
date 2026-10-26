@@ -31,8 +31,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
 
     function test_OpenCommit_RevertsDuringPartialSeedLifecycle() public {
         uint256 juniorSeed = 1000e6;
-        usdc.mint(address(this), juniorSeed);
-        usdc.approve(address(pool), juniorSeed);
+        settlementToken.mint(address(this), juniorSeed);
+        settlementToken.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
         _fundTrader(alice, 10_000e6);
@@ -52,8 +52,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
     function test_OpenCommit_RevertsWhenSeedsCompleteButTradingNotActivated() public {
         uint256 juniorSeed = 1000e6;
         uint256 seniorSeed = 1000e6;
-        usdc.mint(address(this), juniorSeed + seniorSeed);
-        usdc.approve(address(pool), juniorSeed + seniorSeed);
+        settlementToken.mint(address(this), juniorSeed + seniorSeed);
+        settlementToken.approve(address(pool), juniorSeed + seniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
         pool.initializeSeedPosition(true, seniorSeed, address(this));
 
@@ -71,7 +71,7 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
     }
 
     function test_ActivateTradingRejectsStoredUnassignedAssetsUntilAssigned() public {
-        usdc.mint(address(pool), 500e6);
+        settlementToken.mint(address(pool), 500e6);
         pool.accountExcess();
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -91,7 +91,7 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
     function test_ActivateTradingRejectsProjectedUnassignedAssets() public {
         _seedBothTranches();
 
-        usdc.mint(address(pool), 500e6);
+        settlementToken.mint(address(pool), 500e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             500e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -109,11 +109,11 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
 
     function test_ActivateTradingRejectsResidualPendingClaimantAssets() public {
         _seedBothTranches();
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        usdc.mint(address(pool), 3000e6);
+        settlementToken.mint(address(pool), 3000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -129,16 +129,16 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
 
     function test_ActivateTradingAcceptsPendingRevenueWithSeedOwners() public {
         _seedBothTranches();
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
-        usdc.mint(address(pool), 3000e6);
+        settlementToken.mint(address(pool), 3000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             3000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        assertEq(pool.pendingTradingRevenueUsdc(), 3000e6);
+        assertEq(pool.pendingTradingRevenueAssets(), 3000e6);
 
         pool.activateTrading();
         assertTrue(pool.canIncreaseRisk());
@@ -148,20 +148,20 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         _seedBothTranches();
         pool.activateTrading();
 
-        usdc.mint(address(pool), 500e6);
+        settlementToken.mint(address(pool), 500e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             500e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        assertEq(pool.pendingRecapitalizationUsdc(), 500e6);
+        assertEq(pool.pendingRecapitalizationAssets(), 500e6);
 
         pool.activateTrading();
         assertTrue(pool.isTradingActive());
     }
 
     function _seedBothTranches() internal {
-        usdc.mint(address(this), 2000e6);
-        usdc.approve(address(pool), 2000e6);
+        settlementToken.mint(address(this), 2000e6);
+        settlementToken.approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
     }
@@ -173,20 +173,20 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         // A small assigned junior position supplies the ratio backing required to exercise a senior-first bootstrap
         // without setting the junior seed flag. Its full value is consumed by the pre-seed coupon backlog below.
         uint256 juniorCapacityBacking = 11e6;
-        usdc.mint(address(pool), juniorCapacityBacking);
+        settlementToken.mint(address(pool), juniorCapacityBacking);
         pool.accountExcess();
         vm.prank(address(juniorVault));
         pool.reconcile();
         pool.assignUnassignedAssets(false, address(this));
 
-        usdc.mint(address(this), seniorSeed);
-        usdc.approve(address(pool), seniorSeed);
+        settlementToken.mint(address(this), seniorSeed);
+        settlementToken.approve(address(pool), seniorSeed);
         pool.initializeSeedPosition(true, seniorSeed, address(this));
 
         vm.warp(block.timestamp + 30 days);
         uint256 juniorSeedTime = block.timestamp;
-        usdc.mint(address(this), juniorSeed);
-        usdc.approve(address(pool), juniorSeed);
+        settlementToken.mint(address(this), juniorSeed);
+        settlementToken.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
         uint256 seniorBeforeJuniorSeed = seniorSeed + juniorCapacityBacking;
@@ -217,11 +217,11 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         uint256 juniorSeed = 1000e6;
         uint256 depositAmount = 5000e6;
 
-        usdc.mint(address(this), juniorSeed + depositAmount);
-        usdc.approve(address(pool), juniorSeed + depositAmount);
+        settlementToken.mint(address(this), juniorSeed + depositAmount);
+        settlementToken.approve(address(pool), juniorSeed + depositAmount);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
-        usdc.approve(address(juniorVault), depositAmount);
+        settlementToken.approve(address(juniorVault), depositAmount);
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.requestDeposit(depositAmount, address(this), address(this));
         assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should reflect lifecycle gating");
@@ -230,8 +230,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
     function test_OrdinaryDeposit_RevertsBeforeSeedLifecycleStarts() public {
         uint256 depositAmount = 5000e6;
 
-        usdc.mint(address(this), depositAmount);
-        usdc.approve(address(juniorVault), depositAmount);
+        settlementToken.mint(address(this), depositAmount);
+        settlementToken.approve(address(juniorVault), depositAmount);
 
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.requestDeposit(depositAmount, address(this), address(this));
@@ -243,8 +243,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         juniorVault.bootstrapMint(1e18, address(this));
 
         uint256 juniorSeed = 1000e6;
-        usdc.mint(address(this), juniorSeed);
-        usdc.approve(address(pool), juniorSeed);
+        settlementToken.mint(address(this), juniorSeed);
+        settlementToken.approve(address(pool), juniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
 
         assertTrue(
@@ -258,12 +258,12 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
         uint256 seniorSeed = 1000e6;
         uint256 depositAmount = 5000e6;
 
-        usdc.mint(address(this), juniorSeed + seniorSeed + depositAmount);
-        usdc.approve(address(pool), juniorSeed + seniorSeed);
+        settlementToken.mint(address(this), juniorSeed + seniorSeed + depositAmount);
+        settlementToken.approve(address(pool), juniorSeed + seniorSeed);
         pool.initializeSeedPosition(false, juniorSeed, address(this));
         pool.initializeSeedPosition(true, seniorSeed, address(this));
 
-        usdc.approve(address(juniorVault), depositAmount);
+        settlementToken.approve(address(juniorVault), depositAmount);
         vm.expectRevert(TrancheVault.TrancheVault__TradingNotActive.selector);
         juniorVault.requestDeposit(depositAmount, address(this), address(this));
         assertEq(juniorVault.maxRequestDeposit(address(this)), 0, "request capacity should be zero before activation");
@@ -277,8 +277,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
     }
 
     function test_MaxDeposit_ZeroWhilePoolPaused() public {
-        usdc.mint(address(this), 2000e6);
-        usdc.approve(address(pool), 2000e6);
+        settlementToken.mint(address(this), 2000e6);
+        settlementToken.approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
@@ -291,8 +291,8 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
     }
 
     function test_MaxDeposit_ZeroWhileMarkStale() public {
-        usdc.mint(address(this), 2000e6);
-        usdc.approve(address(pool), 2000e6);
+        settlementToken.mint(address(this), 2000e6);
+        settlementToken.approve(address(pool), 2000e6);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
@@ -309,13 +309,13 @@ contract HousePoolSeedLifecycleGateTest is HousePoolAsyncTestBase {
     }
 
     function test_MaxDeposit_ZeroWhenFreshReconcileWouldCreateUnassignedAssets() public {
-        usdc.mint(address(this), 2000e6);
-        usdc.approve(address(pool), type(uint256).max);
+        settlementToken.mint(address(this), 2000e6);
+        settlementToken.approve(address(pool), type(uint256).max);
         pool.initializeSeedPosition(false, 1000e6, address(this));
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
 
-        usdc.mint(address(pool), 500e6);
+        settlementToken.mint(address(pool), 500e6);
         pool.accountExcess();
         vm.store(address(juniorVault), bytes32(uint256(2)), bytes32(uint256(0)));
 

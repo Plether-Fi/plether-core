@@ -1,6 +1,6 @@
 # MockUSDG for a new perps deployment
 
-Status: implemented and validated locally on `codex/perps-mock-usdg`. The full perps correctness run was stopped at the user's request; targeted validation is complete. No deployment or transaction broadcast has been performed. Revision-bound release export and live activation remain deferred until the changes are reviewed and a deployment is authorized.
+Status: the core MockUSDG implementation and breaking token-neutral API rename are implemented and targeted validation has completed. The SDK is version `0.4.0`, with no old token-specific API aliases. Source finalization, packing the SDK from a clean commit, the packed-consumer smoke check, and companion app integration remain the finalization steps below. No full-suite rerun, deployment, or transaction broadcast has been performed. Revision-bound release export and live activation remain deferred until review and separate authorization.
 
 ## Objective and decisions
 
@@ -8,7 +8,7 @@ Prepare a fresh Arbitrum Sepolia perps deployment using freely mintable MockUSDG
 
 - Deploy `MockUSDG` with name `Mock USDG`, symbol `USDG`, six decimals, and unrestricted `mint(address,uint256)` on testnet. Display `Mock USDG` in the testnet app.
 - Keep the existing perps PnL, margin, liquidation, carry, tranche, and solvency calculations and numerical parameters.
-- Preserve public Solidity selectors, events, error signatures, receipt fields, and SDK input names such as `USDC()`, `*Usdc`, and `usdc`. Document them as legacy identifiers for six-decimal settlement-token amounts/addresses. Token identity comes from the configured address and metadata.
+- Rename every current perps token-specific API and its consumers to token-neutral names: `settlementToken()` and `settlementToken` for token addresses, `*Assets` for settlement amounts, `*AssetAtoms` for exact base units, and `_ASSETS` for amount constants. Rename `getFreeAssets`, `getSettlementFreeAssets`, and `AccountAssetBuckets` consistently. This is a deliberate breaking API change for a fresh deployment, with no compatibility aliases. Token identity comes from the configured address and metadata; `1_000_000` six-decimal base units means one token.
 - Scope changes to the new perps deployment and its consumers. Existing deployed stacks, historical release evidence, spot/options code, and shared USDC mocks remain valid historical or independent configurations.
 - MockUSDG provides ordinary ERC-20 transfers and approvals. It does not implement EIP-2612 or EIP-3009, mirroring the existing release mock. Signed-deposit compatibility with official USDG is a later validation task.
 - Future GDN rewards use a separate payout recipient. Reward accrual, claiming, distribution economics, and production registration are not simulated by the mock.
@@ -47,8 +47,8 @@ Implementation:
 
 1. Give new manifests a canonical `contracts.settlementToken` entry with explicit artifact `script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG`, address, and runtime code hash.
 2. Record name, symbol, decimals, mock status, and `supportsReceiveWithAuthorization: false` in settlement-token metadata. Make application display and capability configuration consume this metadata.
-3. Increment the new manifest schema version for the contract-key change and update current consumer readers together. Keep support for reading historical schemas where those readers already handle old deployments.
-4. Align exporter artifact resolution and deployment-size evidence with the new key and explicit artifact. Preserve historical `mockUsdc` interpretation for old manifests.
+3. Use schema version 4 and update current consumer readers together. Current runtime configuration must require the new prepared manifest instead of accepting old token-specific aliases. Preserve historical manifests and decoders as archived evidence, separate from current runtime configuration.
+4. Align exporter artifact resolution and deployment-size evidence with the new key and explicit artifact. Keep historical `mockUsdc` manifests unchanged as evidence; the current export path uses the explicit new settlement-token entry.
 5. Generate new release artifacts into a fresh directory from the reviewed source revision. Do not rewrite old manifests, ABI snapshots, code hashes, or deployment receipts, and do not mark a prepared release as deployed or active.
 
 Acceptance: the exported token ABI is MockUSDG's; every manifest contract matches its size evidence; the app resolves the new token without interpreting an old USDC address as USDG.
@@ -71,7 +71,7 @@ Companion work in `Plether-Fi/plether-app`:
 
 Implementation:
 
-1. Pass the MockUSDG address through existing SDK `usdc` inputs. Keep action encodings, public exports, signed-operation domains, and historical compatibility fixtures stable.
+1. Pass the MockUSDG address through SDK `settlementToken` inputs. Rename current ABI fields, getters, errors, action inputs, amount constants, receipt types, typed-data definitions, and consumer accessors consistently. Regenerate current ABIs and bindings from the renamed source; remove old token-specific aliases. Preserve archived release snapshots and historical compatibility evidence without exposing them as current APIs.
 2. Replace active hardcoded USDC display/error text with configured token labels or `settlement token`; retain numeric formatting at six decimals.
 3. Keep `supportsReceiveWithAuthorization` false. Do not offer the owner-wallet signed first-deposit route for this mock.
 4. Make the normal testnet path: obtain the canonical trading smart-account address, mint MockUSDG to it, then use the existing `buildSmartAccountBalanceDepositAction` to batch approval and `depositMargin`. The mint transaction still needs testnet gas. If funds are already in an owner EOA, transfer to the trading account before using this deposit path.
@@ -105,22 +105,42 @@ Extend existing integration tests instead of duplicating ERC-20 library tests:
 - A runtime integration smoke test using the actual release MockUSDG: mint to trader account -> approve/deposit -> open/close -> withdraw; include LP deposit/finalization and asynchronous redemption/claim.
 - Reuse current excess/donation accounting coverage; add a small rewards-configuration validation test only if that validator is introduced. Do not add a rewards simulator.
 
-Run formatting and package-boundary checks, targeted root deployment tests, release-export Python tests, the appropriate perps CI suite, and SDK tests/typecheck/build. Verify SDK compatibility fixtures without regenerating historical goldens.
+The authorized targeted checks have completed; the current validation record below supersedes the earlier pre-rename results for this API change. Current consumer fixtures target the renamed API, while historical release snapshots and fixture evidence remain archived and unchanged. No full perps suite was rerun.
 
-Update `packages/perps/README.md`, `DEPLOYMENT.md`, `SECURITY.md`, affected NatSpec, the environment example, and SDK docs to explain MockUSDG, unrestricted test minting, six-decimal settlement units, retained legacy API names, testnet funding, and the separate future rewards destination. Update downstream app documentation with the deployment configuration changes.
+Update `packages/perps/README.md`, `DEPLOYMENT.md`, `SECURITY.md`, affected NatSpec, the environment example, and SDK docs to explain MockUSDG, unrestricted test minting, six-decimal settlement base units, breaking token-neutral API names without aliases, testnet funding, and the separate future rewards destination. Update downstream app documentation with the deployment configuration changes.
 
 ## 6. Release sequence and completion
 
-1. Land the mock, script/configuration, manifest, test, and documentation changes as one coherent core change.
-2. Update SDK display text and companion app configuration/funding behavior against the new manifest format.
-3. Complete local tests and a no-broadcast deployment rehearsal; produce fresh revision-bound release evidence using the existing release workflow.
-4. When deploying the new testnet release, use the existing deployed -> seeded -> active verification stages and complete the runtime smoke tests. Record actual addresses, code hashes, transactions, and validation results.
+1. Finalize and review the coherent core change, then record it in a clean source commit through the authorized source-control workflow. Include the renamed contracts, deployment/configuration, manifests, generated bindings, SDK `0.4.0`, tests, and documentation.
+2. Pack SDK `0.4.0` from that clean commit and run the packed-consumer smoke check against the current renamed API. Record the source revision and package evidence; archived historical fixtures remain separate from current exports.
+3. Complete companion app integration against that exact SDK artifact and matching generated ABIs. Keep the schema-4 prepared manifest inactive, without deployed addresses or enabled sponsorship/funding, until a fresh release is supplied.
+4. Produce any revision-bound release evidence through the existing clean-tree workflow when authorized. A later deployment must use the existing deployed -> seeded -> active verification stages and runtime smoke tests, recording actual addresses, code hashes, transactions, and results. Deployment and activation are not part of the present implementation.
 
-Done means: a new perps stack uses freely mintable MockUSDG end to end; the app supports minting/funding, trading, and withdrawals; collateral math and public protocol interfaces retain their prior behavior; release evidence identifies the correct token; and future USDG reward registration/payout configuration has a documented home.
+Implementation readiness means freely mintable MockUSDG is wired through the new perps source and its consumers; the app's funding, trading, and withdrawal paths use the matching token-neutral API without aliases; collateral math retains its prior behavior; metadata identifies the correct token and capabilities; and future USDG reward registration/payout configuration has a documented home. Live deployment acceptance remains a separate authorized stage.
 
 Production USDG deployment, real-token signature compatibility, GDN onboarding, reward allocation automation, and new cross-chain funding routes are separate follow-up work.
 
-## Local implementation record
+## Current token-neutral implementation and validation record
+
+- The fresh perps API uses `settlementToken`, `*Assets`, `*AssetAtoms`, and `_ASSETS` identifiers throughout current contracts, bindings, SDK, deployment tooling, and consumer configuration. SDK `0.4.0` exposes no old token-specific aliases. Historical ABIs, fixtures, releases, and audit evidence remain archived for their original deployments.
+- MockUSDG retains six decimals and unrestricted test minting. The prepared manifest identifies it explicitly; signed owner-wallet deposits and external bridge funding remain unsupported for this mock. Sponsorship and activation remain disabled in the prepared configuration until a reviewed deployed release is supplied. Reward status remains `not_applicable`, with separate payout/controller metadata unconfigured.
+
+| Completed check | Result and scope |
+| --- | --- |
+| Root deployment/script tests | 43 passed, including MockUSDG lifecycle and deployment binding checks. |
+| Order lifecycle tests | 42 passed, including six fuzz tests at 256 runs each. |
+| SDK | 129 tests passed; typecheck and build passed for SDK `0.4.0`. |
+| SDK artifact tooling | Four tests passed; packing from the final clean commit and the packed-consumer smoke check remain finalization steps. |
+| Python release exporter | 30 tests passed. |
+| Node bridge tooling | 10 checks passed. |
+| Repository hygiene | Package boundaries, Solidity formatting, and diff checks passed. |
+| Solidity compiler checks | ABI/type checking covered 421 Solidity files; the optimized production build passed. |
+| Mechanical source comparison | 130 production files matched the approved identifier mapping. |
+| Mechanical ABI/storage comparison | 169 artifacts preserved ABI types/order and storage types/order/slots under the rename. |
+
+The mechanical comparisons support the unchanged accounting implementation and data layout. They do not make the renamed API backward compatible: public names and affected selectors/typed-data definitions must be consumed through the matching current release. The targeted results are not a full-suite pass and are not live deployment evidence. No full-suite rerun, deployment, public-testnet mint, bootstrap, activation, or other transaction broadcast was performed for this change.
+
+## Earlier MockUSDG implementation record (before API rename)
 
 - Core branch: `codex/perps-mock-usdg`; implementation and validation used `b431a689`, then the branch was advanced to `f50f8482` (audit documentation only) for PR preparation.
 - Deployment scripts, the schema-4 template/export checks, SDK wording/capabilities, operational documentation, and MockUSDG trading/LP integration coverage are implemented.

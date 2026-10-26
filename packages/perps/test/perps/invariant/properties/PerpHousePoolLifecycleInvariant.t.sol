@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 
 contract PerpHousePoolLifecycleHandler is Test {
@@ -64,7 +64,7 @@ contract PerpHousePoolLifecycleHandler is Test {
         uint256 expectedCumulativeShares;
     }
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     CfdEngine public immutable engine;
     HousePool public immutable pool;
     TrancheVault public immutable seniorVault;
@@ -109,7 +109,7 @@ contract PerpHousePoolLifecycleHandler is Test {
     uint256 public ghostJuniorDepositRawSupplyQuoteDivergences;
 
     constructor(
-        MockUSDC _usdc,
+        MockSettlementToken _settlementToken,
         CfdEngine _engine,
         HousePool _pool,
         TrancheVault _seniorVault,
@@ -117,7 +117,7 @@ contract PerpHousePoolLifecycleHandler is Test {
         address _owner,
         address _feeRecipient
     ) {
-        usdc = _usdc;
+        settlementToken = _settlementToken;
         engine = _engine;
         pool = _pool;
         seniorVault = _seniorVault;
@@ -157,9 +157,9 @@ contract PerpHousePoolLifecycleHandler is Test {
         uint256 amount = bound(amountFuzz, 1000e6, 100_000e6);
         bool frozen = engine.isOracleFrozen();
         uint256 seniorCapacity = toSenior ? pool.getSeniorDepositCapacity() : 0;
-        usdc.mint(owner, amount);
+        settlementToken.mint(owner, amount);
         vm.startPrank(owner);
-        usdc.approve(address(pool), amount);
+        settlementToken.approve(address(pool), amount);
         try pool.initializeSeedPosition(toSenior, amount, actors[0]) {}
         catch (bytes memory reason) {
             bytes4 selector = _revertSelector(reason);
@@ -191,8 +191,8 @@ contract PerpHousePoolLifecycleHandler is Test {
                 ghostActivationCapacityRejections++;
             } else if (selector == IHousePool.HousePool__PendingBootstrap.selector) {
                 assertTrue(
-                    pool.unassignedAssets() != 0 || pool.pendingRecapitalizationUsdc() != 0
-                        || pool.pendingTradingRevenueUsdc() != 0,
+                    pool.unassignedAssets() != 0 || pool.pendingRecapitalizationAssets() != 0
+                        || pool.pendingTradingRevenueAssets() != 0,
                     "PendingBootstrap requires unresolved value"
                 );
             } else {
@@ -246,16 +246,16 @@ contract PerpHousePoolLifecycleHandler is Test {
         _refreshMark();
         uint256 expectedRequestId = _expectedRequestId(vault, cutoffWindow);
         uint256 maxRequest_ = vault.maxRequestDeposit(actor);
-        uint256 minimum = pool.minTrancheDepositUsdc();
+        uint256 minimum = pool.minTrancheDepositAssets();
         if (maxRequest_ < minimum) {
             return;
         }
 
         uint256 upper = maxRequest_ < 250_000e6 ? maxRequest_ : 250_000e6;
         uint256 amount = bound(amountFuzz, minimum, upper);
-        usdc.mint(actor, amount);
+        settlementToken.mint(actor, amount);
         vm.startPrank(actor);
-        usdc.approve(address(vault), amount);
+        settlementToken.approve(address(vault), amount);
         uint256 requestId = vault.requestDeposit(amount, actor, actor);
         vm.stopPrank();
         assertEq(requestId, expectedRequestId, "deposit request must use the advertised LP epoch");
@@ -276,7 +276,7 @@ contract PerpHousePoolLifecycleHandler is Test {
             return;
         }
 
-        uint256 minimumShares = vault.estimateWithdrawShares(pool.minTrancheDepositUsdc());
+        uint256 minimumShares = vault.estimateWithdrawShares(pool.minTrancheDepositAssets());
         uint256 lower = minimumShares != 0 && minimumShares <= maxRequest_ ? minimumShares : maxRequest_;
         uint256 shares = bound(sharesFuzz, lower, maxRequest_);
         vm.prank(actor);
@@ -562,7 +562,7 @@ contract PerpHousePoolLifecycleHandler is Test {
         uint256 amountFuzz
     ) external {
         uint256 amount = bound(amountFuzz, 1e6, 100_000e6);
-        usdc.mint(address(pool), amount);
+        settlementToken.mint(address(pool), amount);
     }
 
     function accountExcess() external {
@@ -855,8 +855,8 @@ contract PerpHousePoolLifecycleHandler is Test {
         return keccak256(
             abi.encode(
                 _poolFeeIndependentDigest(),
-                usdc.totalSupply(),
-                usdc.balanceOf(address(pool)),
+                settlementToken.totalSupply(),
+                settlementToken.balanceOf(address(pool)),
                 _vaultFeeIndependentDigest(seniorVault),
                 _vaultFeeIndependentDigest(juniorVault),
                 _knownActorShareBalancesDigest(seniorVault),
@@ -875,10 +875,10 @@ contract PerpHousePoolLifecycleHandler is Test {
                 pool.seniorHighWaterMark(),
                 pool.accountedAssets(),
                 pool.unassignedAssets(),
-                pool.pendingRecapitalizationUsdc(),
-                pool.pendingTradingRevenueUsdc(),
-                pool.reservedSeniorDepositAssetsUsdc(),
-                pool.terminalDeficitUsdc()
+                pool.pendingRecapitalizationAssets(),
+                pool.pendingTradingRevenueAssets(),
+                pool.reservedSeniorDepositAssets(),
+                pool.terminalDeficitAssets()
             )
         );
     }
@@ -889,7 +889,7 @@ contract PerpHousePoolLifecycleHandler is Test {
         return keccak256(
             abi.encode(
                 vault.balanceOf(address(vault)),
-                usdc.balanceOf(address(vault)),
+                settlementToken.balanceOf(address(vault)),
                 vault.pendingDepositEscrowAssets(),
                 vault.pendingRedeemEscrowShares(),
                 vault.depositClaimEscrowShares(),
@@ -944,7 +944,7 @@ contract PerpHousePoolLifecycleHandler is Test {
         return keccak256(
             abi.encode(
                 _poolEpochAccountingDigest(),
-                usdc.balanceOf(address(pool)),
+                settlementToken.balanceOf(address(pool)),
                 _vaultEpochAccountingDigest(seniorVault),
                 _vaultEpochAccountingDigest(juniorVault)
             )
@@ -962,10 +962,10 @@ contract PerpHousePoolLifecycleHandler is Test {
                 pool.seniorHighWaterMark(),
                 pool.accountedAssets(),
                 pool.unassignedAssets(),
-                pool.pendingRecapitalizationUsdc(),
-                pool.pendingTradingRevenueUsdc(),
-                pool.reservedSeniorDepositAssetsUsdc(),
-                pool.terminalDeficitUsdc()
+                pool.pendingRecapitalizationAssets(),
+                pool.pendingTradingRevenueAssets(),
+                pool.reservedSeniorDepositAssets(),
+                pool.terminalDeficitAssets()
             )
         );
     }
@@ -977,7 +977,7 @@ contract PerpHousePoolLifecycleHandler is Test {
             abi.encode(
                 vault.totalSupply(),
                 vault.balanceOf(address(vault)),
-                usdc.balanceOf(address(vault)),
+                settlementToken.balanceOf(address(vault)),
                 vault.pendingDepositEscrowAssets(),
                 vault.pendingRedeemEscrowShares(),
                 vault.depositClaimEscrowShares(),
@@ -1082,8 +1082,9 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
     function setUp() public override {
         super.setUp();
 
-        handler =
-            new PerpHousePoolLifecycleHandler(usdc, engine, pool, seniorVault, juniorVault, address(this), address(0));
+        handler = new PerpHousePoolLifecycleHandler(
+            settlementToken, engine, pool, seniorVault, juniorVault, address(this), address(0)
+        );
 
         bytes4[] memory selectors = new bytes4[](17);
         selectors[0] = handler.initializeSeed.selector;
@@ -1269,9 +1270,9 @@ contract PerpHousePoolLifecycleInvariantTest is BasePerpTest {
         TrancheVault vault
     ) internal view {
         assertEq(
-            usdc.balanceOf(address(vault)),
+            settlementToken.balanceOf(address(vault)),
             vault.pendingDepositEscrowAssets() + vault.withdrawalEscrowAssets(),
-            "vault USDC must equal pending-deposit plus withdrawal-claim escrow"
+            "vault settlementToken must equal pending-deposit plus withdrawal-claim escrow"
         );
         assertEq(
             vault.balanceOf(address(vault)),
@@ -1369,7 +1370,7 @@ contract PerpHousePoolMaintenanceFeeInvariantTest is BasePerpTest {
         super.setUp();
 
         handler = new PerpHousePoolLifecycleHandler(
-            usdc, engine, pool, seniorVault, juniorVault, address(this), FEE_RECIPIENT
+            settlementToken, engine, pool, seniorVault, juniorVault, address(this), FEE_RECIPIENT
         );
 
         // Give the fee real backing supply; the original companion contract retains the unconstrained seed ordering.
@@ -1475,7 +1476,7 @@ contract PerpHousePoolMaintenanceFeeInvariantTest is BasePerpTest {
         assertEq(
             handler.ghostFeeIsolationAccountingMutations(),
             0,
-            "fee-only checkpoint must not mutate principal, HWM, assets, USDC, or escrows"
+            "fee-only checkpoint must not mutate principal, HWM, assets, settlementToken, or escrows"
         );
     }
 

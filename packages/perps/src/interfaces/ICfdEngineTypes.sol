@@ -5,7 +5,7 @@ import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 /// @notice Shared CfdEngine errors, events, and ABI view types.
-/// @dev Unless a field says otherwise, USDC amounts use 6 decimals, prices use 8 decimals, position sizes use
+/// @dev Unless a field says otherwise, settlement token amounts use 6 decimals, prices use 8 decimals, position sizes use
 ///      18 decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
 interface ICfdEngineTypes {
 
@@ -69,7 +69,7 @@ interface ICfdEngineTypes {
     error CfdEngine__InvalidCloseSizeQuantum();
     /// @notice A partial-close commitment would start from a position below maintenance health.
     error CfdEngine__PartialCloseUnhealthy();
-    error CfdEngine__PartialCloseCarryUnfunded(uint256 unpaidCarryUsdc);
+    error CfdEngine__PartialCloseCarryUnfunded(uint256 unpaidCarryAssets);
     /// @notice The one-time terminal NAV book has already been configured.
     error CfdEngine__TerminalNavBookAlreadySet();
     /// @notice A terminal NAV book is absent, has no code, or is not bound to this Engine and price domain.
@@ -96,7 +96,7 @@ interface ICfdEngineTypes {
     /// @param side Resulting position side.
     /// @param sizeDelta Position size added, with 18 decimals.
     /// @param price Execution price, with 8 decimals.
-    /// @param marginDelta Order-supplied margin, in USDC; this is not necessarily the net post-fee margin change.
+    /// @param marginDelta Order-supplied margin, in settlement token; this is not necessarily the net post-fee margin change.
     event PositionOpened(
         address indexed account, CfdTypes.Side side, uint256 sizeDelta, uint256 price, uint256 marginDelta
     );
@@ -105,96 +105,96 @@ interface ICfdEngineTypes {
     /// @param side Position side before the close.
     /// @param sizeDelta Position size closed, with 18 decimals.
     /// @param price Execution price, with 8 decimals.
-    /// @param pnl Realized price PnL in signed USDC, before separate VPI, carry, fee, and frozen-spread accounting.
+    /// @param pnl Realized price PnL in signed settlement token, before separate VPI, carry, fee, and frozen-spread accounting.
     event PositionClosed(address indexed account, CfdTypes.Side side, uint256 sizeDelta, uint256 price, int256 pnl);
     /// @notice Emitted after an unsafe position is liquidated and removed.
     /// @param account Liquidated account.
     /// @param side Liquidated position side.
     /// @param size Full liquidated position size, with 18 decimals.
     /// @param price Liquidation execution price, with 8 decimals.
-    /// @param keeperBounty Bounty credited to the keeper in USDC.
+    /// @param keeperBounty Bounty credited to the keeper in settlement token.
     event PositionLiquidated(
         address indexed account, CfdTypes.Side side, uint256 size, uint256 price, uint256 keeperBounty
     );
     /// @notice Emitted after an account owner locks additional free settlement as active position margin.
     /// @param account Position account whose margin increased.
-    /// @param amount Added margin in USDC.
+    /// @param amount Added margin in settlement token.
     event MarginAdded(address indexed account, uint256 amount);
     /// @notice Emitted when a terminal settlement latches degraded mode because adjusted solvency is negative.
-    /// @param effectiveAssets Effective pool assets after senior trader-claim reservation, in USDC.
-    /// @param maxLiability Larger side's maximum-profit liability after settlement, in USDC.
+    /// @param effectiveAssets Effective pool assets after senior trader-claim reservation, in settlement token.
+    /// @param maxLiability Larger side's maximum-profit liability after settlement, in settlement token.
     /// @param triggeringAccount Account whose settlement exposed the shortfall.
     event DegradedModeEntered(uint256 effectiveAssets, uint256 maxLiability, address indexed triggeringAccount);
     /// @notice Emitted when the owner clears degraded mode after adjusted solvency recovers.
     event DegradedModeCleared();
     /// @notice The owner funded the pool's pending claimant recapitalization without minting LP shares.
-    /// @param payer Owner wallet supplying the USDC.
-    /// @param amountUsdc Exact USDC received by the pool, in 6-decimal units.
-    event PoolRecapitalized(address indexed payer, uint256 amountUsdc);
+    /// @param payer Owner wallet supplying the settlement token.
+    /// @param amountAssets Exact settlement token received by the pool, in 6-decimal units.
+    event PoolRecapitalized(address indexed payer, uint256 amountAssets);
     /// @notice Emitted when an unaffordable fresh payout becomes a senior HousePool trader claim.
     /// @param account Claim beneficiary.
-    /// @param amountUsdc Claim recorded in USDC.
-    event TraderClaimRecorded(address indexed account, uint256 amountUsdc);
+    /// @param amountAssets Claim recorded in settlement token.
+    event TraderClaimRecorded(address indexed account, uint256 amountAssets);
     /// @notice Emitted when an existing trader claim is paid into its beneficiary's clearinghouse balance.
     /// @param account Claim beneficiary.
-    /// @param amountUsdc Claim settled in USDC.
-    event TraderClaimSettled(address indexed account, uint256 amountUsdc);
+    /// @param amountAssets Claim settled in settlement token.
+    event TraderClaimSettled(address indexed account, uint256 amountAssets);
     /// @notice Emitted when a clearinghouse-reserved execution bounty is credited to a beneficiary or treasury.
     /// @param sourceAccount Account whose reserved-settlement bucket funded the credit.
     /// @param beneficiary Clearinghouse account receiving the settlement credit.
-    /// @param amountUsdc Amount reclassified in USDC; no ERC20 transfer occurs.
-    event BountyCredited(address indexed sourceAccount, address indexed beneficiary, uint256 amountUsdc);
+    /// @param amountAssets Amount reclassified in settlement token; no ERC20 transfer occurs.
+    event BountyCredited(address indexed sourceAccount, address indexed beneficiary, uint256 amountAssets);
     /// @notice Emitted when the immutable-bound terminal NAV book is configured exactly once.
     event TerminalNavBookSet(address indexed terminalNavBook);
     /// @notice Emitted when nonzero carry due is evaluated; collected value follows the HousePool claimant path.
     /// @dev Collected value may be zero when no backing is available. Claim and bounty credits occur afterward
     ///      and can cover retained arrears at a later checkpoint.
     /// @param account Position account paying carry.
-    /// @param realizedCarryUsdc Total carry collected in USDC.
-    /// @param freeSettlementConsumedUsdc Portion collected from free settlement, in USDC.
-    /// @param marginConsumedUsdc Portion collected from active position margin, in USDC.
-    /// @param remainingUnsettledCarryUsdc Total carry still unpaid after collection, in USDC.
+    /// @param realizedCarryAssets Total carry collected in settlement token.
+    /// @param freeSettlementConsumedAssets Portion collected from free settlement, in settlement token.
+    /// @param marginConsumedAssets Portion collected from active position margin, in settlement token.
+    /// @param remainingUnsettledCarryAssets Total carry still unpaid after collection, in settlement token.
     event CarryRealized(
         address indexed account,
-        uint256 realizedCarryUsdc,
-        uint256 freeSettlementConsumedUsdc,
-        uint256 marginConsumedUsdc,
-        uint256 remainingUnsettledCarryUsdc
+        uint256 realizedCarryAssets,
+        uint256 freeSettlementConsumedAssets,
+        uint256 marginConsumedAssets,
+        uint256 remainingUnsettledCarryAssets
     );
 
     /// @notice Detailed clearinghouse custody, liquidation reachability, terminal-price cap, and claim view.
-    /// @dev Every monetary field is USDC. Trader claims are senior HousePool liabilities and are not clearinghouse
-    ///      collateral. `closeReachableUsdc` is the legacy free-settlement value. Liquidation reachability may include
+    /// @dev Every monetary field is settlement token. Trader claims are senior HousePool liabilities and are not clearinghouse
+    ///      collateral. `closeReachableAssets` is the legacy free-settlement value. Liquidation reachability may include
     ///      locked value that liquidation can release; the terminal price collectible cap is a separate exact domain.
-    /// @param settlementBalanceUsdc Total clearinghouse settlement balance, including locked buckets.
-    /// @param lockedMarginUsdc Sum of active-position, liquidation-reserve, committed-order, and reserved-settlement buckets.
-    /// @param activePositionMarginUsdc Clearinghouse custody bucket backing the live position.
-    /// @param otherLockedMarginUsdc Sum of liquidation-reserve, committed-order, and reserved-settlement buckets.
-    /// @param freeSettlementUsdc Settlement balance not assigned to any locked bucket.
-    /// @param closeReachableUsdc Legacy close reachability value, exactly equal to `freeSettlementUsdc`.
-    /// @param liquidationReachableSettlementUsdc Settlement balance available to liquidation after excluding
+    /// @param settlementBalanceAssets Total clearinghouse settlement balance, including locked buckets.
+    /// @param lockedMarginAssets Sum of active-position, liquidation-reserve, committed-order, and reserved-settlement buckets.
+    /// @param activePositionMarginAssets Clearinghouse custody bucket backing the live position.
+    /// @param otherLockedMarginAssets Sum of liquidation-reserve, committed-order, and reserved-settlement buckets.
+    /// @param freeSettlementAssets Settlement balance not assigned to any locked bucket.
+    /// @param closeReachableAssets Legacy close reachability value, exactly equal to `freeSettlementAssets`.
+    /// @param liquidationReachableSettlementAssets Settlement balance available to liquidation after excluding
     ///        router-attributed execution-bounty reserves; this can include value liquidation releases.
-    /// @param terminalPriceCollectibleCapUsdc Live-position terminal price-loss cap: PnL pledge plus same-account
+    /// @param terminalPriceCollectibleCapAssets Live-position terminal price-loss cap: PnL pledge plus same-account
     ///        claim, clipped to maximum endpoint loss; zero without a live position. Close records add no backing.
-    /// @param accountEquityUsdc Clearinghouse-local settlement balance, excluding unrealized PnL and trader claims.
-    /// @param freeBuyingPowerUsdc Clearinghouse-local free settlement, excluding engine withdrawal guards.
-    /// @param traderClaimBalanceUsdc Separate senior HousePool payout liability owed to the account.
+    /// @param accountEquityAssets Clearinghouse-local settlement balance, excluding unrealized PnL and trader claims.
+    /// @param freeBuyingPowerAssets Clearinghouse-local free settlement, excluding engine withdrawal guards.
+    /// @param traderClaimBalanceAssets Separate senior HousePool payout liability owed to the account.
     struct AccountCollateralView {
-        uint256 settlementBalanceUsdc;
-        uint256 lockedMarginUsdc;
-        uint256 activePositionMarginUsdc;
-        uint256 otherLockedMarginUsdc;
-        uint256 freeSettlementUsdc;
-        uint256 closeReachableUsdc;
-        uint256 liquidationReachableSettlementUsdc;
-        uint256 terminalPriceCollectibleCapUsdc;
-        uint256 accountEquityUsdc;
-        uint256 freeBuyingPowerUsdc;
-        uint256 traderClaimBalanceUsdc;
+        uint256 settlementBalanceAssets;
+        uint256 lockedMarginAssets;
+        uint256 activePositionMarginAssets;
+        uint256 otherLockedMarginAssets;
+        uint256 freeSettlementAssets;
+        uint256 closeReachableAssets;
+        uint256 liquidationReachableSettlementAssets;
+        uint256 terminalPriceCollectibleCapAssets;
+        uint256 accountEquityAssets;
+        uint256 freeBuyingPowerAssets;
+        uint256 traderClaimBalanceAssets;
     }
 
     /// @notice Legacy detailed position-risk ABI shape; current live lenses do not return this struct.
-    /// @dev When populated under the legacy shape, PnL excludes carry and VPI. `netEquityUsdc` deducts stored plus
+    /// @dev When populated under the legacy shape, PnL excludes carry and VPI. `netEquityAssets` deducts stored plus
     ///      elapsed carry and negative lifetime VPI exactly once from physical reachable collateral and cached-mark
     ///      PnL; a funded dedicated VPI reserve included in that collateral therefore offsets its matching clawback.
     ///      The view excludes trader claims. Liquidatability uses the active FAD or normal maintenance ratio without
@@ -202,14 +202,14 @@ interface ICfdEngineTypes {
     /// @param exists Whether the account has a nonzero live position.
     /// @param side Position direction; zero-valued when `exists` is false.
     /// @param size Position size, with 18 decimals.
-    /// @param margin Active position margin in USDC.
+    /// @param margin Active position margin in settlement token.
     /// @param entryPrice Average entry price, with 8 decimals.
-    /// @param entryNotionalUsdc Legacy 6-decimal USDC entry-notional field, distinct from raw side-state notional.
-    /// @param physicalReachableCollateralUsdc Terminally reachable clearinghouse collateral, excluding trader claims.
-    /// @param nettableTraderClaimUsdc Existing trader claim shown separately for settlement diagnostics.
-    /// @param unrealizedPnlUsdc Signed cached-mark price PnL before carry and VPI.
-    /// @param netEquityUsdc Signed physical equity after price PnL, carry, and negative VPI adjustments.
-    /// @param maxProfitUsdc Position's capped maximum-profit envelope.
+    /// @param entryNotionalAssets Legacy 6-decimal settlement token entry-notional field, distinct from raw side-state notional.
+    /// @param physicalReachableCollateralAssets Terminally reachable clearinghouse collateral, excluding trader claims.
+    /// @param nettableTraderClaimAssets Existing trader claim shown separately for settlement diagnostics.
+    /// @param unrealizedPnlAssets Signed cached-mark price PnL before carry and VPI.
+    /// @param netEquityAssets Signed physical equity after price PnL, carry, and negative VPI adjustments.
+    /// @param maxProfitAssets Position's capped maximum-profit envelope.
     /// @param liquidatable Whether physical net equity is at or below the active maintenance requirement.
     struct PositionView {
         bool exists;
@@ -217,99 +217,99 @@ interface ICfdEngineTypes {
         uint256 size;
         uint256 margin;
         uint256 entryPrice;
-        uint256 entryNotionalUsdc;
-        uint256 physicalReachableCollateralUsdc;
-        uint256 nettableTraderClaimUsdc;
-        int256 unrealizedPnlUsdc;
-        int256 netEquityUsdc;
-        uint256 maxProfitUsdc;
+        uint256 entryNotionalAssets;
+        uint256 physicalReachableCollateralAssets;
+        uint256 nettableTraderClaimAssets;
+        int256 unrealizedPnlAssets;
+        int256 netEquityAssets;
+        uint256 maxProfitAssets;
         bool liquidatable;
     }
 
     /// @notice Legacy protocol-wide pool-asset, liability, reservation, and degraded-mode view.
-    /// @param poolAssetsUsdc Canonical physical HousePool assets.
-    /// @param maxLiabilityUsdc Larger side's aggregate maximum-profit liability.
-    /// @param withdrawalReservedUsdc Cash reserved against maximum position liability, trader claims, and the
+    /// @param poolAssets Canonical physical HousePool assets.
+    /// @param maxLiabilityAssets Larger side's aggregate maximum-profit liability.
+    /// @param withdrawalReservedAssets Cash reserved against maximum position liability, trader claims, and the
     ///        settlement buffer.
-    /// @param freeUsdc Pool cash above `withdrawalReservedUsdc`.
-    /// @param protocolTreasuryBalanceUsdc Clearinghouse balance of the configured protocol treasury.
-    /// @param totalTraderClaimBalanceUsdc Aggregate senior trader-claim liability owed by the HousePool.
+    /// @param freeAssets Pool cash above `withdrawalReservedAssets`.
+    /// @param protocolTreasuryBalanceAssets Clearinghouse balance of the configured protocol treasury.
+    /// @param totalTraderClaimBalanceAssets Aggregate senior trader-claim liability owed by the HousePool.
     /// @param degradedMode Whether terminal insolvency has latched risk-increasing operations off.
     /// @param hasLiveLiability Whether either side has a nonzero maximum-profit liability.
     struct ProtocolAccountingView {
-        uint256 poolAssetsUsdc;
-        uint256 maxLiabilityUsdc;
-        uint256 withdrawalReservedUsdc;
-        uint256 freeUsdc;
-        uint256 protocolTreasuryBalanceUsdc;
-        uint256 totalTraderClaimBalanceUsdc;
+        uint256 poolAssets;
+        uint256 maxLiabilityAssets;
+        uint256 withdrawalReservedAssets;
+        uint256 freeAssets;
+        uint256 protocolTreasuryBalanceAssets;
+        uint256 totalTraderClaimBalanceAssets;
         bool degradedMode;
         bool hasLiveLiability;
     }
 
     /// @notice Read-only projection of close/decrease economics and post-settlement solvency.
-    /// @dev Prices use 8 decimals, sizes use 18 decimals, and all monetary fields use 6-decimal USDC. A false `valid`
+    /// @dev Prices use 8 decimals, sizes use 18 decimals, and all monetary fields use 6-decimal settlement token. A false `valid`
     ///      value makes `invalidReason` authoritative; remaining fields can be partially populated up to the failure.
     /// @param valid Whether the planner would accept the close.
     /// @param invalidReason Public reason for a rejected close.
     /// @param executionPrice Caller-supplied price clamped to the engine cap.
     /// @param sizeDelta Requested close size.
-    /// @param realizedPnlUsdc Signed price PnL realized by the requested size before separate costs.
-    /// @param vpiDeltaUsdc Signed close VPI: positive is a charge and negative is a rebate.
-    /// @param vpiUsdc Positive VPI charge exposed for legacy clients; zero for rebates.
-    /// @param executionFeeUsdc Protocol execution fee assessed on the close notional.
-    /// @param freshTraderPayoutUsdc New value owed to the trader by this close, whether immediate or deferred.
-    /// @param existingTraderClaimConsumedUsdc Existing claim value netted into the settlement.
-    /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
-    /// @param immediatePayoutUsdc Aggregate cash paid now: payoutToPnlPledgeUsdc + payoutToFreeSettlementUsdc.
+    /// @param realizedPnlAssets Signed price PnL realized by the requested size before separate costs.
+    /// @param vpiDeltaAssets Signed close VPI: positive is a charge and negative is a rebate.
+    /// @param vpiAssets Positive VPI charge exposed for legacy clients; zero for rebates.
+    /// @param executionFeeAssets Protocol execution fee assessed on the close notional.
+    /// @param freshTraderPayoutAssets New value owed to the trader by this close, whether immediate or deferred.
+    /// @param existingTraderClaimConsumedAssets Existing claim value netted into the settlement.
+    /// @param existingTraderClaimRemainingAssets Existing claim left after settlement netting.
+    /// @param immediatePayoutAssets Aggregate cash paid now: payoutToPnlPledgeAssets + payoutToFreeSettlementAssets.
     ///        Includes locked collateral; integrations should use the destination fields, not treat this as withdrawable.
-    /// @param traderClaimBalanceUsdc Projected claim balance after consuming old claims and recording deferred payout.
-    /// @param seizedCollateralUsdc PnL pledge collected for price loss; excludes carry and action charges.
+    /// @param traderClaimBalanceAssets Projected claim balance after consuming old claims and recording deferred payout.
+    /// @param seizedCollateralAssets PnL pledge collected for price loss; excludes carry and action charges.
     /// @param remainingSize Position size after the close.
     /// @param remainingMargin Active position margin after the close.
     /// @param triggersDegradedMode Whether this operation newly reveals adjusted pool insolvency.
     /// @param postOpDegradedMode Projected degraded-mode latch after settlement.
-    /// @param effectiveAssetsAfterUsdc Projected physical pool assets net of senior trader claims.
-    /// @param maxLiabilityAfterUsdc Projected larger-side maximum-profit liability.
-    /// @param frozenSpreadUsdc LP-owned spread assessed on an oracle-frozen voluntary close.
-    /// @param frozenSpreadPaidUsdc Assessed spread recovered from fresh price-gain withholding or eligible action
+    /// @param effectiveAssetsAfterAssets Projected physical pool assets net of senior trader claims.
+    /// @param maxLiabilityAfterAssets Projected larger-side maximum-profit liability.
+    /// @param frozenSpreadAssets LP-owned spread assessed on an oracle-frozen voluntary close.
+    /// @param frozenSpreadPaidAssets Assessed spread recovered from fresh price-gain withholding or eligible action
     ///        collateral; existing trader claims cannot pay the spread.
-    /// @param frozenSpreadWaivedUsdc Assessed frozen spread left uncollected; it does not become bad debt.
-    /// @param payoutToPnlPledgeUsdc Fresh price payout credited and locked as collateral for the remaining position.
-    /// @param payoutToFreeSettlementUsdc Fresh cash credited without a position pledge: paid action rebates plus
+    /// @param frozenSpreadWaivedAssets Assessed frozen spread left uncollected; it does not become bad debt.
+    /// @param payoutToPnlPledgeAssets Fresh price payout credited and locked as collateral for the remaining position.
+    /// @param payoutToFreeSettlementAssets Fresh cash credited without a position pledge: paid action rebates plus
     ///        full-close price payouts. Excludes released pre-existing collateral and is not a withdrawal-capacity quote.
-    /// @param deferredPayoutUsdc Fresh unpaid price payout recorded as a trader claim; excludes existing claims.
+    /// @param deferredPayoutAssets Fresh unpaid price payout recorded as a trader claim; excludes existing claims.
     struct ClosePreview {
         bool valid;
         CfdTypes.CloseInvalidReason invalidReason;
         uint256 executionPrice;
         uint256 sizeDelta;
-        int256 realizedPnlUsdc;
-        int256 vpiDeltaUsdc;
-        uint256 vpiUsdc;
-        uint256 executionFeeUsdc;
-        uint256 freshTraderPayoutUsdc;
-        uint256 existingTraderClaimConsumedUsdc;
-        uint256 existingTraderClaimRemainingUsdc;
-        uint256 immediatePayoutUsdc;
-        uint256 traderClaimBalanceUsdc;
-        uint256 seizedCollateralUsdc;
+        int256 realizedPnlAssets;
+        int256 vpiDeltaAssets;
+        uint256 vpiAssets;
+        uint256 executionFeeAssets;
+        uint256 freshTraderPayoutAssets;
+        uint256 existingTraderClaimConsumedAssets;
+        uint256 existingTraderClaimRemainingAssets;
+        uint256 immediatePayoutAssets;
+        uint256 traderClaimBalanceAssets;
+        uint256 seizedCollateralAssets;
         uint256 remainingSize;
         uint256 remainingMargin;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
-        uint256 frozenSpreadUsdc;
-        uint256 frozenSpreadPaidUsdc;
-        uint256 frozenSpreadWaivedUsdc;
-        uint256 payoutToPnlPledgeUsdc;
-        uint256 payoutToFreeSettlementUsdc;
-        uint256 deferredPayoutUsdc;
+        uint256 effectiveAssetsAfterAssets;
+        uint256 maxLiabilityAfterAssets;
+        uint256 frozenSpreadAssets;
+        uint256 frozenSpreadPaidAssets;
+        uint256 frozenSpreadWaivedAssets;
+        uint256 payoutToPnlPledgeAssets;
+        uint256 payoutToFreeSettlementAssets;
+        uint256 deferredPayoutAssets;
     }
 
     /// @notice Read-only open/increase trade-ticket preview.
-    /// @dev Unless stated otherwise, USDC fields use 6 decimals, prices use 8 decimals, and position sizes use 18
+    /// @dev Unless stated otherwise, settlement token fields use 6 decimals, prices use 8 decimals, and position sizes use 18
     ///      decimals. Invalid previews return authoritative validity fields; economics/risk fields may be zero or
     ///      partial depending on where planning stopped.
     /// @param valid Whether the planner would accept the open/increase.
@@ -318,23 +318,23 @@ interface ICfdEngineTypes {
     ///        for degraded mode and fee-drained margin.
     /// @param executionPrice Caller-supplied oracle price clamped to the engine cap.
     /// @param sizeDelta Requested position-size increase.
-    /// @param notionalUsdc Notional represented by `sizeDelta` at `executionPrice`.
-    /// @param marginDeltaUsdc Order-supplied margin.
-    /// @param vpiUsdc Signed VPI for the trade: positive is a charge and negative is a rebate.
-    /// @param executionFeeUsdc Protocol execution fee assessed on trade notional.
-    /// @param tradeCostUsdc Total signed immediate trade cost, including VPI and execution fee.
-    /// @param poolRebatePayoutUsdc Pool-funded amount required by a negative `tradeCostUsdc`.
-    /// @param pendingCarryUsdc Stored plus elapsed position carry realized before the increase.
-    /// @param initialMarginRequirementUsdc Initial-margin requirement for the projected position.
-    /// @param maintenanceMarginUsdc Active FAD or normal maintenance requirement when position economics were
+    /// @param notionalAssets Notional represented by `sizeDelta` at `executionPrice`.
+    /// @param marginDeltaAssets Order-supplied margin.
+    /// @param vpiAssets Signed VPI for the trade: positive is a charge and negative is a rebate.
+    /// @param executionFeeAssets Protocol execution fee assessed on trade notional.
+    /// @param tradeCostAssets Total signed immediate trade cost, including VPI and execution fee.
+    /// @param poolRebatePayoutAssets Pool-funded amount required by a negative `tradeCostAssets`.
+    /// @param pendingCarryAssets Stored plus elapsed position carry realized before the increase.
+    /// @param initialMarginRequirementAssets Initial-margin requirement for the projected position.
+    /// @param maintenanceMarginAssets Active FAD or normal maintenance requirement when position economics were
     ///        constructed, including rejected opens. Early rejection can leave this zero and unavailable.
     /// @param postSize Projected total position size.
-    /// @param postMarginUsdc Projected PnL pledge after carry, positive trade cost, and liquidation/VPI reserve
+    /// @param postMarginAssets Projected PnL pledge after carry, positive trade cost, and liquidation/VPI reserve
     ///        reclassification. A trade-cost rebate credits settlement without directly increasing this pledge.
     /// @param postEntryPrice Projected size-weighted entry price.
     /// @param postVpiAccrued Projected lifetime signed VPI balance.
-    /// @param postUnrealizedPnlUsdc Projected signed price PnL at `executionPrice`, excluding carry and VPI.
-    /// @param postEquityUsdc Projected signed post-carry pledge plus claim and price PnL at `executionPrice`; excludes VPI.
+    /// @param postUnrealizedPnlAssets Projected signed price PnL at `executionPrice`, excluding carry and VPI.
+    /// @param postEquityAssets Projected signed post-carry pledge plus claim and price PnL at `executionPrice`; excludes VPI.
     /// @param postHealthBps Projected equity divided by maintenance requirement, in basis points; zero when undefined.
     /// @param postLiquidatable Whether the projected position meets the active liquidation condition.
     /// @param hasLiquidationPrice Whether a liquidation boundary exists within the capped price domain.
@@ -347,23 +347,23 @@ interface ICfdEngineTypes {
         // Trade economics.
         uint256 executionPrice;
         uint256 sizeDelta;
-        uint256 notionalUsdc;
-        uint256 marginDeltaUsdc;
-        int256 vpiUsdc;
-        uint256 executionFeeUsdc;
-        int256 tradeCostUsdc;
-        uint256 poolRebatePayoutUsdc;
-        uint256 pendingCarryUsdc;
+        uint256 notionalAssets;
+        uint256 marginDeltaAssets;
+        int256 vpiAssets;
+        uint256 executionFeeAssets;
+        int256 tradeCostAssets;
+        uint256 poolRebatePayoutAssets;
+        uint256 pendingCarryAssets;
         // Margin and projected post-trade position.
-        uint256 initialMarginRequirementUsdc;
-        uint256 maintenanceMarginUsdc;
+        uint256 initialMarginRequirementAssets;
+        uint256 maintenanceMarginAssets;
         uint256 postSize;
-        uint256 postMarginUsdc;
+        uint256 postMarginAssets;
         uint256 postEntryPrice;
         int256 postVpiAccrued;
         // Projected post-trade health.
-        int256 postUnrealizedPnlUsdc;
-        int256 postEquityUsdc;
+        int256 postUnrealizedPnlAssets;
+        int256 postEquityAssets;
         uint256 postHealthBps;
         bool postLiquidatable;
         // Liquidation threshold inside [0, CAP_PRICE], if one exists.
@@ -372,61 +372,61 @@ interface ICfdEngineTypes {
     }
 
     /// @notice Read-only projection of liquidation economics and post-settlement solvency.
-    /// @dev `oraclePrice` is clamped to the engine cap. Every monetary field is 6-decimal USDC. The simulation
+    /// @dev `oraclePrice` is clamped to the engine cap. Every monetary field is 6-decimal settlement token. The simulation
     ///      models forfeiture of the account's pending execution bounties before computing liquidation reachability.
     ///      An underfunded negative-VPI reserve causes planning to revert before this result is returned.
     /// @param liquidatable Whether exact P+C price risk breaches the active requirement or an independent delinquency
     ///        condition applies.
     /// @param oraclePrice Price used by the simulation, with 8 decimals.
-    /// @param equityUsdc Signed post-carry pledge plus claim and exact price PnL; excludes VPI.
-    /// @param pnlUsdc Signed price PnL before carry and VPI.
-    /// @param reachableCollateralUsdc Account settlement reachable by liquidation before the liquidation charge.
-    /// @param liquidationChargeUsdc Total liquidation charge collected from the account.
-    /// @param keeperBountyUsdc Configured keeper share of the liquidation charge.
-    /// @param protocolLiquidationFeeUsdc Configured protocol-treasury share of the liquidation charge.
-    /// @param lpLiquidationFeeUsdc Remaining LP share after keeper and protocol allocations.
-    /// @param seizedCollateralUsdc Price-loss pledge plus the LP liquidation fee; excludes carry and action charges.
-    /// @param settlementRetainedUsdc Total projected account settlement after liquidation debits and any immediate
-    ///        payout. Already includes immediatePayoutUsdc; do not add it again. Excludes outstanding trader claims
+    /// @param equityAssets Signed post-carry pledge plus claim and exact price PnL; excludes VPI.
+    /// @param pnlAssets Signed price PnL before carry and VPI.
+    /// @param reachableCollateralAssets Account settlement reachable by liquidation before the liquidation charge.
+    /// @param liquidationChargeAssets Total liquidation charge collected from the account.
+    /// @param keeperBountyAssets Configured keeper share of the liquidation charge.
+    /// @param protocolLiquidationFeeAssets Configured protocol-treasury share of the liquidation charge.
+    /// @param lpLiquidationFeeAssets Remaining LP share after keeper and protocol allocations.
+    /// @param seizedCollateralAssets Price-loss pledge plus the LP liquidation fee; excludes carry and action charges.
+    /// @param settlementRetainedAssets Total projected account settlement after liquidation debits and any immediate
+    ///        payout. Already includes immediatePayoutAssets; do not add it again. Excludes outstanding trader claims
     ///        and is not a withdrawal-capacity quote.
-    /// @param freshTraderPayoutUsdc New surplus value owed to the trader after liquidation.
-    /// @param existingTraderClaimConsumedUsdc Existing claim value netted into liquidation settlement.
-    /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
-    /// @param immediatePayoutUsdc Portion of fresh trader payout paid immediately into clearinghouse settlement.
-    ///        This is a component of settlementRetainedUsdc, not an additional balance.
-    /// @param traderClaimBalanceUsdc Projected claim balance after netting and any deferred fresh payout.
+    /// @param freshTraderPayoutAssets New surplus value owed to the trader after liquidation.
+    /// @param existingTraderClaimConsumedAssets Existing claim value netted into liquidation settlement.
+    /// @param existingTraderClaimRemainingAssets Existing claim left after settlement netting.
+    /// @param immediatePayoutAssets Portion of fresh trader payout paid immediately into clearinghouse settlement.
+    ///        This is a component of settlementRetainedAssets, not an additional balance.
+    /// @param traderClaimBalanceAssets Projected claim balance after netting and any deferred fresh payout.
     /// @param triggersDegradedMode Whether liquidation newly reveals adjusted pool insolvency.
     /// @param postOpDegradedMode Projected degraded-mode latch after liquidation.
-    /// @param effectiveAssetsAfterUsdc Projected physical pool assets net of senior trader claims.
-    /// @param maxLiabilityAfterUsdc Projected larger-side maximum-profit liability.
+    /// @param effectiveAssetsAfterAssets Projected physical pool assets net of senior trader claims.
+    /// @param maxLiabilityAfterAssets Projected larger-side maximum-profit liability.
     struct LiquidationPreview {
         bool liquidatable;
         uint256 oraclePrice;
-        int256 equityUsdc;
-        int256 pnlUsdc;
-        uint256 reachableCollateralUsdc;
-        uint256 liquidationChargeUsdc;
-        uint256 keeperBountyUsdc;
-        uint256 protocolLiquidationFeeUsdc;
-        uint256 lpLiquidationFeeUsdc;
-        uint256 seizedCollateralUsdc;
-        uint256 settlementRetainedUsdc;
-        uint256 freshTraderPayoutUsdc;
-        uint256 existingTraderClaimConsumedUsdc;
-        uint256 existingTraderClaimRemainingUsdc;
-        uint256 immediatePayoutUsdc;
-        uint256 traderClaimBalanceUsdc;
+        int256 equityAssets;
+        int256 pnlAssets;
+        uint256 reachableCollateralAssets;
+        uint256 liquidationChargeAssets;
+        uint256 keeperBountyAssets;
+        uint256 protocolLiquidationFeeAssets;
+        uint256 lpLiquidationFeeAssets;
+        uint256 seizedCollateralAssets;
+        uint256 settlementRetainedAssets;
+        uint256 freshTraderPayoutAssets;
+        uint256 existingTraderClaimConsumedAssets;
+        uint256 existingTraderClaimRemainingAssets;
+        uint256 immediatePayoutAssets;
+        uint256 traderClaimBalanceAssets;
         bool triggersDegradedMode;
         bool postOpDegradedMode;
-        uint256 effectiveAssetsAfterUsdc;
-        uint256 maxLiabilityAfterUsdc;
+        uint256 effectiveAssetsAfterAssets;
+        uint256 maxLiabilityAfterAssets;
     }
 
     /// @notice Legacy trader-claim balance and immediate-serviceability view.
-    /// @param traderClaimBalanceUsdc Senior HousePool payout liability owed to the account.
+    /// @param traderClaimBalanceAssets Senior HousePool payout liability owed to the account.
     /// @param traderClaimServiceableNow Whether aggregate HousePool cash can service the full selected claim now.
     struct TraderClaimStatus {
-        uint256 traderClaimBalanceUsdc;
+        uint256 traderClaimBalanceAssets;
         bool traderClaimServiceableNow;
     }
 
@@ -434,30 +434,30 @@ interface ICfdEngineTypes {
     /// @param markPrice Authenticated cached Engine mark, with 8 decimals; HousePool separately enforces freshness and
     ///        oracle-frozen policy for LP actions.
     /// @param markTime Oracle publish time associated with the mark.
-    /// @param terminalLpPriceDeltaUsdc Signed exact LP price delta in 6-decimal USDC atoms.
-    /// @param totalTraderClaimsUsdc Aggregate senior trader claims, in USDC.
-    /// @param maxDirectionalLiabilityUsdc Worst price-endpoint liability across LONG and SHORT sides, in USDC.
+    /// @param terminalLpPriceDeltaAssets Signed exact LP price delta in 6-decimal settlement token atoms.
+    /// @param totalTraderClaimsAssets Aggregate senior trader claims, in settlement token.
+    /// @param maxDirectionalLiabilityAssets Worst price-endpoint liability across LONG and SHORT sides, in settlement token.
     /// @param bookVersion Monotonic terminal-book mutation version.
     /// @param hasOpenPositions Whether either side has nonzero open interest.
     /// @param degradedMode Whether Engine risk increase is latched off.
     struct TerminalNavSnapshot {
         uint32 markPrice;
         uint64 markTime;
-        int256 terminalLpPriceDeltaUsdc;
-        uint256 totalTraderClaimsUsdc;
-        uint256 maxDirectionalLiabilityUsdc;
+        int256 terminalLpPriceDeltaAssets;
+        uint256 totalTraderClaimsAssets;
+        uint256 maxDirectionalLiabilityAssets;
         uint64 bookVersion;
         bool hasOpenPositions;
         bool degradedMode;
     }
 
     /// @notice Aggregate engine accounting for one position side.
-    /// @param maxProfitUsdc Sum of capped maximum-profit envelopes for the side.
+    /// @param maxProfitAssets Sum of capped maximum-profit envelopes for the side.
     /// @param openInterest Aggregate position size for the side, with 18 decimals.
-    /// @param entryNotional Raw aggregate `size * entryPrice` numerator with 26 decimals; divide by 1e20 for USDC.
-    /// @param totalMargin Aggregate active position margin for the side, in USDC.
+    /// @param entryNotional Raw aggregate `size * entryPrice` numerator with 26 decimals; divide by 1e20 for settlement token.
+    /// @param totalMargin Aggregate active position margin for the side, in settlement token.
     struct SideState {
-        uint256 maxProfitUsdc;
+        uint256 maxProfitAssets;
         uint256 openInterest;
         uint256 entryNotional;
         uint256 totalMargin;

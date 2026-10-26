@@ -17,11 +17,11 @@ interface IOrderRouterErrors {
     error OrderRouter__SettlementFloorOrderPending(uint64 orderId);
     /// @notice Custody cannot fund both the requested minimum and the complete gross-debit allowance.
     error OrderRouter__SettlementFloorFunding(
-        uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc, uint256 maxGrossDebitUsdc
+        uint64 orderId, uint256 balanceAssets, uint256 minimumAssets, uint256 maxGrossDebitAssets
     );
     /// @notice A withdrawal would make the pending open's funded settlement minimum mutable.
     error OrderRouter__SettlementFloorWithdrawal(
-        uint64 orderId, uint256 balanceUsdc, uint256 minimumUsdc, uint256 maxGrossDebitUsdc
+        uint64 orderId, uint256 balanceAssets, uint256 minimumAssets, uint256 maxGrossDebitAssets
     );
 
     /// @notice Terminal result of one independently isolated liquidation-batch item.
@@ -115,7 +115,7 @@ interface IOrderRouterErrors {
     /// @notice A fresh V3 request omitted its mandatory post-position leverage ceiling.
     error OrderRouter__ZeroPostLeverageBound();
     /// @notice The quoted execution bounty alone exceeds the request's gross-account-debit ceiling.
-    error OrderRouter__ExecutionBountyAboveGrossDebit(uint256 executionBountyUsdc, uint256 maximumGrossDebitUsdc);
+    error OrderRouter__ExecutionBountyAboveGrossDebit(uint256 executionBountyAssets, uint256 maximumGrossDebitAssets);
     /// @notice A router integration or configuration hook was called by an unauthorized engine, sidecar, or admin.
     error OrderRouter__Unauthorized();
     /// @notice An open/increase commit was attempted while engine degraded mode is latched.
@@ -136,7 +136,7 @@ interface IOrderRouterErrors {
     /// @notice The requested retry requires a latched protection with no live close attempt.
     error OrderRouter__ProtectionNotLatched();
     /// @notice A protection close carried a nonzero keeper bounty despite zero-bounty close policy.
-    error OrderRouter__ProtectedCloseBountyNonzero(uint256 bountyUsdc);
+    error OrderRouter__ProtectedCloseBountyNonzero(uint256 bountyAssets);
     /// @notice An ordinary discretionary order was attempted while account protection is active.
     error OrderRouter__ProtectionActive();
     /// @notice Trigger prices are both disabled, out of bounds, or inconsistent with the protected direction.
@@ -173,13 +173,13 @@ interface IOrderRouterErrors {
     /// @param index Zero-based account index in the submitted batch.
     /// @param account Account whose liquidation was attempted.
     /// @param result Success, expected skip, or unexpected failure classification.
-    /// @param keeperBountyUsdc Bounty credited on success, or zero otherwise.
+    /// @param keeperBountyAssets Bounty credited on success, or zero otherwise.
     /// @param errorSelector Revert selector on a skipped or failed item, or zero on success.
     event LiquidationBatchItem(
         uint256 indexed index,
         address indexed account,
         LiquidationBatchResult result,
-        uint256 keeperBountyUsdc,
+        uint256 keeperBountyAssets,
         bytes4 errorSelector
     );
     /// @notice Reports the first unattempted account after a low-gas check or empty-data item revert stops the batch.
@@ -193,7 +193,7 @@ interface IOrderRouterErrors {
         uint64 indexed parentOrderId,
         uint256 takeProfitTriggerPrice,
         uint256 stopLossTriggerPrice,
-        uint256 triggerBountyUsdc
+        uint256 triggerBountyAssets
     );
 
     /// @notice Emitted when a staged or armed protection's trigger prices and close limits are atomically replaced.
@@ -208,10 +208,10 @@ interface IOrderRouterErrors {
     event PositionProtectionCloseLimitsUpdated(
         uint64 indexed protectionId,
         address indexed account,
-        uint256 maxExecutionNotionalUsdc,
-        uint256 maxGrossAccountDebitUsdc,
-        uint256 maxActionChargeUsdc,
-        uint256 maxExplicitFeesUsdc
+        uint256 maxExecutionNotionalAssets,
+        uint256 maxGrossAccountDebitAssets,
+        uint256 maxActionChargeAssets,
+        uint256 maxExplicitFeesAssets
     );
 
     /// @notice Emitted when a parent open succeeds or existing-position protection becomes armed.

@@ -136,13 +136,17 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         );
         uint256 supplyAfterFunding = juniorVault.totalSupply();
         assertEq(supplyAfterFunding, expected.supply - expected.shares);
-        uint256 escrowCashBefore = usdc.balanceOf(address(juniorVault));
+        uint256 escrowCashBefore = settlementToken.balanceOf(address(juniorVault));
         uint256 remainingNav = _juniorNav();
         assertEq(_collectCarry(), expected.carry, "funding changes depth after checkpointing historical carry");
         assertEq(_juniorNav(), remainingNav + expected.carry, "remaining shares own the collected revenue");
         (, uint256 claimAssetsAfterCollection) = _fundedExit(expected.requestId);
         assertEq(claimAssetsAfterCollection, expected.assetsAfter, "funded exit entitlement is fixed");
-        assertEq(usdc.balanceOf(address(juniorVault)), escrowCashBefore, "carry does not enter funded claim escrow");
+        assertEq(
+            settlementToken.balanceOf(address(juniorVault)),
+            escrowCashBefore,
+            "carry does not enter funded claim escrow"
+        );
         (uint256 claimedShares, uint256 claimedAssets) =
             _claimAsyncRedeem(juniorVault, expected.requestId, address(this));
         assertEq(claimedShares, expected.shares);
@@ -158,22 +162,22 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         _refreshMarkForAsyncSettlement();
         uint256 due = _independentCarry(start);
         uint256 backing =
-            clearinghouse.getAccountUsdcBuckets(TRADER).activePositionMarginUsdc + _freeSettlementUsdc(TRADER);
+            clearinghouse.getAccountAssetBuckets(TRADER).activePositionMarginAssets + _freeSettlementAssets(TRADER);
         assertGt(due, backing, "fixture must exhaust all carry-eligible custody");
         assertEq(_juniorNav(), nav, "even unpayable indexed carry is absent from LP NAV");
         assertEq(_collectCarry(), backing);
         uint256 arrears = due - backing;
-        assertEq(engine.unsettledCarryUsdc(TRADER), arrears, "unpaid debt must remain owed by the trader");
+        assertEq(engine.unsettledCarryAssets(TRADER), arrears, "unpaid debt must remain owed by the trader");
         assertEq(_juniorNav(), nav + backing, "only collected backing becomes revenue");
         _assertNoSecondCollection();
-        assertEq(engine.unsettledCarryUsdc(TRADER), arrears, "an empty checkpoint cannot forgive retained arrears");
+        assertEq(engine.unsettledCarryAssets(TRADER), arrears, "an empty checkpoint cannot forgive retained arrears");
 
         uint256 replenishment = 10e6;
         assertGt(arrears, replenishment);
         uint256 poolCash = pool.accountedAssets();
         _fundTrader(TRADER, replenishment);
         assertEq(pool.accountedAssets(), poolCash + replenishment, "deposit pays existing debt at the same timestamp");
-        assertEq(engine.unsettledCarryUsdc(TRADER), arrears - replenishment);
+        assertEq(engine.unsettledCarryAssets(TRADER), arrears - replenishment);
         assertEq(_juniorNav(), nav + backing + replenishment);
         _assertNoSecondCollection();
     }
@@ -184,7 +188,7 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         // LONG loses when the mark rises. The $40k loss exceeds its $20k pledge before and after carry.
         vm.prank(address(router));
         engine.updateMarkPrice(1.4e8, uint64(vm.getBlockTimestamp()));
-        uint256 marginBefore = clearinghouse.getAccountUsdcBuckets(TRADER).activePositionMarginUsdc;
+        uint256 marginBefore = clearinghouse.getAccountAssetBuckets(TRADER).activePositionMarginAssets;
         int256 priceDeltaBefore = _terminalLpPriceDelta();
         assertEq(priceDeltaBefore, int256(marginBefore), "fixture must cap price-loss receivable at pledged margin");
         uint256 navBefore = _juniorNav();
@@ -216,7 +220,7 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
         _open(TRADER, CfdTypes.Side.LONG, SIZE, margin, 1e8);
         (uint256 size,,,,,,) = engine.positions(TRADER);
         assertEq(size, SIZE);
-        uint256 actualMargin = clearinghouse.getAccountUsdcBuckets(TRADER).activePositionMarginUsdc;
+        uint256 actualMargin = clearinghouse.getAccountAssetBuckets(TRADER).activePositionMarginAssets;
         (start.borrowBase,,) = engine.positionCarryState(TRADER);
         assertEq(start.borrowBase, 100_000e6 - actualMargin);
         start.depth = pool.accountedAssets();
@@ -250,10 +254,10 @@ contract CarryLpOwnershipTest is HousePoolAsyncTestBase {
 
     function _assertNoSecondCollection() private {
         uint256 nav = _juniorNav();
-        uint256 cash = usdc.balanceOf(address(pool));
+        uint256 cash = settlementToken.balanceOf(address(pool));
         assertEq(_collectCarry(), 0, "the same carry must never be collected twice");
         assertEq(_juniorNav(), nav);
-        assertEq(usdc.balanceOf(address(pool)), cash);
+        assertEq(settlementToken.balanceOf(address(pool)), cash);
     }
 
     function _juniorNav() private view returns (uint256 nav) {

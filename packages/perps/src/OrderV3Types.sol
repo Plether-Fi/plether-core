@@ -18,23 +18,23 @@ library OrderV3Types {
     }
 
     struct CloseEconomics {
-        uint256 postFreeSettlementUsdc;
-        uint256 safeMarginReleaseUsdc;
-        uint256 actionChargeFromReleasedMarginUsdc;
-        uint256 netReleasedMarginUsdc;
-        uint256 priceLossUsdc;
-        uint256 pricePnlClaimConsumedUsdc;
-        uint256 pricePnlPledgeConsumedUsdc;
-        uint256 priceLossWrittenOffUsdc;
-        uint256 actionChargeWithheldUsdc;
-        uint256 actionChargeWaivedUsdc;
+        uint256 postFreeSettlementAssets;
+        uint256 safeMarginReleaseAssets;
+        uint256 actionChargeFromReleasedMarginAssets;
+        uint256 netReleasedMarginAssets;
+        uint256 priceLossAssets;
+        uint256 pricePnlClaimConsumedAssets;
+        uint256 pricePnlPledgeConsumedAssets;
+        uint256 priceLossWrittenOffAssets;
+        uint256 actionChargeWithheldAssets;
+        uint256 actionChargeWaivedAssets;
     }
 
     struct BountyAccounting {
-        uint256 bountyEntitlementUsdc;
-        uint256 bountyPaidUsdc;
-        uint256 bountyRefundedUsdc;
-        uint256 bountyForfeitedUsdc;
+        uint256 bountyEntitlementAssets;
+        uint256 bountyPaidAssets;
+        uint256 bountyRefundedAssets;
+        uint256 bountyForfeitedAssets;
         ReservationDiscrepancy discrepancy;
     }
 
@@ -130,8 +130,8 @@ library OrderV3Types {
 
     /// @notice Mandatory financial authority supplied with every V3 order.
     /// @dev Maximum values are inclusive and zero is a real zero allowance. Minimum values are inclusive.
-    ///      `maxGrossAccountDebitUsdc` covers settlement debit, trader-claim consumption, and the reserved bounty;
-    ///      `minPostSettlementBalanceUsdc` refers to total internal settlement custody, including locked value.
+    ///      `maxGrossAccountDebitAssets` covers settlement debit, trader-claim consumption, and the reserved bounty;
+    ///      `minPostSettlementBalanceAssets` refers to total internal settlement custody, including locked value.
     ///      Full closes skip the post-position equity and leverage checks; fresh public requests still require a
     ///      nonzero `maxPostLeverageBps`. Execution modes use bits 1 (Live), 2 (Fad), and 4 (Frozen).
     struct ExecutionBounds {
@@ -139,14 +139,14 @@ library OrderV3Types {
         uint32 executionWindowSeconds;
         uint8 allowedExecutionModes;
         bytes32 expectedConfigHash;
-        uint256 maxExecutionBountyUsdc;
-        uint256 maxExecutionNotionalUsdc;
-        uint256 maxGrossAccountDebitUsdc;
-        uint256 maxActionChargeUsdc;
-        uint256 maxExplicitFeesUsdc;
+        uint256 maxExecutionBountyAssets;
+        uint256 maxExecutionNotionalAssets;
+        uint256 maxGrossAccountDebitAssets;
+        uint256 maxActionChargeAssets;
+        uint256 maxExplicitFeesAssets;
         uint256 maxPostPositionSize;
-        uint256 minPostSettlementBalanceUsdc;
-        uint256 minPostPositionEquityUsdc;
+        uint256 minPostSettlementBalanceAssets;
+        uint256 minPostPositionEquityAssets;
         uint32 maxPostLeverageBps;
     }
 
@@ -180,7 +180,7 @@ library OrderV3Types {
         address account;
         bytes32 clientOrderId;
         bytes32 intentHash;
-        uint256 executionBountyUsdc;
+        uint256 executionBountyAssets;
         CfdEnginePlanTypes.CloseCommitment commitment;
         ExecutionBounds bounds;
         OrderTiming timing;
@@ -189,25 +189,25 @@ library OrderV3Types {
     /// @notice Normalized economic assessment produced before Engine state is applied.
     struct ExecutionAssessment {
         ExecutionMode mode;
-        uint256 executionNotionalUsdc;
-        uint256 grossAccountDebitUsdc;
-        uint256 actionChargeAssessedUsdc;
-        uint256 actionChargeCollectedUsdc;
-        uint256 explicitFeesUsdc;
-        uint256 preSettlementBalanceUsdc;
-        uint256 postSettlementBalanceUsdc;
-        int256 realizedPnlUsdc;
-        int256 vpiUsdc;
+        uint256 executionNotionalAssets;
+        uint256 grossAccountDebitAssets;
+        uint256 actionChargeAssessedAssets;
+        uint256 actionChargeCollectedAssets;
+        uint256 explicitFeesAssets;
+        uint256 preSettlementBalanceAssets;
+        uint256 postSettlementBalanceAssets;
+        int256 realizedPnlAssets;
+        int256 vpiAssets;
         /// @notice Carry assessed for the action, including any commitment-time carry collection added to the assessment.
         /// @dev A full close may waive uncollectible carry; this field is not the amount debited from settlement.
-        uint256 carryUsdc;
-        uint256 executionFeeUsdc;
-        uint256 frozenSpreadUsdc;
-        uint256 preTraderClaimUsdc;
-        uint256 postTraderClaimUsdc;
+        uint256 carryAssets;
+        uint256 executionFeeAssets;
+        uint256 frozenSpreadAssets;
+        uint256 preTraderClaimAssets;
+        uint256 postTraderClaimAssets;
         uint256 postPositionSize;
-        uint256 postPositionMarginUsdc;
-        int256 postPositionEquityUsdc;
+        uint256 postPositionMarginAssets;
+        int256 postPositionEquityAssets;
         uint256 postLeverageBps;
         CloseEconomics close;
     }
@@ -227,25 +227,25 @@ library OrderV3Types {
     /// @dev Executed receipts include the assessment; failed receipts contain observed account/position states and
     ///      leave unapplied trade economics zero. Liquidation cleanup records state after liquidation.
     struct OrderEconomics {
-        uint256 executionNotionalUsdc;
-        int256 realizedPnlUsdc;
-        int256 vpiUsdc;
+        uint256 executionNotionalAssets;
+        int256 realizedPnlAssets;
+        int256 vpiAssets;
         /// @notice Assessed carry copied from the execution assessment, not a standalone settlement debit.
         /// @dev On a full close, some carry may be covered by price gain or waived. Collection and waiver evidence is
         ///      included in aggregate action-charge fields and `close`, without a separate carry-only breakdown.
-        int256 carryUsdc;
-        uint256 executionFeeUsdc;
-        uint256 frozenSpreadUsdc;
-        uint256 actionChargeAssessedUsdc;
-        uint256 actionChargeCollectedUsdc;
-        uint256 grossAccountDebitUsdc;
-        uint256 preSettlementBalanceUsdc;
-        uint256 postSettlementBalanceUsdc;
-        uint256 preTraderClaimBalanceUsdc;
-        uint256 postTraderClaimBalanceUsdc;
+        int256 carryAssets;
+        uint256 executionFeeAssets;
+        uint256 frozenSpreadAssets;
+        uint256 actionChargeAssessedAssets;
+        uint256 actionChargeCollectedAssets;
+        uint256 grossAccountDebitAssets;
+        uint256 preSettlementBalanceAssets;
+        uint256 postSettlementBalanceAssets;
+        uint256 preTraderClaimBalanceAssets;
+        uint256 postTraderClaimBalanceAssets;
         uint256 postPositionSize;
-        uint256 postPositionMarginUsdc;
-        int256 postPositionEquityUsdc;
+        uint256 postPositionMarginAssets;
+        int256 postPositionEquityAssets;
         uint256 postLeverageBps;
         CloseEconomics close;
     }
@@ -265,13 +265,13 @@ library OrderV3Types {
         PriceSource priceSource;
         uint256 executionPrice;
         uint256 neutralMarkPrice;
-        /// @notice Gross recognized pool assets sampled for this receipt's context, in 6-decimal USDC.
+        /// @notice Gross recognized pool assets sampled for this receipt's context, in 6-decimal settlement token.
         /// @dev Uses `HousePool.totalAssets()` before trader-claim deductions, not claim-net economic depth. Zero
         ///      may also mean that no pool context was sampled for this terminal path.
-        uint256 poolDepthUsdc;
+        uint256 poolDepthAssets;
         uint64 oraclePublishTime;
         bool priceReachedEngine;
-        uint256 bountyUsdc;
+        uint256 bountyAssets;
         address bountyRecipient;
         BountyDisposition bountyDisposition;
         FailureDetails failure;
@@ -308,7 +308,7 @@ library OrderV3Types {
         address executor;
         address bountyRecipient;
         uint256 executionPrice;
-        uint256 bountyUsdc;
+        uint256 bountyAssets;
         bytes4 failureSelector;
         uint8 failureCategory;
         uint8 failureCode;

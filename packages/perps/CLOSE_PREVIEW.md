@@ -21,7 +21,7 @@ previewClose(engineAddress, closeOrder, executor, executionPrice, bounds)
 
 The first accepts a prospective `OrderRequest` and checks close admission through the configured Router's batch
 sidecar. The second accepts a `CfdTypes.Order` and explicit execution bounds. Both return `commitment`,
-`commitmentCarryUsdc`, and `assessment`; neither returns a close execution bounty. Use the matching generated ABI
+`commitmentCarryAssets`, and `assessment`; neither returns a close execution bounty. Use the matching generated ABI
 for a fresh deployment. The archived six-argument call and bounty handling below describe the pinned v1.2.3 lens.
 
 ## Historical additive-preview integration
@@ -119,6 +119,6 @@ For the next deployment, a full close releases unused pledge and liquidation res
 settlement, making that surplus eligible for action charges before pending-order margin. Reservation-aware previews
 protect the execution bounty before computing collection; that reservation is essential even when all remaining
 surplus is consumed. Preview and receipt collection fields exclude withheld price profit, while the settlement
-`ActionChargeSettled` event includes withholding in recovered value. This reserve-eligibility change adds no preview or receipt fields beyond the current V3 close schema. Released-pledge attribution remains exact: free settlement, including the released liquidation reserve, is consumed before `actionChargeFromReleasedMarginUsdc`.
+`ActionChargeSettled` event includes withholding in recovered value. This reserve-eligibility change adds no preview or receipt fields beyond the current V3 close schema. Released-pledge attribution remains exact: free settlement, including the released liquidation reserve, is consumed before `actionChargeFromReleasedMarginAssets`.
 
 The synthetic regression demonstrates the underflow state shape with no liquidation reserve; the hardened evaluator reports the typed invariant error there. Neither that fixture nor the real-stack regression identifies the historical screenshot account or establishes a panic in a properly reserved deployed order.

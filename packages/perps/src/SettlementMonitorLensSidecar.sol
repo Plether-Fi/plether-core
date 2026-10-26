@@ -52,7 +52,7 @@ contract SettlementMonitorLensSidecar {
     TerminalNavBookV2 internal TERMINAL_NAV_BOOK;
     TrancheVault internal SENIOR_VAULT;
     TrancheVault internal JUNIOR_VAULT;
-    IERC20 internal USDC;
+    IERC20 internal settlementToken;
     address internal _BOUND_PLANNER;
     bytes32 internal _BOUND_PLANNER_CODEHASH;
 
@@ -77,7 +77,7 @@ contract SettlementMonitorLensSidecar {
         TERMINAL_NAV_BOOK = TerminalNavBookV2(address(ENGINE.terminalNavBook()));
         SENIOR_VAULT = TrancheVault(HOUSE_POOL.seniorVault());
         JUNIOR_VAULT = TrancheVault(HOUSE_POOL.juniorVault());
-        USDC = IERC20(address(ENGINE.USDC()));
+        settlementToken = IERC20(address(ENGINE.settlementToken()));
         _BOUND_PLANNER = address(ENGINE.planner());
         _BOUND_PLANNER_CODEHASH = _BOUND_PLANNER.codehash;
     }
@@ -116,32 +116,33 @@ contract SettlementMonitorLensSidecar {
         address pool = address(HOUSE_POOL);
         bool readOk;
         bool poolReadsOk = true;
-        (readOk, accounting.poolRawAssetsUsdc) = _readUint(pool, HousePool.rawAssets.selector);
+        (readOk, accounting.poolRawAssets) = _readUint(pool, HousePool.rawAssets.selector);
         poolReadsOk = readOk;
-        (readOk, accounting.poolAccountedAssetsUsdc) = _readUint(pool, bytes4(keccak256("accountedAssets()")));
+        (readOk, accounting.poolAccountedAssets) = _readUint(pool, bytes4(keccak256("accountedAssets()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.poolTotalAssetsUsdc) = _readUint(pool, HousePool.totalAssets.selector);
+        (readOk, accounting.poolTotalAssets) = _readUint(pool, HousePool.totalAssets.selector);
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.poolExcessAssetsUsdc) = _readUint(pool, HousePool.excessAssets.selector);
+        (readOk, accounting.poolExcessAssets) = _readUint(pool, HousePool.excessAssets.selector);
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.storedSeniorPrincipalUsdc) = _readUint(pool, bytes4(keccak256("seniorPrincipal()")));
+        (readOk, accounting.storedSeniorPrincipalAssets) = _readUint(pool, bytes4(keccak256("seniorPrincipal()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.storedJuniorPrincipalUsdc) = _readUint(pool, bytes4(keccak256("juniorPrincipal()")));
+        (readOk, accounting.storedJuniorPrincipalAssets) = _readUint(pool, bytes4(keccak256("juniorPrincipal()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.storedSeniorHighWaterMarkUsdc) = _readUint(pool, bytes4(keccak256("seniorHighWaterMark()")));
+        (readOk, accounting.storedSeniorHighWaterMarkAssets) =
+            _readUint(pool, bytes4(keccak256("seniorHighWaterMark()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.pendingRecapitalizationUsdc) =
-            _readUint(pool, bytes4(keccak256("pendingRecapitalizationUsdc()")));
+        (readOk, accounting.pendingRecapitalizationAssets) =
+            _readUint(pool, bytes4(keccak256("pendingRecapitalizationAssets()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.pendingTradingRevenueUsdc) =
-            _readUint(pool, bytes4(keccak256("pendingTradingRevenueUsdc()")));
+        (readOk, accounting.pendingTradingRevenueAssets) =
+            _readUint(pool, bytes4(keccak256("pendingTradingRevenueAssets()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.unassignedAssetsUsdc) = _readUint(pool, bytes4(keccak256("unassignedAssets()")));
+        (readOk, accounting.unassignedAssets) = _readUint(pool, bytes4(keccak256("unassignedAssets()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.reservedSeniorDepositAssetsUsdc) =
-            _readUint(pool, bytes4(keccak256("reservedSeniorDepositAssetsUsdc()")));
+        (readOk, accounting.reservedSeniorDepositAssets) =
+            _readUint(pool, bytes4(keccak256("reservedSeniorDepositAssets()")));
         poolReadsOk = poolReadsOk && readOk;
-        (readOk, accounting.storedTerminalDeficitUsdc) = _readUint(pool, bytes4(keccak256("terminalDeficitUsdc()")));
+        (readOk, accounting.storedTerminalDeficitAssets) = _readUint(pool, bytes4(keccak256("terminalDeficitAssets()")));
         poolReadsOk = poolReadsOk && readOk;
         (readOk, accounting.lastReconcileTime) = _readUint(pool, bytes4(keccak256("lastReconcileTime()")));
         poolReadsOk = poolReadsOk && readOk;
@@ -160,9 +161,9 @@ contract SettlementMonitorLensSidecar {
             );
         } else {
             accounting.liquidityPreviewAvailable = true;
-            accounting.freeUsdc = liquidity[1];
-            accounting.withdrawalReservedUsdc = liquidity[2];
-            accounting.cachedPreviewTerminalDeficitUsdc = liquidity[8];
+            accounting.freeAssets = liquidity[1];
+            accounting.withdrawalReservedAssets = liquidity[2];
+            accounting.cachedPreviewTerminalDeficitAssets = liquidity[8];
         }
 
         (bool pendingOk, uint256[16] memory pending) =
@@ -172,10 +173,10 @@ contract SettlementMonitorLensSidecar {
                 SettlementMonitorViewTypes.Dependency.PoolAccountingPreview
             );
         } else {
-            accounting.cachedPreviewSeniorPrincipalUsdc = pending[0];
-            accounting.cachedPreviewJuniorPrincipalUsdc = pending[1];
-            accounting.cachedPreviewMaxSeniorWithdrawUsdc = pending[2];
-            accounting.cachedPreviewMaxJuniorWithdrawUsdc = pending[3];
+            accounting.cachedPreviewSeniorPrincipalAssets = pending[0];
+            accounting.cachedPreviewJuniorPrincipalAssets = pending[1];
+            accounting.cachedPreviewMaxSeniorWithdrawAssets = pending[2];
+            accounting.cachedPreviewMaxJuniorWithdrawAssets = pending[3];
             accounting.cachedPreviewAvailable = true;
         }
 
@@ -189,9 +190,9 @@ contract SettlementMonitorLensSidecar {
         } else {
             accounting.terminalMarkPrice = uint32(terminal[0]);
             accounting.terminalMarkTime = uint64(terminal[1]);
-            accounting.terminalLpPriceDeltaUsdc = int256(terminal[2]);
-            accounting.totalTraderClaimsUsdc = terminal[3];
-            accounting.maxDirectionalLiabilityUsdc = terminal[4];
+            accounting.terminalLpPriceDeltaAssets = int256(terminal[2]);
+            accounting.totalTraderClaimsAssets = terminal[3];
+            accounting.maxDirectionalLiabilityAssets = terminal[4];
             accounting.terminalBookVersion = uint64(terminal[5]);
             accounting.terminalHasOpenPositions = terminal[6] == 1;
             accounting.terminalDegradedMode = terminal[7] == 1;
@@ -448,16 +449,19 @@ contract SettlementMonitorLensSidecar {
                 || address(ENGINE.pool()) != address(HOUSE_POOL)
                 || address(ENGINE.clearinghouse()) != address(CLEARINGHOUSE)
                 || address(ENGINE.terminalNavBook()) != address(TERMINAL_NAV_BOOK)
-                || address(ENGINE.USDC()) != address(USDC) || address(HOUSE_POOL.ENGINE()) != address(ENGINE)
-                || address(HOUSE_POOL.USDC()) != address(USDC)
+                || address(ENGINE.settlementToken()) != address(settlementToken)
+                || address(HOUSE_POOL.ENGINE()) != address(ENGINE)
+                || address(HOUSE_POOL.settlementToken()) != address(settlementToken)
                 || address(HOUSE_POOL.ENGINE_PROTOCOL_LENS()) != address(ENGINE_PROTOCOL_LENS)
                 || HOUSE_POOL.seniorVault() != address(SENIOR_VAULT)
                 || HOUSE_POOL.juniorVault() != address(JUNIOR_VAULT) || CLEARINGHOUSE.engine() != address(ENGINE)
-                || CLEARINGHOUSE.settlementAsset() != address(USDC) || TERMINAL_NAV_BOOK.ENGINE() != address(ENGINE)
+                || CLEARINGHOUSE.settlementAsset() != address(settlementToken)
+                || TERMINAL_NAV_BOOK.ENGINE() != address(ENGINE)
                 || address(ENGINE_PROTOCOL_LENS.engineContract()) != address(ENGINE)
                 || address(SENIOR_VAULT.POOL()) != address(HOUSE_POOL) || !SENIOR_VAULT.IS_SENIOR()
-                || SENIOR_VAULT.asset() != address(USDC) || address(JUNIOR_VAULT.POOL()) != address(HOUSE_POOL)
-                || JUNIOR_VAULT.IS_SENIOR() || JUNIOR_VAULT.asset() != address(USDC)
+                || SENIOR_VAULT.asset() != address(settlementToken)
+                || address(JUNIOR_VAULT.POOL()) != address(HOUSE_POOL) || JUNIOR_VAULT.IS_SENIOR()
+                || JUNIOR_VAULT.asset() != address(settlementToken)
         ) {
             faults |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.BindingMismatch);
         }
@@ -602,8 +606,8 @@ contract SettlementMonitorLensSidecar {
         health.bookCapPrice = book[0];
         health.bookActiveCurveCount = book[1];
         health.bookTotalLots = book[3];
-        health.bookTotalEntryCostUsdcAtoms = book[4];
-        health.bookTotalEffectiveCapUsdcAtoms = book[5];
+        health.bookTotalEntryCostAssetAtoms = book[4];
+        health.bookTotalEffectiveCapAssetAtoms = book[5];
         health.engineLongOpenInterest = long[1];
         health.engineShortOpenInterest = short[1];
         health.engineLongEntryNotional = long[2];
@@ -682,7 +686,8 @@ contract SettlementMonitorLensSidecar {
     ) internal view {
         (bool terminalOk, uint256[16] memory terminal) =
             _readWords(address(ENGINE), abi.encodeWithSelector(CfdEngine.terminalNavSnapshot.selector), 8);
-        (bool claimsOk, uint256 claims) = _readUint(address(ENGINE), bytes4(keccak256("totalTraderClaimBalanceUsdc()")));
+        (bool claimsOk, uint256 claims) =
+            _readUint(address(ENGINE), bytes4(keccak256("totalTraderClaimBalanceAssets()")));
         (bool degradedOk, bool degraded) = _readBool(address(ENGINE), bytes4(keccak256("degradedMode()")));
         if (
             !terminalOk || !claimsOk || !degradedOk || terminal[0] > type(uint32).max || terminal[1] > type(uint64).max
@@ -706,21 +711,18 @@ contract SettlementMonitorLensSidecar {
     ) internal view {
         bool rawOk;
         bool accountedOk;
-        (rawOk, health.poolRawAssetsUsdc) = _readBalance(address(HOUSE_POOL));
-        (accountedOk, health.poolAccountedAssetsUsdc) =
+        (rawOk, health.poolRawAssets) = _readBalance(address(HOUSE_POOL));
+        (accountedOk, health.poolAccountedAssets) =
             _readUint(address(HOUSE_POOL), bytes4(keccak256("accountedAssets()")));
         (bool totalOk, uint256 totalAssets) = _readUint(address(HOUSE_POOL), HousePool.totalAssets.selector);
         if (!rawOk || !accountedOk || !totalOk) {
             health.dependencyFailureMask |= _dependencyBit(SettlementMonitorViewTypes.Dependency.Pool);
         } else {
-            health.poolCustodyDeficitUsdc =
-                _saturatingDifference(health.poolAccountedAssetsUsdc, health.poolRawAssetsUsdc);
-            health.poolCustodySurplusUsdc =
-                _saturatingDifference(health.poolRawAssetsUsdc, health.poolAccountedAssetsUsdc);
-            uint256 expectedTotal = health.poolRawAssetsUsdc < health.poolAccountedAssetsUsdc
-                ? health.poolRawAssetsUsdc
-                : health.poolAccountedAssetsUsdc;
-            if (health.poolCustodyDeficitUsdc != 0) {
+            health.poolCustodyDeficitAssets = _saturatingDifference(health.poolAccountedAssets, health.poolRawAssets);
+            health.poolCustodySurplusAssets = _saturatingDifference(health.poolRawAssets, health.poolAccountedAssets);
+            uint256 expectedTotal =
+                health.poolRawAssets < health.poolAccountedAssets ? health.poolRawAssets : health.poolAccountedAssets;
+            if (health.poolCustodyDeficitAssets != 0) {
                 health.criticalFaultMask |= _criticalBit(SettlementMonitorViewTypes.CriticalFault.PoolCustodyDeficit);
             }
             if (totalAssets != expectedTotal) {
@@ -733,7 +735,7 @@ contract SettlementMonitorLensSidecar {
         (bool seniorPendingOk, uint256 seniorPendingAssets) = _populateVaultCustody(health, address(SENIOR_VAULT), true);
         _populateVaultCustody(health, address(JUNIOR_VAULT), false);
         (bool reservationOk, uint256 reservation) =
-            _readUint(address(HOUSE_POOL), bytes4(keccak256("reservedSeniorDepositAssetsUsdc()")));
+            _readUint(address(HOUSE_POOL), bytes4(keccak256("reservedSeniorDepositAssets()")));
         if (!reservationOk) {
             health.dependencyFailureMask |= _dependencyBit(SettlementMonitorViewTypes.Dependency.Pool);
         } else if (seniorPendingOk && reservation > seniorPendingAssets) {
@@ -817,8 +819,8 @@ contract SettlementMonitorLensSidecar {
             return (pendingDepositOk, pendingDepositAssets);
         }
         if (isSenior) {
-            health.seniorRequiredAssetEscrowUsdc = requiredAssets;
-            health.seniorActualAssetEscrowUsdc = actualAssets;
+            health.seniorRequiredAssetEscrowAssets = requiredAssets;
+            health.seniorActualAssetEscrowAssets = actualAssets;
             health.seniorRequiredShareEscrow = requiredShares;
             health.seniorActualShareEscrow = actualShares;
             if (actualAssets < requiredAssets) {
@@ -832,8 +834,8 @@ contract SettlementMonitorLensSidecar {
                 );
             }
         } else {
-            health.juniorRequiredAssetEscrowUsdc = requiredAssets;
-            health.juniorActualAssetEscrowUsdc = actualAssets;
+            health.juniorRequiredAssetEscrowAssets = requiredAssets;
+            health.juniorActualAssetEscrowAssets = actualAssets;
             health.juniorRequiredShareEscrow = requiredShares;
             health.juniorActualShareEscrow = actualShares;
             if (actualAssets < requiredAssets) {
@@ -917,26 +919,27 @@ contract SettlementMonitorLensSidecar {
     ) internal view {
         bool principalOk;
         bool hwmOk;
-        (principalOk, health.seniorPrincipalUsdc) =
+        (principalOk, health.seniorPrincipalAssets) =
             _readUint(address(HOUSE_POOL), bytes4(keccak256("seniorPrincipal()")));
-        (hwmOk, health.seniorHighWaterMarkUsdc) =
+        (hwmOk, health.seniorHighWaterMarkAssets) =
             _readUint(address(HOUSE_POOL), bytes4(keccak256("seniorHighWaterMark()")));
         if (!principalOk || !hwmOk) {
             health.dependencyFailureMask |= _dependencyBit(SettlementMonitorViewTypes.Dependency.Pool);
             return;
         }
-        health.seniorImpairmentUsdc = _saturatingDifference(health.seniorHighWaterMarkUsdc, health.seniorPrincipalUsdc);
-        health.seniorPrincipalAboveHighWaterMarkUsdc =
-            _saturatingDifference(health.seniorPrincipalUsdc, health.seniorHighWaterMarkUsdc);
-        health.protectedSeniorExposureUsdc = health.seniorPrincipalUsdc > health.seniorHighWaterMarkUsdc
-            ? health.seniorPrincipalUsdc
-            : health.seniorHighWaterMarkUsdc;
+        health.seniorImpairmentAssets =
+            _saturatingDifference(health.seniorHighWaterMarkAssets, health.seniorPrincipalAssets);
+        health.seniorPrincipalAboveHighWaterMarkAssets =
+            _saturatingDifference(health.seniorPrincipalAssets, health.seniorHighWaterMarkAssets);
+        health.protectedSeniorExposureAssets = health.seniorPrincipalAssets > health.seniorHighWaterMarkAssets
+            ? health.seniorPrincipalAssets
+            : health.seniorHighWaterMarkAssets;
     }
 
     function _readBalance(
         address account
     ) internal view returns (bool ok, uint256 balance) {
-        return _readTokenBalance(address(USDC), account);
+        return _readTokenBalance(address(settlementToken), account);
     }
 
     function _readTokenBalance(
@@ -1013,8 +1016,9 @@ contract SettlementMonitorLensSidecar {
                 )
             );
         }
-        bytes32 poolDigest =
-            keccak256(abi.encode(address(HOUSE_POOL), address(SENIOR_VAULT), address(JUNIOR_VAULT), address(USDC)));
+        bytes32 poolDigest = keccak256(
+            abi.encode(address(HOUSE_POOL), address(SENIOR_VAULT), address(JUNIOR_VAULT), address(settlementToken))
+        );
         bytes32 oracleDigest = keccak256(abi.encode(oracle, oracle.codehash, pyth, pyth.codehash));
         digest = keccak256(abi.encode(address(ROUTER), ROUTER.admin(), engineDigest, poolDigest, oracleDigest));
         available = true;
@@ -1025,7 +1029,7 @@ contract SettlementMonitorLensSidecar {
         (bool phaseCapOk, uint256 phaseCap) =
             _readUint(address(HOUSE_POOL), bytes4(keccak256("MAX_LP_EPOCHS_PER_PHASE()")));
         (bool minimumOk, uint256 minimum) =
-            _readUint(address(HOUSE_POOL), bytes4(keccak256("MIN_TRANCHE_DEPOSIT_USDC()")));
+            _readUint(address(HOUSE_POOL), bytes4(keccak256("MIN_TRANCHE_DEPOSIT_ASSETS()")));
         (bool seniorCutoffOk, uint256 seniorCutoff) =
             _readUint(address(SENIOR_VAULT), bytes4(keccak256("LP_REQUEST_CUTOFF_DURATION()")));
         (bool juniorCutoffOk, uint256 juniorCutoff) =
@@ -1127,7 +1131,7 @@ contract SettlementMonitorLensSidecar {
         if (!ok) {
             return (false, bytes32(0));
         }
-        (ok, values[4]) = _readUint(address(HOUSE_POOL), HousePool.maxSeniorExposureUsdc.selector);
+        (ok, values[4]) = _readUint(address(HOUSE_POOL), HousePool.maxSeniorExposureAssets.selector);
         if (!ok) {
             return (false, bytes32(0));
         }

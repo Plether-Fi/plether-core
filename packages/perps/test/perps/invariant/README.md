@@ -201,7 +201,7 @@ bounded by each handler's actor set and input range.
   per-controller queue state, and every epoch's dust until terminal acknowledgments release it. Generated claim
   attempts choose zero, one atom, half, all, or excess remaining entitlement and check exact rejection/rollback;
   cash and refund claims run in both orders, including zero-share refund acknowledgment. Intermediate claimable
-  amounts and escrows are checked after every action. Generated Junior deposits use 1,000–3,000 USDC and redemption
+  amounts and escrows are checked after every action. Generated Junior deposits use 1,000–3,000 settlement tokens and redemption
   requests use the controller's full share wallet, with one unfinished redemption per controller across at most two
   epochs. A focused real one-share transfer creates the zero-refund-entitlement acknowledgment case. Other focused
   histories include thirteen years of coupon accrual and a recorded cash shock limiting funding to 10,000 atoms,
@@ -226,7 +226,7 @@ bounded by each handler's actor set and input range.
   cross-ledger claims. Rollback hashes are before/after reconciliation; finalized receipts establish that a prefix
   executed before rollback, without supplying expected ETH amounts. Fees are bounded to 0–1 gwei and surplus to
   0–5 gwei. Every bounded scenario creates fresh traders, drains its queue and closes opened positions; ETH debt
-  and counters persist, but this is not a general persistent USDC model. Prices are fixed, frozen/FAD predicates
+  and counters persist, but this is not a general persistent settlement tokens model. Prices are fixed, frozen/FAD predicates
   mocked, and real Pyth verification, liquidation, LP flow and forced ETH are outside the domain. Bounded callback
   gas makes both properties production-compiler gates in PR, post-merge and audit lanes.
 
@@ -275,7 +275,7 @@ bounded by each handler's actor set and input range.
 
 - `PerpEconomicConservationInvariant.t.sol`
   - Catches protocol-wide ledger drift and conservation bugs
-  - Verifies known actor and protocol balances conserve total USDC supply
+  - Verifies known actor and protocol balances conserve total settlement tokens supply
   - Verifies clearinghouse custody matches tracked account balances
   - Verifies the compact per-account ledger view stays aligned with clearinghouse buckets, router order reserves, trader claims, and pending order counts
   - Verifies the expanded per-account ledger snapshot stays aligned with typed locked-margin buckets, collateral, position-health, and settlement-reachability views
@@ -300,7 +300,7 @@ bounded by each handler's actor set and input range.
   - Catches drift between close previews and canonical-depth simulations
   - Independently checks valid partial-close residual health from whole lots, exact remaining entry basis, capped
     mark, remaining PnL pledge, and same-account claims, strictly above the floored maintenance/FAD requirement
-  - Treats liquidation/VPI reserves as separate buckets; `minBountyUsdc` is not a residual pledge floor
+  - Treats liquidation/VPI reserves as separate buckets; `minBountyAssets` is not a residual pledge floor
   - Executes a reachable claim-backed partial close whose remaining pledge is below the minimum liquidation bounty,
     checking actual size, pledge, claims, exact entry basis, separate liquidation reserve, and authenticated receipt
   - When a full close is valid, restricts invalid canonical partial closes to `PartialActionChargeUncollectible`
@@ -327,7 +327,7 @@ bounded by each handler's actor set and input range.
   - Verifies seed floors, withdrawal caps, and share-transfer cooldown
     propagation
   - Verifies raw assets split into canonical assets plus excess
-  - Verifies asynchronous USDC/share escrow conservation, request/claim capacity, direct routing from deposit-claim
+  - Verifies asynchronous settlement tokens/share escrow conservation, request/claim capacity, direct routing from deposit-claim
     escrow into redemption, and held-settlement rollback
   - Also contains `PerpHousePoolMaintenanceFeeInvariantTest`, a companion campaign with a nonzero Junior fee:
     effective supply includes pending dilution, fee materialization credits only the configured recipient, and

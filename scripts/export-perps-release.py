@@ -28,10 +28,10 @@ def artifact_identifier(key, entry):
     if entry.get("artifact"):
         source, name = entry["artifact"].rsplit(":", 1)
         return Path(source).name + ":" + name
-    name = {"mockUsdc": "MockUSDC", "seniorVault": "TrancheVault", "juniorVault": "TrancheVault"}.get(
+    name = {"seniorVault": "TrancheVault", "juniorVault": "TrancheVault"}.get(
         key, key[0].upper() + key[1:]
     )
-    source = "DeployPerpsArbitrumSepolia.s.sol" if name == "MockUSDC" else name + ".sol"
+    source = name + ".sol"
     return source + ":" + name
 
 
@@ -45,11 +45,9 @@ def artifact_path(root, identifier):
 def validate_settlement_configuration(manifest):
     """Check the new MockUSDG release's capabilities and separate rewards destination.
 
-    Earlier manifests retain their historical schema and mockUsdc artifact mapping.
+    Fresh releases require the canonical settlement-token schema without legacy aliases.
     This is a local configuration check, not proof of GDN eligibility or wallet control.
     """
-    if manifest["schemaVersion"] < 4:
-        return
     if manifest["schemaVersion"] != 4:
         raise ValueError("Unsupported perps release manifest schema")
     contracts = manifest["contracts"]

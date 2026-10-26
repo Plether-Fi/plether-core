@@ -5,10 +5,10 @@ import type { SmartAccountCall, PerpsActionPlan } from "./types.js";
 export type OrderRequestV3 = ContractFunctionArgs<typeof orderRouterV3Abi, "nonpayable", "commitOrder">[0];
 
 function validateSettlementFloor(request: OrderRequestV3): void {
-  if (request.bounds.minPostSettlementBalanceUsdc > 0n) {
+  if (request.bounds.minPostSettlementBalanceAssets > 0n) {
     if (request.isClose) throw new Error("A positive settlement balance floor requires a flat opening order.");
-    if (request.bounds.maxGrossAccountDebitUsdc === maxUint256) {
-      throw new Error("A positive settlement balance floor requires a finite maxGrossAccountDebitUsdc.");
+    if (request.bounds.maxGrossAccountDebitAssets === maxUint256) {
+      throw new Error("A positive settlement balance floor requires a finite maxGrossAccountDebitAssets.");
     }
   }
 }

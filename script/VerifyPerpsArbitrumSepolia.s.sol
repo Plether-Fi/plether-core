@@ -38,9 +38,9 @@ contract VerifyPerpsArbitrumSepolia is Script {
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint256 internal constant RELEASE_SENIOR_SEED_ASSETS = 1e6;
     uint256 internal constant RELEASE_JUNIOR_SEED_ASSETS = 1e6;
-    uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_USDC = 40_000_000e6;
+    uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_ASSETS = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
-    uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_USDC = 1000e6;
+    uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_ASSETS = 1000e6;
     uint256 internal constant RELEASE_ADVERSE_CONFIDENCE_MULTIPLIER_BPS = 2500;
     uint256 internal constant RELEASE_JUNIOR_MAINTENANCE_FEE_APR_BPS = 0;
 
@@ -217,7 +217,9 @@ contract VerifyPerpsArbitrumSepolia is Script {
         );
         require(deployed.clearinghouse.settlementAsset() == deployed.settlementToken, "Clearinghouse asset mismatch");
         require(deployed.clearinghouse.engine() == address(deployed.engine), "Clearinghouse engine mismatch");
-        require(address(deployed.engine.USDC()) == deployed.settlementToken, "Engine settlement token mismatch");
+        require(
+            address(deployed.engine.settlementToken()) == deployed.settlementToken, "Engine settlement token mismatch"
+        );
         require(
             address(deployed.engine.clearinghouse()) == address(deployed.clearinghouse), "Engine clearinghouse mismatch"
         );
@@ -244,7 +246,10 @@ contract VerifyPerpsArbitrumSepolia is Script {
             "Redemption math implementation mismatch"
         );
 
-        require(address(deployed.housePool.USDC()) == deployed.settlementToken, "HousePool settlement token mismatch");
+        require(
+            address(deployed.housePool.settlementToken()) == deployed.settlementToken,
+            "HousePool settlement token mismatch"
+        );
         require(address(deployed.housePool.ENGINE()) == address(deployed.engine), "HousePool engine mismatch");
         require(deployed.housePool.seniorVault() == address(deployed.seniorVault), "Senior vault mismatch");
         require(deployed.housePool.juniorVault() == address(deployed.juniorVault), "Junior vault mismatch");
@@ -331,7 +336,9 @@ contract VerifyPerpsArbitrumSepolia is Script {
         );
         require(address(deployed.monitor.SENIOR_VAULT()) == address(deployed.seniorVault), "Monitor Senior mismatch");
         require(address(deployed.monitor.JUNIOR_VAULT()) == address(deployed.juniorVault), "Monitor Junior mismatch");
-        require(address(deployed.monitor.USDC()) == deployed.settlementToken, "Monitor settlement token mismatch");
+        require(
+            address(deployed.monitor.settlementToken()) == deployed.settlementToken, "Monitor settlement token mismatch"
+        );
         require(address(deployed.monitor.SIDECAR()) == address(deployed.monitorSidecar), "Monitor sidecar mismatch");
         require(deployed.monitorSidecar.MONITOR() == address(deployed.monitor), "Monitor sidecar binding mismatch");
 
@@ -390,7 +397,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
             params.initMarginBps,
             params.fadMarginBps,
             params.baseCarryBps,
-            params.minBountyUsdc,
+            params.minBountyAssets,
             params.bountyBps,
             params.keeperShareBps,
             params.protocolShareBps
@@ -401,7 +408,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(params.initMarginBps == 20, "Initial margin mismatch");
         require(params.fadMarginBps == 300, "FAD mismatch");
         require(params.baseCarryBps == 500, "Base carry mismatch");
-        require(params.minBountyUsdc == 1e6, "Minimum liquidation charge mismatch");
+        require(params.minBountyAssets == 1e6, "Minimum liquidation charge mismatch");
         require(params.bountyBps == 10, "Liquidation charge mismatch");
         require(params.keeperShareBps == 5000, "Keeper share mismatch");
         require(params.protocolShareBps == 0, "Protocol share mismatch");
@@ -413,8 +420,10 @@ contract VerifyPerpsArbitrumSepolia is Script {
             "Adverse multiplier mismatch"
         );
         require(deployed.router.maxPendingOrders() == 5, "Pending-order limit mismatch");
-        require(deployed.router.minOpenNotionalUsdc() == RELEASE_MIN_OPEN_NOTIONAL_USDC, "Opening notional mismatch");
-        require(deployed.housePool.maxSeniorExposureUsdc() == RELEASE_MAX_SENIOR_EXPOSURE_USDC, "Exposure mismatch");
+        require(
+            deployed.router.minOpenNotionalAssets() == RELEASE_MIN_OPEN_NOTIONAL_ASSETS, "Opening notional mismatch"
+        );
+        require(deployed.housePool.maxSeniorExposureAssets() == RELEASE_MAX_SENIOR_EXPOSURE_ASSETS, "Exposure mismatch");
         require(deployed.housePool.maxSeniorShareBps() == RELEASE_MAX_SENIOR_SHARE_BPS, "Senior share mismatch");
     }
 

@@ -117,7 +117,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         _fundTrader(carol, 50_000 * 1e6);
         _open(carol, CfdTypes.Side.LONG, 100_000 * 1e18, 10_000 * 1e6, 1e8);
 
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        uint256 fees = clearinghouse.balanceAssets(engine.protocolTreasury());
         assertTrue(fees > 0, "Fees should exist after trade");
 
         vm.prank(address(juniorVault));
@@ -175,7 +175,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
     }
 
     function test_PendingRecapitalization_CapsAgainstTraderClaimLiabilitiesAndCarriesResidual() public {
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -183,7 +183,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 traderClaimLiability = 50_040e6;
         uint256 settleableAmount = pendingAmount - traderClaimLiability;
 
-        usdc.mint(address(pool), pendingAmount);
+        settlementToken.mint(address(pool), pendingAmount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             pendingAmount, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -199,15 +199,15 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         assertEq(pool.seniorPrincipal(), settleableAmount, "Live reconcile should apply only the settleable recap");
         assertEq(pool.seniorHighWaterMark(), pendingAmount, "Residual recap should preserve senior's recovery target");
-        assertEq(pool.pendingRecapitalizationUsdc(), traderClaimLiability, "Unsettled recap must remain pending");
-        assertEq(pool.pendingTradingRevenueUsdc(), 0);
+        assertEq(pool.pendingRecapitalizationAssets(), traderClaimLiability, "Unsettled recap must remain pending");
+        assertEq(pool.pendingTradingRevenueAssets(), 0);
 
         IHousePool.PoolLiquidityView memory viewData = pool.getPoolLiquidityView();
-        assertEq(viewData.seniorPrincipalUsdc, settleableAmount, "Liquidity view should not overstate senior NAV");
+        assertEq(viewData.seniorPrincipalAssets, settleableAmount, "Liquidity view should not overstate senior NAV");
         assertEq(
-            viewData.pendingRecapitalizationUsdc, traderClaimLiability, "Liquidity view should expose residual recap"
+            viewData.pendingRecapitalizationAssets, traderClaimLiability, "Liquidity view should expose residual recap"
         );
-        assertEq(viewData.freeUsdc, 0, "Residual pending recap should reserve remaining free liquidity");
+        assertEq(viewData.freeAssets, 0, "Residual pending recap should reserve remaining free liquidity");
         assertEq(pool.getMaxSeniorWithdraw(), 0, "Residual pending recap should reserve senior withdrawals");
 
         _setTotalTraderClaim(0);
@@ -215,12 +215,12 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         pool.reconcile();
 
         assertEq(pool.seniorPrincipal(), pendingAmount, "Residual recap should settle once backing becomes available");
-        assertEq(pool.pendingRecapitalizationUsdc(), 0, "Fully settled recap should clear the pending bucket");
+        assertEq(pool.pendingRecapitalizationAssets(), 0, "Fully settled recap should clear the pending bucket");
         assertEq(pool.unassignedAssets(), 0, "Settled recap should keep senior restoration out of unassigned assets");
     }
 
     function test_PendingRevenue_CapsAgainstTraderClaimLiabilitiesAndCarriesResidual() public {
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -228,7 +228,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 traderClaimLiability = 50_040e6;
         uint256 settleableAmount = pendingAmount - traderClaimLiability;
 
-        usdc.mint(address(pool), pendingAmount);
+        settlementToken.mint(address(pool), pendingAmount);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             pendingAmount, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -245,7 +245,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         assertEq(pool.seniorPrincipal(), SEEDED_SENIOR, "Live reconcile should restore seeded senior first");
         assertEq(pool.juniorPrincipal(), settleableAmount - SEEDED_SENIOR, "Live reconcile should cap revenue credit");
-        assertEq(pool.pendingTradingRevenueUsdc(), traderClaimLiability, "Unsettled revenue must remain pending");
+        assertEq(pool.pendingTradingRevenueAssets(), traderClaimLiability, "Unsettled revenue must remain pending");
         assertFalse(pool.canAcceptTrancheDeposits(false), "Residual pending revenue should keep deposits shut");
 
         _setTotalTraderClaim(0);
@@ -254,11 +254,11 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
 
         assertEq(pool.seniorPrincipal(), SEEDED_SENIOR, "Senior should stay restored after residual revenue settles");
         assertEq(pool.juniorPrincipal(), pendingAmount - SEEDED_SENIOR, "Residual revenue should settle to junior");
-        assertEq(pool.pendingTradingRevenueUsdc(), 0, "Fully settled revenue should clear the pending bucket");
+        assertEq(pool.pendingTradingRevenueAssets(), 0, "Fully settled revenue should clear the pending bucket");
     }
 
     function test_Reconcile_RestoresSeededClaimantsBeforeUnassignedWhenClaimedEquityZero() public {
-        usdc.burn(address(pool), pool.totalAssets());
+        settlementToken.burn(address(pool), pool.totalAssets());
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -267,7 +267,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         assertGt(seniorVault.totalSupply(), 0, "Seeded senior shares should still exist");
         assertGt(juniorVault.totalSupply(), 0, "Seeded junior shares should still exist");
 
-        usdc.mint(address(pool), 1500e6);
+        settlementToken.mint(address(pool), 1500e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             1500e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -295,7 +295,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
 
-        usdc.mint(address(pool), 50_000e6);
+        settlementToken.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -331,7 +331,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 hwmBeforeLoss = pool.seniorHighWaterMark();
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 150_000e6);
+        settlementToken.transfer(address(0xDEAD), 150_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -346,7 +346,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 staleTime = block.timestamp + 30 days;
         vm.warp(staleTime);
 
-        usdc.mint(address(pool), 50_000e6);
+        settlementToken.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -392,7 +392,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 hwmBeforeLoss = pool.seniorHighWaterMark();
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 150_000e6);
+        settlementToken.transfer(address(0xDEAD), 150_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -403,7 +403,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(freshTime));
 
-        usdc.mint(address(pool), 50_000e6);
+        settlementToken.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
@@ -422,7 +422,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         uint256 strandedAssets = 30_000e6;
         uint256 legacySeniorHwm = 50_000e6;
 
-        usdc.mint(address(pool), juniorAssets + strandedAssets);
+        settlementToken.mint(address(pool), juniorAssets + strandedAssets);
 
         stdstore.target(address(pool)).sig("seniorPrincipal()").checked_write(uint256(0));
         stdstore.target(address(pool)).sig("juniorPrincipal()").checked_write(juniorAssets);
@@ -447,8 +447,8 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
     function test_RecordClaimantRevenue_RestoresCanonicalAssetsAfterRawShortfall() public {
         _fundJunior(bob, 500_000e6);
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), 100_000e6);
-        usdc.mint(address(pool), 10_000e6);
+        settlementToken.transfer(address(0xDEAD), 100_000e6);
+        settlementToken.mint(address(pool), 10_000e6);
 
         vm.prank(address(engine));
         pool.recordClaimantInflow(
@@ -503,7 +503,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         assertGt(pool.seniorHighWaterMark(), hwmBeforeCoupon, "HWM should rise after paying senior coupon");
 
         vm.prank(address(pool));
-        usdc.transfer(address(0xdead), 95_000e6);
+        settlementToken.transfer(address(0xdead), 95_000e6);
         vm.prank(address(juniorVault));
         pool.reconcile();
 
@@ -525,9 +525,9 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         assertEq(pool.seniorPrincipal(), seniorHwmBeforeLoss);
 
         // Catastrophic loss: pool loses $600k → junior wiped ($500k), senior loses $100k
-        // Simulate by burning pool USDC
+        // Simulate by burning pool settlement token
         vm.prank(address(pool));
-        usdc.transfer(address(0xdead), 600_000 * 1e6);
+        settlementToken.transfer(address(0xdead), 600_000 * 1e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -537,7 +537,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         assertEq(pool.seniorHighWaterMark(), seniorHwmBeforeLoss, "HWM remembers original principal");
 
         // Revenue arrives: $150k. Should restore senior $100k first, then junior gets $50k.
-        usdc.mint(address(pool), 150_000 * 1e6);
+        settlementToken.mint(address(pool), 150_000 * 1e6);
 
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -555,7 +555,7 @@ contract HousePoolWaterfallTest is HousePoolTestBase {
         // Total wipeout
         uint256 burnAmount = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xdead), burnAmount);
+        settlementToken.transfer(address(0xdead), burnAmount);
 
         vm.prank(address(juniorVault));
         pool.reconcile();

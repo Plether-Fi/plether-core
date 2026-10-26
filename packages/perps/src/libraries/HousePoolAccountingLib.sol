@@ -5,7 +5,7 @@ import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngin
 
 /// @title HousePoolAccountingLib
 /// @notice Derives withdrawal, reconciliation, and mark-freshness views from engine accounting snapshots.
-/// @dev All asset and liability amounts use 6-decimal USDC; staleness values and timestamps use seconds. Liability
+/// @dev All asset and liability amounts use 6-decimal settlement token; staleness values and timestamps use seconds. Liability
 ///      additions use checked arithmetic, while the documented asset-minus-reservation calculations saturate at zero.
 library HousePoolAccountingLib {
 
@@ -13,12 +13,12 @@ library HousePoolAccountingLib {
     /// @param physicalAssets Canonical physical pool assets.
     /// @param maxLiability Maximum side-liability envelope.
     /// @param reserved Sum of max liability, outstanding trader claims, and supplemental reservation.
-    /// @param freeUsdc Physical assets above `reserved`, floored at zero.
+    /// @param freeAssets Physical assets above `reserved`, floored at zero.
     struct WithdrawalSnapshot {
         uint256 physicalAssets;
         uint256 maxLiability;
         uint256 reserved;
-        uint256 freeUsdc;
+        uint256 freeAssets;
     }
 
     /// @notice Pool assets distributable to tranche claims after trader claims and the canonical terminal delta.
@@ -42,15 +42,15 @@ library HousePoolAccountingLib {
     ///      supplemental protected headroom. Free cash saturates at zero when reservations equal or exceed assets.
     ///      Callers may layer additional reservations on the result.
     /// @param engineSnapshot Engine-supplied physical assets and liability reservations.
-    /// @return snapshot Withdrawal accounting values in 6-decimal USDC.
+    /// @return snapshot Withdrawal accounting values in 6-decimal settlement token.
     function buildWithdrawalSnapshot(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (WithdrawalSnapshot memory snapshot) {
-        snapshot.physicalAssets = engineSnapshot.physicalAssetsUsdc;
-        snapshot.maxLiability = engineSnapshot.maxLiabilityUsdc;
-        snapshot.reserved = engineSnapshot.maxLiabilityUsdc + engineSnapshot.traderClaimBalanceUsdc
-            + engineSnapshot.supplementalReservedUsdc;
-        snapshot.freeUsdc =
+        snapshot.physicalAssets = engineSnapshot.physicalAssets;
+        snapshot.maxLiability = engineSnapshot.maxLiabilityAssets;
+        snapshot.reserved = engineSnapshot.maxLiabilityAssets + engineSnapshot.traderClaimBalanceAssets
+            + engineSnapshot.supplementalReservedAssets;
+        snapshot.freeAssets =
             snapshot.physicalAssets > snapshot.reserved ? snapshot.physicalAssets - snapshot.reserved : 0;
     }
 
@@ -60,9 +60,9 @@ library HousePoolAccountingLib {
     function buildReconcileSnapshot(
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory engineSnapshot
     ) internal pure returns (ReconcileSnapshot memory snapshot) {
-        uint256 terminalAssets = engineSnapshot.physicalAssetsUsdc;
-        uint256 terminalLiabilities = engineSnapshot.traderClaimBalanceUsdc;
-        int256 terminalDelta = engineSnapshot.terminalLpPriceDeltaUsdc;
+        uint256 terminalAssets = engineSnapshot.physicalAssets;
+        uint256 terminalLiabilities = engineSnapshot.traderClaimBalanceAssets;
+        int256 terminalDelta = engineSnapshot.terminalLpPriceDeltaAssets;
         if (terminalDelta >= 0) {
             terminalAssets += uint256(terminalDelta);
         } else {

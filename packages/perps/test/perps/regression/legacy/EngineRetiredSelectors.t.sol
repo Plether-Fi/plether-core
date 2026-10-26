@@ -19,20 +19,30 @@ contract EngineRetiredSelectorsTest is CfdEngineTestBase {
     function test_DirectEngineDonationIsOutsideCanonicalPoolAndCannotBeSweptThroughRetiredSelector() public {
         uint256 poolAssetsBefore = pool.totalAssets();
         ICfdEngineTypes.TerminalNavSnapshot memory terminalBefore = engine.terminalNavSnapshot();
-        usdc.mint(address(engine), 123e6);
-        uint256 ownerBefore = usdc.balanceOf(address(this));
+        settlementToken.mint(address(engine), 123e6);
+        uint256 ownerBefore = settlementToken.balanceOf(address(this));
 
         (bool success,) = address(engine)
-            .call(abi.encodeWithSignature("sweepToken(address,address,uint256)", address(usdc), address(this), 123e6));
+            .call(
+                abi.encodeWithSignature(
+                    "sweepToken(address,address,uint256)", address(settlementToken), address(this), 123e6
+                )
+            );
 
         assertFalse(success, "V2 engine must not expose a discretionary token-sweep selector");
-        assertEq(usdc.balanceOf(address(engine)), 123e6, "A direct donation must remain outside canonical custody");
-        assertEq(usdc.balanceOf(address(this)), ownerBefore, "The retired selector must not transfer donated tokens");
+        assertEq(
+            settlementToken.balanceOf(address(engine)), 123e6, "A direct donation must remain outside canonical custody"
+        );
+        assertEq(
+            settlementToken.balanceOf(address(this)),
+            ownerBefore,
+            "The retired selector must not transfer donated tokens"
+        );
         assertEq(pool.totalAssets(), poolAssetsBefore, "Direct engine donations must not alter canonical pool assets");
         ICfdEngineTypes.TerminalNavSnapshot memory terminalAfter = engine.terminalNavSnapshot();
         assertEq(
-            terminalAfter.terminalLpPriceDeltaUsdc,
-            terminalBefore.terminalLpPriceDeltaUsdc,
+            terminalAfter.terminalLpPriceDeltaAssets,
+            terminalBefore.terminalLpPriceDeltaAssets,
             "Direct engine donations must not alter exact terminal NAV"
         );
         assertEq(terminalAfter.bookVersion, terminalBefore.bookVersion, "Direct donations must not mutate the NAV book");

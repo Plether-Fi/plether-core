@@ -24,7 +24,7 @@ contract CarryAndMarginCheckpointGasTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 5 * 1e6,
+            minBountyAssets: 5 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -38,9 +38,9 @@ contract CarryAndMarginCheckpointGasTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
         bytes[] memory priceData = _mockPythUpdateData();
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
-        uint256 traderBefore = clearinghouse.balanceUsdc(alice);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
-        uint256 reservedBefore = clearinghouse.lockedMarginUsdc(alice);
+        uint256 traderBefore = clearinghouse.balanceAssets(alice);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
+        uint256 reservedBefore = clearinghouse.lockedMarginAssets(alice);
         uint256 snapshot = vm.snapshotState();
 
         // The exact same eligible state must execute when gas is sufficient.
@@ -62,11 +62,11 @@ contract CarryAndMarginCheckpointGasTest is BasePerpTest {
             assertEq(uint8(blocked.pendingReason), uint8(OrderV3Types.PendingReason.InsufficientGas));
         }
         assertEq(router.nextExecuteId(), 1, "Low gas must preserve the eligible FIFO head");
-        assertEq(clearinghouse.balanceUsdc(alice), traderBefore, "Low gas must preserve trader settlement");
-        assertEq(clearinghouse.balanceUsdc(keeper), keeperBefore, "Low gas must not pay a bounty");
-        assertEq(clearinghouse.lockedMarginUsdc(alice), reservedBefore, "Low gas must preserve reservations");
+        assertEq(clearinghouse.balanceAssets(alice), traderBefore, "Low gas must preserve trader settlement");
+        assertEq(clearinghouse.balanceAssets(keeper), keeperBefore, "Low gas must not pay a bounty");
+        assertEq(clearinghouse.lockedMarginAssets(alice), reservedBefore, "Low gas must preserve reservations");
         (IOrderRouterAccounting.PendingOrderView memory afterAttempt,) = router.getPendingOrderView(1);
-        assertEq(afterAttempt.executionBountyUsdc, pending.executionBountyUsdc);
+        assertEq(afterAttempt.executionBountyAssets, pending.executionBountyAssets);
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "Low gas must not partially apply the open");
     }
@@ -89,9 +89,9 @@ contract ExecutionGasFloorTest is BasePerpTest {
         router.commitOrder(CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8, false);
         bytes[] memory priceData = _mockPythUpdateData();
         (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(1);
-        uint256 traderBefore = clearinghouse.balanceUsdc(alice);
-        uint256 keeperBefore = clearinghouse.balanceUsdc(keeper);
-        uint256 reservedBefore = clearinghouse.lockedMarginUsdc(alice);
+        uint256 traderBefore = clearinghouse.balanceAssets(alice);
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
+        uint256 reservedBefore = clearinghouse.lockedMarginAssets(alice);
         uint256 snapshot = vm.snapshotState();
 
         // The exact same eligible state must execute when gas is sufficient.
@@ -113,11 +113,11 @@ contract ExecutionGasFloorTest is BasePerpTest {
             assertEq(uint8(blocked.pendingReason), uint8(OrderV3Types.PendingReason.InsufficientGas));
         }
         assertEq(router.nextExecuteId(), 1, "Low gas must preserve the eligible FIFO head");
-        assertEq(clearinghouse.balanceUsdc(alice), traderBefore, "Low gas must preserve trader settlement");
-        assertEq(clearinghouse.balanceUsdc(keeper), keeperBefore, "Low gas must not pay a bounty");
-        assertEq(clearinghouse.lockedMarginUsdc(alice), reservedBefore, "Low gas must preserve reservations");
+        assertEq(clearinghouse.balanceAssets(alice), traderBefore, "Low gas must preserve trader settlement");
+        assertEq(clearinghouse.balanceAssets(keeper), keeperBefore, "Low gas must not pay a bounty");
+        assertEq(clearinghouse.lockedMarginAssets(alice), reservedBefore, "Low gas must preserve reservations");
         (IOrderRouterAccounting.PendingOrderView memory afterAttempt,) = router.getPendingOrderView(1);
-        assertEq(afterAttempt.executionBountyUsdc, pending.executionBountyUsdc);
+        assertEq(afterAttempt.executionBountyAssets, pending.executionBountyAssets);
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 0, "Low gas must not partially apply the open");
     }

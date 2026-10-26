@@ -15,7 +15,7 @@ contract PerpIndependentClaimInvariantTest is BasePerpInvariantTest {
 
     function setUp() public override {
         super.setUp();
-        model = new PerpClaimModelHandler(engine, clearinghouse, housePool, usdc, address(router));
+        model = new PerpClaimModelHandler(engine, clearinghouse, housePool, settlementToken, address(router));
         // Seed each economic transition so invariant campaigns cannot pass solely through skipped calls.
         model.open(0, false);
         model.close(0, true, false);
@@ -51,7 +51,7 @@ contract PerpIndependentClaimInvariantTest is BasePerpInvariantTest {
         assertGt(model.deferredCloses(), 0);
         assertGt(model.immediateCloses(), 0);
         assertGt(model.lossCloses(), 0);
-        assertGt(model.claimConsumptionUsdc(), 0);
+        assertGt(model.claimConsumptionAssets(), 0);
         assertGt(model.livePositionSettlements(), 0);
         assertGt(model.expectedRejections(), 0);
         _check();
@@ -69,7 +69,7 @@ contract PerpIndependentClaimInvariantTest is BasePerpInvariantTest {
     function test_ModelDetectsIncorrectAccountClaimWithoutResynchronizing() public {
         address account = model.accountAt(2);
         uint256 expected = model.expectedClaim(account);
-        stdstore.target(address(engine)).sig("traderClaimBalanceUsdc(address)").with_key(account)
+        stdstore.target(address(engine)).sig("traderClaimBalanceAssets(address)").with_key(account)
             .checked_write(expected + 1);
         vm.expectRevert(
             abi.encodeWithSelector(PerpClaimModelHandler.ClaimModelMismatch.selector, account, expected, expected + 1)
@@ -80,7 +80,7 @@ contract PerpIndependentClaimInvariantTest is BasePerpInvariantTest {
 
     function test_ModelDetectsIncorrectAggregateClaim() public {
         uint256 expected = model.expectedTotalClaims();
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(expected + 1);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(expected + 1);
         vm.expectRevert(
             abi.encodeWithSelector(PerpClaimModelHandler.ClaimTotalMismatch.selector, expected, expected + 1)
         );
@@ -93,7 +93,7 @@ contract PerpIndependentClaimInvariantTest is BasePerpInvariantTest {
         model.checkWithdrawalReserveModel();
         uint256 expected = model.expectedWithdrawalReserve();
         uint256 claims = model.expectedTotalClaims();
-        stdstore.target(address(engine)).sig("totalTraderClaimBalanceUsdc()").checked_write(claims + 1);
+        stdstore.target(address(engine)).sig("totalTraderClaimBalanceAssets()").checked_write(claims + 1);
         vm.expectRevert(
             abi.encodeWithSelector(PerpClaimModelHandler.WithdrawalReserveMismatch.selector, expected, expected + 1)
         );
@@ -110,8 +110,8 @@ contract PerpIndependentClaimInvariantTest is BasePerpInvariantTest {
 
         model.openAt(0, false, 31, 80_000_001);
         model.openAt(1, true, 17, 120_000_003);
-        assertEq(model.expectedEntryCostUsdc(model.accountAt(0)), 2_480_000_031);
-        assertEq(model.expectedEntryCostUsdc(model.accountAt(1)), 2_040_000_051);
+        assertEq(model.expectedEntryCostAssets(model.accountAt(0)), 2_480_000_031);
+        assertEq(model.expectedEntryCostAssets(model.accountAt(1)), 2_040_000_051);
         assertEq(model.expectedWithdrawalReserve(), 2_486_200_032, "Long endpoint plus rounded buffer dominates");
         _check();
 
@@ -180,7 +180,7 @@ contract PerpIndependentClaimInvariantTest is BasePerpInvariantTest {
         CfdEngineProtocolLens lens = model.protocolLens();
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory snapshot = lens.getProtocolAccountingSnapshot();
         uint256 corrupted = delta > 0 ? expected + 1 : expected - 1;
-        snapshot.withdrawalReservedUsdc = corrupted;
+        snapshot.withdrawalReservedAssets = corrupted;
         vm.mockCall(address(lens), abi.encodeCall(lens.getProtocolAccountingSnapshot, ()), abi.encode(snapshot));
 
         // Every claim/position assertion still passes: only the reserve response has changed.

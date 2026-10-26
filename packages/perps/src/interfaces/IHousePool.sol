@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
-/// @notice Two-tranche USDC pool that acts as counterparty to CFD traders.
+/// @notice Two-tranche settlement token pool that acts as counterparty to CFD traders.
 ///         Senior tranche earns a junior-funded target coupon; junior absorbs first-loss and excess profit.
-/// @dev Unless stated otherwise, monetary amounts use 6-decimal USDC, rates use a 10,000 basis-point denominator,
+/// @dev Unless stated otherwise, monetary amounts use 6-decimal settlement token, rates use a 10,000 basis-point denominator,
 ///      and timestamps or durations use seconds.
 interface IHousePool {
 
@@ -17,36 +17,36 @@ interface IHousePool {
 
     /// @notice Whether claimant inflow accounting should recognize newly arrived cash.
     enum ClaimantInflowCashMode {
-        /// @notice Matching USDC has already arrived and canonical accounted assets must increase.
+        /// @notice Matching settlement token has already arrived and canonical accounted assets must increase.
         CashArrived,
-        /// @notice Matching USDC is already included in canonical pool assets and only ownership routing changes.
+        /// @notice Matching settlement token is already included in canonical pool assets and only ownership routing changes.
         AlreadyRetained
     }
 
     /// @notice Pool cash, claimant-reservation, tranche-principal, and runtime-status snapshot.
-    /// @param totalAssetsUsdc Canonical pool backing, capped by raw USDC custody.
-    /// @param freeUsdc Assets above maximum position liability, trader claims, pending claimant value, unassigned
+    /// @param totalAssets Canonical pool backing, capped by raw settlement token custody.
+    /// @param freeAssets Assets above maximum position liability, trader claims, pending claimant value, unassigned
     ///        assets, and any supplemental reserve.
-    /// @param withdrawalReservedUsdc Aggregate amount reserved ahead of tranche withdrawals.
-    /// @param pendingRecapitalizationUsdc Unsettled recapitalization value awaiting claimant routing.
-    /// @param pendingTradingRevenueUsdc Unsettled trading revenue awaiting claimant routing.
-    /// @param seniorPrincipalUsdc Stored value attributed to senior tranche claimants.
-    /// @param juniorPrincipalUsdc Stored value attributed to junior tranche claimants.
-    /// @param seniorHighWaterMarkUsdc Protected senior entitlement restored before revenue reaches junior claimants.
-    /// @param currentTerminalDeficitUsdc Deficit derived from the current engine terminal-NAV snapshot.
+    /// @param withdrawalReservedAssets Aggregate amount reserved ahead of tranche withdrawals.
+    /// @param pendingRecapitalizationAssets Unsettled recapitalization value awaiting claimant routing.
+    /// @param pendingTradingRevenueAssets Unsettled trading revenue awaiting claimant routing.
+    /// @param seniorPrincipalAssets Stored value attributed to senior tranche claimants.
+    /// @param juniorPrincipalAssets Stored value attributed to junior tranche claimants.
+    /// @param seniorHighWaterMarkAssets Protected senior entitlement restored before revenue reaches junior claimants.
+    /// @param currentTerminalDeficitAssets Deficit derived from the current engine terminal-NAV snapshot.
     /// @param markFresh Whether the cached mark satisfies the currently applicable HousePool freshness policy.
     /// @param oracleFrozen Whether the engine reports recurring or override-driven frozen-oracle policy.
     /// @param degradedMode Whether the engine's adjusted-insolvency latch is active.
     struct PoolLiquidityView {
-        uint256 totalAssetsUsdc;
-        uint256 freeUsdc;
-        uint256 withdrawalReservedUsdc;
-        uint256 pendingRecapitalizationUsdc;
-        uint256 pendingTradingRevenueUsdc;
-        uint256 seniorPrincipalUsdc;
-        uint256 juniorPrincipalUsdc;
-        uint256 seniorHighWaterMarkUsdc;
-        uint256 currentTerminalDeficitUsdc;
+        uint256 totalAssets;
+        uint256 freeAssets;
+        uint256 withdrawalReservedAssets;
+        uint256 pendingRecapitalizationAssets;
+        uint256 pendingTradingRevenueAssets;
+        uint256 seniorPrincipalAssets;
+        uint256 juniorPrincipalAssets;
+        uint256 seniorHighWaterMarkAssets;
+        uint256 currentTerminalDeficitAssets;
         bool markFresh;
         bool oracleFrozen;
         bool degradedMode;
@@ -60,27 +60,27 @@ interface IHousePool {
     /// @param markStalenessLimit HousePool component of the live cached-mark age limit, in seconds.
     /// @param seniorFrozenLpFeeBps Senior vault exit fee while the oracle is frozen, in basis points.
     /// @param juniorFrozenLpFeeBps Junior vault exit fee while the oracle is frozen, in basis points.
-    /// @param maxSeniorExposureUsdc Maximum protected senior exposure, including accepted reservations, in USDC.
+    /// @param maxSeniorExposureAssets Maximum protected senior exposure, including accepted reservations, in settlement token.
     /// @param maxSeniorShareBps Maximum senior share of committed tranche capital, in basis points.
     struct PoolConfig {
         uint256 seniorRateBps;
         uint256 markStalenessLimit;
         uint256 seniorFrozenLpFeeBps;
         uint256 juniorFrozenLpFeeBps;
-        uint256 maxSeniorExposureUsdc;
+        uint256 maxSeniorExposureAssets;
         uint256 maxSeniorShareBps;
     }
 
     /// @notice Aggregate result of one synchronized LP epoch settlement.
-    /// @dev Withdrawal fields report exact shares burned and USDC moved into vault claim escrow. Deposit fields report
+    /// @dev Withdrawal fields report exact shares burned and settlement token moved into vault claim escrow. Deposit fields report
     ///      the delayed-deposit batches finalized after withdrawal funding. `seniorBacklog` and `juniorBacklog` report
     ///      matured demand left after this bounded call; `entriesDeferred` reports that at least one matured deposit
-    ///      batch could not be safely finalized and remains pending. All asset amounts use 6-decimal USDC.
+    ///      batch could not be safely finalized and remains pending. All asset amounts use 6-decimal settlement token.
     /// @param cutoffEpoch Latest withdrawal epoch eligible for funding in this call.
     /// @param seniorFundedShares Senior shares transitioned from pending to claimable and burned.
-    /// @param seniorFundedAssets Senior USDC moved from HousePool custody into claim escrow.
+    /// @param seniorFundedAssets Senior settlement token moved from HousePool custody into claim escrow.
     /// @param juniorFundedShares Junior shares transitioned from pending to claimable and burned.
-    /// @param juniorFundedAssets Junior USDC moved from HousePool custody into claim escrow.
+    /// @param juniorFundedAssets Junior settlement token moved from HousePool custody into claim escrow.
     /// @param seniorProcessedEpochs Number of senior withdrawal epochs visited by the bounded processor.
     /// @param juniorProcessedEpochs Number of junior withdrawal epochs visited by the bounded processor.
     /// @param juniorDepositAssets Junior delayed-deposit assets finalized after withdrawal funding.
@@ -154,9 +154,9 @@ interface IHousePool {
     error HousePool__SeniorDepositReservationsExceedLimits();
     /// @notice A reservation release or finalization exceeds aggregate accepted senior reservations.
     error HousePool__InsufficientSeniorDepositReservation();
-    /// @notice The owner attempted to account excess when raw USDC does not exceed canonical accounted assets.
+    /// @notice The owner attempted to account excess when raw settlement token does not exceed canonical accounted assets.
     error HousePool__NoExcessAssets();
-    /// @notice An excess sweep exceeds currently unaccounted raw USDC.
+    /// @notice An excess sweep exceeds currently unaccounted raw settlement token.
     error HousePool__ExcessAmountTooHigh();
     /// @notice A deposit or initial trading activation was attempted while ownerless value still requires resolution.
     error HousePool__PendingBootstrap();
@@ -192,7 +192,7 @@ interface IHousePool {
     /// @param markStalenessLimit Proposed live mark-age limit in seconds.
     /// @param seniorFrozenLpFeeBps Proposed senior frozen-oracle fee in basis points.
     /// @param juniorFrozenLpFeeBps Proposed junior frozen-oracle fee in basis points.
-    /// @param maxSeniorExposureUsdc Proposed protected senior-exposure ceiling in USDC.
+    /// @param maxSeniorExposureAssets Proposed protected senior-exposure ceiling in settlement token.
     /// @param maxSeniorShareBps Proposed maximum senior share in basis points.
     /// @param activationTime Earliest Unix timestamp at which the proposal can be finalized.
     event PoolConfigProposed(
@@ -200,7 +200,7 @@ interface IHousePool {
         uint256 markStalenessLimit,
         uint256 seniorFrozenLpFeeBps,
         uint256 juniorFrozenLpFeeBps,
-        uint256 maxSeniorExposureUsdc,
+        uint256 maxSeniorExposureAssets,
         uint256 maxSeniorShareBps,
         uint256 activationTime
     );
@@ -211,41 +211,41 @@ interface IHousePool {
     /// @param juniorFeeBps New junior frozen-oracle fee in basis points.
     event FrozenLpFeesUpdated(uint256 seniorFeeBps, uint256 juniorFeeBps);
     /// @notice Emitted when finalized governance changes either senior-capacity limit.
-    /// @param maxSeniorExposureUsdc New protected senior-exposure ceiling in USDC.
+    /// @param maxSeniorExposureAssets New protected senior-exposure ceiling in settlement token.
     /// @param maxSeniorShareBps New maximum senior share in basis points.
-    event SeniorCapacityUpdated(uint256 maxSeniorExposureUsdc, uint256 maxSeniorShareBps);
-    /// @notice Emitted when the owner admits all currently unsolicited raw USDC into canonical accounting.
-    /// @param amountUsdc Newly recognized excess in USDC.
-    /// @param accountedAssetsUsdc Canonical accounted-asset ledger after recognition, in USDC.
-    event ExcessAccounted(uint256 amountUsdc, uint256 accountedAssetsUsdc);
-    /// @notice Emitted when the owner transfers unaccounted excess USDC out of the pool.
+    event SeniorCapacityUpdated(uint256 maxSeniorExposureAssets, uint256 maxSeniorShareBps);
+    /// @notice Emitted when the owner admits all currently unsolicited raw settlement token into canonical accounting.
+    /// @param amountAssets Newly recognized excess in settlement token.
+    /// @param accountedAssets Canonical accounted-asset ledger after recognition, in settlement token.
+    event ExcessAccounted(uint256 amountAssets, uint256 accountedAssets);
+    /// @notice Emitted when the owner transfers unaccounted excess settlement token out of the pool.
     /// @param recipient Recipient of the excess.
-    /// @param amountUsdc Amount swept without changing canonical accounted assets, in USDC.
-    event ExcessSwept(address indexed recipient, uint256 amountUsdc);
+    /// @param amountAssets Amount swept without changing canonical accounted assets, in settlement token.
+    event ExcessSwept(address indexed recipient, uint256 amountAssets);
 
     /// @notice Emitted when claimant-owned revenue or recapitalization is routed into pool accounting.
     /// @param caller Authorized engine or settlement sidecar that recorded the inflow.
     /// @param kind Revenue or recapitalization ownership bucket.
     /// @param cashMode Whether canonical accounted assets increased or cash was already retained.
-    /// @param amountUsdc Routed claimant value in USDC.
+    /// @param amountAssets Routed claimant value in settlement token.
     event ClaimantInflowAccounted(
-        address indexed caller, ClaimantInflowKind kind, ClaimantInflowCashMode cashMode, uint256 amountUsdc
+        address indexed caller, ClaimantInflowKind kind, ClaimantInflowCashMode cashMode, uint256 amountAssets
     );
     /// @notice Emitted when all quarantined ownerless assets are assigned to a tranche and matching shares are minted.
     /// @param toSenior True when assets were assigned to senior, false for junior.
     /// @param receiver Account receiving bootstrap vault shares.
-    /// @param amountUsdc Principal assigned to the tranche, in USDC.
+    /// @param amountAssets Principal assigned to the tranche, in settlement token.
     /// @param sharesMinted Vault shares minted to `receiver`.
     event UnassignedAssetsAssigned(
-        bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted
+        bool indexed toSenior, address indexed receiver, uint256 amountAssets, uint256 sharesMinted
     );
     /// @notice Emitted when a permanent real-cash seed position is initialized for a tranche.
     /// @param toSenior True when the senior tranche was seeded, false for junior.
     /// @param receiver Account receiving the permanently floored seed shares.
-    /// @param amountUsdc Owner-supplied seed principal in USDC.
+    /// @param amountAssets Owner-supplied seed principal in settlement token.
     /// @param sharesMinted Vault shares minted and registered as the seed floor.
     event SeedPositionInitialized(
-        bool indexed toSenior, address indexed receiver, uint256 amountUsdc, uint256 sharesMinted
+        bool indexed toSenior, address indexed receiver, uint256 amountAssets, uint256 sharesMinted
     );
     /// @notice Emitted when the owner activates trading after both tranche seeds exist.
     event TradingActivated();
@@ -258,19 +258,19 @@ interface IHousePool {
     /// @param paused True when settlement is held, false when governance releases it.
     event LpEpochSettlementPauseUpdated(address indexed caller, bool paused);
 
-    /// @notice Canonical economic USDC backing recognized by the pool (6 decimals).
+    /// @notice Canonical economic settlement token backing recognized by the pool (6 decimals).
     ///         Ignores unsolicited positive token transfers until explicitly accounted, but
     ///         still reflects raw-balance shortfalls if assets leave the pool unexpectedly.
-    /// @return Lesser of raw pool USDC and the canonical accounted-asset ledger
+    /// @return Lesser of raw pool settlement token and the canonical accounted-asset ledger
     function totalAssets() external view returns (uint256);
 
     /// @notice Cash above all current engine and pool reserves, safe to query during engine settlement.
-    /// @return Unreserved USDC available for a protocol-fee top-up.
-    function getSettlementFreeUSDC() external view returns (uint256);
+    /// @return Unreserved settlement token available for a protocol-fee top-up.
+    function getSettlementFreeAssets() external view returns (uint256);
 
     /// @notice Returns the terminal deficit persisted by the most recent mark-fresh reconcile.
-    /// @return Last reconciled terminal deficit in 6-decimal USDC
-    function terminalDeficitUsdc() external view returns (uint256);
+    /// @return Last reconciled terminal deficit in 6-decimal settlement token
+    function terminalDeficitAssets() external view returns (uint256);
 
     /// @notice Returns the current id of the coordinator's shared LP epoch.
     /// @return Current Unix timestamp divided by the shared LP epoch duration
@@ -296,11 +296,11 @@ interface IHousePool {
     /// @dev Governance-only recovery operation.
     function unpauseLpEpochSettlement() external;
 
-    /// @notice Transfers USDC from the pool to a recipient.
+    /// @notice Transfers settlement token from the pool to a recipient.
     /// @dev Callable only by the engine or its current settlement sidecar. Decreases canonical accounted assets and
     ///      transfers the same raw amount atomically.
-    /// @param recipient Address to receive USDC
-    /// @param amount USDC amount to transfer (6 decimals)
+    /// @param recipient Address to receive settlement token
+    /// @param amount settlement token amount to transfer (6 decimals)
     function payOut(
         address recipient,
         uint256 amount
@@ -309,10 +309,10 @@ interface IHousePool {
     /// @notice Records claimant-owned value that should ultimately flow through the tranche waterfall.
     /// @dev Callable only by the engine or settlement sidecar; recapitalization is further restricted to the engine.
     ///      `CashArrived` increments canonical accounted assets but does not transfer tokens, so the caller must have
-    ///      already delivered the matching USDC. `AlreadyRetained` only routes ownership for value already held by
+    ///      already delivered the matching settlement token. `AlreadyRetained` only routes ownership for value already held by
     ///      the pool. Revenue is quarantined when no tranche principal exists; recapitalization is always queued for
     ///      explicit waterfall reconciliation.
-    /// @param amount USDC amount to route through claimant accounting (6 decimals)
+    /// @param amount settlement token amount to route through claimant accounting (6 decimals)
     /// @param kind Economic source bucket for the claimant inflow
     /// @param cashMode Whether to recognize newly arrived cash or only route value already in canonical pool assets
     function recordClaimantInflow(
@@ -328,8 +328,8 @@ interface IHousePool {
     function markStalenessLimit() external view returns (uint256);
 
     /// @notice Governed ceiling on protected senior exposure, including accepted reservations.
-    /// @return Maximum protected senior exposure in 6-decimal USDC
-    function maxSeniorExposureUsdc() external view returns (uint256);
+    /// @return Maximum protected senior exposure in 6-decimal settlement token
+    function maxSeniorExposureAssets() external view returns (uint256);
 
     /// @notice Governed maximum senior share of committed tranche capital.
     /// @return Maximum senior share in basis points
@@ -338,12 +338,12 @@ interface IHousePool {
     /// @notice Returns additional senior assets that can currently be admitted under both capacity limits.
     /// @dev Uses conservative pending reconciliation and subtracts all accepted senior reservations. Returns zero
     ///      when residual capacity is below the asynchronous deposit-request minimum.
-    /// @return Additional senior admission capacity in 6-decimal USDC
+    /// @return Additional senior admission capacity in 6-decimal settlement token
     function getSeniorDepositCapacity() external view returns (uint256);
 
     /// @notice Aggregate accepted senior deposit requests not yet cancelled or finalized.
-    /// @return Reserved senior deposit assets in 6-decimal USDC
-    function reservedSeniorDepositAssetsUsdc() external view returns (uint256);
+    /// @return Reserved senior deposit assets in 6-decimal settlement token
+    function reservedSeniorDepositAssets() external view returns (uint256);
 
     /// @notice Returns whether projected protected senior exposure plus all reservations fits active limits.
     /// @dev Diagnostic for current headroom; existing firm reservations may settle after passive overage.
@@ -354,16 +354,16 @@ interface IHousePool {
     /// @return Whether both senior and junior seed flags are set
     function isSeedLifecycleComplete() external view returns (bool);
 
-    /// @notice Total USDC attributed to the senior tranche (6 decimals)
+    /// @notice Total settlement token attributed to the senior tranche (6 decimals)
     /// @return Stored senior principal before any pending-reconcile projection
     function seniorPrincipal() external view returns (uint256);
 
-    /// @notice Total USDC attributed to the junior tranche (6 decimals)
+    /// @notice Total settlement token attributed to the junior tranche (6 decimals)
     /// @return Stored junior principal before any pending-reconcile projection
     function juniorPrincipal() external view returns (uint256);
 
     /// @notice Senior high-water mark used to block dilutive recapitalizing deposits.
-    /// @return Protected senior entitlement in USDC restored before revenue flows to junior
+    /// @return Protected senior entitlement in settlement token restored before revenue flows to junior
     function seniorHighWaterMark() external view returns (uint256);
 
     /// @notice Accounted LP assets currently quarantined pending explicit bootstrap / assignment (6 decimals)
@@ -371,21 +371,21 @@ interface IHousePool {
     function unassignedAssets() external view returns (uint256);
 
     /// @notice Unsettled recapitalization reserved from discretionary pool payouts.
-    function pendingRecapitalizationUsdc() external view returns (uint256);
+    function pendingRecapitalizationAssets() external view returns (uint256);
 
     /// @notice Unsettled trading revenue reserved from discretionary pool payouts.
-    function pendingTradingRevenueUsdc() external view returns (uint256);
+    function pendingTradingRevenueAssets() external view returns (uint256);
 
     /// @notice Commits senior capacity for a delayed deposit request.
     /// @dev Callable only by the configured senior vault. The amount must fit additional capacity when reserved.
-    /// @param amount Gross USDC request amount to reserve (6 decimals)
+    /// @param amount Gross settlement token request amount to reserve (6 decimals)
     function reserveSeniorDeposit(
         uint256 amount
     ) external;
 
     /// @notice Releases senior capacity after a delayed deposit request is cancelled.
     /// @dev Callable only by the configured senior vault and remains available while deposits are paused.
-    /// @param amount Gross USDC request amount to release (6 decimals)
+    /// @param amount Gross settlement token request amount to release (6 decimals)
     function releaseSeniorDepositReservation(
         uint256 amount
     ) external;
@@ -407,7 +407,7 @@ interface IHousePool {
     /// @notice Explicitly bootstraps quarantined LP assets into a tranche and mints matching shares.
     /// @dev Owner only, outside oracle-frozen mode and with any required mark satisfying active freshness policy.
     ///      Reconciles, assigns the entire unassigned balance, and asks the selected configured vault to mint shares.
-    ///      No USDC moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
+    ///      No settlement token moves and the tranche seed-lifecycle flag is not initialized by this action. Senior assignment is
     ///      bounded by the active capacity limits, which are neutral before the first governed configuration.
     /// @param toSenior True to assign assets to senior, false to junior
     /// @param receiver Account receiving bootstrap tranche shares
@@ -416,13 +416,13 @@ interface IHousePool {
         address receiver
     ) external;
 
-    /// @notice Seeds a tranche with permanent share-backed minimum ownership using real USDC.
-    /// @dev Owner only, once per tranche and outside oracle-frozen mode. Pulls real USDC from the owner, increases
+    /// @notice Seeds a tranche with permanent share-backed minimum ownership using real settlement token.
+    /// @dev Owner only, once per tranche and outside oracle-frozen mode. Pulls real settlement token from the owner, increases
     ///      canonical assets and principal, checkpoints engine carry, mints shares, and registers the receiver's
     ///      permanent share floor. Senior seeding also raises its high-water mark and is bounded by active capacity;
     ///      neutral constructor limits remain permissive, while activation later requires finite compliant limits.
     /// @param toSenior True to seed senior, false to seed junior
-    /// @param amount Nonzero USDC amount supplied by the owner for the seed (6 decimals)
+    /// @param amount Nonzero settlement token amount supplied by the owner for the seed (6 decimals)
     /// @param receiver Nonzero account receiving permanent seed shares
     function initializeSeedPosition(
         bool toSenior,
@@ -443,7 +443,7 @@ interface IHousePool {
     ///      senior demand, caps by conservative free cash, junior principal, and the governed active senior-share
     ///      covenant without reserving dormant senior principal. Does not preview pending reconciliation or enforce
     ///      the current-epoch Router-bound mark required for execution with open positions outside frozen mode.
-    /// @return Current junior queue-funding capacity in USDC
+    /// @return Current junior queue-funding capacity in settlement token
     function getMaxJuniorWithdraw() external view returns (uint256);
 
     /// @notice Read-only tranche state as if `reconcile()` ran immediately with current inputs.
@@ -453,18 +453,18 @@ interface IHousePool {
     ///      exists; otherwise it does not reserve dormant senior principal. These are current queue-funding capacities,
     ///      not promises that settlement will consume the full amounts. With open positions outside frozen mode,
     ///      execution additionally requires a Router-bound mark published in the current epoch.
-    /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
-    /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
-    /// @return maxSeniorWithdrawUsdc Simulated senior withdrawal cap after reconcile (6 decimals)
-    /// @return maxJuniorWithdrawUsdc Simulated junior withdrawal cap after reconcile (6 decimals)
+    /// @return seniorPrincipalAssets Simulated senior principal after reconcile (6 decimals)
+    /// @return juniorPrincipalAssets Simulated junior principal after reconcile (6 decimals)
+    /// @return maxSeniorWithdrawAssets Simulated senior withdrawal cap after reconcile (6 decimals)
+    /// @return maxJuniorWithdrawAssets Simulated junior withdrawal cap after reconcile (6 decimals)
     function getPendingTrancheState()
         external
         view
         returns (
-            uint256 seniorPrincipalUsdc,
-            uint256 juniorPrincipalUsdc,
-            uint256 maxSeniorWithdrawUsdc,
-            uint256 maxJuniorWithdrawUsdc
+            uint256 seniorPrincipalAssets,
+            uint256 juniorPrincipalAssets,
+            uint256 maxSeniorWithdrawAssets,
+            uint256 maxJuniorWithdrawAssets
         );
 
     /// @notice Read-only tranche principals for deposit pricing.
@@ -472,12 +472,12 @@ interface IHousePool {
     ///      price value, coupon accrual, realized value, and settleable claimant routing.
     ///      Fully asynchronous vaults use this state for indicative request estimates and coordinator-time epoch quotes;
     ///      it does not enable or quote an immediate ERC-4626 entry.
-    /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
-    /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
+    /// @return seniorPrincipalAssets Simulated senior principal after reconcile (6 decimals)
+    /// @return juniorPrincipalAssets Simulated junior principal after reconcile (6 decimals)
     function getPendingDepositTrancheState()
         external
         view
-        returns (uint256 seniorPrincipalUsdc, uint256 juniorPrincipalUsdc);
+        returns (uint256 seniorPrincipalAssets, uint256 juniorPrincipalAssets);
 
     /// @notice Whether pending deposit finalization would hit the senior impairment gate after reconcile.
     /// @dev Uses the canonical signed terminal-NAV reconcile snapshot shared by entry and exit pricing.
@@ -554,7 +554,7 @@ interface IHousePool {
     /// @dev Deposit admission and Senior request capacity enforce this floor. Redemption admission applies the same
     ///      minimum to estimated assets, except when requesting the owner's entire available share balance. Nonbinding
     ///      conversion estimates do not enforce it. ERC-7575 `deposit` and `mint` are claims, not new entry flows.
-    /// @return Minimum asynchronous deposit-request asset amount (1 USDC)
-    function minTrancheDepositUsdc() external view returns (uint256);
+    /// @return Minimum asynchronous deposit-request asset amount (1 settlement token)
+    function minTrancheDepositAssets() external view returns (uint256);
 
 }

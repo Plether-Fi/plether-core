@@ -2,6 +2,7 @@
 pragma solidity 0.8.35;
 
 import {LegacyOrderRouterHarness} from "../../../utils/LegacyOrderRouterHarness.sol";
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {OrderRouterDebugLens} from "../../../utils/OrderRouterDebugLens.sol";
 import {PerpGhostLedger} from "../ghost/PerpGhostLedger.sol";
 import {MockInvariantHousePool} from "../mocks/MockInvariantHousePool.sol";
@@ -20,7 +21,6 @@ import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghou
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
@@ -51,23 +51,23 @@ contract PerpAccountingHandler is Test {
 
     struct ReachabilityTransition {
         uint8 action;
-        uint256 beforeCloseReachableUsdc;
-        uint256 afterCloseReachableUsdc;
-        uint256 beforeTerminalReachableUsdc;
-        uint256 afterTerminalReachableUsdc;
+        uint256 beforeCloseReachableAssets;
+        uint256 afterCloseReachableAssets;
+        uint256 beforeTerminalReachableAssets;
+        uint256 afterTerminalReachableAssets;
     }
 
     struct PriceLossTraderClaimEvent {
         bool active;
         address account;
-        uint256 expectedTraderClaimAfterUsdc;
+        uint256 expectedTraderClaimAfterAssets;
     }
 
     struct TerminalResidualEvent {
         bool active;
         address account;
-        uint256 expectedFinalResidualUsdc;
-        uint256 traderWalletBeforeUsdc;
+        uint256 expectedFinalResidualAssets;
+        uint256 traderWalletBeforeAssets;
         bool walletPayoutExpected;
     }
 
@@ -95,13 +95,13 @@ contract PerpAccountingHandler is Test {
         bool isClose;
         bool terminalClose;
         bool terminalPriceLoss;
-        uint256 traderClaimBalanceUsdc;
-        uint256 expectedFinalResidualUsdc;
-        uint256 priceGainUsdc;
-        uint256 traderWalletBeforeUsdc;
+        uint256 traderClaimBalanceAssets;
+        uint256 expectedFinalResidualAssets;
+        uint256 priceGainAssets;
+        uint256 traderWalletBeforeAssets;
     }
 
-    MockUSDC public immutable usdc;
+    MockSettlementToken public immutable settlementToken;
     CfdEngine public immutable engine;
     CfdEngineAccountLens public immutable engineAccountLens;
     CfdEngineLens public immutable engineLens;
@@ -150,13 +150,13 @@ contract PerpAccountingHandler is Test {
     uint256[5] internal lastTerminalReservationRemainingBefore;
 
     constructor(
-        MockUSDC _usdc,
+        MockSettlementToken _settlementToken,
         CfdEngine _engine,
         MarginClearinghouse _clearinghouse,
         LegacyOrderRouterHarness _router,
         MockInvariantHousePool _housePool
     ) {
-        usdc = _usdc;
+        settlementToken = _settlementToken;
         engine = _engine;
         engineAccountLens = new CfdEngineAccountLens(address(_engine));
         engineLens = new CfdEngineLens(address(_engine));
@@ -184,15 +184,15 @@ contract PerpAccountingHandler is Test {
     }
 
     function seedActors(
-        uint256 traderDepositUsdc,
-        uint256 housePoolSeedUsdc
+        uint256 traderDepositAssets,
+        uint256 housePoolSeedAssets
     ) external {
         for (uint256 i = 0; i < actors.length; i++) {
-            _mintAndDepositTrader(actors[i], traderDepositUsdc);
+            _mintAndDepositTrader(actors[i], traderDepositAssets);
         }
 
-        housePool.seedAssets(housePoolSeedUsdc);
-        ghostTotalHousePoolMinted += housePoolSeedUsdc;
+        housePool.seedAssets(housePoolSeedAssets);
+        ghostTotalHousePoolMinted += housePoolSeedAssets;
     }
 
     function depositCollateral(
@@ -219,7 +219,7 @@ contract PerpAccountingHandler is Test {
         _clearTerminalReservationSet();
         address actor = actors[actorIndex % actors.length];
         address account = _account(actor);
-        uint256 freeSettlement = _freeSettlementUsdc(account);
+        uint256 freeSettlement = _freeSettlementAssets(account);
         if (freeSettlement < 1e6) {
             return;
         }
@@ -268,13 +268,13 @@ contract PerpAccountingHandler is Test {
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(account);
         uint256 amount = bound(amountFuzz, 1, 250_000e6);
-        usdc.mint(payer, amount);
+        settlementToken.mint(payer, amount);
         vm.startPrank(payer);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.depositFor(account, amount);
         vm.stopPrank();
 
-        // The payer introduces new tracked USDC; free credit creates no claim or committed-margin ghost entry.
+        // The payer introduces new tracked settlement token; free credit creates no claim or committed-margin ghost entry.
         ghost.recordMintAndDeposit(payer, amount);
         ghostTotalTraderMinted += amount;
         AccountLensViewTypes.AccountLedgerSnapshot memory afterSnapshot =
@@ -295,8 +295,8 @@ contract PerpAccountingHandler is Test {
         uint256 targetPrice = bound(targetPriceFuzz, 0.5e8, 1.5e8);
         uint256 sizeDelta = bound(sizeFuzz, 10, 1000) * CfdTypes.SIZE_QUANTUM;
         uint256 marginDelta = bound(marginDeltaFuzz, 0, 50_000e6);
-        uint256 neededUsdc = marginDelta + router.maxOpenOrderExecutionBountyUsdc();
-        _ensureFreeSettlement(actor, neededUsdc);
+        uint256 neededAssets = marginDelta + router.maxOpenOrderExecutionBountyAssets();
+        _ensureFreeSettlement(actor, neededAssets);
 
         CfdTypes.Side side = sideRaw % 2 == 0 ? CfdTypes.Side.LONG : CfdTypes.Side.SHORT;
         uint64 orderId = router.nextCommitId();
@@ -441,11 +441,12 @@ contract PerpAccountingHandler is Test {
         bytes[] memory priceData = _nextBlockPriceData(executionPrice);
         ModelledOrderPreview memory model = _modelOrderPreview(orderId, executionPrice);
         uint256[4] memory committedBefore = _snapshotTrackedCommittedMargin();
-        (bool processed, bool executed, uint256 actionChargeCollectedUsdc) = _tryExecuteOrder(orderId, priceData, model);
+        (bool processed, bool executed, uint256 actionChargeCollectedAssets) =
+            _tryExecuteOrder(orderId, priceData, model);
         if (executed) {
             if (model.terminalClose) {
-                model.expectedFinalResidualUsdc = model.expectedFinalResidualUsdc > actionChargeCollectedUsdc
-                    ? model.expectedFinalResidualUsdc - actionChargeCollectedUsdc
+                model.expectedFinalResidualAssets = model.expectedFinalResidualAssets > actionChargeCollectedAssets
+                    ? model.expectedFinalResidualAssets - actionChargeCollectedAssets
                     : 0;
             }
             _afterModelledOrderExecution(orderId, committedBefore, model);
@@ -463,21 +464,21 @@ contract PerpAccountingHandler is Test {
         model.isClose = orderRecord.core.isClose;
         AccountLensViewTypes.AccountLedgerSnapshot memory beforeSnapshot =
             engineAccountLens.getAccountLedgerSnapshot(model.account);
-        model.traderWalletBeforeUsdc = usdc.balanceOf(model.account);
+        model.traderWalletBeforeAssets = settlementToken.balanceOf(model.account);
         if (model.isClose && orderRecord.core.marginDelta == 0) {
             ICfdEngineTypes.ClosePreview memory preview =
                 engineLens.previewClose(model.account, orderRecord.core.sizeDelta, executionPrice);
             if (preview.valid) {
-                model.traderClaimBalanceUsdc = preview.traderClaimBalanceUsdc;
+                model.traderClaimBalanceAssets = preview.traderClaimBalanceAssets;
                 if (preview.remainingSize == 0) {
                     model.terminalClose = true;
-                    model.terminalPriceLoss = preview.realizedPnlUsdc < 0;
-                    model.priceGainUsdc = preview.realizedPnlUsdc > 0 ? uint256(preview.realizedPnlUsdc) : 0;
-                    uint256 grossResidualUsdc = beforeSnapshot.settlementBalanceUsdc + preview.immediatePayoutUsdc
-                        + preview.traderClaimBalanceUsdc;
-                    uint256 terminalDebitUsdc = preview.seizedCollateralUsdc + orderRecord.executionBountyUsdc;
-                    model.expectedFinalResidualUsdc =
-                        grossResidualUsdc > terminalDebitUsdc ? grossResidualUsdc - terminalDebitUsdc : 0;
+                    model.terminalPriceLoss = preview.realizedPnlAssets < 0;
+                    model.priceGainAssets = preview.realizedPnlAssets > 0 ? uint256(preview.realizedPnlAssets) : 0;
+                    uint256 grossResidualAssets = beforeSnapshot.settlementBalanceAssets + preview.immediatePayoutAssets
+                        + preview.traderClaimBalanceAssets;
+                    uint256 terminalDebitAssets = preview.seizedCollateralAssets + orderRecord.executionBountyAssets;
+                    model.expectedFinalResidualAssets =
+                        grossResidualAssets > terminalDebitAssets ? grossResidualAssets - terminalDebitAssets : 0;
                 }
             }
         }
@@ -491,11 +492,11 @@ contract PerpAccountingHandler is Test {
         _reconcileCommittedMarginAfterProcessedOrders(committedBefore, orderId, router.nextExecuteId(), false);
         _observeTraderClaim(model.account);
         if (model.terminalPriceLoss) {
-            _recordPriceLossTraderClaimEvent(model.account, model.traderClaimBalanceUsdc);
+            _recordPriceLossTraderClaimEvent(model.account, model.traderClaimBalanceAssets);
         }
         if (model.terminalClose) {
             _recordTerminalResidualEvent(
-                model.account, model.expectedFinalResidualUsdc, model.traderWalletBeforeUsdc, false
+                model.account, model.expectedFinalResidualAssets, model.traderWalletBeforeAssets, false
             );
         }
     }
@@ -504,7 +505,7 @@ contract PerpAccountingHandler is Test {
         uint64 orderId,
         bytes[] memory priceData,
         ModelledOrderPreview memory model
-    ) internal returns (bool processed, bool executed, uint256 actionChargeCollectedUsdc) {
+    ) internal returns (bool processed, bool executed, uint256 actionChargeCollectedAssets) {
         _recordOrderExecutionAttempt();
         if (model.terminalClose) {
             vm.recordLogs();
@@ -518,10 +519,10 @@ contract PerpAccountingHandler is Test {
             if (model.terminalClose) {
                 Vm.Log[] memory logs = vm.getRecordedLogs();
                 if (executed) {
-                    actionChargeCollectedUsdc = _terminalCloseActionChargeCollected(model, logs);
+                    actionChargeCollectedAssets = _terminalCloseActionChargeCollected(model, logs);
                 }
             }
-            return (processed, executed, actionChargeCollectedUsdc);
+            return (processed, executed, actionChargeCollectedAssets);
         } catch (bytes memory err) {
             _recordCaughtRevert(RejectionDomain.Execution, err);
             if (model.terminalClose) {
@@ -534,15 +535,15 @@ contract PerpAccountingHandler is Test {
     function _terminalCloseActionChargeCollected(
         ModelledOrderPreview memory model,
         Vm.Log[] memory logs
-    ) internal view returns (uint256 collectedUsdc) {
+    ) internal view returns (uint256 collectedAssets) {
         for (uint256 i = 0; i < logs.length; ++i) {
             if (
                 logs[i].emitter == address(engine) && logs[i].topics.length == 2
                     && logs[i].topics[0] == CARRY_REALIZED_TOPIC
                     && address(uint160(uint256(logs[i].topics[1]))) == model.account
             ) {
-                (uint256 realizedUsdc,,,) = abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
-                collectedUsdc += realizedUsdc;
+                (uint256 realizedAssets,,,) = abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+                collectedAssets += realizedAssets;
                 continue;
             }
             if (
@@ -553,9 +554,9 @@ contract PerpAccountingHandler is Test {
                 continue;
             }
 
-            (uint256 assessedUsdc, uint256 recoveredUsdc,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
-            uint256 withheldUsdc = model.priceGainUsdc < assessedUsdc ? model.priceGainUsdc : assessedUsdc;
-            collectedUsdc += recoveredUsdc - withheldUsdc;
+            (uint256 assessedAssets, uint256 recoveredAssets,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+            uint256 withheldAssets = model.priceGainAssets < assessedAssets ? model.priceGainAssets : assessedAssets;
+            collectedAssets += recoveredAssets - withheldAssets;
         }
     }
 
@@ -574,8 +575,8 @@ contract PerpAccountingHandler is Test {
         uint256 price = bound(priceFuzz, 0.3e8, 1.8e8);
         bytes[] memory priceData = _nextBlockPriceData(price);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, price);
-        uint256 traderWalletBeforeUsdc = usdc.balanceOf(actor);
-        uint256 expectedFinalResidualUsdc = preview.settlementRetainedUsdc + preview.traderClaimBalanceUsdc;
+        uint256 traderWalletBeforeAssets = settlementToken.balanceOf(actor);
+        uint256 expectedFinalResidualAssets = preview.settlementRetainedAssets + preview.traderClaimBalanceAssets;
         uint256 committedBefore = _trackedCommittedMargin(account);
         _recordTerminalReservationSet(account);
 
@@ -584,10 +585,10 @@ contract PerpAccountingHandler is Test {
             ghostSuccessfulLiquidations++;
             _reconcileCommittedMarginAfterLiquidation(account, committedBefore);
             _observeTraderClaim(account);
-            if (preview.pnlUsdc < 0) {
-                _recordPriceLossTraderClaimEvent(account, preview.traderClaimBalanceUsdc);
+            if (preview.pnlAssets < 0) {
+                _recordPriceLossTraderClaimEvent(account, preview.traderClaimBalanceAssets);
             }
-            _recordTerminalResidualEvent(account, expectedFinalResidualUsdc, traderWalletBeforeUsdc, false);
+            _recordTerminalResidualEvent(account, expectedFinalResidualAssets, traderWalletBeforeAssets, false);
         } catch (bytes memory err) {
             _recordCaughtRevert(RejectionDomain.Liquidation, err);
         }
@@ -709,10 +710,11 @@ contract PerpAccountingHandler is Test {
     function restoreSolvencyAndClearDegradedMode() external {
         _clearLastPriceLossTraderClaimEvent();
         _clearTerminalReservationSet();
-        (uint256 longMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.LONG));
-        (uint256 shortMaxProfitUsdc,,,) = engine.sides(uint256(CfdTypes.Side.SHORT));
-        uint256 maxLiabilityUsdc = longMaxProfitUsdc > shortMaxProfitUsdc ? longMaxProfitUsdc : shortMaxProfitUsdc;
-        housePool.setAssets(engine.totalTraderClaimBalanceUsdc() + maxLiabilityUsdc + 1e6);
+        (uint256 longMaxProfitAssets,,,) = engine.sides(uint256(CfdTypes.Side.LONG));
+        (uint256 shortMaxProfitAssets,,,) = engine.sides(uint256(CfdTypes.Side.SHORT));
+        uint256 maxLiabilityAssets =
+            longMaxProfitAssets > shortMaxProfitAssets ? longMaxProfitAssets : shortMaxProfitAssets;
+        housePool.setAssets(engine.totalTraderClaimBalanceAssets() + maxLiabilityAssets + 1e6);
 
         if (engine.degradedMode()) {
             vm.prank(engine.owner());
@@ -738,13 +740,13 @@ contract PerpAccountingHandler is Test {
 
     function accountExecutionBountyReserve(
         address account
-    ) public view returns (uint256 totalReservationUsdc) {
+    ) public view returns (uint256 totalReservationAssets) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             OrderRouterDebugLens.OrderRecord memory record = _orderRecord(orderId);
             if (record.core.account != account || record.core.sizeDelta == 0) {
                 continue;
             }
-            totalReservationUsdc += record.executionBountyUsdc;
+            totalReservationAssets += record.executionBountyAssets;
         }
     }
 
@@ -756,7 +758,7 @@ contract PerpAccountingHandler is Test {
             if (record.core.account != account || record.core.sizeDelta == 0) {
                 continue;
             }
-            if (record.executionBountyUsdc > 0 || _remainingCommittedMargin(orderId) > 0) {
+            if (record.executionBountyAssets > 0 || _remainingCommittedMargin(orderId) > 0) {
                 count++;
             }
         }
@@ -911,24 +913,24 @@ contract PerpAccountingHandler is Test {
 
     function _recordPriceLossTraderClaimEvent(
         address account,
-        uint256 expectedTraderClaimAfterUsdc
+        uint256 expectedTraderClaimAfterAssets
     ) internal {
         lastPriceLossTraderClaimEvent = PriceLossTraderClaimEvent({
-            active: true, account: account, expectedTraderClaimAfterUsdc: expectedTraderClaimAfterUsdc
+            active: true, account: account, expectedTraderClaimAfterAssets: expectedTraderClaimAfterAssets
         });
     }
 
     function _recordTerminalResidualEvent(
         address account,
-        uint256 expectedFinalResidualUsdc,
-        uint256 traderWalletBeforeUsdc,
+        uint256 expectedFinalResidualAssets,
+        uint256 traderWalletBeforeAssets,
         bool walletPayoutExpected
     ) internal {
         lastTerminalResidualEvent = TerminalResidualEvent({
             active: true,
             account: account,
-            expectedFinalResidualUsdc: expectedFinalResidualUsdc,
-            traderWalletBeforeUsdc: traderWalletBeforeUsdc,
+            expectedFinalResidualAssets: expectedFinalResidualAssets,
+            traderWalletBeforeAssets: traderWalletBeforeAssets,
             walletPayoutExpected: walletPayoutExpected
         });
     }
@@ -936,7 +938,7 @@ contract PerpAccountingHandler is Test {
     function _observeTraderClaim(
         address account
     ) internal {
-        uint256 liveTraderClaim = engine.traderClaimBalanceUsdc(account);
+        uint256 liveTraderClaim = engine.traderClaimBalanceAssets(account);
         observedTotalTraderClaims = observedTotalTraderClaims - observedTraderClaims[account] + liveTraderClaim;
         observedTraderClaims[account] = liveTraderClaim;
     }
@@ -976,7 +978,7 @@ contract PerpAccountingHandler is Test {
     function reservationRemainingCommittedMargin(
         uint64 orderId
     ) external view returns (uint256) {
-        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+        return clearinghouse.getOrderReservation(orderId).remainingAmountAssets;
     }
 
     function reservationOriginalAmount(
@@ -991,7 +993,7 @@ contract PerpAccountingHandler is Test {
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
         uint256 original = ghostReservationOriginal[orderId];
         uint256 terminalizedOrConsumed =
-            original > reservation.remainingAmountUsdc ? original - reservation.remainingAmountUsdc : 0;
+            original > reservation.remainingAmountAssets ? original - reservation.remainingAmountAssets : 0;
         if (reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
             return terminalizedOrConsumed;
         }
@@ -1012,7 +1014,7 @@ contract PerpAccountingHandler is Test {
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
         uint256 original = ghostReservationOriginal[orderId];
         uint256 terminalizedOrConsumed =
-            original > reservation.remainingAmountUsdc ? original - reservation.remainingAmountUsdc : 0;
+            original > reservation.remainingAmountAssets ? original - reservation.remainingAmountAssets : 0;
         if (reservation.status != IMarginClearinghouse.ReservationStatus.Released) {
             return 0;
         }
@@ -1039,16 +1041,16 @@ contract PerpAccountingHandler is Test {
     function accountActiveReservationCommittedMargin(
         address account
     ) external view returns (uint256) {
-        return clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginUsdc;
+        return clearinghouse.getAccountReservationSummary(account).activeCommittedOrderMarginAssets;
     }
 
     function accountReservationRemainingSum(
         address account
-    ) external view returns (uint256 totalRemainingUsdc) {
+    ) external view returns (uint256 totalRemainingAssets) {
         for (uint64 orderId = 1; orderId < router.nextCommitId(); orderId++) {
             IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
             if (reservation.account == account && reservation.status == IMarginClearinghouse.ReservationStatus.Active) {
-                totalRemainingUsdc += reservation.remainingAmountUsdc;
+                totalRemainingAssets += reservation.remainingAmountAssets;
             }
         }
     }
@@ -1127,15 +1129,15 @@ contract PerpAccountingHandler is Test {
 
     function _ensureFreeSettlement(
         address actor,
-        uint256 minFreeSettlementUsdc
+        uint256 minFreeSettlementAssets
     ) internal {
         address account = _account(actor);
-        uint256 freeSettlement = _freeSettlementUsdc(account);
-        if (freeSettlement >= minFreeSettlementUsdc) {
+        uint256 freeSettlement = _freeSettlementAssets(account);
+        if (freeSettlement >= minFreeSettlementAssets) {
             return;
         }
 
-        _mintAndDepositTrader(actor, minFreeSettlementUsdc - freeSettlement);
+        _mintAndDepositTrader(actor, minFreeSettlementAssets - freeSettlement);
     }
 
     function _mintAndDepositTrader(
@@ -1143,9 +1145,9 @@ contract PerpAccountingHandler is Test {
         uint256 amount
     ) internal {
         address account = _account(actor);
-        usdc.mint(actor, amount);
+        settlementToken.mint(actor, amount);
         vm.startPrank(actor);
-        usdc.approve(address(clearinghouse), amount);
+        settlementToken.approve(address(clearinghouse), amount);
         clearinghouse.deposit(account, amount);
         vm.stopPrank();
 
@@ -1156,16 +1158,16 @@ contract PerpAccountingHandler is Test {
     function _registerPendingOrder(
         uint64 orderId,
         address account,
-        uint256 committedMarginUsdc
+        uint256 committedMarginAssets
     ) internal {
         ghostOrderOwner[orderId] = account;
         ghostOrderGeneration[orderId] = ghost.accountGeneration(account);
         accountOrderHistory[account].push(orderId);
-        ghostOrderCommittedMargin[orderId] = committedMarginUsdc;
+        ghostOrderCommittedMargin[orderId] = committedMarginAssets;
         ghostOrderState[orderId] = GHOST_ORDER_PENDING;
-        if (committedMarginUsdc > 0) {
-            ghostReservationOriginal[orderId] = committedMarginUsdc;
-            ghost.increaseCommittedMargin(account, committedMarginUsdc);
+        if (committedMarginAssets > 0) {
+            ghostReservationOriginal[orderId] = committedMarginAssets;
+            ghost.increaseCommittedMargin(account, committedMarginAssets);
         }
     }
 
@@ -1182,7 +1184,7 @@ contract PerpAccountingHandler is Test {
         }
         for (uint256 i = 0; i < ids.length; i++) {
             lastTerminalReservationIds[i] = ids[i];
-            lastTerminalReservationRemainingBefore[i] = clearinghouse.getOrderReservation(ids[i]).remainingAmountUsdc;
+            lastTerminalReservationRemainingBefore[i] = clearinghouse.getOrderReservation(ids[i]).remainingAmountAssets;
             if (lastTerminalReservationRemainingBefore[i] > 0) {
                 lastTerminalActiveReservationCountBefore++;
             }
@@ -1207,10 +1209,10 @@ contract PerpAccountingHandler is Test {
     ) internal {
         reachabilityTransitions[account] = ReachabilityTransition({
             action: action,
-            beforeCloseReachableUsdc: beforeSnapshot.closeReachableUsdc,
-            afterCloseReachableUsdc: afterSnapshot.closeReachableUsdc,
-            beforeTerminalReachableUsdc: beforeSnapshot.liquidationReachableSettlementUsdc,
-            afterTerminalReachableUsdc: afterSnapshot.liquidationReachableSettlementUsdc
+            beforeCloseReachableAssets: beforeSnapshot.closeReachableAssets,
+            afterCloseReachableAssets: afterSnapshot.closeReachableAssets,
+            beforeTerminalReachableAssets: beforeSnapshot.liquidationReachableSettlementAssets,
+            afterTerminalReachableAssets: afterSnapshot.liquidationReachableSettlementAssets
         });
     }
 
@@ -1219,18 +1221,18 @@ contract PerpAccountingHandler is Test {
         uint8 terminalState
     ) internal {
         address account = ghostOrderOwner[orderId];
-        uint256 committedMarginUsdc = ghostOrderCommittedMargin[orderId];
+        uint256 committedMarginAssets = ghostOrderCommittedMargin[orderId];
         if (ghostOrderState[orderId] == GHOST_ORDER_NONE) {
             return;
         }
 
         IMarginClearinghouse.OrderReservation memory reservation = clearinghouse.getOrderReservation(orderId);
-        if (committedMarginUsdc > 0) {
-            ghost.decreaseCommittedMargin(account, committedMarginUsdc);
+        if (committedMarginAssets > 0) {
+            ghost.decreaseCommittedMargin(account, committedMarginAssets);
         }
 
         uint256 terminalizedAmount = ghostReservationOriginal[orderId] - ghostReservationConsumed[orderId]
-            - ghostReservationReleased[orderId] - reservation.remainingAmountUsdc;
+            - ghostReservationReleased[orderId] - reservation.remainingAmountAssets;
         if (terminalizedAmount > 0) {
             if (reservation.status == IMarginClearinghouse.ReservationStatus.Released) {
                 ghostReservationReleased[orderId] += terminalizedAmount;
@@ -1253,9 +1255,9 @@ contract PerpAccountingHandler is Test {
 
     function _consumeCommittedMarginFromAccount(
         address account,
-        uint256 amountUsdc
+        uint256 amountAssets
     ) internal {
-        uint256 remainingToConsume = amountUsdc;
+        uint256 remainingToConsume = amountAssets;
         for (uint64 orderId = 1; orderId < router.nextCommitId() && remainingToConsume > 0; orderId++) {
             if (ghostOrderOwner[orderId] != account || ghostOrderState[orderId] != GHOST_ORDER_PENDING) {
                 continue;
@@ -1346,7 +1348,7 @@ contract PerpAccountingHandler is Test {
     function _trackedCommittedMargin(
         address account
     ) internal view returns (uint256) {
-        return router.getAccountReservations(account).committedMarginUsdc;
+        return router.getAccountReservations(account).committedMarginAssets;
     }
 
     function _executionPriceForOrder(
@@ -1391,11 +1393,11 @@ contract PerpAccountingHandler is Test {
         return housePool.totalAssets();
     }
 
-    function _freeSettlementUsdc(
+    function _freeSettlementAssets(
         address account
     ) internal view returns (uint256) {
-        IMarginClearinghouse.AccountUsdcBuckets memory buckets = clearinghouse.getAccountUsdcBuckets(account);
-        return buckets.freeSettlementUsdc;
+        IMarginClearinghouse.AccountAssetBuckets memory buckets = clearinghouse.getAccountAssetBuckets(account);
+        return buckets.freeSettlementAssets;
     }
 
     function _firstPendingCloseOrderId(
@@ -1419,7 +1421,7 @@ contract PerpAccountingHandler is Test {
     function _remainingCommittedMargin(
         uint64 orderId
     ) internal view returns (uint256) {
-        return clearinghouse.getOrderReservation(orderId).remainingAmountUsdc;
+        return clearinghouse.getOrderReservation(orderId).remainingAmountAssets;
     }
 
     function _account(
@@ -1432,7 +1434,7 @@ contract PerpAccountingHandler is Test {
     /// @dev New-generation orders are deliberately excluded; old orders can never become live again.
     function liquidatedGenerationExposure(
         address account
-    ) external view returns (uint256 pendingOrders, uint256 liveReserves, uint256 reservedUsdc) {
+    ) external view returns (uint256 pendingOrders, uint256 liveReserves, uint256 reservedAssets) {
         uint256 currentGeneration = ghost.accountGeneration(account);
         if (currentGeneration == 0) {
             return (0, 0, 0);
@@ -1448,8 +1450,8 @@ contract PerpAccountingHandler is Test {
                 pendingOrders++;
             }
             uint256 committed = _remainingCommittedMargin(orderId);
-            reservedUsdc += record.executionBountyUsdc + committed;
-            if (record.executionBountyUsdc != 0 || committed != 0) {
+            reservedAssets += record.executionBountyAssets + committed;
+            if (record.executionBountyAssets != 0 || committed != 0) {
                 liveReserves++;
             }
         }

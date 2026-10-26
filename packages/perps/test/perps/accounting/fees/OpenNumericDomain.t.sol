@@ -20,16 +20,16 @@ contract OpenNumericDomainTest is Test {
     function _snapshot() private pure returns (CfdEnginePlanTypes.RawSnapshot memory snap) {
         snap.account = address(0xBEEF);
         snap.capPrice = 2e8;
-        snap.poolAssetsUsdc = 1_000_000e6;
-        snap.poolCashUsdc = snap.poolAssetsUsdc;
-        snap.accountBuckets.settlementBalanceUsdc = 100_000e6;
-        snap.accountBuckets.freeSettlementUsdc = 100_000e6;
+        snap.poolAssets = 1_000_000e6;
+        snap.poolCashAssets = snap.poolAssets;
+        snap.accountBuckets.settlementBalanceAssets = 100_000e6;
+        snap.accountBuckets.freeSettlementAssets = 100_000e6;
         snap.executionFeeBps = 4;
         snap.riskParams.maxSkewRatio = 1e18;
         snap.riskParams.initMarginBps = 150;
         snap.riskParams.maintMarginBps = 100;
         snap.riskParams.fadMarginBps = 300;
-        snap.riskParams.minBountyUsdc = 1e6;
+        snap.riskParams.minBountyAssets = 1e6;
         snap.riskParams.bountyBps = 10;
         snap.riskParams.vpiFactor = 0.0005e18;
     }
@@ -44,8 +44,8 @@ contract OpenNumericDomainTest is Test {
         inputs.sizeDelta = 17 * Q;
         inputs.price = 123_456_789;
         inputs.capPrice = 2e8;
-        inputs.poolDepthUsdc = 1_000_000e6;
-        inputs.postSkewUsdc = 2_098_765_413;
+        inputs.poolDepthAssets = 1_000_000e6;
+        inputs.postSkewAssets = 2_098_765_413;
         inputs.executionFeeBps = 4;
         inputs.riskParams = _snapshot().riskParams;
     }
@@ -133,14 +133,14 @@ contract OpenNumericDomainTest is Test {
 
     function test_NumericGuardFaultControlExposesOriginalPanic() public {
         CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
-        snap.poolAssetsUsdc = 1e30;
-        snap.poolCashUsdc = 1e30;
+        snap.poolAssets = 1e30;
+        snap.poolCashAssets = 1e30;
         uint256 lots = (MAX_SKEW + 1) / 1e8 + 1;
         snap.shortSide.openInterest = lots * Q;
         _numeric(snap, _order());
         // Bypassing the checked construction reproduces the original reachable intermediate overflow.
         vm.expectRevert(abi.encodeWithSignature("Panic(uint256)", 0x11));
-        math.oldSkewCost(lots * 1e8, snap.poolAssetsUsdc, snap.riskParams.vpiFactor);
+        math.oldSkewCost(lots * 1e8, snap.poolAssets, snap.riskParams.vpiFactor);
     }
 
     function test_OpenNonDollarGoldenState() public pure {
@@ -148,13 +148,13 @@ contract OpenNumericDomainTest is Test {
             OpenAccountingLib.tryBuildOpenState(_inputs());
         assertTrue(valid);
         assertEq(state.newSize, 17 * Q);
-        assertEq(state.newEntryCostUsdcAtoms, 2_098_765_413);
+        assertEq(state.newEntryCostAssetAtoms, 2_098_765_413);
         assertEq(state.newEntryPrice, 123_456_789);
-        assertEq(state.vpiUsdc, 1101);
-        assertEq(state.executionFeeUsdc, 839_506);
-        assertEq(state.tradeCostUsdc, 840_607);
-        assertEq(state.initialMarginRequirementUsdc, 31_481_481);
-        assertEq(state.maintenanceMarginUsdc, 20_987_654);
+        assertEq(state.vpiAssets, 1101);
+        assertEq(state.executionFeeAssets, 839_506);
+        assertEq(state.tradeCostAssets, 840_607);
+        assertEq(state.initialMarginRequirementAssets, 31_481_481);
+        assertEq(state.maintenanceMarginAssets, 20_987_654);
         assertEq(raw, 2_098_765);
     }
 
@@ -176,10 +176,10 @@ contract OpenNumericDomainTest is Test {
         order.side = shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG;
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(_snapshot(), order, mark);
         assertTrue(delta.valid);
-        assertEq(delta.newPosEntryCostUsdcAtoms, notional);
+        assertEq(delta.newPosEntryCostAssetAtoms, notional);
         assertEq(delta.posVpiAccruedDelta, int256(vpi));
-        assertEq(delta.executionFeeUsdc, fee);
-        assertEq(delta.liquidationReserveAfterUsdc, reserve);
+        assertEq(delta.executionFeeAssets, fee);
+        assertEq(delta.liquidationReserveAfterAssets, reserve);
         assertEq(delta.positionMarginAfterOpen, 10_000e6 - fee - reserve - vpi);
         assertEq(delta.posMaxProfitIncrease, shortSide ? lots * 200_000_000 - notional : notional);
     }
@@ -202,11 +202,11 @@ contract OpenNumericDomainTest is Test {
                 snap.shortSide.openInterest = shortLots * Q;
                 snap.longSide.entryNotional = longLots * 1e8 * Q;
                 snap.shortSide.entryNotional = shortLots * 1e8 * Q;
-                snap.longSide.maxProfitUsdc = longLots * 1e8;
-                snap.shortSide.maxProfitUsdc = shortLots * 1e8;
-                snap.poolAssetsUsdc = 1e44; // balanced sides keep VPI in-domain at the aggregate lot boundary.
-                snap.poolCashUsdc = 1e44;
-                snap.riskParams.minBountyUsdc = 1;
+                snap.longSide.maxProfitAssets = longLots * 1e8;
+                snap.shortSide.maxProfitAssets = shortLots * 1e8;
+                snap.poolAssets = 1e44; // balanced sides keep VPI in-domain at the aggregate lot boundary.
+                snap.poolCashAssets = 1e44;
+                snap.riskParams.minBountyAssets = 1;
                 CfdTypes.Order memory order = _order();
                 order.side = CfdTypes.Side(side);
                 order.sizeDelta = Q;
@@ -228,15 +228,15 @@ contract OpenNumericDomainTest is Test {
             snap.capPrice = cap;
             snap.longSide.openInterest = longLots * Q;
             snap.longSide.entryNotional = longLots * cap * Q;
-            snap.longSide.maxProfitUsdc = longLots * cap;
+            snap.longSide.maxProfitAssets = longLots * cap;
             uint256 oldShortEntry = shortEntryAtBoundary - cap + i - 1;
             uint256 oldShortLots = longLots; // balanced OI isolates the intercept bound from VPI's square bound.
             snap.shortSide.openInterest = oldShortLots * Q;
             snap.shortSide.entryNotional = oldShortEntry * Q;
-            snap.shortSide.maxProfitUsdc = oldShortLots * cap - oldShortEntry;
-            snap.poolAssetsUsdc = 1e44;
-            snap.poolCashUsdc = 1e44;
-            snap.riskParams.minBountyUsdc = 1;
+            snap.shortSide.maxProfitAssets = oldShortLots * cap - oldShortEntry;
+            snap.poolAssets = 1e44;
+            snap.poolCashAssets = 1e44;
+            snap.riskParams.minBountyAssets = 1;
             CfdTypes.Order memory order = _order();
             order.side = CfdTypes.Side.SHORT;
             order.sizeDelta = Q;
@@ -248,7 +248,7 @@ contract OpenNumericDomainTest is Test {
 
     function test_OpenLotAndEntryStorageBoundaries() public pure {
         OpenAccountingLib.OpenInputs memory inputs = _inputs();
-        inputs.poolDepthUsdc = 0;
+        inputs.poolDepthAssets = 0;
         inputs.price = type(uint32).max;
         inputs.capPrice = type(uint32).max;
         for (uint256 i; i < 3; ++i) {
@@ -259,11 +259,11 @@ contract OpenNumericDomainTest is Test {
         inputs.sizeDelta = Q;
         inputs.currentSize = Q;
         for (uint256 i; i < 3; ++i) {
-            inputs.currentEntryCostUsdcAtoms = uint256(type(uint144).max) - inputs.price + i - 1;
+            inputs.currentEntryCostAssetAtoms = uint256(type(uint144).max) - inputs.price + i - 1;
             (bool valid,,) = OpenAccountingLib.tryBuildOpenState(inputs);
             assertEq(valid, i < 2);
         }
-        inputs.currentEntryCostUsdcAtoms = 0;
+        inputs.currentEntryCostAssetAtoms = 0;
         inputs.currentSize = uint256(type(uint112).max) * Q;
         (bool valid,,) = OpenAccountingLib.tryBuildOpenState(inputs);
         assertFalse(valid, "increase cannot overflow existing lot storage");
@@ -292,8 +292,8 @@ contract OpenNumericDomainTest is Test {
         snap.shortSide.openInterest = type(uint256).max / snap.capPrice + 1;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.poolAssetsUsdc = 1e30;
-        snap.poolCashUsdc = 1e30;
+        snap.poolAssets = 1e30;
+        snap.poolCashAssets = 1e30;
         snap.shortSide.openInterest = ((MAX_SKEW + 1) / 1e8 + 1) * Q;
         _numeric(snap, order); // healing open still reaches invalid pre-skew square.
     }
@@ -312,7 +312,7 @@ contract OpenNumericDomainTest is Test {
         snap.riskParams.bountyBps = type(uint256).max;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.riskParams.minBountyUsdc = type(uint256).max;
+        snap.riskParams.minBountyAssets = type(uint256).max;
         assertEq(uint8(CfdEnginePlanLib.planOpen(snap, order, 1e8).revertCode), 3);
         OpenAccountingLib.OpenInputs memory inputs = _inputs();
         inputs.riskParams.bountyBps = type(uint256).max / (17 * inputs.price);
@@ -326,7 +326,7 @@ contract OpenNumericDomainTest is Test {
     function test_MinimumBountyQuotientEqualityAndAdjacentAtoms() public pure {
         for (uint256 i; i < 3; ++i) {
             CfdEnginePlanTypes.RawSnapshot memory snap = _snapshot();
-            snap.riskParams.minBountyUsdc = 10e6 + i - 1;
+            snap.riskParams.minBountyAssets = 10e6 + i - 1;
             CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, _order(), 1e8);
             assertEq(delta.valid, i < 2);
             assertEq(uint8(delta.revertCode), i < 2 ? 0 : 3);
@@ -362,32 +362,32 @@ contract OpenNumericDomainTest is Test {
         _numeric(snap, order);
         snap = _snapshot();
         snap.shortSide.openInterest = 500 * Q;
-        snap.accountBuckets.settlementBalanceUsdc = type(uint256).max;
-        snap.accountBuckets.freeSettlementUsdc = type(uint256).max;
+        snap.accountBuckets.settlementBalanceAssets = type(uint256).max;
+        snap.accountBuckets.freeSettlementAssets = type(uint256).max;
         snap.riskParams.vpiFactor = 1e18;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.poolCashUsdc = type(uint256).max;
+        snap.poolCashAssets = type(uint256).max;
         _numeric(snap, order);
         snap = _snapshot();
         snap.longSide.entryNotional = type(uint256).max;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.longSide.maxProfitUsdc = type(uint256).max;
+        snap.longSide.maxProfitAssets = type(uint256).max;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.poolAssetsUsdc = type(uint256).max;
-        snap.totalTraderClaimBalanceUsdc = type(uint256).max - 1_000_000e6;
-        snap.longSide.maxProfitUsdc = 1_000_000e6;
+        snap.poolAssets = type(uint256).max;
+        snap.totalTraderClaimBalanceAssets = type(uint256).max - 1_000_000e6;
+        snap.longSide.maxProfitAssets = 1_000_000e6;
         _numeric(snap, order);
         snap = _snapshot();
         snap.longSide.totalMargin = type(uint256).max;
         _numeric(snap, order);
         snap = _snapshot();
-        snap.poolCashUsdc = type(uint256).max;
+        snap.poolCashAssets = type(uint256).max;
         snap.traderClaimBalanceForAccount = uint256(type(int256).max);
-        snap.totalTraderClaimBalanceUsdc = snap.traderClaimBalanceForAccount;
-        snap.poolAssetsUsdc = snap.totalTraderClaimBalanceUsdc + 1_000_000e6;
+        snap.totalTraderClaimBalanceAssets = snap.traderClaimBalanceForAccount;
+        snap.poolAssets = snap.totalTraderClaimBalanceAssets + 1_000_000e6;
         _numeric(snap, order);
     }
 
@@ -398,7 +398,7 @@ contract OpenNumericDomainTest is Test {
         snap.riskParams.maxSkewRatio = 0;
         assertTrue(CfdEnginePlanLib.planOpen(snap, order, 1e8).valid);
         snap = _snapshot();
-        snap.poolAssetsUsdc = 0;
+        snap.poolAssets = 0;
         snap.riskParams.vpiFactor = type(uint256).max;
         CfdEnginePlanTypes.OpenDelta memory delta = CfdEnginePlanLib.planOpen(snap, order, 1e8);
         assertFalse(delta.valid);
@@ -411,11 +411,11 @@ contract OpenNumericDomainTest is Test {
         order.isClose = true;
         order.side = CfdTypes.Side.SHORT;
         snap.position.size = order.sizeDelta;
-        snap.positionBorrowBaseUsdc = type(uint256).max;
+        snap.positionBorrowBaseAssets = type(uint256).max;
         snap.longSide.carryIndex = type(uint256).max; // proves mismatch cannot touch even an unusable carry snapshot.
         CfdEnginePlanTypes.CloseDelta memory delta = CfdEnginePlanLib.planClose(snap, order, 1e8);
         assertEq(uint8(delta.revertCode), 7);
-        assertEq(delta.pendingCarryUsdc, 0);
+        assertEq(delta.pendingCarryAssets, 0);
         snap.position.size = 0;
         assertEq(uint8(CfdEnginePlanLib.planClose(snap, order, 1e8).revertCode), 1);
     }

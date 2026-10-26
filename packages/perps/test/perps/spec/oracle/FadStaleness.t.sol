@@ -28,8 +28,8 @@ import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdmin
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
 
+import {MockSettlementToken} from "../../../utils/MockSettlementToken.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 
 contract FadStalenessTest is BasePerpTest {
 
@@ -59,7 +59,7 @@ contract FadStalenessTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1 * 1e6,
+            minBountyAssets: 1 * 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0
@@ -67,21 +67,21 @@ contract FadStalenessTest is BasePerpTest {
     }
 
     function setUp() public override {
-        usdc = new MockUSDC();
+        settlementToken = new MockSettlementToken();
         mockPyth = new MockPyth();
         mockPyth.setSynchronizeLegacyUniquePrices(true);
 
-        clearinghouse = new MarginClearinghouse(address(usdc));
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
         engine = _deployEngine(_riskParams());
         _syncEngineAdmin();
         engine.setTerminalNavBook(address(new TerminalNavBookV2(address(engine), uint32(engine.CAP_PRICE()))));
-        pool = new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+        pool = new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
 
         seniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), true, "Plether Senior LP", "seniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), true, "Plether Senior LP", "seniorAssets", 0, address(0)
         );
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Plether Junior LP", "juniorUSDC", 0, address(0)
+            IERC20(address(settlementToken)), address(pool), false, "Plether Junior LP", "juniorAssets", 0, address(0)
         );
         pool.setSeniorVault(address(seniorVault));
         pool.setJuniorVault(address(juniorVault));
@@ -107,9 +107,9 @@ contract FadStalenessTest is BasePerpTest {
 
         _fundJunior(bob, 1_000_000 * 1e6);
 
-        usdc.mint(alice, 10_000 * 1e6);
+        settlementToken.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
@@ -370,9 +370,9 @@ contract FadStalenessTest is BasePerpTest {
     function test_Weekday_OpenOrder_Allowed() public {
         _startRecordingLogs();
         address carol = address(0x333);
-        usdc.mint(carol, 10_000 * 1e6);
+        settlementToken.mint(carol, 10_000 * 1e6);
         vm.startPrank(carol);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(carol, 10_000 * 1e6);
         vm.stopPrank();
 

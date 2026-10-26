@@ -15,7 +15,7 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
         address account;
         CfdTypes.Side side;
         uint256 size;
-        uint256 triggerBountyUsdc;
+        uint256 triggerBountyAssets;
     }
 
     /// @notice Activates a met OCO leg and returns the trigger bounty with a zero-bounty close plan.
@@ -49,16 +49,16 @@ interface IPositionProtectionBook is IPositionProtectionActions, IPositionProtec
     function failPendingOpenForRiskOff(
         uint64 parentOrderId,
         address account
-    ) external returns (uint256 refundableProtectionBountyUsdc);
+    ) external returns (uint256 refundableProtectionBountyAssets);
 
     /// @notice Terminalizes active protection during liquidation and returns its unpaid non-order bounty.
     function forfeitOnLiquidation(
         address account
-    ) external returns (uint256 forfeitedUsdc);
+    ) external returns (uint256 forfeitedAssets);
 
     /// @notice Returns unpaid reserved bounty value not yet represented by an ordinary queued order.
     function unpaidBounties(
         address account
-    ) external view returns (uint256 unpaidBountyUsdc);
+    ) external view returns (uint256 unpaidBountyAssets);
 
 }

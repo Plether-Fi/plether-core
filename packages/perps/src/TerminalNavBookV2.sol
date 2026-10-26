@@ -22,29 +22,29 @@ interface ITerminalNavEngineView {
             uint256 size,
             uint256 margin,
             uint256 entryPrice,
-            uint256 maxProfitUsdc,
+            uint256 maxProfitAssets,
             CfdTypes.Side side,
             uint64 lastUpdateTime,
             int256 vpiAccrued
         );
 
-    function positionEntryCostUsdcAtoms(
+    function positionEntryCostAssetAtoms(
         address account
     ) external view returns (uint256);
 
-    function traderClaimBalanceUsdc(
+    function traderClaimBalanceAssets(
         address account
     ) external view returns (uint256);
 
     function sides(
         uint256 index
-    ) external view returns (uint256 maxProfitUsdc, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
+    ) external view returns (uint256 maxProfitAssets, uint256 openInterest, uint256 entryNotional, uint256 totalMargin);
 
     function lastMarkPrice() external view returns (uint256);
 
     function lastMarkTime() external view returns (uint64);
 
-    function totalTraderClaimBalanceUsdc() external view returns (uint256);
+    function totalTraderClaimBalanceAssets() external view returns (uint256);
 
     function degradedMode() external view returns (bool);
 
@@ -99,10 +99,10 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
     uint112 private _totalLots;
 
     /// @notice Gross entry-basis budget used to prove every packed aggregate intercept remains representable.
-    uint144 private _totalEntryCostUsdcAtoms;
+    uint144 private _totalEntryCostAssetAtoms;
 
     /// @notice Gross effective collectible-cap budget used in packed-intercept safety checks.
-    uint144 private _totalEffectiveCapUsdcAtoms;
+    uint144 private _totalEffectiveCapAssetAtoms;
 
     /// @notice Internal piecewise-affine representation of one canonical account curve.
     struct CurveEncoding {
@@ -115,8 +115,8 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
     /// @notice Exact Engine state used to derive one canonical account curve.
     struct EngineCurveInput {
         uint112 lots;
-        uint144 entryCostUsdcAtoms;
-        uint144 collectibleCapUsdcAtoms;
+        uint144 entryCostAssetAtoms;
+        uint144 collectibleCapAssetAtoms;
         CfdTypes.Side side;
     }
 
@@ -164,8 +164,8 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
             engine.sides(1);
         return engine.CAP_PRICE() == CAP_PRICE && longMaxProfit == 0 && longOpenInterest == 0 && longEntryNotional == 0
             && longMargin == 0 && shortMaxProfit == 0 && shortOpenInterest == 0 && shortEntryNotional == 0
-            && shortMargin == 0 && _totalEntryCostUsdcAtoms == 0 && _totalEffectiveCapUsdcAtoms == 0 && _base.slope == 0
-            && _base.intercept == 0;
+            && shortMargin == 0 && _totalEntryCostAssetAtoms == 0 && _totalEffectiveCapAssetAtoms == 0
+            && _base.slope == 0 && _base.intercept == 0;
     }
 
     /// @inheritdoc ITerminalNavBookV2
@@ -213,7 +213,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         uint256 totalEntryNotional = longEntryNotional + shortEntryNotional;
         if (
             uint256(_totalLots) * SIZE_QUANTUM != totalOpenInterest
-                || uint256(_totalEntryCostUsdcAtoms) * SIZE_QUANTUM != totalEntryNotional
+                || uint256(_totalEntryCostAssetAtoms) * SIZE_QUANTUM != totalEntryNotional
                 || ((_activeCurveCount == 0) != (totalOpenInterest == 0))
         ) {
             revert ICfdEngineTypes.CfdEngine__InvalidTerminalNavBook();
@@ -226,12 +226,12 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
             revert ICfdEngineTypes.CfdEngine__InvalidTerminalNavBook();
         }
         if (snapshot.hasOpenPositions) {
-            snapshot.terminalLpPriceDeltaUsdc = _terminalLpPriceDeltaUsdcAtoms(uint32(markPrice));
+            snapshot.terminalLpPriceDeltaAssets = _terminalLpPriceDeltaAssetAtoms(uint32(markPrice));
         }
         snapshot.markPrice = uint32(markPrice);
         snapshot.markTime = markTime;
-        snapshot.totalTraderClaimsUsdc = engine.totalTraderClaimBalanceUsdc();
-        snapshot.maxDirectionalLiabilityUsdc = longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
+        snapshot.totalTraderClaimsAssets = engine.totalTraderClaimBalanceAssets();
+        snapshot.maxDirectionalLiabilityAssets = longMaxProfit > shortMaxProfit ? longMaxProfit : shortMaxProfit;
         snapshot.bookVersion = _bookVersion;
         snapshot.degradedMode = engine.degradedMode();
     }
@@ -262,8 +262,8 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         }
 
         _totalLots = nextTotalLots;
-        _totalEntryCostUsdcAtoms = nextTotalEntryCost;
-        _totalEffectiveCapUsdcAtoms = nextTotalCap;
+        _totalEntryCostAssetAtoms = nextTotalEntryCost;
+        _totalEffectiveCapAssetAtoms = nextTotalCap;
         if (!replacing) {
             if (_activeCurveCount == type(uint64).max) {
                 revert TerminalNavBookV2__AggregateBoundsExceeded();
@@ -283,8 +283,8 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
             newHash,
             newBookVersion,
             nextRecord.lots,
-            nextRecord.entryCostUsdcAtoms,
-            nextRecord.effectiveCapUsdcAtoms,
+            nextRecord.entryCostAssetAtoms,
+            nextRecord.effectiveCapAssetAtoms,
             nextRecord.side
         );
     }
@@ -297,8 +297,8 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         _applyCurve(oldRecord, false);
 
         _totalLots -= oldRecord.lots;
-        _totalEntryCostUsdcAtoms -= oldRecord.entryCostUsdcAtoms;
-        _totalEffectiveCapUsdcAtoms -= oldRecord.effectiveCapUsdcAtoms;
+        _totalEntryCostAssetAtoms -= oldRecord.entryCostAssetAtoms;
+        _totalEffectiveCapAssetAtoms -= oldRecord.effectiveCapAssetAtoms;
         unchecked {
             --_activeCurveCount;
         }
@@ -311,15 +311,15 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
     }
 
     /// @inheritdoc ITerminalNavBookV2
-    function terminalLpPriceDeltaUsdcAtoms(
+    function terminalLpPriceDeltaAssetAtoms(
         uint32 markPrice
-    ) external view returns (int256 terminalDeltaUsdcAtoms) {
-        return _terminalLpPriceDeltaUsdcAtoms(markPrice);
+    ) external view returns (int256 terminalDeltaAssetAtoms) {
+        return _terminalLpPriceDeltaAssetAtoms(markPrice);
     }
 
-    function _terminalLpPriceDeltaUsdcAtoms(
+    function _terminalLpPriceDeltaAssetAtoms(
         uint32 markPrice
-    ) private view returns (int256 terminalDeltaUsdcAtoms) {
+    ) private view returns (int256 terminalDeltaAssetAtoms) {
         if (markPrice > CAP_PRICE) {
             revert TerminalNavBookV2__MarkPriceAboveCap(markPrice, CAP_PRICE);
         }
@@ -346,7 +346,7 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         aggregateSlope += int256(exactLeaf.slope);
         aggregateIntercept += int256(exactLeaf.intercept);
 
-        terminalDeltaUsdcAtoms = aggregateSlope * int256(uint256(markPrice)) + aggregateIntercept;
+        terminalDeltaAssetAtoms = aggregateSlope * int256(uint256(markPrice)) + aggregateIntercept;
     }
 
     /// @inheritdoc ITerminalNavBookV2
@@ -369,8 +369,8 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         state.activeCurveCount = _activeCurveCount;
         state.bookVersion = _bookVersion;
         state.totalLots = _totalLots;
-        state.totalEntryCostUsdcAtoms = _totalEntryCostUsdcAtoms;
-        state.totalEffectiveCapUsdcAtoms = _totalEffectiveCapUsdcAtoms;
+        state.totalEntryCostAssetAtoms = _totalEntryCostAssetAtoms;
+        state.totalEffectiveCapAssetAtoms = _totalEffectiveCapAssetAtoms;
         state.base = _base;
     }
 
@@ -393,23 +393,23 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
             revert TerminalNavBookV2__ZeroLots();
         }
 
-        uint256 maximumEntryCostUsdcAtoms = uint256(next.lots) * uint256(CAP_PRICE);
-        if (uint256(next.entryCostUsdcAtoms) > maximumEntryCostUsdcAtoms) {
-            revert TerminalNavBookV2__EntryCostAboveCap(next.entryCostUsdcAtoms, maximumEntryCostUsdcAtoms);
+        uint256 maximumEntryCostAssetAtoms = uint256(next.lots) * uint256(CAP_PRICE);
+        if (uint256(next.entryCostAssetAtoms) > maximumEntryCostAssetAtoms) {
+            revert TerminalNavBookV2__EntryCostAboveCap(next.entryCostAssetAtoms, maximumEntryCostAssetAtoms);
         }
 
-        uint256 maximumCollectibleUsdcAtoms = next.side == CfdTypes.Side.LONG
-            ? maximumEntryCostUsdcAtoms - uint256(next.entryCostUsdcAtoms)
-            : uint256(next.entryCostUsdcAtoms);
-        uint144 effectiveCap = next.collectibleCapUsdcAtoms;
-        if (uint256(effectiveCap) > maximumCollectibleUsdcAtoms) {
-            effectiveCap = uint144(maximumCollectibleUsdcAtoms);
+        uint256 maximumCollectibleAssetAtoms = next.side == CfdTypes.Side.LONG
+            ? maximumEntryCostAssetAtoms - uint256(next.entryCostAssetAtoms)
+            : uint256(next.entryCostAssetAtoms);
+        uint144 effectiveCap = next.collectibleCapAssetAtoms;
+        if (uint256(effectiveCap) > maximumCollectibleAssetAtoms) {
+            effectiveCap = uint144(maximumCollectibleAssetAtoms);
         }
 
         record = CurveRecord({
             lots: next.lots,
-            entryCostUsdcAtoms: next.entryCostUsdcAtoms,
-            effectiveCapUsdcAtoms: effectiveCap,
+            entryCostAssetAtoms: next.entryCostAssetAtoms,
+            effectiveCapAssetAtoms: effectiveCap,
             side: next.side
         });
     }
@@ -428,20 +428,21 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         }
 
         uint256 lots = size / SIZE_QUANTUM;
-        uint256 entryCostUsdcAtoms = engine.positionEntryCostUsdcAtoms(account);
+        uint256 entryCostAssetAtoms = engine.positionEntryCostAssetAtoms(account);
         IMarginClearinghouse clearinghouse = IMarginClearinghouse(engine.clearinghouse());
-        uint256 candidateCapUsdcAtoms = clearinghouse.pnlPledgeUsdc(account) + engine.traderClaimBalanceUsdc(account);
+        uint256 candidateCapAssetAtoms =
+            clearinghouse.pnlPledgeAssets(account) + engine.traderClaimBalanceAssets(account);
         if (
-            lots > type(uint112).max || entryCostUsdcAtoms > type(uint144).max
-                || candidateCapUsdcAtoms > type(uint144).max
+            lots > type(uint112).max || entryCostAssetAtoms > type(uint144).max
+                || candidateCapAssetAtoms > type(uint144).max
         ) {
             revert ICfdEngineTypes.CfdEngine__InvalidTerminalNavBook();
         }
 
         input = EngineCurveInput({
             lots: uint112(lots),
-            entryCostUsdcAtoms: uint144(entryCostUsdcAtoms),
-            collectibleCapUsdcAtoms: uint144(candidateCapUsdcAtoms),
+            entryCostAssetAtoms: uint144(entryCostAssetAtoms),
+            collectibleCapAssetAtoms: uint144(candidateCapAssetAtoms),
             side: side
         });
         hasPosition = true;
@@ -454,13 +455,13 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         bool replacing
     ) private view returns (uint112 nextLots, uint144 nextEntryCost, uint144 nextCap) {
         uint256 oldLots = replacing ? uint256(oldRecord.lots) : 0;
-        uint256 oldEntryCost = replacing ? uint256(oldRecord.entryCostUsdcAtoms) : 0;
-        uint256 oldCap = replacing ? uint256(oldRecord.effectiveCapUsdcAtoms) : 0;
+        uint256 oldEntryCost = replacing ? uint256(oldRecord.entryCostAssetAtoms) : 0;
+        uint256 oldCap = replacing ? uint256(oldRecord.effectiveCapAssetAtoms) : 0;
 
         uint256 widenedLots = uint256(_totalLots) - oldLots + uint256(nextRecord.lots);
         uint256 widenedEntryCost =
-            uint256(_totalEntryCostUsdcAtoms) - oldEntryCost + uint256(nextRecord.entryCostUsdcAtoms);
-        uint256 widenedCap = uint256(_totalEffectiveCapUsdcAtoms) - oldCap + uint256(nextRecord.effectiveCapUsdcAtoms);
+            uint256(_totalEntryCostAssetAtoms) - oldEntryCost + uint256(nextRecord.entryCostAssetAtoms);
+        uint256 widenedCap = uint256(_totalEffectiveCapAssetAtoms) - oldCap + uint256(nextRecord.effectiveCapAssetAtoms);
 
         if (widenedLots > MAX_INT112 || widenedEntryCost + widenedCap > MAX_INT144) {
             revert TerminalNavBookV2__AggregateBoundsExceeded();
@@ -573,23 +574,23 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
         CurveRecord memory record
     ) private view returns (CurveEncoding memory encoding) {
         int112 lots = int112(record.lots);
-        int144 entryCost = int144(record.entryCostUsdcAtoms);
-        uint256 cap = uint256(record.effectiveCapUsdcAtoms);
+        int144 entryCost = int144(record.entryCostAssetAtoms);
+        uint256 cap = uint256(record.effectiveCapAssetAtoms);
 
         if (record.side == CfdTypes.Side.LONG) {
             encoding.base = Coeff({slope: lots, intercept: -entryCost});
 
-            uint256 maximumCollectible = uint256(record.lots) * uint256(CAP_PRICE) - record.entryCostUsdcAtoms;
+            uint256 maximumCollectible = uint256(record.lots) * uint256(CAP_PRICE) - record.entryCostAssetAtoms;
             if (cap < maximumCollectible) {
-                uint256 eventIntercept = uint256(record.entryCostUsdcAtoms) + cap;
+                uint256 eventIntercept = uint256(record.entryCostAssetAtoms) + cap;
                 encoding.hasEvent = true;
                 encoding.breakpoint = _checkedBreakpoint(_ceilDiv(eventIntercept, record.lots));
                 encoding.eventCoefficient = Coeff({slope: -lots, intercept: int144(int256(eventIntercept))});
             }
-        } else if (cap == uint256(record.entryCostUsdcAtoms)) {
+        } else if (cap == uint256(record.entryCostAssetAtoms)) {
             encoding.base = Coeff({slope: -lots, intercept: entryCost});
         } else {
-            uint256 eventIntercept = uint256(record.entryCostUsdcAtoms) - cap;
+            uint256 eventIntercept = uint256(record.entryCostAssetAtoms) - cap;
             encoding.base = Coeff({slope: 0, intercept: int144(int256(cap))});
             encoding.hasEvent = true;
             encoding.breakpoint = _checkedBreakpoint(_ceilDiv(eventIntercept, record.lots));
@@ -630,8 +631,8 @@ contract TerminalNavBookV2 is ITerminalNavBookV2 {
                 CAP_PRICE,
                 account,
                 record.lots,
-                record.entryCostUsdcAtoms,
-                record.effectiveCapUsdcAtoms,
+                record.entryCostAssetAtoms,
+                record.effectiveCapAssetAtoms,
                 record.side
             )
         );

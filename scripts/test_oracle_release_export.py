@@ -69,15 +69,17 @@ class SettlementConfigurationTest(unittest.TestCase):
         self.root = Path(__file__).resolve().parents[1]
         self.manifest = json.loads((self.root / "deployments/arbitrum-sepolia-perps.template.json").read_text())
 
-    def test_new_template_selects_mock_usdg_and_retains_historical_artifact_mapping(self):
+    def test_new_template_selects_explicit_mock_usdg_artifact(self):
         release.validate_settlement_configuration(self.manifest)
         identifier = release.artifact_identifier("settlementToken", self.manifest["contracts"]["settlementToken"])
         self.assertEqual(identifier, "DeployPerpsArbitrumSepolia.s.sol:MockUSDG")
         inventory = release.consumer_inventory(self.root, self.manifest)
         self.assertEqual(inventory[identifier], "script/DeployPerpsArbitrumSepolia.s.sol")
         self.assertNotIn("DeployPerpsArbitrumSepolia.s.sol:MockUSDC", inventory)
-        self.assertEqual(release.artifact_identifier("mockUsdc", {}), "DeployPerpsArbitrumSepolia.s.sol:MockUSDC")
-        release.validate_settlement_configuration(MANIFEST)
+
+    def test_export_rejects_legacy_manifest_schema(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported perps release manifest schema"):
+            release.consumer_inventory(self.root, MANIFEST)
 
     def test_mock_cannot_advertise_signed_deposits_bridge_funding_or_gdn_eligibility(self):
         for section, key, value in (
@@ -254,6 +256,7 @@ class ExportWorkflowTest(unittest.TestCase):
         with patch.object(release, "source_fingerprint", side_effect=fingerprints or [self.fingerprint] * 3), \
              patch.object(release.subprocess, "check_output", side_effect=check_output or self.check_output), \
              patch.object(release.subprocess, "run", side_effect=run or self.run_command), \
+             patch.object(release, "validate_settlement_configuration"), \
              patch.object(release, "pinned_source", side_effect=lambda _root, _revision, path: SOURCE if path == SOURCE_PATH else (self.root / path).read_bytes()), \
              patch.object(release, "keccak256", side_effect=synthetic_keccak):
             return release.export_release(self.root, self.output, self.fingerprint["sourceCommit"])
@@ -384,7 +387,10 @@ class ExportWorkflowTest(unittest.TestCase):
         path = self.root / "packages/perps/src/interfaces/IMultiple.sol"
         path.parent.mkdir(parents=True)
         path.write_text("// interface Fake {}\n/* contract Fake2 {} */\ninterface IMultiple {}\ninterface ISecondary {}\n")
-        result = release.consumer_inventory(self.root, MANIFEST)
+        # This test exercises source declaration discovery; token schema validation
+        # is covered independently with the complete real manifest above.
+        with patch.object(release, "validate_settlement_configuration"):
+            result = release.consumer_inventory(self.root, MANIFEST)
         self.assertEqual(set(result), {IDENTIFIER, "IMultiple.sol:IMultiple", "IMultiple.sol:ISecondary"})
 
     def test_existing_output_cannot_be_overwritten(self):

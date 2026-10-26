@@ -63,7 +63,7 @@ contract PendingOrderReferenceLedgerTest is Test {
         assertEq(historical.deadline, 400);
         assertEq(historical.bountyFree, 0);
         assertEq(historical.bountyPledge, 0);
-        assertEq(historical.bountyUsdc, 0);
+        assertEq(historical.bountyAssets, 0);
         assertEq(historical.remainingBounty, 0);
         assertEq(abi.encode(historical.request), abi.encode(request));
         assertEq(uint8(historical.status), uint8(OrderV3Types.LifecycleStatus.Failed));
@@ -72,7 +72,7 @@ contract PendingOrderReferenceLedgerTest is Test {
         assertEq(ledger.margin(0), 0);
         assertEq(ledger.bounty(0), 0);
 
-        request.bounds.maxActionChargeUsdc--;
+        request.bounds.maxActionChargeAssets--;
         vm.expectRevert(PendingOrderReferenceLedger.ClientIdConflict.selector);
         ledger.commit(0, 9, request, 200_000, 0, 900, 90);
     }
@@ -165,14 +165,14 @@ contract PendingOrderReferenceLedgerTest is Test {
         request.bounds.executionWindowSeconds = 300;
         request.bounds.allowedExecutionModes = 7;
         request.bounds.expectedConfigHash = bytes32(uint256(0xCAFE));
-        request.bounds.maxExecutionBountyUsdc = 200_000;
-        request.bounds.maxExecutionNotionalUsdc = 10_000e6;
-        request.bounds.maxGrossAccountDebitUsdc = 1000e6;
-        request.bounds.maxActionChargeUsdc = 100e6;
-        request.bounds.maxExplicitFeesUsdc = 20e6;
+        request.bounds.maxExecutionBountyAssets = 200_000;
+        request.bounds.maxExecutionNotionalAssets = 10_000e6;
+        request.bounds.maxGrossAccountDebitAssets = 1000e6;
+        request.bounds.maxActionChargeAssets = 100e6;
+        request.bounds.maxExplicitFeesAssets = 20e6;
         request.bounds.maxPostPositionSize = 10_000e18;
-        request.bounds.minPostSettlementBalanceUsdc = 1;
-        request.bounds.minPostPositionEquityUsdc = 2;
+        request.bounds.minPostSettlementBalanceAssets = 1;
+        request.bounds.minPostPositionEquityAssets = 2;
         request.bounds.maxPostLeverageBps = 500_000;
     }
 

@@ -58,7 +58,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
 
         (uint256 positionSize,,,,,,) = engine.positions(trader);
         assertEq(positionSize, 200_000e18, "Withdrawal must exercise a surviving live position");
-        assertGe(_freeSettlementUsdc(trader), 1e6, "Free cash must cover the requested withdrawal");
+        assertGe(_freeSettlementAssets(trader), 1e6, "Free cash must cover the requested withdrawal");
         bytes32 accountingBefore = _withdrawalAccountingDigest(trader);
         vm.prank(trader);
         vm.expectRevert(ICfdEngineTypes.CfdEngine__MarkPriceStale.selector);
@@ -116,8 +116,10 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         assertGt((expectedLiability * 37) % 10_000, 0, "Fixture must distinguish ceiling from floor rounding");
         HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot =
             engineProtocolLens.getHousePoolInputSnapshot(pool.markStalenessLimit());
-        assertEq(snapshot.maxLiabilityUsdc, expectedLiability, "Snapshot must preserve the known directional liability");
-        assertEq(snapshot.supplementalReservedUsdc, expectedBuffer, "Staleness must not erase the settlement buffer");
+        assertEq(
+            snapshot.maxLiabilityAssets, expectedLiability, "Snapshot must preserve the known directional liability"
+        );
+        assertEq(snapshot.supplementalReservedAssets, expectedBuffer, "Staleness must not erase the settlement buffer");
         assertTrue(snapshot.hasOpenPositions);
         assertTrue(snapshot.markFreshnessRequired);
         assertEq(snapshot.maxMarkStaleness, expectedStaleness, "Snapshot must select the active freshness limit");
@@ -129,16 +131,16 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         (uint256 borrowBase, uint256 carryIndex, uint64 carryTimestamp) = engine.positionCarryState(account);
         return keccak256(
             abi.encode(
-                clearinghouse.getAccountUsdcBuckets(account),
-                clearinghouse.totalBountyReservationsUsdc(account),
-                engine.unsettledCarryUsdc(account),
+                clearinghouse.getAccountAssetBuckets(account),
+                clearinghouse.totalBountyReservationsAssets(account),
+                engine.unsettledCarryAssets(account),
                 borrowBase,
                 carryIndex,
                 carryTimestamp,
                 _lastCarryTimestamp(account),
                 terminalNavBook.curveHashOf(account),
-                usdc.balanceOf(account),
-                usdc.balanceOf(address(clearinghouse)),
+                settlementToken.balanceOf(account),
+                settlementToken.balanceOf(address(clearinghouse)),
                 pool.rawAssets(),
                 pool.accountedAssets()
             )
@@ -151,25 +153,25 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 depositAmount = 500e6;
 
         _fundTrader(trader, 10_000e6);
-        usdc.mint(trader, depositAmount);
+        settlementToken.mint(trader, depositAmount);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
         uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.depositMargin(depositAmount);
         vm.stopPrank();
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore + depositAmount - expectedCarry,
             "Stale deposit should checkpoint carry on the pre-deposit basis before increasing collateral"
         );
         assertEq(
-            engine.unsettledCarryUsdc(account),
+            engine.unsettledCarryAssets(account),
             0,
             "Covered stale deposit carry should not leave residual unsettled carry"
         );
@@ -203,15 +205,17 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         (, uint256 marginAfterOpen,,,,,) = engine.positions(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedAfterOpen = clearinghouse.getLockedMarginBuckets(account);
         assertEq(
-            lockedAfterOpen.positionMarginUsdc,
+            lockedAfterOpen.positionMarginAssets,
             marginAfterOpen,
             "Position bucket should track stored position margin after open"
         );
         assertEq(
-            lockedAfterOpen.committedOrderMarginUsdc, 0, "Open positions should not leave committed-order margin behind"
+            lockedAfterOpen.committedOrderMarginAssets,
+            0,
+            "Open positions should not leave committed-order margin behind"
         );
         assertEq(
-            lockedAfterOpen.reservedSettlementUsdc, 0, "Open positions should not leave reserved settlement behind"
+            lockedAfterOpen.reservedSettlementAssets, 0, "Open positions should not leave reserved settlement behind"
         );
 
         // Warp 30 days before the next carry checkpoint; no legacy side-spread state exists.
@@ -235,14 +239,14 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         (, uint256 marginAfterAdd,,,,,) = engine.positions(account);
         IMarginClearinghouse.LockedMarginBuckets memory lockedAfterAdd = clearinghouse.getLockedMarginBuckets(account);
         assertEq(
-            lockedAfterAdd.positionMarginUsdc,
+            lockedAfterAdd.positionMarginAssets,
             marginAfterAdd,
             "Carry realization should leave the canonical position bucket aligned with stored margin"
         );
         assertEq(
-            lockedAfterAdd.committedOrderMarginUsdc, 0, "Carry realization should not create committed-order locks"
+            lockedAfterAdd.committedOrderMarginAssets, 0, "Carry realization should not create committed-order locks"
         );
-        assertEq(lockedAfterAdd.reservedSettlementUsdc, 0, "Carry realization should not strand reserved settlement");
+        assertEq(lockedAfterAdd.reservedSettlementAssets, 0, "Carry realization should not strand reserved settlement");
     }
 
     function test_DepositWithdrawMargin_RealizesCarryBeforeBalanceMutation() public {
@@ -251,7 +255,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 depositAmount = 50_000e6;
 
         _fundTrader(trader, 20_000e6);
-        usdc.mint(trader, depositAmount);
+        settlementToken.mint(trader, depositAmount);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);
 
         uint64 mutationTime = uint64(vm.getBlockTimestamp() + 1 days);
@@ -261,18 +265,18 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         engine.updateMarkPrice(1e8, mutationTime);
         assertEq(engine.lastMarkTime(), mutationTime, "The withdrawal must use the intended fresh mark");
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
         uint256 poolRawBefore = pool.rawAssets();
         uint256 poolAccountedBefore = pool.accountedAssets();
-        uint256 clearinghouseRawBefore = usdc.balanceOf(address(clearinghouse));
+        uint256 clearinghouseRawBefore = settlementToken.balanceOf(address(clearinghouse));
         uint256 expectedCarry = _expectedIndexedCarry(account);
         assertGt(expectedCarry, 0, "Setup must accrue carry before the balance mutation");
 
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.depositMargin(depositAmount);
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore + depositAmount - expectedCarry,
             "Deposit hook should realize carry before adding fresh settlement"
         );
@@ -283,7 +287,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
             "Carry realization should increase accounted assets only with matching cash"
         );
         assertEq(
-            usdc.balanceOf(address(clearinghouse)),
+            settlementToken.balanceOf(address(clearinghouse)),
             clearinghouseRawBefore + depositAmount - expectedCarry,
             "Carry realization should transfer realized cash out of clearinghouse custody"
         );
@@ -292,7 +296,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         vm.stopPrank();
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore - expectedCarry,
             "Deposit-withdraw roundtrip must not erase accrued carry"
         );
@@ -307,9 +311,9 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         _fundTrader(trader, 10_000e6);
         _open(account, CfdTypes.Side.LONG, 500_000e18, 10_000e6, 1e8);
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
 
-        usdc.mint(trader, rescueDeposit);
+        settlementToken.mint(trader, rescueDeposit);
 
         vm.warp(block.timestamp + carryElapsed);
         vm.prank(address(router));
@@ -322,12 +326,12 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         );
 
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.depositMargin(rescueDeposit);
         vm.stopPrank();
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore + rescueDeposit - expectedCarry,
             "Rescue deposit should settle pre-basis carry from the incoming cash in the same tx"
         );
@@ -339,28 +343,28 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         uint256 depositAmount = 500e6;
 
         _fundTrader(trader, 10_000e6);
-        usdc.mint(trader, depositAmount);
+        settlementToken.mint(trader, depositAmount);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() + 30 days);
 
         uint256 expectedCarry = _expectedIndexedCarry(account);
 
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.depositMargin(depositAmount);
         vm.stopPrank();
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore + depositAmount - expectedCarry,
             "Stale-oracle deposit should checkpoint indexed carry before crediting settlement"
         );
         assertEq(
             _lastCarryTimestamp(account), block.timestamp, "Stale-mark deposit should advance the carry checkpoint"
         );
-        assertEq(engine.unsettledCarryUsdc(account), 0, "Indexed carry deposit should settle elapsed carry");
+        assertEq(engine.unsettledCarryAssets(account), 0, "Indexed carry deposit should settle elapsed carry");
     }
 
     function test_ReserveCommittedOrderMargin_CheckpointsCarryBeforeReachabilityDrops() public {
@@ -373,7 +377,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         _fundTrader(trader, 10_000e6);
         _open(account, CfdTypes.Side.LONG, 100_000e18, 2000e6, 1e8);
 
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
 
         vm.warp(block.timestamp + carryElapsed);
         vm.prank(address(router));
@@ -386,22 +390,22 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         clearinghouse.reserveCommittedOrderMargin(account, 77, reserveAmount);
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore - expectedCarry,
             "Committed-order reservation should realize carry before lowering reachable collateral"
         );
         assertEq(
-            engine.unsettledCarryUsdc(account), 0, "Reservation checkpoint should settle elapsed carry immediately"
+            engine.unsettledCarryAssets(account), 0, "Reservation checkpoint should settle elapsed carry immediately"
         );
 
-        usdc.mint(trader, depositAmount);
+        settlementToken.mint(trader, depositAmount);
         vm.startPrank(trader);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.depositMargin(depositAmount);
         vm.stopPrank();
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore - expectedCarry + depositAmount,
             "Later deposits must not retroactively reprice pre-reservation carry on the reduced basis"
         );
@@ -419,7 +423,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         vm.prank(address(router));
         clearinghouse.lockReservedSettlement(account, reservedAmount);
 
-        uint256 settlementBeforeUnlock = clearinghouse.balanceUsdc(account);
+        uint256 settlementBeforeUnlock = clearinghouse.balanceAssets(account);
         vm.warp(block.timestamp + carryElapsed);
         vm.prank(address(router));
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
@@ -430,11 +434,11 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         clearinghouse.unlockReservedSettlement(account, reservedAmount);
 
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBeforeUnlock - expectedCarry,
             "Reserved-settlement unlock should checkpoint carry before reserved funds become reachable again"
         );
-        assertEq(engine.unsettledCarryUsdc(account), 0, "Unlock should not leave elapsed carry uncheckpointed");
+        assertEq(engine.unsettledCarryAssets(account), 0, "Unlock should not leave elapsed carry uncheckpointed");
     }
 
     function test_ProfitableClose_DoesNotDoubleBookCarryIntoAccountedAssets() public {
@@ -546,7 +550,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.processOrderTyped(openOrder, 1e8, poolDepth, uint64(block.timestamp));
 
-        uint256 chBefore = clearinghouse.balanceUsdc(account);
+        uint256 chBefore = clearinghouse.balanceAssets(account);
 
         vm.warp(block.timestamp + 90 days);
 
@@ -564,7 +568,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         vm.prank(address(router));
         engine.processOrderTyped(closeOrder, 1e8, poolDepth, uint64(block.timestamp));
 
-        uint256 chAfter = clearinghouse.balanceUsdc(account);
+        uint256 chAfter = clearinghouse.balanceAssets(account);
         assertLt(chAfter, chBefore, "Carry drain should reduce clearinghouse balance on close");
     }
 
@@ -593,7 +597,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
 
         // Price dropped to $0.50 → LONG has $50k unrealized profit
         // User should be able to close and receive profit minus carry minus fees
-        uint256 chBefore = clearinghouse.balanceUsdc(account);
+        uint256 chBefore = clearinghouse.balanceAssets(account);
 
         CfdTypes.Order memory closeOrder = CfdTypes.Order({
             account: account,
@@ -614,7 +618,7 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         (uint256 size,,,,,,) = engine.positions(account);
         assertEq(size, 0, "Position should be fully closed");
 
-        uint256 chAfter = clearinghouse.balanceUsdc(account);
+        uint256 chAfter = clearinghouse.balanceAssets(account);
         assertGt(chAfter, chBefore, "User should net positive after profitable close minus carry");
     }
 
@@ -632,12 +636,12 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         vm.warp(block.timestamp + engine.engineMarkStalenessLimit() - 1);
 
         uint256 expectedCarry = _expectedIndexedCarry(account);
-        uint256 pledgeBefore = clearinghouse.pnlPledgeUsdc(account);
+        uint256 pledgeBefore = clearinghouse.pnlPledgeAssets(account);
         assertGt(expectedCarry, 0);
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, 50_000e18);
-        assertEq(clearinghouse.pnlPledgeUsdc(account), pledgeBefore - expectedCarry);
-        assertEq(clearinghouse.actionReserveUsdc(account), 0);
+        assertEq(clearinghouse.pnlPledgeAssets(account), pledgeBefore - expectedCarry);
+        assertEq(clearinghouse.actionReserveAssets(account), 0);
     }
 
     function test_ReserveCloseOrderExecutionBounty_DoesNotRecomputeHistoricalCarryAfterReservationReachabilityDrop()
@@ -650,48 +654,48 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         address account = trader;
         uint256 price = 1e8;
         uint256 size = 100_000e18;
-        uint256 marginUsdc = 2000e6;
-        uint256 bountyUsdc = 0;
+        uint256 marginAssets = 2000e6;
+        uint256 bountyAssets = 0;
         uint256 carryTimeDelta = 3_839_405;
 
         // Leave a distinct free-settlement slice to show that historical carry consumes position margin
         // without consuming unrelated free cash; the close's zero-value bounty record adds no action reserve.
-        _fundTrader(trader, marginUsdc + 100e6);
-        _open(account, CfdTypes.Side.LONG, size, marginUsdc, price);
+        _fundTrader(trader, marginAssets + 100e6);
+        _open(account, CfdTypes.Side.LONG, size, marginAssets, price);
 
         vm.prank(address(router));
         engine.updateMarkPrice(price, uint64(block.timestamp));
         vm.warp(block.timestamp + carryTimeDelta);
 
-        uint256 borrowBaseBefore = _positionBorrowBaseUsdc(account);
+        uint256 borrowBaseBefore = _positionBorrowBaseAssets(account);
         uint256 expectedCarry = _expectedIndexedCarry(account);
-        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
-        uint256 pnlPledgeBefore = clearinghouse.pnlPledgeUsdc(account);
-        uint256 actionReserveBefore = clearinghouse.actionReserveUsdc(account);
+        uint256 settlementBefore = clearinghouse.balanceAssets(account);
+        uint256 pnlPledgeBefore = clearinghouse.pnlPledgeAssets(account);
+        uint256 actionReserveBefore = clearinghouse.actionReserveAssets(account);
         assertGt(expectedCarry, 0, "Setup must accrue indexed carry");
 
         vm.prank(address(router));
         engine.reserveCloseOrderExecutionBounty(account, size / 2);
 
-        assertEq(engine.unsettledCarryUsdc(account), 0, "Reservation should realize indexed carry first");
+        assertEq(engine.unsettledCarryAssets(account), 0, "Reservation should realize indexed carry first");
         assertEq(
-            _positionBorrowBaseUsdc(account),
+            _positionBorrowBaseAssets(account),
             borrowBaseBefore + expectedCarry,
             "Margin-funded carry increases the borrow base only after historical carry is assessed"
         );
         assertEq(
-            clearinghouse.balanceUsdc(account),
+            clearinghouse.balanceAssets(account),
             settlementBefore - expectedCarry,
             "Exactly the historical carry should leave settlement custody"
         );
         assertEq(
-            clearinghouse.pnlPledgeUsdc(account),
+            clearinghouse.pnlPledgeAssets(account),
             pnlPledgeBefore - expectedCarry,
             "Only carry consumes position margin; zero-value close record leaves remaining pledge unchanged"
         );
         assertEq(
-            clearinghouse.actionReserveUsdc(account),
-            actionReserveBefore + bountyUsdc,
+            clearinghouse.actionReserveAssets(account),
+            actionReserveBefore + bountyAssets,
             "Zero-value close record does not increase the isolated action reserve"
         );
     }

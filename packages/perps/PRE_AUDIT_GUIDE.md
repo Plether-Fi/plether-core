@@ -68,7 +68,7 @@ Before trusting a test as a source of truth, ask:
 | `HousePool.pauseLpEpochSettlement` | HousePool owner or configured pauser | adds the no-expiry settlement hold, stops new Senior requests, and permits refunds of existing Senior commitments; Junior requests, reconciliation, trading, and funded claims remain live |
 | `HousePool.unpauseLpEpochSettlement` | HousePool owner only | restores eligibility to attempt settlement; it does not repair state or guarantee progress |
 | `TrancheVault.requestRedeemFromClaimableDeposit` | source controller or its approved operator | consumes one finalized source lot only after its activation-aged cooldown and preserves the controller on the destination redemption request; no token allowance or wallet custody is involved |
-| `TrancheVault.proposeMaintenanceFeeConfig` / `finalizeMaintenanceFeeConfig` / `cancelMaintenanceFeeConfigProposal` | current `HousePool.owner()` only, Junior vault only | 48-hour delayed configuration; finalization checkpoints the old rate/recipient before applying the new pair; no arbitrary mint or USDC-transfer authority |
+| `TrancheVault.proposeMaintenanceFeeConfig` / `finalizeMaintenanceFeeConfig` / `cancelMaintenanceFeeConfigProposal` | current `HousePool.owner()` only, Junior vault only | 48-hour delayed configuration; finalization checkpoints the old rate/recipient before applying the new pair; no arbitrary mint or settlement-token-transfer authority |
 | `HousePoolRedemptionMathSidecar` pure functions | permissionless | stateless EIP-170 size split used by the HousePool immutable binding; fixed implementation id, no storage, authorization, setter, delegatecall, or upgrade path |
 | `SettlementMonitorLens` views | permissionless | read-only, bounded, fail-soft settlement diagnostics; no settlement, pause, or circuit-breaker authority |
 | `SettlementMonitorLensSidecar` diagnostic builders | constructor-bound `SettlementMonitorLens` facade only | code-size implementation detail; external callers cannot obtain facade-attributed health from fabricated queue masks, integrations must use the facade rather than treating the sidecar as a second canonical surface, the public `MONITOR()` binding remains readable while dependency bindings stay internal, and there are no setters or delegatecall paths |
@@ -174,25 +174,25 @@ Custody held by the clearinghouse becomes pool backing only when collected into 
 
 | Quantity | Economic owner | Storage/source of truth | Mutators | Counts as reachable collateral? | Counts toward solvency? | Counts toward LP withdrawal reserve? | Counts toward tranche reconcile? |
 |----------|----------------|-------------------------|----------|---------------------------------|-------------------------|-------------------------------------|----------------------------------|
-| Free settlement | Trader | `MarginClearinghouse.getFreeBuyingPowerUsdc(account)` or `getPnlIsolationBuckets(account).freeSettlementUsdc` | clearinghouse deposit/withdraw, engine settle/seize | yes, action-dependent | no; not HousePool assets before collection | no | no |
-| PnL pledge / active position margin | Trader until exact price settlement | clearinghouse `pnlPledgeUsdc`; the Engine position getter reads this canonical bucket | engine/settlement-sidecar open, close, liquidation, claim service | yes only for the account's price-loss cap and health | no physical pool asset before collection | no | yes, only through the capped terminal curve |
+| Free settlement | Trader | `MarginClearinghouse.getFreeBuyingPowerAssets(account)` or `getPnlIsolationBuckets(account).freeSettlementAssets` | clearinghouse deposit/withdraw, engine settle/seize | yes, action-dependent | no; not HousePool assets before collection | no | no |
+| PnL pledge / active position margin | Trader until exact price settlement | clearinghouse `pnlPledgeAssets`; the Engine position getter reads this canonical bucket | engine/settlement-sidecar open, close, liquidation, claim service | yes only for the account's price-loss cap and health | no physical pool asset before collection | no | yes, only through the capped terminal curve |
 | Other locked margin | Trader, reserved to typed non-price obligations | clearinghouse typed reserves | router and engine/sidecar typed reservation paths | only for its matching action; never generic price-loss reachability | no direct pool asset | no | no |
 | Committed order margin | Trader but reserved to one order | clearinghouse reservation keyed by `orderId` | router commit/execute/fail and typed action-charge settlement | separate close/liquidation action charges only, after spendable action reserve and free settlement; never price loss | no | no | no |
 | Execution bounty reserve | Trader-funded opening or protection-trigger reward | `MarginClearinghouse` action reserve and canonical bounty-reservation ledger; close Order records have zero amount | router/Book reserve, distribute, refund, or forfeit under their separate policies | no price-loss reachability | no | no | no |
-| Liquidation-charge reserve | Trader, dedicated to the active position charge | `MarginClearinghouse.liquidationReserveUsdc` | engine/settlement sidecar | liquidation charge only | no separate pool asset | no | no |
+| Liquidation-charge reserve | Trader, dedicated to the active position charge | `MarginClearinghouse.liquidationReserveAssets` | engine/settlement sidecar | liquidation charge only | no separate pool asset | no | no |
 | VPI rebate reserve | Trader, dedicated to `max(-vpiAccrued, 0)` | protected sub-balance of clearinghouse action reserve | engine/settlement sidecar | matching VPI clawback only; excluded from price-risk collateral, with underfunding treated as independent delinquency | no separate pool asset | no | no |
-| Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceUsdc` | engine create/service | same-account price-risk health and one-time price-loss netting only; never cash/action collateral | yes, as senior liability | yes | yes |
-| Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceUsdc(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
-| Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryUsdc[account]` | engine carry-checkpoint paths | active position margin, then free settlement; never claims or unrelated reserves | no pool asset until collected; projected margin debit separately reduces account price equity | no | no |
-| Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceUsdc(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | no; separate custody outside HousePool solvency assets | no | no |
+| Trader claim balance | Trader senior claim on pool liquidity | `CfdEngine.traderClaimBalanceAssets` | engine create/service | same-account price-risk health and one-time price-loss netting only; never cash/action collateral | yes, as senior liability | yes | yes |
+| Keeper bounty credit | Keeper margin credit | `MarginClearinghouse.balanceAssets(keeper)` | engine/clearinghouse bounty settlement | no | no pool liability | no | no |
+| Unsettled carry | Protocol-recorded carry obligation on an account | `CfdEngine.unsettledCarryAssets[account]` | engine carry-checkpoint paths | active position margin, then free settlement; never claims or unrelated reserves | no pool asset until collected; projected margin debit separately reduces account price equity | no | no |
+| Treasury protocol fees | Protocol/treasury | Treasury account in `MarginClearinghouse`; `MarginClearinghouse.balanceAssets(CfdEngine.protocolTreasury())` reports that balance | cash-collected execution and liquidation fee routing, settlement top-ups, treasury clearinghouse withdraw | no | no; separate custody outside HousePool solvency assets | no | no |
 | Signed terminal price delta | LP marked ownership adjustment | `TerminalNavBookV2` queried through the authenticated Engine snapshot | Engine-only atomic, state-derived `syncFromEngine(...)` | n/a | not the endpoint admission reserve | cannot fund cash redemption | yes, identically for deposit activation and redemption pricing |
 | Canonical pool assets | LP/protocol backing | `HousePool.totalAssets()` and accounting ledger | synchronized LP activation/funding plus accounting hooks | base physical solvency cash | yes | yes | yes |
 | Settlement-liability buffer `B` | No separate owner; protected cash headroom | Derived as `ceil(maxLiability * settlementBufferBps / 10_000)` from canonical Engine state | Liability changes and timelocked `EngineRiskConfig` updates change the target; no custody movement | no | no; excluded from raw `E < L` degraded test | yes, as an engine-supplied supplemental reserve | cash-funding constraint only; excluded from terminal NAV and yield |
-| Pending LP deposit assets | Request controller | USDC in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
+| Pending LP deposit assets | Request controller | settlement tokens in `TrancheVault` request escrow plus per-controller/per-epoch accounting | request, eligible cancellation, or pool-authorized activation | no | no | no | no, until activated |
 | Activated LP deposit shares | Request controller | Shares in `TrancheVault` claim escrow plus claimable epoch accounting and activation timestamp | coordinated HousePool epoch settlement, then controller/operator wallet claim or direct source-lot routing into redemption | no | no separate asset claim | no | yes, through outstanding share supply |
 | Pending LP redemption shares | Request controller; still exposed to tranche P&L | `TrancheVault` request/epoch queue; shares held by vault escrow and still in supply | wallet request or authorized reclassification from deposit-claim escrow, plus pool-authorized settlement callback | no | no separate asset claim before funding | no | yes, through outstanding share supply |
 | Junior maintenance-fee shares | Configured fee recipient | Junior `TrancheVault`; pending dilution in `pendingMaintenanceFeeShares()`, issued ownership in ordinary ERC-20 balance | any nonzero Junior supply mutation (including terminal deposit-claim escrow-dust burn) and fee-config finalization | no | no separate asset claim | no | yes, through effective Junior supply |
-| Funded LP redemption assets | Request controller | USDC held in `TrancheVault` claim escrow and claimable epoch accounting | coordinated HousePool epoch settlement, then controller/operator claim | no | no longer part of pool | no | no |
+| Funded LP redemption assets | Request controller | settlement tokens held in `TrancheVault` claim escrow and claimable epoch accounting | coordinated HousePool epoch settlement, then controller/operator claim | no | no longer part of pool | no | no |
 | Excess assets | no owner until admitted | `HousePool.excessAssets()` | pool account/sweep paths | no | no | no | no |
 
 Reachability note:
@@ -221,7 +221,7 @@ Reachability note:
 - Pricing rule: voluntary closes keep normal signed VPI and the lifetime rebate clamp. During `oracleFrozen`, the fixed `frozenCloseSpreadBps` replaces the Pyth adverse-confidence price shift; live/FAD-only closes and liquidations retain adverse-confidence pricing.
 - Ownership rule: paid spread belongs only to LPs and never credits protocol treasury. `frozenCloseSpreadBps` defaults to `50`, is 48-hour timelocked, must be nonzero, and is capped at `1,000` bps.
 - Liveness rule: partial closes must fully settle separate action charges, including frozen spread, but price loss above the account cap is written off. Terminal full closes may waive an uncollectible action remainder. Neither creates a protocol liability or terminal deficit. Liquidations do not assess the spread.
-- Protecting invariant: frozen execution remains close-only, and close preview preserves `frozenSpreadUsdc == frozenSpreadPaidUsdc + frozenSpreadWaivedUsdc`.
+- Protecting invariant: frozen execution remains close-only, and close preview preserves `frozenSpreadAssets == frozenSpreadPaidAssets + frozenSpreadWaivedAssets`.
 
 ### Trader claim balance servicing
 
@@ -293,7 +293,7 @@ Reachability note:
 
 ### Junior maintenance-fee dilution
 
-- Ownership choice: the fee is paid only by diluting Junior supply; it does not move USDC or alter principal, HWM,
+- Ownership choice: the fee is paid only by diluting Junior supply; it does not move settlement tokens or alter principal, HWM,
   reserves, claimant buckets, or waterfall arithmetic.
 - Governance boundary: the current HousePool owner controls a 48-hour delayed configuration capped at `1,000 bps`
   nominal APR. The generic Junior constructor accepts a zero rate with either zero or a valid nonzero recipient; this
@@ -403,7 +403,7 @@ Reachability note:
 2. Planner applies normal signed VPI with the lifetime rebate clamp, then assesses the fixed spread on the full reduced notional.
 3. Terminal price settlement consumes same-account claim plus PnL pledge up to the account cap; action charges use gain withholding, protected VPI reserve, spendable action reserve, eligible free settlement, and finally committed-order margin through its canonical FIFO.
 4. The retained or collected spread is booked as LP revenue; it is never routed to protocol treasury.
-5. Any uncollectible spread is exposed as `frozenSpreadWaivedUsdc` and creates no protocol liability or terminal deficit.
+5. Any uncollectible spread is exposed as `frozenSpreadWaivedAssets` and creates no protocol liability or terminal deficit.
 6. Price loss above the precommitted cap is emitted as `PriceLossWrittenOff`, creates no debt accumulator, and the full close removes the account curve.
 
 ### Liquidation with positive residual

@@ -7,12 +7,12 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 /// @title Exact terminal price-PnL book for the V3 perps engine
 /// @notice Maintains a position-count-independent aggregate of account-local, collateral-capped price PnL.
 /// @dev Prices use 8 decimals. `lots` count exact 100-token position quanta and monetary fields use native
-///      6-decimal USDC atoms. Positive terminal values are collectible by LPs; negative values are owed to traders.
+///      6-decimal settlement token atoms. Positive terminal values are collectible by LPs; negative values are owed to traders.
 interface ITerminalNavBookV2 {
 
     /// @notice Packed affine coefficient used by the base curve and sparse radix accumulator.
-    /// @param slope USDC-atom change per one 8-decimal price atom.
-    /// @param intercept Constant USDC-atom term.
+    /// @param slope settlement token-atom change per one 8-decimal price atom.
+    /// @param intercept Constant settlement token-atom term.
     struct Coeff {
         int112 slope;
         int144 intercept;
@@ -20,13 +20,13 @@ interface ITerminalNavBookV2 {
 
     /// @notice Stored canonical account curve after unreachable collateral has been removed from its cap.
     /// @param lots Number of exact 100-token position quanta.
-    /// @param entryCostUsdcAtoms Exact remaining position basis in 6-decimal USDC atoms.
-    /// @param effectiveCapUsdcAtoms Reachable collectible cap in 6-decimal USDC atoms.
+    /// @param entryCostAssetAtoms Exact remaining position basis in 6-decimal settlement token atoms.
+    /// @param effectiveCapAssetAtoms Reachable collectible cap in 6-decimal settlement token atoms.
     /// @param side Position direction under the protocol's USD-strength oracle convention.
     struct CurveRecord {
         uint112 lots;
-        uint144 entryCostUsdcAtoms;
-        uint144 effectiveCapUsdcAtoms;
+        uint144 entryCostAssetAtoms;
+        uint144 effectiveCapAssetAtoms;
         CfdTypes.Side side;
     }
 
@@ -35,16 +35,16 @@ interface ITerminalNavBookV2 {
     /// @param activeCurveCount Number of accounts with a stored curve.
     /// @param bookVersion Monotonic version incremented by each effective curve mutation.
     /// @param totalLots Gross active 100-token lots across all accounts.
-    /// @param totalEntryCostUsdcAtoms Gross exact active entry basis in USDC atoms.
-    /// @param totalEffectiveCapUsdcAtoms Gross canonical collectible cap in USDC atoms.
+    /// @param totalEntryCostAssetAtoms Gross exact active entry basis in settlement token atoms.
+    /// @param totalEffectiveCapAssetAtoms Gross canonical collectible cap in settlement token atoms.
     /// @param base Aggregate affine coefficient applied at every mark before suffix events.
     struct BookState {
         uint32 capPrice;
         uint64 activeCurveCount;
         uint64 bookVersion;
         uint112 totalLots;
-        uint144 totalEntryCostUsdcAtoms;
-        uint144 totalEffectiveCapUsdcAtoms;
+        uint144 totalEntryCostAssetAtoms;
+        uint144 totalEffectiveCapAssetAtoms;
         Coeff base;
     }
 
@@ -59,9 +59,9 @@ interface ITerminalNavBookV2 {
     /// @notice A curve mutation supplied zero 100-token lots.
     error TerminalNavBookV2__ZeroLots();
     /// @notice Exact entry basis exceeds the position's notional at the configured price cap.
-    /// @param entryCostUsdcAtoms Supplied exact entry basis.
-    /// @param maximumEntryCostUsdcAtoms Maximum representable basis for the supplied lots.
-    error TerminalNavBookV2__EntryCostAboveCap(uint256 entryCostUsdcAtoms, uint256 maximumEntryCostUsdcAtoms);
+    /// @param entryCostAssetAtoms Supplied exact entry basis.
+    /// @param maximumEntryCostAssetAtoms Maximum representable basis for the supplied lots.
+    error TerminalNavBookV2__EntryCostAboveCap(uint256 entryCostAssetAtoms, uint256 maximumEntryCostAssetAtoms);
     /// @notice The Engine's expected account curve does not match canonical book state.
     /// @param account Account whose curve was checked.
     /// @param expectedHash Hash supplied by the Engine.
@@ -91,8 +91,8 @@ interface ITerminalNavBookV2 {
         bytes32 indexed newCurveHash,
         uint64 bookVersion,
         uint112 lots,
-        uint144 entryCostUsdcAtoms,
-        uint144 effectiveCapUsdcAtoms,
+        uint144 entryCostAssetAtoms,
+        uint144 effectiveCapAssetAtoms,
         CfdTypes.Side side
     );
 
@@ -133,10 +133,10 @@ interface ITerminalNavBookV2 {
     /// @dev Positive output is collectible by LPs; negative output is owed to traders. Runtime is independent of the
     ///      active curve count and performs at most 121 sparse-radix node reads.
     /// @param markPrice Exact cached mark in 8-decimal price atoms, no greater than `CAP_PRICE`.
-    /// @return terminalDeltaUsdcAtoms Signed terminal price delta in 6-decimal USDC atoms.
-    function terminalLpPriceDeltaUsdcAtoms(
+    /// @return terminalDeltaAssetAtoms Signed terminal price delta in 6-decimal settlement token atoms.
+    function terminalLpPriceDeltaAssetAtoms(
         uint32 markPrice
-    ) external view returns (int256 terminalDeltaUsdcAtoms);
+    ) external view returns (int256 terminalDeltaAssetAtoms);
 
     /// @notice Returns one account's stored canonical curve; a missing curve is all zeroes.
     function curveOf(

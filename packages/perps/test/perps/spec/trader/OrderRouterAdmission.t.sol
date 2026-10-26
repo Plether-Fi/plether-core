@@ -126,19 +126,19 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         _fundTrader(crossingShortTrader, 30_000e6);
         _open(longTrader, CfdTypes.Side.LONG, 300_000e18, 30_000e6, 1e8);
 
-        uint256 targetPoolAssetsUsdc = 700_000e6;
-        uint256 poolAssetsBeforeDrainUsdc = pool.totalAssets();
+        uint256 targetPoolAssets = 700_000e6;
+        uint256 poolAssetsBeforeDrainAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssetsBeforeDrainUsdc - targetPoolAssetsUsdc);
+        settlementToken.transfer(address(0xDEAD), poolAssetsBeforeDrainAssets - targetPoolAssets);
 
-        uint256 poolAssetsUsdc = pool.totalAssets();
-        uint256 maxSkewUsdc = (poolAssetsUsdc * 0.4e18) / 1e18;
-        uint256 preSkewUsdc = 300_000e6;
+        uint256 poolAssets = pool.totalAssets();
+        uint256 maxSkewAssets = (poolAssets * 0.4e18) / 1e18;
+        uint256 preSkewAssets = 300_000e6;
         uint256 healingSize = 10_000e18;
-        uint256 postHealingSkewUsdc = preSkewUsdc - 10_000e6;
-        assertEq(poolAssetsUsdc, targetPoolAssetsUsdc, "Setup should establish the intended skew denominator");
-        assertGt(preSkewUsdc, maxSkewUsdc, "Setup should begin above the configured skew cap");
-        assertGt(postHealingSkewUsdc, maxSkewUsdc, "The healing order should remain above the skew cap");
+        uint256 postHealingSkewAssets = preSkewAssets - 10_000e6;
+        assertEq(poolAssets, targetPoolAssets, "Setup should establish the intended skew denominator");
+        assertGt(preSkewAssets, maxSkewAssets, "Setup should begin above the configured skew cap");
+        assertGt(postHealingSkewAssets, maxSkewAssets, "The healing order should remain above the skew cap");
 
         _assertAboveCapPreviewPolicy(healingShortTrader, crossingShortTrader, healingSize);
 
@@ -157,7 +157,7 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         assertEq(uint8(liveSide), uint8(CfdTypes.Side.SHORT), "Executed position should use the healing side");
         assertEq(
             _sideOpenInterest(CfdTypes.Side.LONG) - _sideOpenInterest(CfdTypes.Side.SHORT),
-            postHealingSkewUsdc * 1e12,
+            postHealingSkewAssets * 1e12,
             "Execution should leave the expected reduced open-interest skew"
         );
     }
@@ -209,7 +209,7 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
         vm.roll(block.number + 1);
         router.executeOrder(1, priceData);
 
-        uint256 keeperUsdcBefore = _settlementBalance(address(this));
+        uint256 keeperAssetsBefore = _settlementBalance(address(this));
         vm.roll(block.number + 1);
         router.executeOrderBatch(2, priceData);
 
@@ -219,7 +219,7 @@ contract OrderRouterAdmissionTest is OrderRouterPythTestBase {
             "Rejected close intent should not stall the FIFO queue and the remaining opens should drain cleanly"
         );
         assertEq(
-            _settlementBalance(address(this)) - keeperUsdcBefore,
+            _settlementBalance(address(this)) - keeperAssetsBefore,
             200_000,
             "Batch executor should only be paid for the single successful order that remains queued"
         );

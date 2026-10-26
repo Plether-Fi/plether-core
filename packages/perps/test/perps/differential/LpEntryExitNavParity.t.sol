@@ -12,14 +12,14 @@ contract PendingDepositLifecycleNavTest is BasePerpTest {
 
     /// @dev differential; source: ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view.
     function test_DepositPricingMatchesWithdrawalNavForDeltaNeutralExposure() public {
-        uint256 revenueUsdc = 500_000e6;
-        usdc.mint(address(pool), revenueUsdc);
+        uint256 revenueAssets = 500_000e6;
+        settlementToken.mint(address(pool), revenueAssets);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
-            revenueUsdc, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
+            revenueAssets, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
-        uint256 depositUsdc = 300_000e6;
+        uint256 depositAssets = 300_000e6;
         address long = address(0xB011);
         address short = address(0xBEA2);
         uint256 size = 400_000e18;
@@ -37,16 +37,16 @@ contract PendingDepositLifecycleNavTest is BasePerpTest {
             "entry and exit must use the same terminal NAV for delta-neutral exposure"
         );
         assertEq(
-            juniorVault.estimateDepositShares(depositUsdc),
-            juniorVault.quoteDepositFromState(depositUsdc, withdrawalJuniorAssets, juniorVault.totalSupply(), 0),
+            juniorVault.estimateDepositShares(depositAssets),
+            juniorVault.quoteDepositFromState(depositAssets, withdrawalJuniorAssets, juniorVault.totalSupply(), 0),
             "deposit quote must use the shared terminal NAV"
         );
     }
 
     /// @dev differential; source: ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view.
     function test_DepositPricingMatchesWithdrawalNavAfterUnrealizedProfit() public {
-        uint256 depositUsdc = 300_000e6;
-        uint256 sharesBeforeMtm = juniorVault.estimateDepositShares(depositUsdc);
+        uint256 depositAssets = 300_000e6;
+        uint256 sharesBeforeMtm = juniorVault.estimateDepositShares(depositAssets);
         uint256 juniorAssetsBeforeMtm = juniorVault.totalAssets();
 
         address long = address(0xB012);
@@ -75,27 +75,27 @@ contract PendingDepositLifecycleNavTest is BasePerpTest {
             "unrealized trader profit must reduce the shared junior terminal NAV"
         );
         assertGt(
-            juniorVault.estimateDepositShares(depositUsdc),
+            juniorVault.estimateDepositShares(depositAssets),
             sharesBeforeMtm,
             "new deposits must receive more shares at the same impaired NAV used for exits"
         );
         assertEq(
-            juniorVault.estimateDepositShares(depositUsdc),
-            juniorVault.quoteDepositFromState(depositUsdc, withdrawalJuniorAssets, juniorVault.totalSupply(), 0),
+            juniorVault.estimateDepositShares(depositAssets),
+            juniorVault.quoteDepositFromState(depositAssets, withdrawalJuniorAssets, juniorVault.totalSupply(), 0),
             "deposit quote must use the shared terminal NAV"
         );
     }
 
     /// @dev differential; source: ACCOUNTING_SPEC.md#3-canonical-lp-reconciliation-and-share-pricing-view.
     function test_DepositPricingAllowsDiscountedSharesAfterRealJuniorLoss() public {
-        uint256 depositUsdc = 100_000e6;
-        uint256 sharesBeforeLoss = juniorVault.estimateDepositShares(depositUsdc);
+        uint256 depositAssets = 100_000e6;
+        uint256 sharesBeforeLoss = juniorVault.estimateDepositShares(depositAssets);
 
         vm.prank(address(engine));
         pool.payOut(address(0xD15C0), 200_000e6);
 
         assertGt(
-            juniorVault.estimateDepositShares(depositUsdc),
+            juniorVault.estimateDepositShares(depositAssets),
             sharesBeforeLoss,
             "real junior losses should mint at the impaired NAV, not a hard 1.0 floor"
         );
@@ -116,7 +116,7 @@ contract DeltaNeutralDepositNavTest is BasePerpTest {
             initMarginBps: ((100) * 15) / 10,
             fadMarginBps: 300,
             baseCarryBps: 500,
-            minBountyUsdc: 1e6,
+            minBountyAssets: 1e6,
             bountyBps: 10,
             keeperShareBps: 5000,
             protocolShareBps: 0

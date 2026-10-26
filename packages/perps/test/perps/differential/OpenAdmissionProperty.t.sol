@@ -56,14 +56,14 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
 
     function test_HealingRebateCannotSubstituteForInitialMargin_AtomBoundary() public {
         _seedSkew();
-        // 40,000 USDC notional needs 600 USDC price-risk pledge and 40 USDC liquidation reserve.
+        // 40,000 settlement token notional needs 600 settlement token price-risk pledge and 40 settlement token liquidation reserve.
         // A healing rebate is free settlement / VPI reserve, never additional pledge for admission.
         for (uint256 supplied = 640e6 - 1; supplied <= 640e6 + 1; supplied++) {
             uint256 snapshot = vm.snapshotState();
             bool success = _tryOpenAndCheck(CfdTypes.Side.SHORT, 40_000e18, supplied);
             assertEq(success, supplied > 640e6, "Admission boundary must exclude the rebate from price-risk equity");
             if (success) {
-                assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), supplied - 40e6);
+                assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), supplied - 40e6);
                 (,,,,,, int256 lifetimeVpi) = engine.positions(ACCOUNT);
                 assertLt(lifetimeVpi, 0, "Boundary must execute a healing rebate");
             }
@@ -123,15 +123,15 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
             (uint256 installedSize,,,,,,) = engine.positions(ACCOUNT);
             uint256 totalLots = priorLots + addedLots;
             assertEq(installedSize, totalLots * CfdTypes.SIZE_QUANTUM);
-            assertEq(engine.positionEntryCostUsdcAtoms(ACCOUNT), totalLots * price);
-            assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), totalLots * pledgePerLot + boundary - 1);
-            assertEq(clearinghouse.liquidationReserveUsdc(ACCOUNT), totalLots * reservePerLot);
+            assertEq(engine.positionEntryCostAssetAtoms(ACCOUNT), totalLots * price);
+            assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), totalLots * pledgePerLot + boundary - 1);
+            assertEq(clearinghouse.liquidationReserveAssets(ACCOUNT), totalLots * reservePerLot);
             assertEq(
-                clearinghouse.balanceUsdc(ACCOUNT),
+                clearinghouse.balanceAssets(ACCOUNT),
                 20_000e6 - totalLots * feePerLot,
                 "Only execution fees debit custody"
             );
-            assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
+            assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
         }
     }
 
@@ -158,11 +158,11 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
             abi.encode(
                 position,
                 _carryState(),
-                engine.positionEntryCostUsdcAtoms(ACCOUNT),
+                engine.positionEntryCostAssetAtoms(ACCOUNT),
                 engineProtocolLens.getProtocolAccountingSnapshot(),
                 _custodyState(),
-                engine.traderClaimBalanceUsdc(ACCOUNT),
-                engine.unsettledCarryUsdc(ACCOUNT),
+                engine.traderClaimBalanceAssets(ACCOUNT),
+                engine.unsettledCarryAssets(ACCOUNT),
                 terminalNavBook.curveHashOf(ACCOUNT)
             )
         );
@@ -171,13 +171,13 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
     function _custodyState() private view returns (bytes32) {
         return keccak256(
             abi.encode(
-                clearinghouse.balanceUsdc(ACCOUNT),
-                clearinghouse.lockedMarginUsdc(ACCOUNT),
-                clearinghouse.liquidationReserveUsdc(ACCOUNT),
-                clearinghouse.vpiRebateReserveUsdc(ACCOUNT),
-                usdc.balanceOf(address(pool)),
-                usdc.balanceOf(address(clearinghouse)),
-                clearinghouse.balanceUsdc(PROTOCOL_TREASURY_ACCOUNT)
+                clearinghouse.balanceAssets(ACCOUNT),
+                clearinghouse.lockedMarginAssets(ACCOUNT),
+                clearinghouse.liquidationReserveAssets(ACCOUNT),
+                clearinghouse.vpiRebateReserveAssets(ACCOUNT),
+                settlementToken.balanceOf(address(pool)),
+                settlementToken.balanceOf(address(clearinghouse)),
+                clearinghouse.balanceAssets(PROTOCOL_TREASURY_ACCOUNT)
             )
         );
     }
@@ -237,22 +237,23 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
     ) private view {
         (uint256 size,,,,,, int256 lifetimeVpi) = engine.positions(ACCOUNT);
         uint256 markedNotional = size * MARK / 1e20;
-        int256 pnl = int256(engine.positionEntryCostUsdcAtoms(ACCOUNT)) - int256(markedNotional);
+        int256 pnl = int256(engine.positionEntryCostAssetAtoms(ACCOUNT)) - int256(markedNotional);
         if (side == CfdTypes.Side.SHORT) {
             pnl = -pnl;
         }
-        int256 priceEquity = int256(clearinghouse.pnlPledgeUsdc(ACCOUNT) + engine.traderClaimBalanceUsdc(ACCOUNT)) + pnl;
+        int256 priceEquity =
+            int256(clearinghouse.pnlPledgeAssets(ACCOUNT) + engine.traderClaimBalanceAssets(ACCOUNT)) + pnl;
         uint256 initialRequirement = markedNotional * 150 / 10_000;
         if (initialRequirement < 1e6) {
             initialRequirement = 1e6;
         }
         assertGt(priceEquity, int256(initialRequirement), "Every successful admission exceeds initial price equity");
         assertGe(
-            clearinghouse.vpiRebateReserveUsdc(ACCOUNT),
+            clearinghouse.vpiRebateReserveAssets(ACCOUNT),
             lifetimeVpi < 0 ? uint256(-lifetimeVpi) : 0,
             "Negative lifetime VPI is physically reserved separately"
         );
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0, "New risk cannot leave carry arrears");
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 0, "New risk cannot leave carry arrears");
     }
 
 }

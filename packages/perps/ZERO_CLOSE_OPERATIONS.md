@@ -39,7 +39,7 @@ When the keeper is unavailable, users can execute or expire existing IDs through
 
 ## Same-account fallback
 
-The app offers an explicit native-gas close path for the already-deployed permissionless SimpleAccount v0.8 profile. It verifies the owner, predicted factory address, EntryPoint, implementation slot and coherent deployment bindings. The owner wallet calls `SimpleAccount.execute(Router, 0, commitOrder(request))`; the Router still sees the original Trading Account. It does not submit the close as the owner EOA, switch accounts, approve USDC or deposit USDC.
+The app offers an explicit native-gas close path for the already-deployed permissionless SimpleAccount v0.8 profile. It verifies the owner, predicted factory address, EntryPoint, implementation slot and coherent deployment bindings. The owner wallet calls `SimpleAccount.execute(Router, 0, commitOrder(request))`; the Router still sees the original Trading Account. It does not submit the close as the owner EOA, switch accounts, approve or deposit settlement tokens.
 
 Execution is a separate permissionless transaction. The owner wallet pays native gas and the exact oracle update fee. Historical six-feed data comes directly from public Hermes for the committed interval, independently of the protocol API, keeper, sponsor and bundler. Latest prices cannot substitute for unavailable historical data. Frozen/oracle-independent terminal paths use their existing contract rules. Expiry cleanup does not require Hermes.
 

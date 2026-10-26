@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {MockSettlementToken} from "../utils/MockSettlementToken.sol";
 import {BasePerpTest} from "./BasePerpTest.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
@@ -8,7 +9,6 @@ import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
-import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -23,7 +23,7 @@ contract DepositForRejectingEngine {
 
 }
 
-contract DepositForAdversarialToken is MockUSDC {
+contract DepositForAdversarialToken is MockSettlementToken {
 
     uint256 public mode;
     bool public reentryBlocked;
@@ -63,15 +63,15 @@ contract DepositForTest is Test {
 
     address private constant PAYER = address(0xF00D);
     address private constant ACCOUNT = address(0xA11CE);
-    MockUSDC private usdc;
+    MockSettlementToken private settlementToken;
     MarginClearinghouse private clearinghouse;
 
     function setUp() public {
-        usdc = new MockUSDC();
-        clearinghouse = new MarginClearinghouse(address(usdc));
-        usdc.mint(PAYER, 1000e6);
+        settlementToken = new MockSettlementToken();
+        clearinghouse = new MarginClearinghouse(address(settlementToken));
+        settlementToken.mint(PAYER, 1000e6);
         vm.prank(PAYER);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
     }
 
     function test_CreditsOnlyBeneficiaryAndEmitsOneCanonicalDeposit() public {
@@ -90,7 +90,7 @@ contract DepositForTest is Test {
             if (logs[i].topics[0] == keccak256("Deposit(address,address,uint256)")) {
                 ++deposits;
                 assertEq(logs[i].topics[1], bytes32(uint256(uint160(ACCOUNT))));
-                assertEq(logs[i].topics[2], bytes32(uint256(uint160(address(usdc)))));
+                assertEq(logs[i].topics[2], bytes32(uint256(uint160(address(settlementToken)))));
                 assertEq(abi.decode(logs[i].data, (uint256)), 100e6);
             } else if (logs[i].topics[0] == keccak256("DepositFor(address,address,uint256)")) {
                 ++metadata;
@@ -101,13 +101,13 @@ contract DepositForTest is Test {
         }
         assertEq(deposits, 1);
         assertEq(metadata, 1);
-        assertEq(usdc.balanceOf(PAYER), 900e6);
-        assertEq(usdc.balanceOf(ACCOUNT), 0);
-        assertEq(usdc.balanceOf(address(clearinghouse)), 100e6);
-        assertEq(clearinghouse.balanceUsdc(PAYER), 0);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), 100e6);
-        assertEq(clearinghouse.getFreeBuyingPowerUsdc(ACCOUNT), 100e6);
-        assertEq(clearinghouse.lockedMarginUsdc(ACCOUNT), 0);
+        assertEq(settlementToken.balanceOf(PAYER), 900e6);
+        assertEq(settlementToken.balanceOf(ACCOUNT), 0);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), 100e6);
+        assertEq(clearinghouse.balanceAssets(PAYER), 0);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 100e6);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(ACCOUNT), 100e6);
+        assertEq(clearinghouse.lockedMarginAssets(ACCOUNT), 0);
     }
 
     function test_PayerCannotWithdrawBeneficiaryFunds() public {
@@ -121,9 +121,9 @@ contract DepositForTest is Test {
         clearinghouse.withdrawMargin(100e6);
         vm.prank(ACCOUNT);
         clearinghouse.withdrawMargin(100e6);
-        assertEq(usdc.balanceOf(ACCOUNT), 100e6);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), 0);
-        assertEq(usdc.balanceOf(address(clearinghouse)), 0);
+        assertEq(settlementToken.balanceOf(ACCOUNT), 100e6);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 0);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), 0);
     }
 
     function test_RejectsZeroBeneficiaryAndAmountWithoutTakingFunds() public {
@@ -133,39 +133,39 @@ contract DepositForTest is Test {
         vm.expectRevert(MarginClearinghouse.MarginClearinghouse__ZeroAmount.selector);
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 0);
-        assertEq(usdc.balanceOf(PAYER), 1000e6);
-        assertEq(usdc.balanceOf(address(clearinghouse)), 0);
+        assertEq(settlementToken.balanceOf(PAYER), 1000e6);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), 0);
     }
 
     function test_RequiresPayerAllowanceRatherThanBeneficiaryAllowance() public {
-        usdc.mint(ACCOUNT, 200e6);
+        settlementToken.mint(ACCOUNT, 200e6);
         vm.prank(ACCOUNT);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
         vm.prank(PAYER);
-        usdc.approve(address(clearinghouse), 0);
+        settlementToken.approve(address(clearinghouse), 0);
         vm.expectRevert();
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 100e6);
-        assertEq(usdc.balanceOf(PAYER), 1000e6);
-        assertEq(usdc.balanceOf(ACCOUNT), 200e6);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), 0);
+        assertEq(settlementToken.balanceOf(PAYER), 1000e6);
+        assertEq(settlementToken.balanceOf(ACCOUNT), 200e6);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 0);
     }
 
     function test_TransferFailureDoesNotCreditAccount() public {
         vm.expectRevert();
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 1001e6);
-        assertEq(usdc.balanceOf(PAYER), 1000e6);
-        assertEq(usdc.balanceOf(address(clearinghouse)), 0);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), 0);
+        assertEq(settlementToken.balanceOf(PAYER), 1000e6);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), 0);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 0);
     }
 
     function test_PrefundedCustodyIsNotCreditedAsPartOfDeposit() public {
-        usdc.mint(address(clearinghouse), 777e6);
+        settlementToken.mint(address(clearinghouse), 777e6);
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 100e6);
-        assertEq(usdc.balanceOf(address(clearinghouse)), 877e6);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), 100e6);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), 877e6);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 100e6);
     }
 
     function test_NoCarryHookEvenWhenEngineWouldRevertAndLegacyStillCallsHook() public {
@@ -180,9 +180,9 @@ contract DepositForTest is Test {
         vm.expectRevert("carry hook called");
         vm.prank(PAYER);
         clearinghouse.deposit(PAYER, 10e6);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), 100e6);
-        assertEq(clearinghouse.balanceUsdc(PAYER), 10e6);
-        assertEq(usdc.balanceOf(PAYER), 890e6);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), 100e6);
+        assertEq(clearinghouse.balanceAssets(PAYER), 10e6);
+        assertEq(settlementToken.balanceOf(PAYER), 890e6);
     }
 
     function test_InexactAndFalseReturningTokensRollBack() public {
@@ -208,7 +208,7 @@ contract DepositForTest is Test {
             house.depositFor(ACCOUNT, 100e6);
             assertEq(token.balanceOf(PAYER), 100e6);
             assertEq(token.balanceOf(address(house)), 0);
-            assertEq(house.balanceUsdc(ACCOUNT), 0);
+            assertEq(house.balanceAssets(ACCOUNT), 0);
             assertEq(token.allowance(PAYER, address(house)), 100e6);
         }
     }
@@ -223,8 +223,8 @@ contract DepositForTest is Test {
         vm.prank(PAYER);
         house.depositFor(ACCOUNT, 100e6);
         assertTrue(token.reentryBlocked());
-        assertEq(house.balanceUsdc(ACCOUNT), 100e6);
-        assertEq(house.balanceUsdc(PAYER), 0);
+        assertEq(house.balanceAssets(ACCOUNT), 100e6);
+        assertEq(house.balanceAssets(PAYER), 0);
         assertEq(token.balanceOf(address(house)), 100e6);
     }
 
@@ -238,9 +238,9 @@ contract DepositForTest is Test {
         clearinghouse.depositFor(ACCOUNT, amountA);
         clearinghouse.depositFor(PAYER, amountB);
         vm.stopPrank();
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT) + clearinghouse.balanceUsdc(PAYER), amountA + amountB);
-        assertEq(usdc.balanceOf(address(clearinghouse)), amountA + amountB);
-        assertEq(usdc.balanceOf(PAYER) + usdc.balanceOf(address(clearinghouse)), 1000e6);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT) + clearinghouse.balanceAssets(PAYER), amountA + amountB);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), amountA + amountB);
+        assertEq(settlementToken.balanceOf(PAYER) + settlementToken.balanceOf(address(clearinghouse)), 1000e6);
     }
 
 }
@@ -262,15 +262,15 @@ contract DepositForCarryTest is BasePerpTest {
         clearinghouse.lockReservedSettlement(ACCOUNT, 100e6);
         clearinghouse.lockVpiRebateReserve(ACCOUNT, 50e6);
         vm.stopPrank();
-        usdc.mint(PAYER, 100_000e6);
+        settlementToken.mint(PAYER, 100_000e6);
         vm.prank(PAYER);
-        usdc.approve(address(clearinghouse), type(uint256).max);
+        settlementToken.approve(address(clearinghouse), type(uint256).max);
     }
 
     function _arrears(
         uint256 amount
     ) private {
-        stdstore.target(address(engine)).sig("unsettledCarryUsdc(address)").with_key(ACCOUNT).checked_write(amount);
+        stdstore.target(address(engine)).sig("unsettledCarryAssets(address)").with_key(ACCOUNT).checked_write(amount);
     }
 
     function _snapshot() private returns (CfdEnginePlanTypes.RawSnapshot memory snapshot) {
@@ -312,10 +312,10 @@ contract DepositForCarryTest is BasePerpTest {
                 engine.sideCarryIndex(1),
                 engine.sideCarryTimestamp(0),
                 engine.sideCarryTimestamp(1),
-                engine.sideBorrowBaseUsdc(0),
-                engine.sideBorrowBaseUsdc(1),
-                engine.unsettledCarryUsdc(ACCOUNT),
-                engine.traderClaimBalanceUsdc(ACCOUNT)
+                engine.sideBorrowBaseAssets(0),
+                engine.sideBorrowBaseAssets(1),
+                engine.unsettledCarryAssets(ACCOUNT),
+                engine.traderClaimBalanceAssets(ACCOUNT)
             )
         );
     }
@@ -325,8 +325,8 @@ contract DepositForCarryTest is BasePerpTest {
             abi.encode(
                 clearinghouse.getLockedMarginBuckets(ACCOUNT),
                 clearinghouse.getOrderReservation(type(uint64).max),
-                clearinghouse.vpiRebateReserveUsdc(ACCOUNT),
-                clearinghouse.totalBountyReservationsUsdc(ACCOUNT)
+                clearinghouse.vpiRebateReserveAssets(ACCOUNT),
+                clearinghouse.totalBountyReservationsAssets(ACCOUNT)
             )
         );
     }
@@ -336,7 +336,7 @@ contract DepositForCarryTest is BasePerpTest {
             abi.encode(
                 terminalNavBook.curveHashOf(ACCOUNT),
                 terminalNavBook.bookState(),
-                usdc.balanceOf(address(pool)),
+                settlementToken.balanceOf(address(pool)),
                 pool.totalAssets()
             )
         );
@@ -347,18 +347,18 @@ contract DepositForCarryTest is BasePerpTest {
         vm.warp(block.timestamp + 30 days);
         _arrears(20e6);
         bytes32 beforeState = _unchangedState();
-        uint256 pending = _expectedIndexedCarryUsdc(ACCOUNT);
-        uint256 balance = clearinghouse.balanceUsdc(ACCOUNT);
-        uint256 free = _freeSettlementUsdc(ACCOUNT);
-        uint256 custody = usdc.balanceOf(address(clearinghouse));
+        uint256 pending = _expectedIndexedCarryAssets(ACCOUNT);
+        uint256 balance = clearinghouse.balanceAssets(ACCOUNT);
+        uint256 free = _freeSettlementAssets(ACCOUNT);
+        uint256 custody = settlementToken.balanceOf(address(clearinghouse));
         assertGt(pending, 0);
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 100e6);
         assertEq(_unchangedState(), beforeState);
-        assertEq(_expectedIndexedCarryUsdc(ACCOUNT), pending);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), balance + 100e6);
-        assertEq(_freeSettlementUsdc(ACCOUNT), free + 100e6);
-        assertEq(usdc.balanceOf(address(clearinghouse)), custody + 100e6);
+        assertEq(_expectedIndexedCarryAssets(ACCOUNT), pending);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), balance + 100e6);
+        assertEq(_freeSettlementAssets(ACCOUNT), free + 100e6);
+        assertEq(settlementToken.balanceOf(address(clearinghouse)), custody + 100e6);
         vm.prank(address(engine));
         assertEq(terminalNavBook.authenticateEngineState(ACCOUNT), terminalNavBook.curveHashOf(ACCOUNT));
     }
@@ -368,15 +368,15 @@ contract DepositForCarryTest is BasePerpTest {
         uint256 lastTimestamp = _lastCarryTimestamp(ACCOUNT);
         for (uint256 i; i < 10; ++i) {
             vm.warp(block.timestamp + 1 days);
-            uint256 pending = _expectedIndexedCarryUsdc(ACCOUNT);
+            uint256 pending = _expectedIndexedCarryAssets(ACCOUNT);
             bytes32 beforeState = _unchangedState();
             vm.prank(PAYER);
             clearinghouse.depositFor(ACCOUNT, 1);
             assertEq(_unchangedState(), beforeState);
-            assertEq(_expectedIndexedCarryUsdc(ACCOUNT), pending);
+            assertEq(_expectedIndexedCarryAssets(ACCOUNT), pending);
             assertEq(_lastCarryTimestamp(ACCOUNT), lastTimestamp);
         }
-        assertGt(_expectedIndexedCarryUsdc(ACCOUNT), 0);
+        assertGt(_expectedIndexedCarryAssets(ACCOUNT), 0);
     }
 
     function testFuzz_DeferredCarryProjectionMatchesLaterCollection(
@@ -389,30 +389,30 @@ contract DepositForCarryTest is BasePerpTest {
         vm.warp(block.timestamp + bound(elapsed, 0, 365 days));
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 1000e6);
-        uint256 due = engine.unsettledCarryUsdc(ACCOUNT) + _expectedIndexedCarryUsdc(ACCOUNT);
+        uint256 due = engine.unsettledCarryAssets(ACCOUNT) + _expectedIndexedCarryAssets(ACCOUNT);
         CfdEnginePlanTypes.RawSnapshot memory projected = _snapshot();
-        uint256 settlementBefore = projected.accountBuckets.settlementBalanceUsdc;
+        uint256 settlementBefore = projected.accountBuckets.settlementBalanceAssets;
         CfdEnginePlanLib.projectOpenCarry(projected);
         vm.prank(address(clearinghouse));
         engine.realizeCarryBeforeMarginChange(ACCOUNT);
         CfdEnginePlanTypes.RawSnapshot memory actual = _snapshot();
         assertEq(keccak256(abi.encode(actual.accountBuckets)), keccak256(abi.encode(projected.accountBuckets)));
         assertEq(actual.position.margin, projected.position.margin);
-        assertEq(actual.positionBorrowBaseUsdc, projected.positionBorrowBaseUsdc);
-        assertEq(actual.unsettledCarryUsdc, projected.unsettledCarryUsdc);
-        assertEq(actual.poolAssetsUsdc, projected.poolAssetsUsdc);
-        assertEq(actual.poolCashUsdc, projected.poolCashUsdc);
+        assertEq(actual.positionBorrowBaseAssets, projected.positionBorrowBaseAssets);
+        assertEq(actual.unsettledCarryAssets, projected.unsettledCarryAssets);
+        assertEq(actual.poolAssets, projected.poolAssets);
+        assertEq(actual.poolCashAssets, projected.poolCashAssets);
         assertEq(actual.longSide.totalMargin, projected.longSide.totalMargin);
         assertEq(actual.shortSide.totalMargin, projected.shortSide.totalMargin);
-        assertEq(due, settlementBefore - actual.accountBuckets.settlementBalanceUsdc + actual.unsettledCarryUsdc);
-        assertEq(_expectedIndexedCarryUsdc(ACCOUNT), 0);
+        assertEq(due, settlementBefore - actual.accountBuckets.settlementBalanceAssets + actual.unsettledCarryAssets);
+        assertEq(_expectedIndexedCarryAssets(ACCOUNT), 0);
         vm.prank(address(engine));
         terminalNavBook.authenticateEngineState(ACCOUNT);
     }
 
     function test_ArrearsCannotBeHiddenInNewReservationsAfterFunding() public {
         _fixture(false);
-        uint256 available = clearinghouse.pnlPledgeUsdc(ACCOUNT) + _freeSettlementUsdc(ACCOUNT);
+        uint256 available = clearinghouse.pnlPledgeAssets(ACCOUNT) + _freeSettlementAssets(ACCOUNT);
         _arrears(available + 100e6);
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 100e6);
@@ -425,7 +425,7 @@ contract DepositForCarryTest is BasePerpTest {
         vm.prank(address(engine));
         clearinghouse.lockReservedSettlement(ACCOUNT, 1);
         assertEq(_unchangedState(), state);
-        assertEq(engineAccountLens.getWithdrawableUsdc(ACCOUNT), 0);
+        assertEq(engineAccountLens.getWithdrawableAssets(ACCOUNT), 0);
         vm.expectRevert();
         vm.prank(ACCOUNT);
         clearinghouse.withdrawMargin(1);
@@ -439,38 +439,38 @@ contract DepositForCarryTest is BasePerpTest {
         engine.updateMarkPrice(1e8, uint64(block.timestamp));
         vm.prank(PAYER);
         clearinghouse.depositFor(ACCOUNT, 100e6);
-        uint256 due = _expectedIndexedCarryUsdc(ACCOUNT);
-        uint256 withdrawable = engineAccountLens.getWithdrawableUsdc(ACCOUNT);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(ACCOUNT);
-        uint256 marginBefore = clearinghouse.pnlPledgeUsdc(ACCOUNT);
+        uint256 due = _expectedIndexedCarryAssets(ACCOUNT);
+        uint256 withdrawable = engineAccountLens.getWithdrawableAssets(ACCOUNT);
+        uint256 balanceBefore = clearinghouse.balanceAssets(ACCOUNT);
+        uint256 marginBefore = clearinghouse.pnlPledgeAssets(ACCOUNT);
         assertGt(due, 0);
         assertGt(withdrawable, 0);
         vm.prank(ACCOUNT);
         clearinghouse.withdrawMargin(withdrawable);
-        assertEq(usdc.balanceOf(ACCOUNT), withdrawable);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), balanceBefore - due - withdrawable);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), marginBefore - due);
-        assertEq(_freeSettlementUsdc(ACCOUNT), 0);
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
-        assertEq(_expectedIndexedCarryUsdc(ACCOUNT), 0);
+        assertEq(settlementToken.balanceOf(ACCOUNT), withdrawable);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), balanceBefore - due - withdrawable);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), marginBefore - due);
+        assertEq(_freeSettlementAssets(ACCOUNT), 0);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
+        assertEq(_expectedIndexedCarryAssets(ACCOUNT), 0);
     }
 
     function test_SelfFundingLeavesCarryUntouchedButLegacyDepositStillRealizesIt() public {
         _fixture(false);
         vm.warp(block.timestamp + 30 days);
-        usdc.mint(ACCOUNT, 2e6);
+        settlementToken.mint(ACCOUNT, 2e6);
         vm.prank(ACCOUNT);
-        usdc.approve(address(clearinghouse), 2e6);
-        uint256 pending = _expectedIndexedCarryUsdc(ACCOUNT);
+        settlementToken.approve(address(clearinghouse), 2e6);
+        uint256 pending = _expectedIndexedCarryAssets(ACCOUNT);
         bytes32 beforeState = _unchangedState();
         vm.prank(ACCOUNT);
         clearinghouse.depositFor(ACCOUNT, 1e6);
         assertEq(_unchangedState(), beforeState);
-        uint256 balanceBefore = clearinghouse.balanceUsdc(ACCOUNT);
+        uint256 balanceBefore = clearinghouse.balanceAssets(ACCOUNT);
         vm.prank(ACCOUNT);
         clearinghouse.depositMargin(1e6);
-        assertEq(clearinghouse.balanceUsdc(ACCOUNT), balanceBefore + 1e6 - pending);
-        assertEq(_expectedIndexedCarryUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.balanceAssets(ACCOUNT), balanceBefore + 1e6 - pending);
+        assertEq(_expectedIndexedCarryAssets(ACCOUNT), 0);
     }
 
 }

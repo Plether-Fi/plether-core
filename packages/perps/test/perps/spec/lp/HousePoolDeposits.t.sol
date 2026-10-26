@@ -27,9 +27,9 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         uint256 deficit = 123e6;
         _setTotalTraderClaim(pool.totalAssets() + deficit);
 
-        assertEq(pool.terminalDeficitUsdc(), 0, "stored deficit should remain the prior reconciled checkpoint");
+        assertEq(pool.terminalDeficitAssets(), 0, "stored deficit should remain the prior reconciled checkpoint");
         assertEq(
-            pool.getPoolLiquidityView().currentTerminalDeficitUsdc,
+            pool.getPoolLiquidityView().currentTerminalDeficitAssets,
             deficit,
             "current view must derive the live terminal deficit"
         );
@@ -38,7 +38,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
 
         vm.prank(address(juniorVault));
         pool.reconcile();
-        assertEq(pool.terminalDeficitUsdc(), deficit, "fresh reconcile must persist the explicit deficit");
+        assertEq(pool.terminalDeficitAssets(), deficit, "fresh reconcile must persist the explicit deficit");
     }
 
     function test_DegradedModeBlocksNewEntryAndQueuedActivation() public {
@@ -70,7 +70,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         uint256 redeemRequestId = _requestAsyncRedeem(juniorVault, bob, juniorVault.balanceOf(bob) / 10);
         assertEq(redeemRequestId, depositRequestId, "simultaneous entry and exit must share one request epoch");
 
-        usdc.burn(address(pool), pool.juniorPrincipal());
+        settlementToken.burn(address(pool), pool.juniorPrincipal());
         vm.warp(pool.lpEpochStart(depositRequestId));
 
         IHousePool.LpEpochSettlementResult memory result = _settleLpEpochForTest();
@@ -88,7 +88,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         vm.prank(carol);
         uint256 refundedAssets = juniorVault.cancelPendingDeposit(depositRequestId, carol, carol);
         assertEq(refundedAssets, depositAssets, "wiped-tranche depositor must recover full escrow");
-        assertEq(usdc.balanceOf(carol), depositAssets, "cancelled assets must return to the depositor");
+        assertEq(settlementToken.balanceOf(carol), depositAssets, "cancelled assets must return to the depositor");
     }
 
     // ==========================================
@@ -164,13 +164,13 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         _fundJunior(bob, 500_000e6);
 
         uint256 accountedBefore = pool.totalAssets();
-        usdc.mint(address(pool), 100_000e6);
+        settlementToken.mint(address(pool), 100_000e6);
 
         IHousePool.PoolLiquidityView memory beforeAccount = pool.getPoolLiquidityView();
         assertEq(pool.rawAssets(), accountedBefore + 100_000e6, "Raw balance should include unsolicited donation");
         assertEq(pool.excessAssets(), 100_000e6, "Donation should remain quarantined as excess");
         assertEq(pool.totalAssets(), accountedBefore, "Canonical assets must ignore raw donation until accounted");
-        assertEq(beforeAccount.totalAssetsUsdc, accountedBefore, "Liquidity view must use canonical assets");
+        assertEq(beforeAccount.totalAssets, accountedBefore, "Liquidity view must use canonical assets");
 
         pool.accountExcess();
 
@@ -182,14 +182,12 @@ contract HousePoolDepositsTest is HousePoolTestBase {
             "Canonical assets should increase only after explicit accounting"
         );
         assertEq(
-            afterAccount.totalAssetsUsdc,
-            accountedBefore + 100_000e6,
-            "Liquidity view should reflect explicit accounting"
+            afterAccount.totalAssets, accountedBefore + 100_000e6, "Liquidity view should reflect explicit accounting"
         );
     }
 
     function test_AssignUnassignedAssets_RevertsWhenOracleFrozen() public {
-        usdc.mint(address(pool), 100_000e6);
+        settlementToken.mint(address(pool), 100_000e6);
         pool.accountExcess();
         vm.prank(address(juniorVault));
         pool.reconcile();
@@ -203,8 +201,8 @@ contract HousePoolDepositsTest is HousePoolTestBase {
     function test_InitializeSeedPosition_RevertsWhenSeedAlreadyInitializedEvenIfOracleFrozen() public {
         uint256 seedAssets = 50_000e6;
 
-        usdc.mint(address(this), seedAssets);
-        usdc.approve(address(pool), seedAssets);
+        settlementToken.mint(address(this), seedAssets);
+        settlementToken.approve(address(pool), seedAssets);
 
         _enterFrozenWindow();
 
@@ -216,43 +214,47 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         _fundJunior(bob, 500_000e6);
 
         address treasury = address(0xBEEF);
-        usdc.mint(address(pool), 25_000e6);
+        settlementToken.mint(address(pool), 25_000e6);
 
         uint256 accountedBefore = pool.totalAssets();
         pool.sweepExcess(treasury, 25_000e6);
 
         assertEq(pool.totalAssets(), accountedBefore, "Sweeping raw excess must not change canonical assets");
         assertEq(pool.excessAssets(), 0, "Swept donation should no longer remain as excess");
-        assertEq(usdc.balanceOf(treasury), 25_000e6, "Sweep recipient should receive only the quarantined donation");
+        assertEq(
+            settlementToken.balanceOf(treasury),
+            25_000e6,
+            "Sweep recipient should receive only the quarantined donation"
+        );
     }
 
     function test_GetPoolLiquidityView_ReturnsCurrentPoolState() public {
         _fundSenior(alice, 200_000e6);
         _fundJunior(bob, 300_000e6);
-        usdc.mint(address(pool), 50_000e6);
+        settlementToken.mint(address(pool), 50_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             50_000e6, IHousePool.ClaimantInflowKind.Recapitalization, IHousePool.ClaimantInflowCashMode.CashArrived
         );
-        usdc.mint(address(pool), 20_000e6);
+        settlementToken.mint(address(pool), 20_000e6);
         vm.prank(address(engine));
         pool.recordClaimantInflow(
             20_000e6, IHousePool.ClaimantInflowKind.Revenue, IHousePool.ClaimantInflowCashMode.CashArrived
         );
 
         IHousePool.PoolLiquidityView memory viewData = pool.getPoolLiquidityView();
-        assertEq(viewData.totalAssetsUsdc, pool.totalAssets());
-        assertEq(viewData.freeUsdc, pool.getFreeUSDC());
-        assertEq(viewData.pendingRecapitalizationUsdc, pool.pendingRecapitalizationUsdc());
-        assertEq(viewData.pendingTradingRevenueUsdc, pool.pendingTradingRevenueUsdc());
+        assertEq(viewData.totalAssets, pool.totalAssets());
+        assertEq(viewData.freeAssets, pool.getFreeAssets());
+        assertEq(viewData.pendingRecapitalizationAssets, pool.pendingRecapitalizationAssets());
+        assertEq(viewData.pendingTradingRevenueAssets, pool.pendingTradingRevenueAssets());
         assertEq(
-            viewData.withdrawalReservedUsdc,
-            _withdrawalReservedUsdc() + viewData.pendingRecapitalizationUsdc + viewData.pendingTradingRevenueUsdc,
+            viewData.withdrawalReservedAssets,
+            _withdrawalReservedAssets() + viewData.pendingRecapitalizationAssets + viewData.pendingTradingRevenueAssets,
             "Liquidity view should include pending recapitalization and trading buckets in its reserved figure"
         );
-        assertEq(viewData.seniorPrincipalUsdc, pool.seniorPrincipal());
-        assertEq(viewData.juniorPrincipalUsdc, pool.juniorPrincipal());
-        assertEq(viewData.seniorHighWaterMarkUsdc, pool.seniorHighWaterMark());
+        assertEq(viewData.seniorPrincipalAssets, pool.seniorPrincipal());
+        assertEq(viewData.juniorPrincipalAssets, pool.juniorPrincipal());
+        assertEq(viewData.seniorHighWaterMarkAssets, pool.seniorHighWaterMark());
         assertEq(viewData.oracleFrozen, engine.isOracleFrozen());
         assertEq(viewData.degradedMode, engine.degradedMode());
     }
@@ -277,7 +279,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
 
         // A third party may request with its own funds, but cannot claim shares into an existing holder.
         address attacker = address(0xBAD);
-        uint256 minimumDeposit = pool.minTrancheDepositUsdc();
+        uint256 minimumDeposit = pool.minTrancheDepositAssets();
         uint256 requestId = _requestAsyncDeposit(juniorVault, attacker, minimumDeposit);
         _settleAsyncRequest(requestId, true);
         vm.prank(attacker);
@@ -291,7 +293,9 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         vm.prank(alice);
         juniorVault.withdraw(withdrawable, alice, alice);
 
-        assertEq(usdc.balanceOf(alice), withdrawable, "Victim withdraw should succeed after original cooldown");
+        assertEq(
+            settlementToken.balanceOf(alice), withdrawable, "Victim withdraw should succeed after original cooldown"
+        );
     }
 
     function test_MinDeposit_BlocksDustBeforeCouponCheckpoint() public {
@@ -302,9 +306,9 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         vm.warp(block.timestamp + 1 days);
 
         address dave = address(0x444);
-        usdc.mint(dave, pool.minTrancheDepositUsdc());
+        settlementToken.mint(dave, pool.minTrancheDepositAssets());
         vm.startPrank(dave);
-        usdc.approve(address(seniorVault), pool.minTrancheDepositUsdc());
+        settlementToken.approve(address(seniorVault), pool.minTrancheDepositAssets());
         vm.expectRevert(TrancheVault.TrancheVault__DepositTooSmall.selector);
         seniorVault.requestDeposit(1, dave, dave);
         vm.stopPrank();
@@ -322,7 +326,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         vm.warp(block.timestamp + 50 minutes);
 
         address helper = address(0xB0B);
-        usdc.mint(helper, 10_000e6);
+        settlementToken.mint(helper, 10_000e6);
         uint256 requestId = _requestAsyncDeposit(juniorVault, helper, 10_000e6);
         _settleAsyncRequest(requestId, true);
         vm.prank(helper);
@@ -349,7 +353,7 @@ contract HousePoolDepositsTest is HousePoolTestBase {
         // After cooldown passes, withdrawal succeeds
         _finishAsyncCooldown(juniorVault, alice);
         (,, uint256 withdrawable) = _redeemAsync(juniorVault, alice, juniorVault.maxRequestRedeem(alice), true);
-        assertEq(usdc.balanceOf(alice), withdrawable, "Withdrawal after cooldown succeeds");
+        assertEq(settlementToken.balanceOf(alice), withdrawable, "Withdrawal after cooldown succeeds");
     }
 
 }

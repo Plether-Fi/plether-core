@@ -49,17 +49,17 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
 
         ICfdEngineTypes.ClosePreview memory normalPreview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(normalPreview.valid);
-        assertGt(normalPreview.immediatePayoutUsdc, 0);
-        assertEq(normalPreview.traderClaimBalanceUsdc, 0);
+        assertGt(normalPreview.immediatePayoutAssets, 0);
+        assertEq(normalPreview.traderClaimBalanceAssets, 0);
 
         uint256 poolAssets = pool.totalAssets();
         vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 9000e6);
+        settlementToken.transfer(address(0xDEAD), poolAssets - 9000e6);
 
         ICfdEngineTypes.ClosePreview memory illiquidPreview = engineLens.previewClose(account, 100_000e18, 80_000_000);
         assertTrue(illiquidPreview.valid);
-        assertEq(illiquidPreview.immediatePayoutUsdc, 0);
-        assertGt(illiquidPreview.traderClaimBalanceUsdc, 0);
+        assertEq(illiquidPreview.immediatePayoutAssets, 0);
+        assertGt(illiquidPreview.traderClaimBalanceAssets, 0);
         assertEq(illiquidPreview.remainingSize, 0);
     }
 
@@ -75,13 +75,15 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
             engineLens.simulateClose(account, 100_000e18, 80_000_000, 1);
 
         assertTrue(canonicalPreview.valid);
-        assertGt(canonicalPreview.immediatePayoutUsdc, 0, "Live preview should reflect currently available pool cash");
-        assertEq(canonicalPreview.traderClaimBalanceUsdc, 0, "Live preview should not defer when cash is available");
+        assertGt(canonicalPreview.immediatePayoutAssets, 0, "Live preview should reflect currently available pool cash");
+        assertEq(canonicalPreview.traderClaimBalanceAssets, 0, "Live preview should not defer when cash is available");
         assertEq(canonicalDepth, pool.totalAssets(), "Setup should keep canonical depth unchanged");
 
         assertTrue(hypotheticalPreview.valid);
-        assertEq(hypotheticalPreview.immediatePayoutUsdc, 0, "Hypothetical close should use caller-supplied pool cash");
-        assertGt(hypotheticalPreview.traderClaimBalanceUsdc, 0, "Low hypothetical cash should defer the payout");
+        assertEq(
+            hypotheticalPreview.immediatePayoutAssets, 0, "Hypothetical close should use caller-supplied pool cash"
+        );
+        assertGt(hypotheticalPreview.traderClaimBalanceAssets, 0, "Low hypothetical cash should defer the payout");
     }
 
     function test_PreviewClose_ReportsPostOpDegradedStateAfterLatch() public {
@@ -108,7 +110,7 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         assertFalse(preview.triggersDegradedMode, "Transition flag should stay false after degraded mode latches");
         assertEq(
             preview.postOpDegradedMode,
-            preview.effectiveAssetsAfterUsdc < preview.maxLiabilityAfterUsdc,
+            preview.effectiveAssetsAfterAssets < preview.maxLiabilityAfterAssets,
             "Preview should expose raw post-op solvency values for integrators even after degraded mode latches"
         );
     }
@@ -123,9 +125,9 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
 
         assertTrue(preview.valid, "Preview should remain valid when close earns a negative VPI rebate");
-        assertLt(preview.vpiDeltaUsdc, 0, "Preview should expose negative VPI as a rebate instead of panicking");
-        assertEq(preview.vpiUsdc, 0, "Positive-only VPI charge field should clamp rebates to zero");
-        assertEq(preview.frozenSpreadUsdc, 0, "Live-market close should not assess the frozen spread");
+        assertLt(preview.vpiDeltaAssets, 0, "Preview should expose negative VPI as a rebate instead of panicking");
+        assertEq(preview.vpiAssets, 0, "Positive-only VPI charge field should clamp rebates to zero");
+        assertEq(preview.frozenSpreadAssets, 0, "Live-market close should not assess the frozen spread");
     }
 
     function test_PreviewClose_FadButLiveMarketKeepsSignedVpiRebate() public {
@@ -142,11 +144,11 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1e8);
 
         assertTrue(preview.valid, "Live FAD close should be previewable");
-        assertLt(preview.vpiDeltaUsdc, 0, "Live FAD should keep normal signed VPI rebate behavior");
-        assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp normal rebates to zero");
-        assertEq(preview.frozenSpreadUsdc, 0, "FAD-only close should not assess the frozen spread");
-        assertEq(preview.frozenSpreadPaidUsdc, 0, "FAD-only close should not pay the frozen spread");
-        assertEq(preview.frozenSpreadWaivedUsdc, 0, "FAD-only close should not waive a frozen spread");
+        assertLt(preview.vpiDeltaAssets, 0, "Live FAD should keep normal signed VPI rebate behavior");
+        assertEq(preview.vpiAssets, 0, "Positive-only VPI field should clamp normal rebates to zero");
+        assertEq(preview.frozenSpreadAssets, 0, "FAD-only close should not assess the frozen spread");
+        assertEq(preview.frozenSpreadPaidAssets, 0, "FAD-only close should not pay the frozen spread");
+        assertEq(preview.frozenSpreadWaivedAssets, 0, "FAD-only close should not waive a frozen spread");
     }
 
     function test_PreviewClose_OracleFrozenSkewHealingCloseKeepsSignedVpiAndPaysFixedSpread() public {
@@ -162,30 +164,30 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen close should be previewable");
-        assertLt(preview.vpiDeltaUsdc, 0, "Frozen skew-healing close should keep the normal VPI rebate");
-        assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp the signed rebate to zero");
-        assertEq(preview.frozenSpreadUsdc, 400e6, "Frozen close should assess 50 bps of $80,000 notional");
-        uint256 vpiRebateUsdc = uint256(-preview.vpiDeltaUsdc);
-        uint256 expectedPaidSpreadUsdc =
-            preview.frozenSpreadUsdc > vpiRebateUsdc ? preview.frozenSpreadUsdc - vpiRebateUsdc : 0;
+        assertLt(preview.vpiDeltaAssets, 0, "Frozen skew-healing close should keep the normal VPI rebate");
+        assertEq(preview.vpiAssets, 0, "Positive-only VPI field should clamp the signed rebate to zero");
+        assertEq(preview.frozenSpreadAssets, 400e6, "Frozen close should assess 50 bps of $80,000 notional");
+        uint256 vpiRebateAssets = uint256(-preview.vpiDeltaAssets);
+        uint256 expectedPaidSpreadAssets =
+            preview.frozenSpreadAssets > vpiRebateAssets ? preview.frozenSpreadAssets - vpiRebateAssets : 0;
         assertEq(
-            preview.frozenSpreadPaidUsdc,
-            expectedPaidSpreadUsdc,
+            preview.frozenSpreadPaidAssets,
+            expectedPaidSpreadAssets,
             "Signed VPI rebate should offset frozen spread before physical collection"
         );
         assertEq(
-            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc,
+            preview.frozenSpreadPaidAssets + preview.frozenSpreadWaivedAssets,
+            preview.frozenSpreadAssets,
             "VPI-offset and paid spread must conserve the assessment"
         );
 
         ICfdEngineTypes.ClosePreview memory partialPreview = engineLens.previewClose(account, 25_000e18, 0.8e8);
         assertTrue(partialPreview.valid, "Funded frozen reduction should be previewable");
-        assertEq(partialPreview.frozenSpreadUsdc, 100e6, "A 25% reduction should assess $100 of fixed spread");
-        uint256 partialVpiRebateUsdc = uint256(-partialPreview.vpiDeltaUsdc);
+        assertEq(partialPreview.frozenSpreadAssets, 100e6, "A 25% reduction should assess $100 of fixed spread");
+        uint256 partialVpiRebateAssets = uint256(-partialPreview.vpiDeltaAssets);
         assertEq(
-            partialPreview.frozenSpreadPaidUsdc,
-            partialPreview.frozenSpreadUsdc - partialVpiRebateUsdc,
+            partialPreview.frozenSpreadPaidAssets,
+            partialPreview.frozenSpreadAssets - partialVpiRebateAssets,
             "Partial frozen spread should use the same signed-VPI offset ordering"
         );
     }
@@ -205,11 +207,11 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longTrader, 100_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen close should be previewable");
-        assertGt(preview.vpiDeltaUsdc, 0, "Frozen skew-worsening close should keep the normal positive VPI charge");
-        assertEq(preview.vpiUsdc, uint256(preview.vpiDeltaUsdc), "Positive VPI field should expose the charge");
-        assertEq(preview.frozenSpreadUsdc, 400e6, "Spread should depend on notional, not skew direction");
-        assertEq(preview.frozenSpreadPaidUsdc, 400e6, "Funded frozen close should pay the same fixed spread");
-        assertEq(preview.frozenSpreadWaivedUsdc, 0, "Funded frozen close should not waive spread");
+        assertGt(preview.vpiDeltaAssets, 0, "Frozen skew-worsening close should keep the normal positive VPI charge");
+        assertEq(preview.vpiAssets, uint256(preview.vpiDeltaAssets), "Positive VPI field should expose the charge");
+        assertEq(preview.frozenSpreadAssets, 400e6, "Spread should depend on notional, not skew direction");
+        assertEq(preview.frozenSpreadPaidAssets, 400e6, "Funded frozen close should pay the same fixed spread");
+        assertEq(preview.frozenSpreadWaivedAssets, 0, "Funded frozen close should not waive spread");
     }
 
     function test_PreviewClose_OracleFrozenZeroCrossingCloseUsesNormalCurveAndFixedSpread() public {
@@ -227,18 +229,18 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(longTrader, 150_000e18, 0.8e8);
 
         assertTrue(preview.valid, "Frozen partial close should be previewable");
-        assertLt(preview.vpiDeltaUsdc, 0, "Zero crossing that reduces absolute skew should keep the normal rebate");
-        assertEq(preview.vpiUsdc, 0, "Positive-only VPI field should clamp the signed rebate to zero");
-        assertEq(preview.frozenSpreadUsdc, 600e6, "Spread should assess 50 bps of $120,000 notional");
-        uint256 vpiRebateUsdc = uint256(-preview.vpiDeltaUsdc);
+        assertLt(preview.vpiDeltaAssets, 0, "Zero crossing that reduces absolute skew should keep the normal rebate");
+        assertEq(preview.vpiAssets, 0, "Positive-only VPI field should clamp the signed rebate to zero");
+        assertEq(preview.frozenSpreadAssets, 600e6, "Spread should assess 50 bps of $120,000 notional");
+        uint256 vpiRebateAssets = uint256(-preview.vpiDeltaAssets);
         assertEq(
-            preview.frozenSpreadPaidUsdc,
-            preview.frozenSpreadUsdc - vpiRebateUsdc,
+            preview.frozenSpreadPaidAssets,
+            preview.frozenSpreadAssets - vpiRebateAssets,
             "Zero-crossing VPI rebate should offset frozen spread before collection"
         );
         assertEq(
-            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc,
+            preview.frozenSpreadPaidAssets + preview.frozenSpreadWaivedAssets,
+            preview.frozenSpreadAssets,
             "Paid and VPI-offset spread must conserve the assessment"
         );
     }
@@ -256,27 +258,27 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 100_000e18, 1.019e8);
 
         assertTrue(preview.valid, "Terminal close should remain live when only spread is uncollectible");
-        assertEq(preview.frozenSpreadUsdc, 509_500_000, "Spread should assess 50 bps of $101,900 notional");
-        assertEq(preview.executionFeeUsdc, _engineExecutionFeeUsdc(100_000e18, 1.019e8));
+        assertEq(preview.frozenSpreadAssets, 509_500_000, "Spread should assess 50 bps of $101,900 notional");
+        assertEq(preview.executionFeeAssets, _engineExecutionFeeAssets(100_000e18, 1.019e8));
         assertEq(
-            preview.frozenSpreadPaidUsdc,
-            clearinghouse.liquidationReserveUsdc(account) - preview.executionFeeUsdc,
+            preview.frozenSpreadPaidAssets,
+            clearinghouse.liquidationReserveAssets(account) - preview.executionFeeAssets,
             "Released liquidation reserve pays the fee before the residual frozen spread"
         );
         assertEq(
-            preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc - preview.frozenSpreadPaidUsdc,
+            preview.frozenSpreadWaivedAssets,
+            preview.frozenSpreadAssets - preview.frozenSpreadPaidAssets,
             "Only the spread exceeding released surplus should be waived"
         );
         assertEq(
-            preview.frozenSpreadPaidUsdc + preview.frozenSpreadWaivedUsdc,
-            preview.frozenSpreadUsdc,
+            preview.frozenSpreadPaidAssets + preview.frozenSpreadWaivedAssets,
+            preview.frozenSpreadAssets,
             "Paid and waived spread should conserve the assessment"
         );
 
         vm.expectEmit(true, false, false, true, address(engine.settlementSidecar()));
         emit FrozenCloseSpreadSettled(
-            account, preview.frozenSpreadUsdc, preview.frozenSpreadPaidUsdc, preview.frozenSpreadWaivedUsdc
+            account, preview.frozenSpreadAssets, preview.frozenSpreadPaidAssets, preview.frozenSpreadWaivedAssets
         );
         _close(account, CfdTypes.Side.LONG, 100_000e18, 1.019e8);
 
@@ -316,13 +318,13 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
         vm.prank(trader);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 900e6, type(uint256).max, false);
 
-        uint256 freeSettlementBeforePreview = _freeSettlementUsdc(account);
+        uint256 freeSettlementBeforePreview = _freeSettlementAssets(account);
 
         ICfdEngineTypes.ClosePreview memory preview = engineLens.previewClose(account, 50_000e18, 110_000_000);
 
         assertFalse(preview.valid, "pledge cannot unlock into an unhealthy remainder");
         assertEq(uint8(preview.invalidReason), uint8(CfdTypes.CloseInvalidReason.PartialCloseUnhealthy));
-        assertEq(_freeSettlementUsdc(account), freeSettlementBeforePreview);
+        assertEq(_freeSettlementAssets(account), freeSettlementBeforePreview);
     }
 
     function test_PreviewClose_ClampsOraclePriceToCap() public {
@@ -339,19 +341,21 @@ contract EngineClosePreviewTest is CfdEngineTestBase {
             cappedPreview.executionPrice,
             "Preview execution price should clamp to CAP_PRICE"
         );
-        assertEq(overCapPreview.realizedPnlUsdc, cappedPreview.realizedPnlUsdc, "Preview PnL should clamp to CAP_PRICE");
-        assertEq(overCapPreview.vpiDeltaUsdc, cappedPreview.vpiDeltaUsdc, "Preview VPI should clamp to CAP_PRICE");
         assertEq(
-            overCapPreview.executionFeeUsdc, cappedPreview.executionFeeUsdc, "Preview fee should clamp to CAP_PRICE"
+            overCapPreview.realizedPnlAssets, cappedPreview.realizedPnlAssets, "Preview PnL should clamp to CAP_PRICE"
+        );
+        assertEq(overCapPreview.vpiDeltaAssets, cappedPreview.vpiDeltaAssets, "Preview VPI should clamp to CAP_PRICE");
+        assertEq(
+            overCapPreview.executionFeeAssets, cappedPreview.executionFeeAssets, "Preview fee should clamp to CAP_PRICE"
         );
         assertEq(
-            overCapPreview.immediatePayoutUsdc,
-            cappedPreview.immediatePayoutUsdc,
+            overCapPreview.immediatePayoutAssets,
+            cappedPreview.immediatePayoutAssets,
             "Preview payout should clamp to CAP_PRICE"
         );
         assertEq(
-            overCapPreview.traderClaimBalanceUsdc,
-            cappedPreview.traderClaimBalanceUsdc,
+            overCapPreview.traderClaimBalanceAssets,
+            cappedPreview.traderClaimBalanceAssets,
             "Preview trader claim should clamp to CAP_PRICE"
         );
     }

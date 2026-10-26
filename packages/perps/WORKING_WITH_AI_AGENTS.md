@@ -85,7 +85,7 @@ limit, a withdrawal policy, or a revocation mechanism; those controls belong in 
 
 An owner funds its own account with `MarginClearinghouse.depositMargin(amount)`, which retains ordinary carry
 checkpointing. A payer can instead approve the clearinghouse and call `depositFor(account, amount)` to credit exact
-USDC to that account's free settlement. This credit-only path requires no beneficiary signature or deployed code and
+settlement tokens to that account's free settlement. This credit-only path requires no beneficiary signature or deployed code and
 grants the payer no trading or withdrawal authority. It does not collect carry or add to a position's PnL pledge;
 normal account actions still project and collect outstanding carry.
 
@@ -267,7 +267,7 @@ payload acceptance, lifecycle state, and terminal evidence against the contracts
 Every public `OrderRequest` contains an account-scoped `clientOrderId`, trade direction and size, margin delta,
 target price, open/close flag, and mandatory `ExecutionBounds`.
 
-Use protocol-native units: USDC amounts use 6 decimals, prices use 8 decimals, position sizes use 18 decimals and must
+Use protocol-native units: settlement-token amounts use six-decimal integer base units, prices use 8 decimals, position sizes use 18 decimals and must
 be divisible by `1e20` (the 100-token lot), timestamps are Unix seconds, and leverage values are basis points.
 
 All on-chain order prices are the raw 8-decimal FX-basket quote, not an inverted dollar-oriented display price.
@@ -302,14 +302,14 @@ protocol-generated position-protection orders.
 | `executionWindowSeconds` | Positive duration, bounded by `maxExecutionWindowSeconds`; execution expires after commitment time plus this duration |
 | `allowedExecutionModes` | Authorization mask bits: `Live = 1 << 0` (`1`), `Fad = 1 << 1` (`2`), `Frozen = 1 << 2` (`4`) |
 | `expectedConfigHash` | Exact execution-critical configuration accepted by a public intent; zero is internal-only |
-| `maxExecutionBountyUsdc` | Keeper bounty that may be reserved at commit |
-| `maxExecutionNotionalUsdc` | Canonical planner-assessed execution notional |
-| `maxGrossAccountDebitUsdc` | Settlement debit, consumed trader claims, and reserved bounty in aggregate |
-| `maxActionChargeUsdc` | Net assessed action charge after applicable carry, signed VPI, execution fee, and frozen spread composition |
-| `maxExplicitFeesUsdc` | Open execution fee, or close execution fee plus frozen spread when applicable |
+| `maxExecutionBountyAssets` | Keeper bounty that may be reserved at commit |
+| `maxExecutionNotionalAssets` | Canonical planner-assessed execution notional |
+| `maxGrossAccountDebitAssets` | Settlement debit, consumed trader claims, and reserved bounty in aggregate |
+| `maxActionChargeAssets` | Net assessed action charge after applicable carry, signed VPI, execution fee, and frozen spread composition |
+| `maxExplicitFeesAssets` | Open execution fee, or close execution fee plus frozen spread when applicable |
 | `maxPostPositionSize` | Resulting live position size |
-| `minPostSettlementBalanceUsdc` | Resulting total internal settlement custody, including locked buckets |
-| `minPostPositionEquityUsdc` | Resulting live-position equity |
+| `minPostSettlementBalanceAssets` | Resulting total internal settlement custody, including locked buckets |
+| `minPostPositionEquityAssets` | Resulting live-position equity |
 | `maxPostLeverageBps` | Resulting live-position leverage |
 
 A terminal full close still enforces every non-position bound. It skips post-position equity and leverage checks only
@@ -319,7 +319,7 @@ Router-authenticated triggered and retried protection closes are the only zero-c
 use `expectedConfigHash == bytes32(0)` as an unpinned marker, enable every execution mode, use
 `submitBy = block.timestamp` and `executionWindowSeconds = maxExecutionWindowSeconds`, and copy the four trader-selected
 `PositionProtectionParams.closeLimits` ceilings into every generated close attempt. The zero-bounty child sets
-`maxExecutionBountyUsdc = 0`; other upper bounds use their integer maxima and minimum bounds use zero. The Book retains
+`maxExecutionBountyAssets = 0`; other upper bounds use their integer maxima and minimum bounds use zero. The Book retains
 the close limits at creation or attached-open staging, updates them on owner replacement, and allows the owner to amend
 them after a failed attempt becomes `Latched`. The generated order records the configuration actually observed at
 execution. The separate trigger bounty is reserved at protection creation and paid when protection fires. The
@@ -340,7 +340,7 @@ Clearinghouse immediately before mutation. A caller cannot satisfy a bound by su
 The authorization mask is not the same encoding as the `ExecutionMode` enum in results and receipts. Enum values are
 `None = 0`, `Live = 1`, `Fad = 2`, and `Frozen = 3`; decode them as enums rather than mask bits.
 
-Bounds do not promise execution, fill, profit, liveness, or immediately withdrawable USDC. Profitable settlement may
+Bounds do not promise execution, fill, profit, liveness, or immediately withdrawable settlement tokens. Profitable settlement may
 be represented by a senior trader claim until the HousePool can fund it, and wallet-level authority remains outside
 the order envelope.
 

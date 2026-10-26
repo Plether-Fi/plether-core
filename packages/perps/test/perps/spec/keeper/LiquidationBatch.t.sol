@@ -168,7 +168,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
 
         assertEq(
             _settlementBalance(KEEPER) - keeperSettlementBefore,
-            firstPreview.keeperBountyUsdc + secondPreview.keeperBountyUsdc,
+            firstPreview.keeperBountyAssets + secondPreview.keeperBountyAssets,
             "keeper must receive exactly one bounty per successful unique account"
         );
         assertEq(
@@ -206,7 +206,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         }
         vm.stopPrank();
 
-        uint256 forfeitedBountyUsdc = router.getAccountReservations(account).executionBountyUsdc;
+        uint256 forfeitedBountyAssets = router.getAccountReservations(account).executionBountyAssets;
         uint256 treasuryBefore = _settlementBalance(engine.protocolTreasury());
         uint256 keeperBefore = _settlementBalance(KEEPER);
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, LIQUIDATION_PRICE);
@@ -229,12 +229,12 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         );
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
-            forfeitedBountyUsdc,
+            forfeitedBountyAssets,
             "queued execution bounty must be forfeited to protocol treasury"
         );
         assertEq(
             _settlementBalance(KEEPER) - keeperBefore,
-            preview.keeperBountyUsdc,
+            preview.keeperBountyAssets,
             "liquidation bounty must still be credited to the original keeper"
         );
     }
@@ -259,8 +259,8 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
 
         IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(account);
         assertEq(reservationBefore.pendingOrderCount, maxPendingOrders, "setup must reach the configured order cap");
-        assertEq(reservationBefore.committedMarginUsdc, 64e6, "setup must reserve every order's committed margin");
-        assertGt(reservationBefore.executionBountyUsdc, 0, "setup must reserve execution bounties");
+        assertEq(reservationBefore.committedMarginAssets, 64e6, "setup must reserve every order's committed margin");
+        assertGt(reservationBefore.executionBountyAssets, 0, "setup must reserve execution bounties");
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, LIQUIDATION_PRICE);
         assertTrue(preview.liquidatable, "maximum-order setup account must be liquidatable");
@@ -281,8 +281,8 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         assertEq(router.accountHeadOrderId(account), 0, "account queue head must be clear");
 
         IOrderRouterAccounting.AccountReservationView memory reservationAfter = router.getAccountReservations(account);
-        assertEq(reservationAfter.committedMarginUsdc, 0, "committed margin reservation must be clear");
-        assertEq(reservationAfter.executionBountyUsdc, 0, "execution bounty reservation must be clear");
+        assertEq(reservationAfter.committedMarginAssets, 0, "committed margin reservation must be clear");
+        assertEq(reservationAfter.executionBountyAssets, 0, "execution bounty reservation must be clear");
         assertEq(reservationAfter.pendingOrderCount, 0, "pending order reservation count must be clear");
 
         for (uint256 i = 0; i < maxPendingOrders; i++) {
@@ -293,16 +293,16 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
                 "every queued order must terminally fail"
             );
             assertEq(_remainingCommittedMargin(orderId), 0, "every committed margin reservation must be released");
-            assertEq(_orderRecord(orderId).executionBountyUsdc, 0, "every execution bounty must be cleared");
+            assertEq(_orderRecord(orderId).executionBountyAssets, 0, "every execution bounty must be cleared");
         }
         assertEq(
             _settlementBalance(engine.protocolTreasury()) - treasuryBefore,
-            reservationBefore.executionBountyUsdc,
+            reservationBefore.executionBountyAssets,
             "all queued bounties must be forfeited to protocol treasury"
         );
         assertEq(
             _settlementBalance(KEEPER) - keeperBefore,
-            preview.keeperBountyUsdc,
+            preview.keeperBountyAssets,
             "keeper must receive the liquidation bounty"
         );
         assertEq(
@@ -342,7 +342,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         assertEq(_positionSize(succeedingAccount), 0, "later item must still succeed");
         assertEq(
             _settlementBalance(KEEPER) - keeperSettlementBefore,
-            succeedingPreview.keeperBountyUsdc,
+            succeedingPreview.keeperBountyAssets,
             "failed item must not pay a bounty"
         );
         assertEq(
@@ -385,7 +385,7 @@ contract LiquidationBatchTest is LiquidationBatchTestFixture {
         assertEq(_positionSize(laterAccount), 10_000e18, "later account must remain unattempted");
         assertEq(
             _settlementBalance(KEEPER) - keeperSettlementBefore,
-            firstPreview.keeperBountyUsdc,
+            firstPreview.keeperBountyAssets,
             "only the earlier successful item may pay a bounty"
         );
         assertEq(

@@ -8,12 +8,21 @@ The organization-owned package is `@plether-fi/perps-aa-client`. Configure
 
 ```bash
 npm login --scope=@plether-fi --auth-type=legacy --registry=https://npm.pkg.github.com
-npm install --save-exact @plether-fi/perps-aa-client@0.1.0
+npm install --save-exact @plether-fi/perps-aa-client@0.4.0
 ```
 
-The command shows the initial published version. The V5 source described below
-is version 0.3.0; install its exact registry version only after release and
-deployment compatibility checks.
+The install command is for a future published release. This source is the
+**0.4.0 new-deployment SDK**; these changes do not publish it or deploy contracts.
+For local integration, use the verified tarball produced after the final Core
+commit as described in [release operations](RELEASING.md). Install an exact
+registry version only after publication and deployment compatibility checks.
+
+Version 0.4.0 makes breaking API changes: token inputs are `settlementToken` and
+`settlementTokenRuntimeCodeHash`, and financial fields use the `Assets` suffix.
+There are no aliases for the former token-specific names. The historical
+`orderLifecycleV4Abi` is no longer exported or packaged. Historical deployments
+must use the matching older package and bindings; archived test evidence is not
+an active SDK compatibility layer.
 
 Use your GitHub username and a classic PAT with `read:packages`. Authentication
 is required even for public GitHub npm packages. Never commit tokens. Actions
@@ -92,12 +101,9 @@ schema-4 deployment manifest and use its top-level `settlementToken` metadata fo
 display and capabilities. It records `name: "Mock USDG"`, `symbol: "USDG"`,
 `decimals: 6`, `isMock: true`, `supportsReceiveWithAuthorization: false`, and
 `supportsBridgeFunding: false`.
-Historical USDC releases retain their own token addresses and metadata.
-
-SDK inputs named `usdc`, `usdcRuntimeCodeHash`, and protocol fields ending in
-`Usdc` are retained for compatibility. They refer to the selected deployment's
-six-decimal settlement token, not a hardcoded USDC address. Pass the MockUSDG
-address through these existing inputs; retain six-decimal amount formatting.
+Historical releases retain their original token addresses and metadata. Pass the
+new deployment's MockUSDG address as `settlementToken`; retain six-decimal amount
+formatting.
 
 For normal testnet funding:
 
@@ -110,7 +116,7 @@ For normal testnet funding:
 ```ts
 const deposit = buildSmartAccountBalanceDepositAction({
   account: account.accountAddress,
-  usdc: settlementTokenAddress, // contracts.settlementToken.address
+  settlementToken: settlementTokenAddress, // contracts.settlementToken.address
   clearinghouse: clearinghouseAddress,
   amount: 25_000_000n, // 25 Mock USDG
 });
@@ -158,7 +164,7 @@ deposit. The beneficiary receives no authority over the payer, and the payer rec
 
 `verifyBridgeFundingDeployment` checks the destination chain, pinned settlement-token/clearinghouse/SpokePool/implementation/handler
 code, the SpokePool's EIP-1967 implementation slot, and the clearinghouse settlement token at one block. Supply
-`chainId`, `usdc`, `clearinghouse`, `destinationSpokePool`, `destinationSpokePoolImplementation`, `multicallHandler`, and
+`chainId`, `settlementToken`, `clearinghouse`, `destinationSpokePool`, `destinationSpokePoolImplementation`, `multicallHandler`, and
 each contract's corresponding `RuntimeCodeHash` from a trusted release. The full core graph and actual `depositFor` behavior must
 already have passed release verification. The shared Across handler is permissionless; it has no immutable binding
 to a SpokePool or beneficiary, and these identity checks do not authorize arbitrary handler calldata.
@@ -200,8 +206,8 @@ limits of a `Latched` protection before a permissionless retry. Every
 builder targets the configured PositionProtectionBook with zero native value;
 the exported `positionProtectionBookAbi` is generated for the current source and must match the target deployment.
 Supply all four `bigint` fields in `params.closeLimits` for create, replace, and
-protected open: `maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`,
-`maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. The amendment builder takes
+protected open: `maxExecutionNotionalAssets`, `maxGrossAccountDebitAssets`,
+`maxActionChargeAssets`, and `maxExplicitFeesAssets`. The amendment builder takes
 the same `closeLimits` object. Values are uint256 ceilings in six-decimal settlement-token
 units. Zero is a zero allowance; use `maxUint256` only when unlimited authority
 is intended. Builders reject missing or invalid close limits; they do not
@@ -239,10 +245,10 @@ The package originated from the self-hosted-AA source patch (SHA-256
 base `bc8f6290c540665e4ff61328ea83a4c3d421a8d4`) with protection source
 `3472427ed15b0a478248af7d025535da349a8592`. Those references record its historical
 origins; current source and release evidence define the updated order and protection ABIs.
-The immutable historical compatibility baseline records the old protection
-encodings and hashes. The reviewed current schema records the changed protection
-vectors and amendment action alongside the current order ABI. `RELEASING.md`
-describes the artifact compatibility gate.
+The immutable historical fixtures record the old encodings and hashes. The
+reviewed `current-assets-v5-schema.json` pins the current ABI hashes and protection
+vectors, including the amendment action. `RELEASING.md` describes the artifact
+compatibility gate.
 
 ## UI errors and fallback
 
@@ -257,9 +263,9 @@ failures distinct. `buildExpireOrderV3` encodes permissionless cleanup after the
 order's execution deadline without oracle data. Use archived bindings for older
 deployments with funded close bounties.
 
-A positive `minPostSettlementBalanceUsdc` is supported only for a first opening
+A positive `minPostSettlementBalanceAssets` is supported only for a first opening
 order while the account has no live position and no pending order. The account
-must fund that minimum plus the full declared `maxGrossAccountDebitUsdc`, after
+must fund that minimum plus the full declared `maxGrossAccountDebitAssets`, after
 commitment reservations; an unlimited gross ceiling cannot be used with a
 positive minimum. No later same-account commitment is allowed until this order
 terminates, and withdrawals must preserve its floor. Exact client-ID retries
@@ -274,7 +280,7 @@ sufficient. Increases and closes must use a zero minimum. This restriction
 protects the settlement minimum during its pending lifetime; other execution
 bounds still depend on the state at execution.
 
-## Terminal history on the new stack (0.3.0)
+## Terminal history on the new stack (0.4.0)
 
 The candidate's `orderLifecycleV5Abi` replaces `outcome(orderId)` with
 `terminalOutcome(orderId)`: account, terminal block, status, reason and receipt
@@ -304,16 +310,18 @@ if (summary.status === 2 || summary.status === 3) {
 The helper authenticates the event, clocks and full receipt against the summary;
 `hashOrderReceiptV5` exposes the same digest separately. Solidity consumers can
 call `verifyReceipt(receipt, terminalTime)` on the Book. The receipt and execution
-configuration domains are V5; the request intent domain remains V3. Requests use
-one close flow, and the receipt includes authenticated timing. Earlier candidate
-event and request encodings must not be reused on the final graph.
+configuration domains are V5; the request intent domain remains V3. The renamed
+intent fields change `INTENT_TYPEHASH`, so integrations must use the new Book's
+type hash and current field names. Requests use one close flow, and the receipt
+includes authenticated timing. Earlier candidate event and typed-intent
+definitions must not be reused on the final graph.
 
 Cache history by chain/Book/order ID and invalidate it on reorg. If a log cannot
 be retrieved, report history as unavailable instead of assuming zero fees or
 bounty. Verification proves authenticity, not availability. Detailed on-chain
-reads now require a supplied full receipt. The archived `orderLifecycleV4Abi`
-export and old-stack action/assistance bindings remain available; choose ABI by
-deployment, and migrate external app/keeper reads before new-stack activation.
+reads now require a supplied full receipt. Use the matching older package for
+historical deployments; the archived V4 ABI is retained only as test evidence
+outside the current package. Migrate external app/keeper reads before new-stack activation.
 Commitment history remains stored and does not require an event join.
 
 The current receipt tuple omits pledged-bounty and retained-bounty fields. Its
@@ -355,4 +363,4 @@ New stacks require zero execution bounties for ordinary and protection closes. O
 
 `classifyKeeperHead`, `buildExecuteOrderV3`, `buildExecuteOrderBatchV3`, `buildRiskOffCleanupV3`, `buildTriggerProtection`, `buildRetryProtection` and `quoteExecutionNativeValue` support permissionless execution. Authenticate terminal evidence with the existing V5 receipt helpers. A Pending result or partial batch is not completion. Native gas and oracle fees are still payable, even when the settlement-token bounty is zero.
 
-See [zero-close operations](../perps/ZERO_CLOSE_OPERATIONS.md) for funding, strict expiry, FIFO blockers, protection retries and deployment limitations. The source-tree `scripts/close-operator.mjs` is an explicit one-shot operator tool, not a production daemon or an automatic retry service. Historical ABIs and receipt layouts remain available; do not apply zero-bounty assumptions to old deployments.
+See [zero-close operations](../perps/ZERO_CLOSE_OPERATIONS.md) for funding, strict expiry, FIFO blockers, protection retries and deployment limitations. The source-tree `scripts/close-operator.mjs` is an explicit one-shot operator tool, not a production daemon or an automatic retry service. Use the matching older package for historical ABIs and receipt layouts; do not apply zero-bounty assumptions to old deployments.

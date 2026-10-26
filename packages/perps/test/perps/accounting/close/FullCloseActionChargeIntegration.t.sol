@@ -44,9 +44,9 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         bytes[] memory update = _mockPythUpdateData(CLOSE_PRICE);
         (CfdEnginePlanTypes.CloseDelta memory d, OrderV3Types.ExecutionAssessment memory assessment) = _planAndAssess(f);
         _assertCombinedFunding(d, f.vpiBacking);
-        assertEq(assessment.carryUsdc, d.pendingCarryUsdc);
-        assertEq(assessment.actionChargeCollectedUsdc, d.realizedCarryUsdc + d.actionChargeCollectedUsdc);
-        assertEq(assessment.actionChargeAssessedUsdc, d.realizedCarryUsdc + d.actionChargeAssessedUsdc);
+        assertEq(assessment.carryAssets, d.pendingCarryAssets);
+        assertEq(assessment.actionChargeCollectedAssets, d.realizedCarryAssets + d.actionChargeCollectedAssets);
+        assertEq(assessment.actionChargeAssessedAssets, d.realizedCarryAssets + d.actionChargeAssessedAssets);
 
         vm.recordLogs();
         vm.prank(KEEPER);
@@ -82,7 +82,7 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         _openNormally(CfdTypes.Side.LONG, 200e6);
         (,,,,,, int256 accruedVpi) = engine.positions(ACCOUNT);
         assertLt(accruedVpi, 0, "Minority open must earn a backed rebate");
-        f.vpiBacking = clearinghouse.vpiRebateReserveUsdc(ACCOUNT);
+        f.vpiBacking = clearinghouse.vpiRebateReserveAssets(ACCOUNT);
         assertEq(f.vpiBacking, uint256(-accruedVpi));
         assertGt(f.vpiBacking, 0);
         // Additional short interest makes the close's positive VPI exceed the original backed rebate.
@@ -94,16 +94,16 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         f.closeId = router.commitOrder(CfdTypes.Side.LONG, SIZE, 0, type(uint256).max, true);
         f.firstPendingId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 20e6, PRICE, false);
         f.secondPendingId = router.commitOrder(CfdTypes.Side.LONG, 1000e18, 100e6, PRICE, false);
-        clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc);
+        clearinghouse.withdraw(ACCOUNT, clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets);
         vm.stopPrank();
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
-        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).committedOrderMarginUsdc, 120e6);
-        assertEq(clearinghouse.vpiRebateReserveUsdc(ACCOUNT), f.vpiBacking);
-        f.settlement = clearinghouse.balanceUsdc(ACCOUNT);
+        assertEq(clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets, 0);
+        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).committedOrderMarginAssets, 120e6);
+        assertEq(clearinghouse.vpiRebateReserveAssets(ACCOUNT), f.vpiBacking);
+        f.settlement = clearinghouse.balanceAssets(ACCOUNT);
         f.poolCash = pool.totalAssets();
-        f.treasury = clearinghouse.balanceUsdc(engine.protocolTreasury());
-        f.keeper = clearinghouse.balanceUsdc(KEEPER);
-        f.bounties = clearinghouse.totalBountyReservationsUsdc(ACCOUNT);
+        f.treasury = clearinghouse.balanceAssets(engine.protocolTreasury());
+        f.keeper = clearinghouse.balanceAssets(KEEPER);
+        f.bounties = clearinghouse.totalBountyReservationsAssets(ACCOUNT);
         f.closeBounty = _executionBountyReserve(f.closeId);
     }
 
@@ -124,23 +124,23 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         uint256 backing
     ) private pure {
         assertTrue(d.valid);
-        assertGt(d.pendingCarryUsdc, 0, "Carry must accrue after reservations are installed");
-        assertEq(d.realizedCarryUsdc, d.pendingCarryUsdc);
-        assertGt(d.pricePnlPledgeConsumedUsdc, 0);
-        assertGt(d.unlockMarginUsdc, 0, "Unused pledge must contribute to action collection");
-        assertGt(d.liquidationReserveReleaseUsdc, 0);
-        assertGt(d.closeState.vpiDeltaUsdc, int256(backing));
-        assertEq(d.vpiRebateReserveConsumedUsdc, backing);
-        assertEq(d.vpiRebateReserveAfterUsdc, 0);
-        assertEq(d.actionReserveConsumedUsdc, 0, "Generic collection must protect execution bounties");
-        assertEq(d.actionChargeWithheldUsdc, 0);
-        assertEq(d.actionChargeWaivedUsdc, 0);
-        assertEq(d.actionChargeCollectedUsdc, d.actionChargeAssessedUsdc);
-        assertEq(d.actionChargeAssessedUsdc, uint256(d.closeState.vpiDeltaUsdc) + d.closeState.executionFeeUsdc);
-        uint256 releasedSurplus = d.unlockMarginUsdc + d.liquidationReserveReleaseUsdc;
-        assertEq(d.actionCommittedMarginConsumedUsdc, d.actionChargeAssessedUsdc - backing - releasedSurplus);
-        assertGt(d.actionCommittedMarginConsumedUsdc, 20e6, "First reservation must be exhausted");
-        assertLt(d.actionCommittedMarginConsumedUsdc, 120e6, "Second reservation must retain its unused balance");
+        assertGt(d.pendingCarryAssets, 0, "Carry must accrue after reservations are installed");
+        assertEq(d.realizedCarryAssets, d.pendingCarryAssets);
+        assertGt(d.pricePnlPledgeConsumedAssets, 0);
+        assertGt(d.unlockMarginAssets, 0, "Unused pledge must contribute to action collection");
+        assertGt(d.liquidationReserveReleaseAssets, 0);
+        assertGt(d.closeState.vpiDeltaAssets, int256(backing));
+        assertEq(d.vpiRebateReserveConsumedAssets, backing);
+        assertEq(d.vpiRebateReserveAfterAssets, 0);
+        assertEq(d.actionReserveConsumedAssets, 0, "Generic collection must protect execution bounties");
+        assertEq(d.actionChargeWithheldAssets, 0);
+        assertEq(d.actionChargeWaivedAssets, 0);
+        assertEq(d.actionChargeCollectedAssets, d.actionChargeAssessedAssets);
+        assertEq(d.actionChargeAssessedAssets, uint256(d.closeState.vpiDeltaAssets) + d.closeState.executionFeeAssets);
+        uint256 releasedSurplus = d.unlockMarginAssets + d.liquidationReserveReleaseAssets;
+        assertEq(d.actionCommittedMarginConsumedAssets, d.actionChargeAssessedAssets - backing - releasedSurplus);
+        assertGt(d.actionCommittedMarginConsumedAssets, 20e6, "First reservation must be exhausted");
+        assertLt(d.actionCommittedMarginConsumedAssets, 120e6, "Second reservation must retain its unused balance");
     }
 
     function _assertSettlementEvents(
@@ -156,7 +156,7 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
             if (logs[i].emitter == address(engine) && logs[i].topics[0] == CARRY_SETTLED) {
                 (uint256 collected, uint256 free, uint256 pledge, uint256 unpaid) =
                     abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
-                assertEq(collected, d.realizedCarryUsdc);
+                assertEq(collected, d.realizedCarryAssets);
                 assertEq(pledge, collected);
                 assertEq(free, 0);
                 assertEq(unpaid, 0);
@@ -165,7 +165,7 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
             if (logs[i].emitter == address(engine.settlementSidecar()) && logs[i].topics[0] == ACTION_SETTLED) {
                 (uint256 assessed, uint256 recovered, uint256 waived) =
                     abi.decode(logs[i].data, (uint256, uint256, uint256));
-                assertEq(assessed, d.actionChargeAssessedUsdc);
+                assertEq(assessed, d.actionChargeAssessedAssets);
                 assertEq(recovered, assessed);
                 assertEq(waived, 0);
                 ++actionEvents;
@@ -183,41 +183,41 @@ contract FullCloseActionChargeIntegrationTest is CfdClosePreviewTestBase {
         IMarginClearinghouse.OrderReservation memory first = clearinghouse.getOrderReservation(f.firstPendingId);
         IMarginClearinghouse.OrderReservation memory second = clearinghouse.getOrderReservation(f.secondPendingId);
         assertEq(uint8(first.status), uint8(IMarginClearinghouse.ReservationStatus.Consumed));
-        assertEq(first.remainingAmountUsdc, 0);
+        assertEq(first.remainingAmountAssets, 0);
         assertEq(uint8(second.status), uint8(IMarginClearinghouse.ReservationStatus.Active));
-        assertEq(second.remainingAmountUsdc, 120e6 - d.actionCommittedMarginConsumedUsdc);
-        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).committedOrderMarginUsdc, second.remainingAmountUsdc);
-        assertEq(clearinghouse.totalBountyReservationsUsdc(ACCOUNT), f.bounties - f.closeBounty);
+        assertEq(second.remainingAmountAssets, 120e6 - d.actionCommittedMarginConsumedAssets);
+        assertEq(clearinghouse.getLockedMarginBuckets(ACCOUNT).committedOrderMarginAssets, second.remainingAmountAssets);
+        assertEq(clearinghouse.totalBountyReservationsAssets(ACCOUNT), f.bounties - f.closeBounty);
         assertEq(
             _executionBountyReserve(f.firstPendingId) + _executionBountyReserve(f.secondPendingId),
             f.bounties - f.closeBounty
         );
-        assertEq(clearinghouse.actionReserveUsdc(ACCOUNT), f.bounties - f.closeBounty);
-        assertEq(clearinghouse.balanceUsdc(KEEPER) - f.keeper, f.closeBounty);
+        assertEq(clearinghouse.actionReserveAssets(ACCOUNT), f.bounties - f.closeBounty);
+        assertEq(clearinghouse.balanceAssets(KEEPER) - f.keeper, f.closeBounty);
         assertEq(router.pendingOrderCounts(ACCOUNT), 2);
-        assertEq(clearinghouse.getAccountUsdcBuckets(ACCOUNT).freeSettlementUsdc, 0);
-        assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), 0);
-        assertEq(clearinghouse.liquidationReserveUsdc(ACCOUNT), 0);
-        assertEq(clearinghouse.vpiRebateReserveUsdc(ACCOUNT), 0);
-        assertEq(engine.unsettledCarryUsdc(ACCOUNT), 0);
-        assertEq(engine.traderClaimBalanceUsdc(ACCOUNT), 0);
+        assertEq(clearinghouse.getAccountAssetBuckets(ACCOUNT).freeSettlementAssets, 0);
+        assertEq(clearinghouse.pnlPledgeAssets(ACCOUNT), 0);
+        assertEq(clearinghouse.liquidationReserveAssets(ACCOUNT), 0);
+        assertEq(clearinghouse.vpiRebateReserveAssets(ACCOUNT), 0);
+        assertEq(engine.unsettledCarryAssets(ACCOUNT), 0);
+        assertEq(engine.traderClaimBalanceAssets(ACCOUNT), 0);
         assertEq(terminalNavBook.curveHashOf(ACCOUNT), bytes32(0));
         (uint256 size,,,,,,) = engine.positions(ACCOUNT);
         assertEq(size, 0);
-        uint256 balance = clearinghouse.balanceUsdc(ACCOUNT);
-        assertEq(balance, assessment.postSettlementBalanceUsdc);
-        assertEq(balance, second.remainingAmountUsdc + f.bounties - f.closeBounty);
+        uint256 balance = clearinghouse.balanceAssets(ACCOUNT);
+        assertEq(balance, assessment.postSettlementBalanceAssets);
+        assertEq(balance, second.remainingAmountAssets + f.bounties - f.closeBounty);
         assertEq(
             f.settlement - balance,
-            d.realizedCarryUsdc + d.pricePnlPledgeConsumedUsdc + d.actionChargeCollectedUsdc + f.closeBounty
+            d.realizedCarryAssets + d.pricePnlPledgeConsumedAssets + d.actionChargeCollectedAssets + f.closeBounty
         );
-        uint256 treasuryCredit = clearinghouse.balanceUsdc(engine.protocolTreasury()) - f.treasury;
-        assertEq(treasuryCredit, d.actionProtocolFeeCreditedUsdc + d.protocolFeeTopUpUsdc);
-        assertEq(treasuryCredit, d.executionFeeUsdc);
+        uint256 treasuryCredit = clearinghouse.balanceAssets(engine.protocolTreasury()) - f.treasury;
+        assertEq(treasuryCredit, d.actionProtocolFeeCreditedAssets + d.protocolFeeTopUpAssets);
+        assertEq(treasuryCredit, d.executionFeeAssets);
         assertEq(pool.totalAssets() + treasuryCredit + balance + f.closeBounty, f.poolCash + f.settlement);
         assertEq(
-            engineProtocolLens.getProtocolAccountingSnapshot().effectiveSolvencyAssetsUsdc,
-            d.solvency.effectiveAssetsAfterUsdc
+            engineProtocolLens.getProtocolAccountingSnapshot().effectiveSolvencyAssets,
+            d.solvency.effectiveAssetsAfterAssets
         );
     }
 

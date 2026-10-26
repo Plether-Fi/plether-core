@@ -177,8 +177,8 @@ library SettlementMonitorViewTypes {
         uint256 cachedMarkTime;
         uint256 cachedMarkAge;
         uint256 applicableMaxMarkAge;
-        uint256 freeUsdc;
-        uint256 cachedPreviewTerminalDeficitUsdc;
+        uint256 freeAssets;
+        uint256 cachedPreviewTerminalDeficitAssets;
         uint256 operationalBlockerMask;
         uint256 warningMask;
         uint256 seniorDepositDeferralMask;
@@ -200,32 +200,32 @@ library SettlementMonitorViewTypes {
 
     /// @notice Cached-state and reconcile-preview accounting observed without mutating settlement state.
     struct SettlementAccounting {
-        uint256 poolRawAssetsUsdc;
-        uint256 poolAccountedAssetsUsdc;
-        uint256 poolTotalAssetsUsdc;
-        uint256 poolExcessAssetsUsdc;
-        uint256 withdrawalReservedUsdc;
-        uint256 freeUsdc;
-        uint256 storedSeniorPrincipalUsdc;
-        uint256 storedJuniorPrincipalUsdc;
-        uint256 storedSeniorHighWaterMarkUsdc;
-        uint256 cachedPreviewSeniorPrincipalUsdc;
-        uint256 cachedPreviewJuniorPrincipalUsdc;
-        uint256 cachedPreviewMaxSeniorWithdrawUsdc;
-        uint256 cachedPreviewMaxJuniorWithdrawUsdc;
-        uint256 pendingRecapitalizationUsdc;
-        uint256 pendingTradingRevenueUsdc;
-        uint256 unassignedAssetsUsdc;
-        uint256 reservedSeniorDepositAssetsUsdc;
-        uint256 storedTerminalDeficitUsdc;
-        uint256 cachedPreviewTerminalDeficitUsdc;
+        uint256 poolRawAssets;
+        uint256 poolAccountedAssets;
+        uint256 poolTotalAssets;
+        uint256 poolExcessAssets;
+        uint256 withdrawalReservedAssets;
+        uint256 freeAssets;
+        uint256 storedSeniorPrincipalAssets;
+        uint256 storedJuniorPrincipalAssets;
+        uint256 storedSeniorHighWaterMarkAssets;
+        uint256 cachedPreviewSeniorPrincipalAssets;
+        uint256 cachedPreviewJuniorPrincipalAssets;
+        uint256 cachedPreviewMaxSeniorWithdrawAssets;
+        uint256 cachedPreviewMaxJuniorWithdrawAssets;
+        uint256 pendingRecapitalizationAssets;
+        uint256 pendingTradingRevenueAssets;
+        uint256 unassignedAssets;
+        uint256 reservedSeniorDepositAssets;
+        uint256 storedTerminalDeficitAssets;
+        uint256 cachedPreviewTerminalDeficitAssets;
         uint256 lastReconcileTime;
         uint256 lastSeniorCouponCheckpointTime;
         uint32 terminalMarkPrice;
         uint64 terminalMarkTime;
-        int256 terminalLpPriceDeltaUsdc;
-        uint256 totalTraderClaimsUsdc;
-        uint256 maxDirectionalLiabilityUsdc;
+        int256 terminalLpPriceDeltaAssets;
+        uint256 totalTraderClaimsAssets;
+        uint256 maxDirectionalLiabilityAssets;
         uint64 terminalBookVersion;
         bool terminalHasOpenPositions;
         bool terminalDegradedMode;
@@ -233,7 +233,7 @@ library SettlementMonitorViewTypes {
         bool cachedPreviewAvailable;
         bool terminalSnapshotAvailable;
         uint256 dependencyFailureMask;
-        /// @notice Availability of freeUsdc, withdrawalReservedUsdc, and cachedPreviewTerminalDeficitUsdc.
+        /// @notice Availability of freeAssets, withdrawalReservedAssets, and cachedPreviewTerminalDeficitAssets.
         /// @dev Independent of cachedPreviewAvailable; false means these fields are unavailable, not measured zero.
         bool liquidityPreviewAvailable;
     }
@@ -268,30 +268,30 @@ library SettlementMonitorViewTypes {
         uint256 engineCapPrice;
         uint256 bookActiveCurveCount;
         uint256 bookTotalLots;
-        uint256 bookTotalEntryCostUsdcAtoms;
-        uint256 bookTotalEffectiveCapUsdcAtoms;
+        uint256 bookTotalEntryCostAssetAtoms;
+        uint256 bookTotalEffectiveCapAssetAtoms;
         uint256 engineLongOpenInterest;
         uint256 engineShortOpenInterest;
         uint256 engineLongEntryNotional;
         uint256 engineShortEntryNotional;
         uint256 sizeQuantum;
-        uint256 poolRawAssetsUsdc;
-        uint256 poolAccountedAssetsUsdc;
-        uint256 poolCustodyDeficitUsdc;
-        uint256 poolCustodySurplusUsdc;
-        uint256 seniorRequiredAssetEscrowUsdc;
-        uint256 seniorActualAssetEscrowUsdc;
+        uint256 poolRawAssets;
+        uint256 poolAccountedAssets;
+        uint256 poolCustodyDeficitAssets;
+        uint256 poolCustodySurplusAssets;
+        uint256 seniorRequiredAssetEscrowAssets;
+        uint256 seniorActualAssetEscrowAssets;
         uint256 seniorRequiredShareEscrow;
         uint256 seniorActualShareEscrow;
-        uint256 juniorRequiredAssetEscrowUsdc;
-        uint256 juniorActualAssetEscrowUsdc;
+        uint256 juniorRequiredAssetEscrowAssets;
+        uint256 juniorActualAssetEscrowAssets;
         uint256 juniorRequiredShareEscrow;
         uint256 juniorActualShareEscrow;
-        uint256 seniorPrincipalUsdc;
-        uint256 seniorHighWaterMarkUsdc;
-        uint256 seniorImpairmentUsdc;
-        uint256 seniorPrincipalAboveHighWaterMarkUsdc;
-        uint256 protectedSeniorExposureUsdc;
+        uint256 seniorPrincipalAssets;
+        uint256 seniorHighWaterMarkAssets;
+        uint256 seniorImpairmentAssets;
+        uint256 seniorPrincipalAboveHighWaterMarkAssets;
+        uint256 protectedSeniorExposureAssets;
     }
 
     /// @notice Full single-block observation plus explicitly unauthenticated content digests.
