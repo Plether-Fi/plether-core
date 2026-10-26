@@ -1,15 +1,10 @@
 # Plether Perps
 
 Plether Perps is a perpetuals protocol for leveraged exposure to the strength of the US dollar.
-Traders post settlement-token margin, while liquidity providers supply the capital backing trades through senior
+Traders post USDG as margin, while liquidity providers supply the capital backing trades through senior
 and junior vaults.
 
-The next Arbitrum Sepolia deployment uses **Mock USDG** (`USDG`), a six-decimal ERC-20 with unrestricted test
-minting. It is not official USDG and has no redemption value or GDN rewards. Existing deployments keep their
-original settlement assets. The new stack uses token-neutral APIs: `settlementToken()` for token bindings,
-`*Assets` for settlement amounts, and SDK `settlementToken` address inputs. Amounts are integer six-decimal base
-units: `1_000_000` means one token. This is a deliberate breaking API change for a fresh deployment; no old
-token-specific aliases are exposed. Integrations must use matching current ABIs and SDK types.
+Testnet USDG can be minted whenever you need it.
 
 The market uses a capped price range to bound potential trader payouts. Orders execute through a delayed queue,
 and traders pay carry for the LP capital supporting their positions.
@@ -30,10 +25,10 @@ long and short traders as funding.
 
 ## Trading
 
-1. Deposit the settlement token into your margin account.
+1. Deposit USDG into your margin account.
 2. Submit an order with your execution limits and deadline.
 3. A keeper executes the order through the queue using validated oracle data.
-4. Close through the same order flow and withdraw available settlement tokens.
+4. Close through the same order flow and withdraw available USDG.
 
 Each account can hold one position at a time. Orders execute in first-in, first-out order, and committed orders
 cannot be cancelled by the trader. Positions must be closed before switching sides.
@@ -48,7 +43,7 @@ settled as cash becomes available.
 
 ## Providing liquidity
 
-LPs deposit the settlement token through one of two vaults that share a common pool:
+LPs deposit USDG through one of two vaults that share a common pool:
 
 - **Senior:** has priority in the capital waterfall and a configured coupon funded by Junior capital.
 - **Junior:** absorbs losses first and receives the residual economics after Senior obligations.
@@ -65,7 +60,7 @@ Refunds remain available under the documented recovery conditions. See the
 
 | Component | Responsibility |
 | --- | --- |
-| `MarginClearinghouse` | Holds trader settlement tokens and manages margin balances. |
+| `MarginClearinghouse` | Holds traders’ USDG and manages margin balances. |
 | `OrderRouter` | Queues orders and coordinates oracle-backed execution and liquidations. |
 | `PositionProtectionBook` | Tracks take-profit and stop-loss protection. |
 | `CfdEngine` | Tracks positions, risk, carry, and settlement accounting. |
@@ -78,15 +73,9 @@ controls can restrict trading and LP activity. See the [security model](SECURITY
 
 ## Development
 
-For MockUSDG testnet funding, mint to the canonical trading smart-account address, then use the existing
-approve-and-`depositMargin` account-balance flow. Funds held by the owner EOA must first be transferred to that
-trading account. The mock has no EIP-2612 permit or EIP-3009 authorization support, so signed owner-wallet deposits
-are unavailable. External bridge funding is also unavailable. Minting can be repeated whenever needed; the mint sender needs
-testnet gas. See [testnet funding](DEPLOYMENT.md#repeat-testnet-funding) for the direct mint command.
-
-Future production reward registration and a separate payout recipient are recorded in deployment metadata.
-MockUSDG rewards are `not_applicable`; no reward accrual, claiming, or distribution enters trading or LP accounting.
-See [future rewards readiness](DEPLOYMENT.md#future-rewards-readiness).
+For testnet funding, mint USDG to your trading account, then approve and deposit it. You’ll need testnet gas.
+See [testnet funding](DEPLOYMENT.md#repeat-testnet-funding) for instructions and
+[future rewards readiness](DEPLOYMENT.md#future-rewards-readiness) for GDN setup notes.
 
 This package uses Foundry and depends on the shared package and third-party libraries. From the repository root:
 

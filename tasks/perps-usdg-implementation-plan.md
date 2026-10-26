@@ -6,7 +6,7 @@ Status: the core MockUSDG implementation and breaking token-neutral API rename a
 
 Prepare a fresh Arbitrum Sepolia perps deployment using freely mintable MockUSDG, with clear token metadata and an operational path for future production USDG rewards.
 
-- Deploy `MockUSDG` with name `Mock USDG`, symbol `USDG`, six decimals, and unrestricted `mint(address,uint256)` on testnet. Display `Mock USDG` in the testnet app.
+- Deploy `MockUSDG` with name `Mock USDG`, symbol `USDG`, six decimals, and unrestricted `mint(address,uint256)` on testnet. Display `USDG` in the testnet app.
 - Keep the existing perps PnL, margin, liquidation, carry, tranche, and solvency calculations and numerical parameters.
 - Rename every current perps token-specific API and its consumers to token-neutral names: `settlementToken()` and `settlementToken` for token addresses, `*Assets` for settlement amounts, `*AssetAtoms` for exact base units, and `_ASSETS` for amount constants. Rename `getFreeAssets`, `getSettlementFreeAssets`, and `AccountAssetBuckets` consistently. This is a deliberate breaking API change for a fresh deployment, with no compatibility aliases. Token identity comes from the configured address and metadata; `1_000_000` six-decimal base units means one token.
 - Scope changes to the new perps deployment and its consumers. Existing deployed stacks, historical release evidence, spot/options code, and shared USDC mocks remain valid historical or independent configurations.
@@ -72,13 +72,13 @@ Companion work in `Plether-Fi/plether-app`:
 Implementation:
 
 1. Pass the MockUSDG address through SDK `settlementToken` inputs. Rename current ABI fields, getters, errors, action inputs, amount constants, receipt types, typed-data definitions, and consumer accessors consistently. Regenerate current ABIs and bindings from the renamed source; remove old token-specific aliases. Preserve archived release snapshots and historical compatibility evidence without exposing them as current APIs.
-2. Replace active hardcoded USDC display/error text with configured token labels or `settlement token`; retain numeric formatting at six decimals.
+2. Replace active hardcoded USDC display/error text with the configured token symbol (`USDG` for this release); retain numeric formatting at six decimals.
 3. Keep `supportsReceiveWithAuthorization` false. Do not offer the owner-wallet signed first-deposit route for this mock.
 4. Make the normal testnet path: obtain the canonical trading smart-account address, mint MockUSDG to it, then use the existing `buildSmartAccountBalanceDepositAction` to batch approval and `depositMargin`. The mint transaction still needs testnet gas. If funds are already in an owner EOA, transfer to the trading account before using this deposit path.
 5. Ensure the app does not disable the supported account-balance deposit just because the signed owner-wallet route is unavailable. Refresh sponsorship targets for the new stack and test sponsorship where it is enabled.
 6. Keep external bridge funding unavailable for the mock unless a real provider route is separately established. Do not reuse a USDC bridge release manifest for MockUSDG.
 
-Acceptance: the app clearly shows Mock USDG, credits the intended trading account, offers a working funded-account deposit path, and never advertises a signed-deposit or bridge capability the token lacks.
+Acceptance: the app clearly shows USDG, credits the intended trading account, offers a working funded-account deposit path, and never advertises a signed-deposit or bridge capability the token lacks.
 
 ## 4. Future rewards readiness
 

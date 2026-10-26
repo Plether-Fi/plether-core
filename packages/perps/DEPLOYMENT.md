@@ -26,7 +26,7 @@ New manifests use schema version `4`. The canonical contract entry is `contracts
 `script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG`, an address, and a runtime code hash. Top-level `settlementToken`
 metadata records `name: "Mock USDG"`, `symbol: "USDG"`, `decimals: 6`, `isMock: true`,
 `supportsReceiveWithAuthorization: false`, and `supportsBridgeFunding: false`. Applications should display
-`Mock USDG`, use the manifest address for balances and approvals, and gate funding routes by those capabilities.
+`USDG`, use the manifest address for balances and approvals, and gate funding routes by those capabilities.
 Do not relabel an address from an older USDC deployment or route it through the new ABI. Historical
 `contracts.mockUsdc` manifests and their ABI exports remain historical evidence. The current runtime uses a fresh
 schema-4 prepared manifest with addresses unset and funding disabled until a reviewed deployment is supplied.
