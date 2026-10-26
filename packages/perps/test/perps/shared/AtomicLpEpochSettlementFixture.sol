@@ -101,7 +101,8 @@ abstract contract AtomicLpEpochSettlementTestFixture is BasePerpTest {
     uint256 internal constant EIP170_RUNTIME_CODE_LIMIT = 24_576;
     uint256 internal constant HOUSE_POOL_RUNTIME_TARGET = 24_529;
     uint256 internal constant REDEMPTION_MATH_SIDECAR_RUNTIME_LIMIT = 1200;
-    uint256 internal constant CFD_ENGINE_RUNTIME_BASELINE = 24_439;
+    // Production runtime including configurable treasury locks and automatic successor scheduling.
+    uint256 internal constant CFD_ENGINE_RUNTIME_TARGET = 24_563;
 
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);

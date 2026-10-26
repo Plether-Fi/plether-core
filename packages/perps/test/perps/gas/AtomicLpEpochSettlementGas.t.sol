@@ -13,9 +13,10 @@ contract AtomicLpEpochSettlementGasTest is AtomicLpEpochSettlementTestFixture {
     function test_AtomicLpEpoch_RuntimeFitsEip170() public view {
         assertLe(
             address(engine).code.length,
-            CFD_ENGINE_RUNTIME_BASELINE,
-            "terminal NAV synchronization must not grow CfdEngine runtime"
+            CFD_ENGINE_RUNTIME_TARGET,
+            "CfdEngine must remain within its measured treasury-scheduling runtime target"
         );
+        assertLe(address(engine).code.length, EIP170_RUNTIME_CODE_LIMIT, "CfdEngine must remain EIP-170 deployable");
         assertLe(
             address(pool).code.length,
             HOUSE_POOL_RUNTIME_TARGET,
