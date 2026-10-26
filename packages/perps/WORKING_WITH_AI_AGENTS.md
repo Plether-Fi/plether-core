@@ -166,6 +166,8 @@ Use the smallest canonical surface that answers the decision:
 - `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for Engine-level trade-ticket simulation; use
   `CfdClosePreview.previewClose(...)` for a prospective ordinary close that projects commitment carry and its zero
   bounty commitment effects.
+- `ICfdEngineLens.previewRouterLiquidation(...)` for liquidation eligibility and economics after the Router's
+  cutoff-invalid open refunds; `previewLiquidation(...)` omits those refunds and remains an Engine diagnostic.
 - `IOrderLifecycleBook` for order identity, pinned policy, lifecycle, and outcome.
 - `PerpsPublicLens.getActivePositionProtection(...)` and `getPositionProtection(...)`, or direct
   `IPositionProtectionViews`, for retained protection thresholds, status, trigger evidence, and order linkage.

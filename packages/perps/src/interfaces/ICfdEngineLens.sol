@@ -24,6 +24,20 @@ interface ICfdEngineLens {
         CfdEnginePlanTypes.OpenRevertCode limitingReason;
     }
 
+    /// @notice Account-queue corruption prevents bounded Router-aware preview traversal.
+    error CfdEngineLens__InvalidRouterQueue();
+
+    /// @notice Liquidation economics after the canonical Router's persistent risk-off refunds.
+    /// @dev Refund amounts are reclassifications into free settlement, not wallet transfers. A nonzero refund count
+    ///      with liquidation.liquidatable=false predicts the Router's refund-and-skip outcome for an open position.
+    struct RouterLiquidationPreview {
+        ICfdEngineTypes.LiquidationPreview liquidation;
+        uint64 riskOffCutoff;
+        uint256 refundedOrderCount;
+        uint256 releasedCommittedMarginUsdc;
+        uint256 releasedBountyUsdc;
+    }
+
     /// @notice Returns the engine inspected by this lens.
     /// @return Bound CfdEngine address
     function engine() external view returns (address);
@@ -128,7 +142,8 @@ interface ICfdEngineLens {
         uint256 poolDepthUsdc
     ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
-    /// @notice Previews liquidation against current pool depth.
+    /// @notice Previews liquidation against current pool depth, without preceding Router risk-off refunds.
+    /// @dev Use previewRouterLiquidation for the current Router queue/refund policy.
     /// @dev Models forfeiture of the account's pending execution bounties before terminal collateral is evaluated.
     ///      Uses current effective `HousePool.totalAssets()`, clamps the price, and does not validate oracle freshness.
     ///      settlementRetainedUsdc already includes immediatePayoutUsdc; the latter is a breakdown, not extra cash.
@@ -139,6 +154,16 @@ interface ICfdEngineLens {
         address account,
         uint256 oraclePrice
     ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
+
+    /// @notice Previews the canonical Router's liquidation after refunding cutoff-invalid pending opens.
+    /// @dev Includes remaining committed margin, order bounties, and pending-open protection-trigger refunds, then
+    ///      forfeits remaining bounties and evaluates carry/price health. Uses current timestamp and pool depth with
+    ///      the supplied side-appropriate price; does not ingest Pyth, validate oracle policy, or simulate other batch
+    ///      accounts, receipt integrity, callbacks, or execution gas. Queue and custody remain unchanged.
+    function previewRouterLiquidation(
+        address account,
+        uint256 oraclePrice
+    ) external view returns (RouterLiquidationPreview memory preview);
 
     /// @notice Simulates liquidation at caller-supplied pool depth.
     /// @dev Models pending-bounty forfeiture and treats the supplied depth as both solvency assets and pool cash; it

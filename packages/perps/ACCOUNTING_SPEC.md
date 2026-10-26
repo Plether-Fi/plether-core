@@ -1037,6 +1037,14 @@ without moving funds, and unknown failures still roll back the item for retry.
 
 ### Liquidation settlement
 
+Use `CfdEngineLens.previewRouterLiquidation(account, oraclePrice)` to include the Router's preceding risk-off
+refunds. It releases remaining committed margin and order/protection bounties for cutoff-invalid pending opens
+in a memory snapshot before evaluating liquidation. Those refunds can cover unpaid carry and restore solvency;
+the result reports both the refund amounts and the subsequent liquidation preview. Refunds make settlement free
+inside the clearinghouse; they are not wallet transfers. `previewLiquidation` and `simulateLiquidation` remain
+Engine-level diagnostics that omit this Router cleanup. All use caller-supplied prices and do not validate oracle
+policy or predict intervening transactions or other accounts in a batch.
+
 In the liquidation preview, `settlementRetainedUsdc` is the projected settlement balance after all liquidation
 debits and any immediate price payout. `immediatePayoutUsdc` is already included in that total and must not be
 added again. `traderClaimBalanceUsdc` reports outstanding claims separately; deferred payouts are not cash in
