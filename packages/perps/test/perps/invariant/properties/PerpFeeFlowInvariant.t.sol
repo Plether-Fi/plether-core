@@ -135,6 +135,31 @@ contract PerpFeeFlowInvariantTest is BasePerpInvariantTest {
         this.invariant_IndependentFeeModelMatchesCustodyAndWithdrawals();
     }
 
+    function test_FeeModelDetectsWrongFeeEvenWhenCustodyIsConserved() public {
+        handler.openPosition(0, 2000e6);
+        _assertAllInvariants();
+        address trader = handler.actorAt(0);
+        uint256 custody = usdc.balanceOf(address(clearinghouse));
+        uint256 traderCredit = clearinghouse.balanceUsdc(trader);
+        uint256 keeperCredit = clearinghouse.balanceUsdc(address(handler));
+        uint256 otherTraderCredit = clearinghouse.balanceUsdc(handler.actorAt(1));
+
+        // Simulate charging the trader one atom too much and routing it correctly to treasury. Total custody and
+        // aggregate credits still agree; only the independently accrued economic fee exposes the overcharge.
+        _replaceTreasuryCredit(20e6 + 1);
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(trader)
+            .checked_write(traderCredit - 1);
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) + clearinghouse.balanceUsdc(trader) + keeperCredit
+                + otherTraderCredit,
+            custody,
+            "Injected fee error must conserve clearinghouse custody"
+        );
+        assertEq(handler.ghostTrackedFeesUsdc(), 20e6, "Corruption must not repair independently accrued fees");
+        vm.expectRevert();
+        this.invariant_IndependentFeeModelMatchesCustodyAndWithdrawals();
+    }
+
     function test_FeeModelDetectsIncorrectWalletPayout() public {
         handler.openPosition(0, 2000e6);
         handler.withdrawTreasuryFees();

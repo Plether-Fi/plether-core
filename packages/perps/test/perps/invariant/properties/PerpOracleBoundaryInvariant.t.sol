@@ -6,15 +6,29 @@ import {PerpOracleHandler} from "../handlers/PerpOracleHandler.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
 import {HousePoolEngineViewTypes} from "@plether/perps/interfaces/HousePoolEngineViewTypes.sol";
-import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
+import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 
 contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
 
     PerpOracleHandler internal handler;
 
+    address internal constant OPEN_MARGIN_PROBE = address(0x7200);
+    address internal constant LONG_MARGIN_PROBE = address(0x7201);
+    address internal constant SHORT_MARGIN_PROBE = address(0x7202);
+
+    function _riskParams() internal pure override returns (CfdTypes.RiskParams memory params) {
+        params = super._riskParams();
+        // Isolate calendar-driven margin changes: these fixed reference positions never accrue carry.
+        params.baseCarryBps = 0;
+    }
+
     function setUp() public override {
         super.setUp();
+
+        _depositMarginProbe(OPEN_MARGIN_PROBE);
+        _openMarginProbe(LONG_MARGIN_PROBE, CfdTypes.Side.LONG, 0.8e8, 200e6);
+        _openMarginProbe(SHORT_MARGIN_PROBE, CfdTypes.Side.SHORT, 1.2e8, 300e6);
 
         handler = new PerpOracleHandler(usdc, mockPyth, engine, clearinghouse, router);
         handler.seedPositions();
@@ -86,12 +100,17 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
     }
 
     function _assertInvariant_MaintenanceMarginMatchesFadWindow() internal view {
-        uint256 price = 1e8;
-        uint256 size = 10_000e18;
-        uint256 maint = _maintenanceMarginUsdc(size, price);
-        uint256 notionalUsdc = (size * price) / 1e20;
-        uint256 expectedBps = engine.isFadWindow() ? 300 : 100;
-        assertEq(maint, (notionalUsdc * expectedBps) / 10_000, "Maintenance margin must switch with FAD mode");
+        bool fad = _expectedFadWindow(block.timestamp);
+        ICfdEngineTypes.OpenPreview memory longPreview =
+            engineLens.previewOpen(OPEN_MARGIN_PROBE, CfdTypes.Side.LONG, 10_000e18, 1000e6, 0.8e8);
+        ICfdEngineTypes.OpenPreview memory shortPreview =
+            engineLens.previewOpen(OPEN_MARGIN_PROBE, CfdTypes.Side.SHORT, 10_000e18, 1000e6, 1.2e8);
+        assertTrue(longPreview.valid, "Funded reference long must be admitted");
+        assertTrue(shortPreview.valid, "Funded reference short must be admitted");
+        // Known policy examples: $8,000/$12,000 notional require 1% ordinarily and 3% in FAD.
+        // Read the production planner result; do not calculate and compare a test-only margin helper.
+        assertEq(longPreview.maintenanceMarginUsdc, fad ? 240e6 : 80e6, "Long maintenance must match known policy");
+        assertEq(shortPreview.maintenanceMarginUsdc, fad ? 360e6 : 120e6, "Short maintenance must match known policy");
     }
 
     function _assertInvariant_HousePoolSnapshotUsesCorrectFreshnessLimit() internal view {
@@ -111,24 +130,122 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         );
     }
 
-    function _assertInvariant_PositionViewsRespectCurrentFadMode() internal view {
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
-            address account = handler.actorAt(i);
-            AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
-                engineAccountLens.getAccountLedgerSnapshot(account);
-            if (!snapshot.hasPosition) {
-                continue;
-            }
+    function _assertInvariant_LiquidationEligibilityMatchesFadWindow() internal view {
+        bool fad = _expectedFadWindow(block.timestamp);
+        ICfdEngineTypes.LiquidationPreview memory longPreview = engineLens.previewLiquidation(LONG_MARGIN_PROBE, 0.8e8);
+        ICfdEngineTypes.LiquidationPreview memory shortPreview =
+            engineLens.previewLiquidation(SHORT_MARGIN_PROBE, 1.2e8);
+        // $200 less $3.20 execution fee and $7.20 liquidation reserve leaves $189.60 price equity;
+        // $300 less $4.80 and $10.80 leaves $284.40. Both exceed weekday maintenance and fail FAD.
+        assertEq(longPreview.equityUsdc, 189.6e6, "Long reference equity must remain fixed");
+        assertEq(shortPreview.equityUsdc, 284.4e6, "Short reference equity must remain fixed");
+        assertEq(longPreview.liquidatable, fad, "Long eligibility must cross the known FAD margin boundary");
+        assertEq(shortPreview.liquidatable, fad, "Short eligibility must cross the known FAD margin boundary");
+    }
 
-            uint256 expectedMaint = _maintenanceMarginUsdc(snapshot.size, engine.lastMarkPrice());
-            uint256 weekdayMaint = (((snapshot.size * engine.lastMarkPrice()) / 1e20) * 100) / 10_000;
-            uint256 fadMaint = (((snapshot.size * engine.lastMarkPrice()) / 1e20) * 300) / 10_000;
-            if (engine.isFadWindow()) {
-                assertEq(expectedMaint, fadMaint, "FAD mode must use the elevated maintenance margin bps");
-            } else {
-                assertEq(expectedMaint, weekdayMaint, "Non-FAD mode must use the weekday maintenance margin bps");
-            }
+    function test_MarginPolicyProbesCrossEveryOracleBoundary() public {
+        for (uint256 mode; mode < 16; ++mode) {
+            handler.warpToOracleBoundary(mode);
+            _assertAllInvariants();
         }
+    }
+
+    function test_RealAccountHealthAndPublicMarginCrossFadBoundary() public {
+        handler.warpToOracleBoundary(8);
+        handler.syncMarkNow(0.8e8);
+        _assertLongProbeAccount(false, 80e6);
+        handler.warpToOracleBoundary(9);
+        _assertLongProbeAccount(true, 240e6);
+    }
+
+    function test_FaultControlInvariantRejectsWrongProductionMaintenance() public {
+        for (uint256 mode; mode < 2; ++mode) {
+            handler.warpToOracleBoundary(mode);
+            ICfdEngineTypes.OpenPreview memory corrupt =
+                engineLens.previewOpen(OPEN_MARGIN_PROBE, CfdTypes.Side.LONG, 10_000e18, 1000e6, 0.8e8);
+            corrupt.maintenanceMarginUsdc += 1;
+            vm.mockCall(
+                address(engineLens),
+                abi.encodeCall(
+                    engineLens.previewOpen, (OPEN_MARGIN_PROBE, CfdTypes.Side.LONG, 10_000e18, 1000e6, 0.8e8)
+                ),
+                abi.encode(corrupt)
+            );
+            vm.expectRevert();
+            this.invariant_OracleCalendarMarginsAndFreshnessMatchPolicy();
+            vm.clearMockedCalls();
+            _assertAllInvariants();
+        }
+    }
+
+    function test_FaultControlInvariantRejectsWrongProductionLiquidationEligibility() public {
+        for (uint256 mode; mode < 2; ++mode) {
+            handler.warpToOracleBoundary(mode);
+            ICfdEngineTypes.LiquidationPreview memory corrupt = engineLens.previewLiquidation(LONG_MARGIN_PROBE, 0.8e8);
+            corrupt.liquidatable = !corrupt.liquidatable;
+            vm.mockCall(
+                address(engineLens),
+                abi.encodeCall(engineLens.previewLiquidation, (LONG_MARGIN_PROBE, 0.8e8)),
+                abi.encode(corrupt)
+            );
+            vm.expectRevert();
+            this.invariant_OracleCalendarMarginsAndFreshnessMatchPolicy();
+            vm.clearMockedCalls();
+            _assertAllInvariants();
+        }
+    }
+
+    function _assertLongProbeAccount(
+        bool expectedLiquidatable,
+        uint256 expectedMaintenance
+    ) internal view {
+        AccountLensViewTypes.AccountLedgerSnapshot memory snapshot =
+            engineAccountLens.getAccountLedgerSnapshot(LONG_MARGIN_PROBE);
+        PerpsViewTypes.PositionView memory position = publicLens.getPosition(LONG_MARGIN_PROBE);
+        assertTrue(snapshot.hasPosition, "Reference position must exist");
+        assertEq(
+            snapshot.netEquityUsdc, 189.6e6, "Reference price equity must stay between weekday and FAD maintenance"
+        );
+        assertEq(snapshot.liquidatable, expectedLiquidatable, "Real account health must follow the FAD threshold");
+        assertEq(position.maintenanceMarginUsdc, expectedMaintenance, "Public margin must report the known requirement");
+        assertEq(position.liquidatable, expectedLiquidatable, "Public health must follow the FAD threshold");
+    }
+
+    function _depositMarginProbe(
+        address account
+    ) internal {
+        usdc.mint(account, 10_000e6);
+        vm.startPrank(account);
+        usdc.approve(address(clearinghouse), type(uint256).max);
+        clearinghouse.deposit(account, 10_000e6);
+        vm.stopPrank();
+    }
+
+    function _openMarginProbe(
+        address account,
+        CfdTypes.Side side,
+        uint256 price,
+        uint256 margin
+    ) internal {
+        _depositMarginProbe(account);
+        uint256 depth = housePool.totalAssets();
+        vm.prank(address(router));
+        engine.processOrderTyped(
+            CfdTypes.Order({
+                account: account,
+                sizeDelta: 10_000e18,
+                marginDelta: margin,
+                targetPrice: price,
+                commitTime: uint64(block.timestamp),
+                commitBlock: uint64(block.number),
+                orderId: 0,
+                side: side,
+                isClose: false
+            }),
+            price,
+            depth,
+            uint64(block.timestamp)
+        );
     }
 
     function _expectedOracleFrozen(
@@ -229,7 +346,7 @@ contract PerpOracleBoundaryInvariantTest is BasePerpInvariantTest {
         _assertInvariant_FadWindowMatchesBoundaryFormula();
         _assertInvariant_MaintenanceMarginMatchesFadWindow();
         _assertInvariant_HousePoolSnapshotUsesCorrectFreshnessLimit();
-        _assertInvariant_PositionViewsRespectCurrentFadMode();
+        _assertInvariant_LiquidationEligibilityMatchesFadWindow();
     }
 
 }
