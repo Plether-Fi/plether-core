@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 // Category: spec. All cases assert current documented behavior and are expected to pass.
-// Source of truth: packages/perps/PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior
+// Source of truth: packages/perps/SECURITY.md#oracle-regimes
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -106,7 +106,7 @@ contract FrozenCloseEligibilityTest is BasePerpTest {
         vm.warp(THURSDAY_NOON);
     }
 
-    /// @dev spec; source: PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior.
+    /// @dev spec; source: SECURITY.md#oracle-regimes.
     function test_CloseExecutesDuringOracleFreeze() public {
         address aliceAccount = alice;
 
@@ -147,7 +147,7 @@ contract FrozenLpRedemptionTest is BasePerpTest {
         return 500_000e6;
     }
 
-    /// @dev spec; source: PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior.
+    /// @dev spec; source: SECURITY.md#oracle-regimes.
     function test_FrozenWindowAllowsMatureLpRedemption() public {
         _fundJunior(bob, 100_000e6);
 
@@ -269,7 +269,7 @@ contract ExpiredHeadFrozenQueueTest is BasePerpTest {
         vm.warp(THURSDAY_NOON);
     }
 
-    /// @dev spec; source: PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior.
+    /// @dev spec; source: SECURITY.md#oracle-regimes.
     function test_ExpiredOpenIsClearedDuringFrozenWindow() public {
         _fundTrader(alice, 50_000e6);
         vm.deal(alice, 1 ether);
@@ -293,7 +293,7 @@ contract ExpiredHeadFrozenQueueTest is BasePerpTest {
         assertEq(router.nextExecuteId(), 0, "Expired open must drain the queue to the zero sentinel");
     }
 
-    /// @dev spec; source: PRE_AUDIT_GUIDE.md#frozen-oracle-close-only-behavior.
+    /// @dev spec; source: SECURITY.md#oracle-regimes.
     function test_ExpiredHeadCanBeClearedBeforeFrozenClose() public {
         address aliceAccount = alice;
         _open(aliceAccount, CfdTypes.Side.LONG, 100_000e18, 10_000e6, 1e8);

@@ -1,53 +1,67 @@
-# White Paper Reproducibility
+# Whitepaper research model and reproduction
 
-This directory contains the machine-readable accounting model and empirical
-analysis used by `packages/perps/WHITEPAPER.md`.
+This directory contains the historical research model, saved results, and PDF
+renderer for [Bounded Perpetuals](../WHITEPAPER.md). For current protocol
+behavior, start with the [package guide](../README.md) and
+[accounting specification](../ACCOUNTING_SPEC.md).
 
-The Python module preserves selected integer accounting kernels from the
-original publication revision `06d0ab451ad9bb42f4e9869fc94b0eeb1e88efe5`,
-including historical versions of:
+The Python model freezes selected accounting kernels from publication revision
+`06d0ab451ad9bb42f4e9869fc94b0eeb1e88efe5`. The whitepaper's protocol description
+is maintained separately; its front matter identifies the implementation
+revision reviewed. Regenerating the research results does **not** update the
+model to current Solidity behavior.
 
-- `CfdMath`
-- `PositionRiskAccountingLib`
-- `SolvencyAccountingLib`
-- `CashPriorityLib`
-- `CfdEngineSettlementLib`
-- `LiquidationAccountingLib`
-- `HousePoolWaterfallAccountingLib`
+## What the model covers
 
-These are frozen research helpers, not current Solidity parity implementations.
-The current Solidity tree no longer contains `CfdEngineSettlementLib`; the name above identifies only the
-historical kernel reproduced by this research model.
-The close-loss and liquidation helpers retain legacy collateral/claim ordering
-and uncovered-loss accounting. They do not implement current exact-lot entry
-costs, claim-first capped price collection, margin-first carry checkpoints,
-separate action and liquidation reserves, or TerminalNavBookV2 curves. The
-model's solvency helper also omits the production settlement buffer.
+[`bounded_perps_model.py`](bounded_perps_model.py) reconstructs the six-currency
+normalized basket from official ECB daily reference rates, checks selected
+integer accounting examples, and runs the monthly-cohort scenarios in Section
+8 of the whitepaper. The fixed data window is 2016-01-01 through 2026-06-30,
+with 2,685 complete observations from 2016-01-04 onward.
 
-The module also reconstructs Plether's six-FX normalized basket from official
-ECB daily reference rates and runs the deterministic monthly-cohort scenarios reported in
-the paper. The ECB series is an information-only, daily research proxy. The
-replay does not reproduce Pyth ticks, oracle confidence intervals, executable
-weekend prices, intraday paths, VPI, frozen execution, keeper latency, or
-pending-deposit epochs. Signals are formed one fix before the entry proxy; the
-reference 40% final-skew wall is enforced on paired cohorts using exact
-integer/rational admission scaling. Paired legs are assumed to be interleaved,
-so this is not a transaction-level order simulation. LP capital is static:
-the scenarios include no LP deposits, withdrawals, or recapitalizations, and do
-not simulate governed Senior capacity or Junior maintenance-fee dilution.
+Important differences from the current protocol:
 
-The replay reports two non-production tranche views. The realized-cash overlay
-applies cash/claim changes and observed-interval coupon checkpoints. The
-separate daily shadow subtracts the legacy conservative side-envelope stress;
-it predates the exact account-capped `TerminalNavBookV2` kernel and must not be
-read as production LP share NAV. Its once-per-observation cadence is also a
-research convention. The replay performs one additional shadow reconciliation
-at the final fix after forced end-of-sample closes. Settlement-order
-alternatives and the forced close are recorded in `results.json`.
+| Area | Research-model treatment |
+| --- | --- |
+| Price settlement | Legacy collateral/claim ordering and uncovered-loss telemetry; no exact-lot entry-cost book, claim-first capped price collection, or separate action/liquidation reserves |
+| Carry and admission | Historical carry collection and gross-cash utilization; no current margin-first carry checkpoint or liability-scaled settlement buffer |
+| LP valuation | A realized-cash waterfall and a separate conservative side-envelope stress shadow; neither implements `TerminalNavBookV2` share NAV |
+| Execution | Daily ECB fixes, not Pyth ticks; no confidence shifts, VPI in the scenario replay, frozen execution, slippage rejection, or keeper delays |
+| Capital and epochs | Static LP capital; no deposits, withdrawals, recapitalizations, synchronized LP epochs, Senior capacity admission, or Junior maintenance-fee dilution |
 
-## Reproduce
+The module includes a standalone VPI arithmetic helper even though the historical
+scenario replay excludes VPI. Historical Solidity names in its comments identify
+the publication kernels; some, such as `CfdEngineSettlementLib`, no longer exist
+in the current source tree.
 
-The publication snapshot covers 2016-01-01 through 2026-06-30:
+Signals are formed one fix before the entry proxy. The reference 40% final-skew
+wall is enforced on paired cohorts with exact integer/rational scaling. The legs
+are assumed to be interleaved, so this is not a transaction-level simulation.
+The shadow waterfall reconciles after each observation and once more after the
+forced end-of-sample closes. `results.json` records settlement-order alternatives
+and forced closes. ECB fixes are an information-only research proxy, not
+executable market prices.
+
+## Check the saved publication results
+
+All commands below run from the repository root. The model and its tests use
+only the Python standard library. These tests require the checked-in generated
+files but no network access:
+
+```bash
+python3 -m unittest discover \
+  -s packages/perps/whitepaper \
+  -p 'test_bounded_perps_model.py' -v
+```
+
+The tests cover historical kernel vectors, the endpoint-envelope proposition
+and its sequential-settlement counterexample, deterministic replay, and
+agreement between the whitepaper's reported tables and saved results. They do
+not establish parity with current Solidity settlement.
+
+## Regenerate the research outputs
+
+Fetch the fixed-window ECB `csvdata` response and rebuild the results:
 
 ```bash
 python3 packages/perps/whitepaper/bounded_perps_model.py \
@@ -55,11 +69,9 @@ python3 packages/perps/whitepaper/bounded_perps_model.py \
   --output-dir packages/perps/whitepaper/generated
 ```
 
-The script pins the expected SHA-256 hash of the ECB response. If the ECB later
-revises the fixed-window dataset, it stops and asks the researcher to inspect the
-revision before explicitly accepting a checksum change.
-
-To use an already downloaded ECB `csvdata` response:
+The raw response is cached at `/tmp/plether_ecb_fx.csv` by default; use
+`--raw-cache /path/to/ecb-exr.csv` to choose another path. To reuse a downloaded
+response without fetching:
 
 ```bash
 python3 packages/perps/whitepaper/bounded_perps_model.py \
@@ -67,38 +79,34 @@ python3 packages/perps/whitepaper/bounded_perps_model.py \
   --output-dir packages/perps/whitepaper/generated
 ```
 
-Run the kernel-vector, proposition, replay, and publication-consistency tests
-from this directory:
+The script verifies the raw response against the publication's pinned SHA-256
+hash before analysis. A mismatch stops the run. Inspect upstream revisions
+before using `--allow-checksum-mismatch`; write a revised dataset's results to
+a separate output directory so they are not confused with the publication
+snapshot. Rerun the tests after regenerating the published outputs.
 
-```bash
-cd packages/perps/whitepaper
-python3 -m unittest -v test_bounded_perps_model.py
-```
+| Output | Contents |
+| --- | --- |
+| [`generated/results.json`](generated/results.json) | Statistics, scenario assumptions, and fixed accounting examples |
+| [`generated/ecb_plether_basket.csv`](generated/ecb_plether_basket.csv) | Derived basket and crossed component prices; this is not the raw ECB response accepted by `--ecb-csv` |
+| [`generated/basket_history.svg`](generated/basket_history.svg) | Normalized basket history |
+| [`generated/nonpublication_gaps.svg`](generated/nonpublication_gaps.svg) | Largest reference-fix changes across long publication gaps |
+| [`generated/cap_sensitivity.svg`](generated/cap_sensitivity.svg) | Stylized reserve sensitivity to the cap |
+| [`generated/replay_summary.svg`](generated/replay_summary.svg) | Scenario capital, carry, and cap sensitivity |
 
-Generated outputs are:
+## Render the maintained whitepaper
 
-- `results.json`: machine-readable statistics and fixed examples
-- `ecb_plether_basket.csv`: derived basket and crossed component prices
-- `basket_history.svg`: normalized basket history
-- `nonpublication_gaps.svg`: largest reference-fix changes across long gaps
-- `cap_sensitivity.svg`: stylized reserve sensitivity to the cap
-- `replay_summary.svg`: scenario capital, carry, and cap-sensitivity summary
-
-Render the publication PDF using a Python environment with ReportLab and
-Pillow, plus Pandoc and `rsvg-convert` on `PATH`. The renderer also requires the
-macOS Times New Roman fonts at `/System/Library/Fonts/Supplemental`:
+[`render_whitepaper.py`](render_whitepaper.py) requires ReportLab and Pillow,
+Pandoc and `rsvg-convert` on `PATH`, and the macOS Times New Roman font files in
+`/System/Library/Fonts/Supplemental`. It uses the maintained Markdown and saved
+figures; it does not rerun the research model.
 
 ```bash
 python3 packages/perps/whitepaper/render_whitepaper.py
 ```
 
-The renderer preserves the original publication cover metadata and renders the
-maintained Markdown body. Layout depends on installed tools and fonts; PDF
-bytes are not deterministic.
-
-The stable output path is
+The output is
 [`output/pdf/plether-perps-bounded-credit-whitepaper.pdf`](../../../output/pdf/plether-perps-bounded-credit-whitepaper.pdf).
-
-The Solidity implementation and `packages/perps/ACCOUNTING_SPEC.md` remain
-normative. This model is a research companion, not an alternate execution
-engine.
+The cover retains the original publication metadata. Installed tools and fonts
+affect layout, and PDF bytes are not deterministic. Review a regenerated PDF
+before distributing it.

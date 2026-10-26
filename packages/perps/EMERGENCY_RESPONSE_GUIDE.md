@@ -1,8 +1,8 @@
 # Emergency Response and Circuit Breaker Guide
 
-This guide is the operator-facing source of truth for Plether perps emergency containment. It describes the controls
-that exist, what each control stops, what deliberately remains live, and how an off-chain monitor and guardian should
-choose the minimum containment action.
+This guide explains the on-chain containment controls, the actions they leave available, and the operator response
+to an incident. The contracts enforce the restrictions; monitoring and the suggested response policy below are
+off-chain responsibilities. Deployment wiring is covered in [Deployment](DEPLOYMENT.md).
 
 The safety objective is **contain the affected transition without disabling risk reduction or already-funded user
 exits**. Plether therefore provides granular breakers, not a global protocol stop.
@@ -23,17 +23,34 @@ exits**. Plether therefore provides granular breakers, not a global protocol sto
 
 ## Control inventory
 
-| Control | Activation | What it stops | What remains live | Recovery |
-|---|---|---|---|---|
-| Risk-off plus LP-entry pause | `EmergencyPauseCoordinator.triggerEmergencyPause(reasonHash,evidenceHash)` by the guardian | New opens/increases, every pending open covered by the persistent cutoff, new LP deposit requests, and deposit activation | Closes, liquidations, mark refresh, redemption requests, eligible settlement/redemption funding, LP request cancellations under existing rules, and funded claims | Governance unpauses RouterAdmin and HousePool entry separately; the order cutoff never decreases |
-| LP-settlement-only hold | `EmergencyPauseCoordinator.triggerLpEpochSettlementHold(reasonHash,evidenceHash)` by the guardian | Every `HousePool.settleLpEpoch(...)` call and new Senior deposits/reservations | Trading, Junior deposit requests, redemption requests, refunds of existing Senior commitments, recapitalization/reconciliation, and already-funded claims | HousePool owner calls `unpauseLpEpochSettlement()` |
-| Full containment | `EmergencyPauseCoordinator.triggerFullContainment(reasonHash,evidenceHash)` by the guardian | All restrictions above in one transaction | Closes, liquidations, mark refresh, redemption requests, existing cancellations, recapitalization/reconciliation, and already-funded claims | Governance releases RouterAdmin, HousePool entry, and LP settlement separately |
-| Router risk-off pause | `OrderRouterAdmin.pause()` by its owner or configured pauser | New opens/increases; permanently invalidates pending opens through `riskOffOrderCutoff` | Closes, liquidations, mark refresh, LP settlement when not separately held, refunds, and claims | RouterAdmin owner calls `unpause()`; the historical cutoff never decreases |
-| HousePool entry pause | `HousePool.pause()` by its owner or configured pauser | New Senior and Junior deposit requests, Senior reservations, and deposit activation | Redemption requests, eligible settlement/redemption funding, reconciliation, LP request cancellations under existing rules, claims, and trading | HousePool owner calls `unpause()` |
-| HousePool settlement hold | `HousePool.pauseLpEpochSettlement()` by its owner or configured pauser | Synchronized epoch clearing and new Senior deposits/reservations | Junior deposit requests, redemption requests, refunds of existing Senior commitments, reconciliation, claims, and trading | HousePool owner calls `unpauseLpEpochSettlement()` |
-| Engine degraded mode | Automatically latches when a close or liquidation leaves raw `E < L`, where `E = max(HousePool.totalAssets() - trader claims, 0)` and `L` is maximum directional liability | New opens, every LP epoch settlement (including deposit activation and redemption funding), and new LP entry through the pool gate | Closes, liquidations, mark refresh, recapitalization, redemption requests, and already-funded claims | Engine owner may clear it once raw `E >= L`; the separate settlement-buffer target need not be restored to clear |
-| Oracle/FAD close-only policy | Automatically derived from oracle regime and calendar | Opens in FAD or `oracleFrozen`; oracle-dependent actions also fail closed when their policy is not satisfied | Policy-valid closes, liquidations, mark refresh, and frozen-market LP settlement when not held | Automatic when a valid regime returns; configuration changes remain timelocked |
-| LP freshness/accounting gates | Automatically evaluated from canonical Engine and HousePool state | Settlement/redemption funding while withdrawals are not live; activation on stale marks, deficits, impairment, or unassigned assets | Unrelated trading and claims already funded | Automatic after canonical state becomes eligible |
+| Guardian action | Restrictions added | Governance recovery |
+| --- | --- | --- |
+| `triggerEmergencyPause(reasonHash,evidenceHash)` | Router risk-off plus HousePool entry pause | RouterAdmin owner calls `unpause()`; HousePool owner separately calls `unpause()` |
+| `triggerLpEpochSettlementHold(reasonHash,evidenceHash)` | HousePool LP epoch settlement hold | HousePool owner calls `unpauseLpEpochSettlement()` |
+| `triggerFullContainment(reasonHash,evidenceHash)` | All three restrictions, atomically | Release each component separately through its owner |
+
+Each component owner or configured pauser may also activate its own `pause()` or `pauseLpEpochSettlement()` directly.
+The deploy script installs the coordinator as both pausers; its owner sets the guardian. Do not assign the guardian
+directly as both pausers and assume the calls will be atomic. Coordinator calls skip restrictions already active;
+a failure in any required downstream action reverts all changes made by that call.
+
+Router risk-off permanently invalidates pending opens through the inclusive `riskOffOrderCutoff` captured from the
+committed order tail. Unpause permits later commits but never revives a covered order. New protection creation and
+replacement are also blocked. Closes, protection cancellation and valid trigger/retry processing remain available.
+HousePool entry pause stops new LP deposits and their activation, while the separate settlement hold stops all
+`settleLpEpoch` calls and new Senior commitments. Neither control stops already-funded claims.
+
+Automatic gates remain independent of those manual controls:
+
+- Engine degraded mode latches when a close or liquidation leaves raw `E < L`, where
+  `E = max(HousePool.totalAssets() - trader claims, 0)` and `L` is maximum directional liability. It blocks new risk,
+  LP entry, and all LP epoch settlement. The Engine owner can call `clearDegradedMode()` once raw `E >= L`.
+  Restoring the separate settlement-buffer target is not required to clear the latch.
+- FAD and `oracleFrozen` block opens. Other oracle-dependent actions still need policy-valid prices. Frozen replay
+  cannot repair a cached Engine mark that has exceeded the frozen freshness limit; see
+  [Oracle synchronization](ORACLE_SYNCHRONIZATION.md).
+- Freshness, solvency, custody, accounting, queue, and capacity gates can reject unpaused actions. Releasing a manual
+  restriction does not bypass any of them.
 
 The unified incident event uses fixed bits: RouterAdmin risk-off `1`, HousePool entry pause `2`, and LP epoch
 settlement hold `4`. The restrictions requested by risk-off plus entry are `3`, while full containment requests `7`.
@@ -52,6 +69,8 @@ operations, but operators must record and monitor any partial restriction state.
 | Commit an open/increase | Stopped | Allowed | Stopped | Risk-off permanently invalidates covered pending opens |
 | Execute an open covered by cutoff | Permanently invalid; refundable | Allowed unless another gate blocks it | Permanently invalid; refundable | Later unpause never revives the order |
 | Commit/execute a close or reduction | Allowed | Allowed | Allowed | No discretionary close-off breaker exists |
+| Create/replace protection or attach it to a new open | Stopped | Allowed | Stopped | Existing protection is not cancelled merely by a pause |
+| Cancel, trigger, or retry existing protection | Allowed | Allowed | Allowed | Position, oracle, and queue checks still apply |
 | Liquidate | Allowed | Allowed | Allowed | Liquidation remains a risk-reduction path |
 | Refresh Engine/oracle mark | Allowed | Allowed | Allowed | A valid refresh may be needed before recovery |
 | Recapitalize or reconcile | Allowed | Allowed | Allowed | These paths support investigation and recovery |
@@ -199,7 +218,7 @@ quoting, or transaction broadcast when the hold is active.
 
 ### Governance recovery
 
-The guardian must never auto-release a restriction. There is no expiry. Governance should recover only after:
+The guardian has no release authority and restrictions have no expiry. Governance should recover only after:
 
 1. the root cause is identified, fixed or isolated, and independently reviewed;
 2. bindings, custody, escrow, queues, NAV commitments, and the redemption-math sidecar reconcile;
@@ -216,41 +235,30 @@ The guardian must never auto-release a restriction. There is no expiry. Governan
 Unpausing cannot reset `riskOffOrderCutoff`. Releasing the settlement hold only restores eligibility to attempt
 settlement; it does not repair state or guarantee success.
 
-## Hard limitations and non-goals
+## Limits and operational ownership
 
-- **The guardian cannot stop traders from closing or reducing positions.** This is intentional. A close may still
-  fail ordinary protocol checks, but no discretionary pause bit blocks it.
-- **The guardian cannot stop already-funded claims.** Deposit shares and funded redemption assets remain claimable.
-- The settlement hold stops new epoch mutations and Senior deposit requests, while Junior deposit and redemption
-  requests may accumulate. It permits refunds of existing Senior commitments.
-- Neither a breaker nor its release repairs accounting, oracle, custody, liquidity, or queue state or guarantees
-  that a later transaction succeeds.
-- Risk-off permanently invalidates covered pending opens; cleanup remains lazy and bounded.
-- The monitor is advisory. Reason/evidence hashes are incident metadata, not on-chain proofs.
-- There is no arbitrary caller-selected mask, claim-off, redemption-request-off or global all-LP-request freeze,
-  queue quarantine, emergency price setter, discretionary close-off, or global protocol freeze.
-- The coordinator acts only on its immutable RouterAdmin and HousePool. It checks constructor addresses for nonzero,
-  distinct code-bearing targets, but does not prove they belong to the intended deployment. Verify that graph
-  independently. Missing pauser authority can make a required downstream pause revert the entire action; already
-  active restrictions are skipped.
-- A compromised governance owner can still use its owner authorities; the guardian cannot constrain governance.
-- This release supplies on-chain controls and observability only. An automated off-chain observer, policy engine,
-  guardian signer, and incident keeper are explicitly out of scope.
+The coordinator has no global-freeze, arbitrary-mask, emergency-price, fund-transfer, or arbitrary-call function.
+It cannot block closes/reductions or already-funded claims. Under a settlement-only hold, Junior deposits and LP
+redemption requests can continue accumulating under normal admission/cancellation rules. Existing Senior
+commitments may be refunded.
 
-## Off-chain monitor and guardian architecture
+The coordinator constructor checks nonzero, distinct code-bearing targets, not their membership in the intended
+stack. Verify the immutable RouterAdmin/HousePool bindings and both pauser assignments independently. Missing
+pauser authority can revert an action that needs a new downstream restriction. A compromised governance owner still
+has its owner authorities; the guardian cannot constrain it.
 
-A future service should separate observer, independent corroborator, versioned policy engine, least-authority
-guardian signer, and incident keeper responsibilities. Its signed payload should bind reason schema/family, evidence
-digest, block number/hash, chain id, coordinator/bindings, chosen action, observation/configuration digests, and
-simulation result. It should handle reorgs, rate-limit duplicate submissions, alert on every decision, and verify
-post-transaction state before declaring containment successful. It must never auto-release restrictions.
+Reason/evidence hashes and monitor digests are advisory metadata, not on-chain proofs. This repository supplies the
+controls and observability, not an automated observer, signer, or incident keeper service. An operator service needs
+block-pinned evidence, independent corroboration, reorg handling, duplicate-action control, and post-transaction
+verification. Recovery remains a deliberate governance action.
 
 ## Canonical references
 
-- `EmergencyPauseCoordinator.sol`: the three fixed guardian actions and unified incident event.
-- `OrderRouterAdmin.sol`: Router pause, ownership, and persistent risk-off cutoff.
-- `HousePool.sol`: LP-entry pause, independent settlement hold, settlement, and withdrawal gates.
-- `CfdEngine.sol`: degraded-mode latch and solvency-gated recovery.
-- `SettlementMonitorLens.sol` and `SettlementMonitorViewTypes.sol`: advisory observations and fault masks.
-- `DEPLOYMENT.md`: deployment wiring and transaction-level containment drills.
-- `SECURITY.md`: trust boundaries, invariants, and security assumptions.
+- [EmergencyPauseCoordinator](src/EmergencyPauseCoordinator.sol): fixed guardian actions and incident event.
+- [OrderRouterAdmin](src/OrderRouterAdmin.sol): Router pause, ownership, and persistent risk-off cutoff.
+- [HousePool](src/HousePool.sol): LP-entry pause, independent settlement hold, and settlement gates.
+- [CfdEngine](src/CfdEngine.sol): degraded mode and solvency-gated recovery.
+- [SettlementMonitorLens](src/SettlementMonitorLens.sol) and
+  [monitor view types](src/interfaces/SettlementMonitorViewTypes.sol): advisory observations and fault masks.
+- [Deployment](DEPLOYMENT.md): coordinator wiring and release verification.
+- [Security model](SECURITY.md): trust boundaries and assumptions.
