@@ -5,7 +5,7 @@
   "historicalOrderLifecycleV4AbiHash": "0x4ec225b250a1e35e6ea9159e9e5b67f2caa959acc9f755d388cd7afe465d4335",
   "positionProtectionCreatedTopic0": "0xf8b87acf7dd7a499d91309bae85c5a4f684cfff775b4d1b1f78234d7c21ba795",
   "abiHashes": {
-    "closePreviewV3Abi": "0x49aa2507e9f88231d05feea7c57a5451647c9a578c8972abce9ec1ebab235703",
+    "closePreviewV3Abi": "0xf44106256820e089bf5851d09831bdc1eec54d2047e6ef2bd2daf0d69ddb9c21",
     "committedOrderV3Abi": "0x970faf1caded2ecf190f42a433d07d507995368560036f9763d7a4f9ed7e4c7f",
     "orderLifecycleV5Abi": "0x7074bdd881e63cd1ba10843f9243227925545817d21563e05ad34f76b4e4a49f",
     "orderRouterV3Abi": "0xe8935e088831272a38e05195b0bb7cf044ea2f79db0f2138b89a100c7765d7c3"

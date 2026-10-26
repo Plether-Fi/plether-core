@@ -177,6 +177,14 @@ Use the smallest canonical surface that answers the decision:
 Rich Engine, Clearinghouse, and HousePool lenses remain useful for risk engines and independent accounting checks,
 but they are not a replacement for the canonical product and lifecycle surfaces.
 
+The bounded-request `CfdClosePreview.previewClose` resolves client identity before fresh admission. A conflicting
+client ID or protocol-reserved ID is rejected as in submission. An exact retry returns a nonzero `replayOrderId`
+with empty commitment and assessment fields: submission will return that existing order without creating another
+close. Check this field before interpreting economics, including after the order has executed or expired. Read the
+Book for its lifecycle and use `assessCommittedOrder` only when an execution assessment of a pending order is needed.
+Fresh requests and the identity-free `Order` overload return `replayOrderId == 0`. Use the updated preview ABI with
+the appended field; older preview deployments require their matching ABI.
+
 Engine previews consume caller-supplied price and time inputs. They do not fetch Hermes/Pyth data, ingest an oracle
 update, validate Router oracle freshness or publish-time policy, or reproduce FIFO, pause, MEV, and slippage gates.
 Treat a preview as a candidate Engine transition, not an execution promise.

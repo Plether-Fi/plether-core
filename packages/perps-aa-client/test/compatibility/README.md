@@ -65,3 +65,8 @@ protection ABIs so configuration-policy rejection is distinct from invalid oracl
 wiring. Only those two current ABI hashes change; action vectors and historical
 fixtures remain unchanged. Recovery-owned errors use the `OrderRecoverySidecar__`
 prefix in the Solidity sidecar ABI; they are not part of these SDK ABI exports.
+
+LOW-55 appends `uint64 replayOrderId` to the current close-preview result and exposes the lifecycle Book's
+client-ID conflict/domain errors in that preview ABI. Nonzero identifies an exact retry; the other result fields
+are empty, and consumers must not interpret them as a fresh close assessment. Only the current close-preview ABI
+hash changes. Request selectors, receipt domains, action vectors, and historical ABI fixtures remain unchanged.

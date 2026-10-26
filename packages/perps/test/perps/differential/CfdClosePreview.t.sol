@@ -9,6 +9,7 @@ import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
 import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
@@ -396,6 +397,89 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
 /// @dev Regressions migrated from the retired USDC-grant preview: use the canonical V3 request all the way through
 ///      preview, commitment and execution. No grant, deposit or account funding occurs while closing.
 contract CfdClosePreviewRequestTest is CfdClosePreviewTestBase {
+
+    function test_ConflictingClientIdMatchesSubmissionEvenAfterDeadline() public {
+        _openNormally(CfdTypes.Side.LONG, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2);
+        IOrderLifecycleBook book = router.lifecycleBook();
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        bytes32 existingHash = book.clientIntent(ACCOUNT, request.clientOrderId).intentHash;
+        request.sizeDelta = SIZE;
+        vm.warp(uint256(request.bounds.submitBy) + 1);
+        bytes memory expected = abi.encodeWithSelector(
+            IOrderLifecycleBook.OrderLifecycleBook__ClientIdConflict.selector,
+            ACCOUNT,
+            request.clientOrderId,
+            existingHash,
+            book.hashOrderRequest(ACCOUNT, request)
+        );
+        vm.expectRevert(expected);
+        _requestPreview(request, PRICE);
+        vm.expectRevert(expected);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 1);
+    }
+
+    function test_ReservedClientIdMatchesSubmissionRejection() public {
+        _openNormally(CfdTypes.Side.SHORT, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
+        request.clientOrderId = OrderV3Types.protocolClientOrderId(keccak256("reserved-close"));
+        bytes memory expected = abi.encodeWithSelector(
+            IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, request.clientOrderId, false
+        );
+        vm.expectRevert(expected);
+        _requestPreview(request, PRICE);
+        vm.expectRevert(expected);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+    }
+
+    function test_PendingExactReplayReturnsIdentityWithoutAnotherClose() public {
+        _openNormally(CfdTypes.Side.LONG, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
+        (uint64 id,) = _requestCommitParity(request, PRICE);
+        // A second fresh full close would fail queued-position admission; an identical retry is a no-op.
+        _assertReplay(request, id);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 1);
+        vm.warp(uint256(request.bounds.submitBy) + 1);
+        _assertReplay(request, id);
+    }
+
+    function test_TerminalExactReplayIgnoresCurrentPositionAndConfiguration() public {
+        _openNormally(CfdTypes.Side.SHORT, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
+        (uint64 id,) = _requestCommitParity(request, PRICE);
+        _executeRequest(id, PRICE, 0);
+        vm.warp(uint256(request.bounds.submitBy) + 1);
+        routerAdmin.pause();
+        vm.mockCall(
+            address(router.lifecycleBook()),
+            abi.encodeWithSelector(IOrderLifecycleBook.currentExecutionConfigHash.selector),
+            abi.encode(keccak256("changed-after-execution"))
+        );
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("planner()"), bytes("must not plan a replay"));
+        _assertReplay(request, id);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+    }
+
+    function _assertReplay(
+        OrderV3Types.OrderRequest memory request,
+        uint64 id
+    ) private {
+        uint64 nextId = router.nextCommitId();
+        uint256 balance = clearinghouse.balanceUsdc(ACCOUNT);
+        CfdClosePreview.ClosePreview memory expected;
+        expected.replayOrderId = id;
+        CfdClosePreview.ClosePreview memory actual = _requestPreview(request, type(uint256).max);
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)), "Replay must contain identity only");
+        vm.prank(ACCOUNT);
+        assertEq(router.commitOrder(request), id, "Submission must return the same existing order");
+        assertEq(router.nextCommitId(), nextId);
+        assertEq(clearinghouse.balanceUsdc(ACCOUNT), balance);
+    }
 
     function _request(
         CfdTypes.Side side,
