@@ -337,8 +337,8 @@ contract EngineLiquidationAccountingTest is CfdEngineTestBase {
         );
         assertEq(
             clearinghouse.balanceUsdc(shortAccount),
-            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc,
-            "Live retained settlement and immediate payout must match the exact liquidation preview"
+            preview.settlementRetainedUsdc,
+            "Live settlement must match the preview total including any immediate payout"
         );
         assertEq(
             terminalNavBook.curveHashOf(shortAccount),

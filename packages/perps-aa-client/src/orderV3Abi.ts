@@ -431,6 +431,11 @@ export const orderRouterV3Abi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__OraclePolicyMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__OrderNotExpired",
     "inputs": []
   },
@@ -1008,6 +1013,11 @@ export const closePreviewV3Abi = [
                 ]
               }
             ]
+          },
+          {
+            "name": "replayOrderId",
+            "type": "uint64",
+            "internalType": "uint64"
           }
         ]
       }
@@ -1143,6 +1153,48 @@ export const closePreviewV3Abi = [
     "type": "error",
     "name": "CfdOrderPolicyEvaluator__InvalidPlannerResult",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OrderLifecycleBook__ClientIdConflict",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "clientOrderId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "existingIntentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "suppliedIntentHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OrderLifecycleBook__ClientIdDomainMismatch",
+    "inputs": [
+      {
+        "name": "clientOrderId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "protocolIntent",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ]
   },
   {
     "type": "error",

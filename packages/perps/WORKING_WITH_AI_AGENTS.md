@@ -166,6 +166,8 @@ Use the smallest canonical surface that answers the decision:
 - `ICfdEngineLens.previewOpen(...)` and `previewClose(...)` for Engine-level trade-ticket simulation; use
   `CfdClosePreview.previewClose(...)` for a prospective ordinary close that projects commitment carry and its zero
   bounty commitment effects.
+- `ICfdEngineLens.previewRouterLiquidation(...)` for liquidation eligibility and economics after the Router's
+  cutoff-invalid open refunds; `previewLiquidation(...)` omits those refunds and remains an Engine diagnostic.
 - `IOrderLifecycleBook` for order identity, pinned policy, lifecycle, and outcome.
 - `PerpsPublicLens.getActivePositionProtection(...)` and `getPositionProtection(...)`, or direct
   `IPositionProtectionViews`, for retained protection thresholds, status, trigger evidence, and order linkage.
@@ -175,9 +177,22 @@ Use the smallest canonical surface that answers the decision:
 Rich Engine, Clearinghouse, and HousePool lenses remain useful for risk engines and independent accounting checks,
 but they are not a replacement for the canonical product and lifecycle surfaces.
 
+The bounded-request `CfdClosePreview.previewClose` resolves client identity before fresh admission. A conflicting
+client ID or protocol-reserved ID is rejected as in submission. An exact retry returns a nonzero `replayOrderId`
+with empty commitment and assessment fields: submission will return that existing order without creating another
+close. Check this field before interpreting economics, including after the order has executed or expired. Read the
+Book for its lifecycle and use `assessCommittedOrder` only when an execution assessment of a pending order is needed.
+Fresh requests and the identity-free `Order` overload return `replayOrderId == 0`. Use the updated preview ABI with
+the appended field; older preview deployments require their matching ABI.
+
 Engine previews consume caller-supplied price and time inputs. They do not fetch Hermes/Pyth data, ingest an oracle
 update, validate Router oracle freshness or publish-time policy, or reproduce FIFO, pause, MEV, and slippage gates.
 Treat a preview as a candidate Engine transition, not an execution promise.
+
+Rejected open previews report the active FAD or ordinary maintenance requirement when position economics were
+constructed. Earlier failures can leave it zero because it was not calculated; always inspect `valid` and
+`invalidReason` before interpreting diagnostics. `quoteMaxOpen` returns zero capacity with
+`NUMERIC_DOMAIN_EXCEEDED` for a margin budget above `int256.max`, before constructing search bounds.
 
 ### Permissionless execution
 
@@ -482,6 +497,10 @@ non-Engine receipts with `PriceSource.None`, zero execution price and oracle tim
 transaction performs oracle and mark work. Liquidation uses `PriceSource.Liquidation` and a liquidation price but
 still sets `priceReachedEngine == false`. A verifier must not apply one blanket nonzero-price or reached-Engine rule
 to every receipt.
+
+Explicit expiry, bulk cleanup and execution-driven expiry retain the observed configuration digest and cached
+neutral mark/gross pool depth. Reservation-mismatch recovery preserves that same authenticated context. These
+observations do not turn expiry into an oracle execution: execution price and oracle publication time remain zero.
 
 For TP/SL, also reconcile the retained protection record and `PositionProtectionCreated`,
 `PositionProtectionReplaced`, `PositionProtectionArmed`, `PositionProtectionCancelled`,

@@ -51,7 +51,7 @@ contract CfdEngineProtocolLensTest is Test {
         ProtocolLensViewTypes.ProtocolAccountingSnapshot memory actual = lens.getProtocolAccountingSnapshot();
         emit log_named_uint("protocol_snapshot_gas", gasBefore - gasleft());
         assertEq(actual.poolAssetsUsdc, expected.poolAssetsUsdc, "physical assets");
-        assertEq(actual.netPhysicalAssetsUsdc, expected.netPhysicalAssetsUsdc, "treasury-adjusted assets");
+        assertEq(actual.netPhysicalAssetsUsdc, expected.netPhysicalAssetsUsdc, "canonical pool assets");
         assertEq(actual.maxLiabilityUsdc, expected.maxLiabilityUsdc, "maximum directional liability");
         assertEq(actual.effectiveSolvencyAssetsUsdc, expected.effectiveSolvencyAssetsUsdc, "claim-adjusted solvency");
         assertEq(actual.withdrawalReservedUsdc, expected.withdrawalReservedUsdc, "liability, claims, and buffer");
@@ -70,18 +70,18 @@ contract CfdEngineProtocolLensTest is Test {
     function test_ProtocolSnapshotSeparatesTreasuryFromSolvencyAndReserves() public {
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
-                100_000e6, 90_000e6, 35_000e6, 95_000e6, 40_437_500_000, 59_562_500_000, 10_000e6, 5000e6, false, true
+                100_000e6, 100_000e6, 35_000e6, 95_000e6, 40_437_500_000, 59_562_500_000, 10_000e6, 5000e6, false, true
             )
         );
     }
 
-    function test_ProtocolSnapshotFloorsTreasuryAdjustedAssetsIndependently() public {
+    function test_ProtocolSnapshotKeepsBackingWhenTreasuryExceedsPoolAssets() public {
         vm.mockCall(
             CLEARINGHOUSE, abi.encodeWithSignature("balanceUsdc(address)", TREASURY), abi.encode(uint256(125_000e6))
         );
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
-                100_000e6, 0, 35_000e6, 95_000e6, 40_437_500_000, 59_562_500_000, 125_000e6, 5000e6, false, true
+                100_000e6, 100_000e6, 35_000e6, 95_000e6, 40_437_500_000, 59_562_500_000, 125_000e6, 5000e6, false, true
             )
         );
     }
@@ -91,7 +91,7 @@ contract CfdEngineProtocolLensTest is Test {
         vm.mockCall(ENGINE, abi.encodeWithSignature("degradedMode()"), abi.encode(true));
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
-                100_000e6, 90_000e6, 35_000e6, 0, 160_437_500_000, 0, 10_000e6, 125_000e6, true, true
+                100_000e6, 100_000e6, 35_000e6, 0, 160_437_500_000, 0, 10_000e6, 125_000e6, true, true
             )
         );
     }
@@ -100,7 +100,7 @@ contract CfdEngineProtocolLensTest is Test {
         vm.mockCall(POOL, abi.encodeWithSignature("totalAssets()"), abi.encode(uint256(30_000e6)));
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
-                30_000e6, 20_000e6, 35_000e6, 25_000e6, 40_437_500_000, 0, 10_000e6, 5000e6, false, true
+                30_000e6, 30_000e6, 35_000e6, 25_000e6, 40_437_500_000, 0, 10_000e6, 5000e6, false, true
             )
         );
     }
@@ -110,7 +110,7 @@ contract CfdEngineProtocolLensTest is Test {
         _mockSide(CfdTypes.Side.SHORT, 0, 35_000e18);
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
-                100_000e6, 90_000e6, 0, 95_000e6, 5000e6, 95_000e6, 10_000e6, 5000e6, false, false
+                100_000e6, 100_000e6, 0, 95_000e6, 5000e6, 95_000e6, 10_000e6, 5000e6, false, false
             )
         );
     }
@@ -120,7 +120,7 @@ contract CfdEngineProtocolLensTest is Test {
         _mockSide(CfdTypes.Side.SHORT, 0, 0);
         _assertSnapshot(
             ProtocolLensViewTypes.ProtocolAccountingSnapshot(
-                100_000e6, 90_000e6, 1, 95_000e6, 5000e6 + 2, 95_000e6 - 2, 10_000e6, 5000e6, false, true
+                100_000e6, 100_000e6, 1, 95_000e6, 5000e6 + 2, 95_000e6 - 2, 10_000e6, 5000e6, false, true
             )
         );
     }

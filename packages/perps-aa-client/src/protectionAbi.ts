@@ -1493,6 +1493,11 @@ export const positionProtectionBookAbi = [
   },
   {
     "type": "error",
+    "name": "OrderRouter__OraclePolicyMismatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "OrderRouter__OrderNotExpired",
     "inputs": []
   },

@@ -136,6 +136,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     }
 
     /// @notice Applies the same prospective admission checks as fresh public close commitment.
+    /// @dev Fresh-state checks only. CfdClosePreview resolves client identity first and checks the registration
+    ///      namespace afterwards; call its bounded-request overload for a complete submission preview.
     function previewCloseAdmission(
         address account,
         OrderV3Types.OrderRequest calldata request
@@ -522,7 +524,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IPletherOracle.OracleConfig memory policy = _oraclePolicy(activeOracle);
         candidate.applyConfig(policy);
         if (keccak256(abi.encode(_oraclePolicy(candidate))) != keccak256(abi.encode(policy))) {
-            revert OrderRouter__InvalidPletherOracle();
+            revert OrderRouter__OraclePolicyMismatch();
         }
     }
 

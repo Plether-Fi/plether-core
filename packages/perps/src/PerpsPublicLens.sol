@@ -3,7 +3,10 @@ pragma solidity 0.8.35;
 
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {HousePool} from "@plether/perps/HousePool.sol";
+import {OrderRouter} from "@plether/perps/OrderRouter.sol";
+import {OrderRouterAdmin} from "@plether/perps/OrderRouterAdmin.sol";
 import {AccountLensViewTypes} from "@plether/perps/interfaces/AccountLensViewTypes.sol";
 import {ICfdEngine} from "@plether/perps/interfaces/ICfdEngine.sol";
 import {ICfdEngineAccountLens} from "@plether/perps/interfaces/ICfdEngineAccountLens.sol";
@@ -490,17 +493,30 @@ contract PerpsPublicLens is IPerpsTraderViews, IPerpsLPViews, IProtocolViews {
         }
     }
 
-    /// @notice Derives the public protocol phase from engine wiring, degraded mode, and pool risk availability.
-    /// @dev An unwired engine or a pool that cannot increase risk is reported as `Configuring`; degraded mode
-    ///      takes precedence once the engine has both a pool and router.
+    /// @notice Derives protocol phase from mandatory engine wiring, degraded mode, Router pause, and pool readiness.
+    /// @dev Missing dependency code is Configuring. Once wired, Degraded precedes Paused; Active requires an
+    ///      unpaused canonical Router and a pool that permits risk increases. Paused does not disable risk-off exits.
     /// @return Numeric value of `ICfdEngine.ProtocolPhase`.
     function _getProtocolPhase() internal view returns (uint8) {
         address enginePool = ENGINE.pool();
-        if (enginePool == address(0) || ENGINE.orderRouter() == address(0)) {
+        address engineRouter = ENGINE.orderRouter();
+        CfdEngine host = CfdEngine(address(ENGINE));
+        if (
+            enginePool.code.length == 0 || engineRouter.code.length == 0 || address(host.planner()).code.length == 0
+                || address(host.settlementSidecar()).code.length == 0
+                || address(host.terminalNavBook()).code.length == 0 || host.admin().code.length == 0
+        ) {
+            return uint8(ICfdEngine.ProtocolPhase.Configuring);
+        }
+        address routerAdmin = OrderRouter(engineRouter).admin();
+        if (routerAdmin.code.length == 0) {
             return uint8(ICfdEngine.ProtocolPhase.Configuring);
         }
         if (ENGINE.degradedMode()) {
             return uint8(ICfdEngine.ProtocolPhase.Degraded);
+        }
+        if (OrderRouterAdmin(routerAdmin).paused()) {
+            return uint8(ICfdEngine.ProtocolPhase.Paused);
         }
         if (!HousePool(enginePool).canIncreaseRisk()) {
             return uint8(ICfdEngine.ProtocolPhase.Configuring);

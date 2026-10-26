@@ -9,9 +9,13 @@ neutral Engine mark before settlement, protection activation, or any excess-ETH 
 replays the unchanged accepted basket at zero fee if it still passes the selected policy. An uninitialized basket
 cannot be read or replayed.
 
-Historical order-execution components use `maxComponentPublishTimeDivergence` (5 seconds by default). Current live
-baskets use the mode-specific freshness limit for divergence; the 15-second parsing lookback also bounds their
-component gaps. See the accepted [live basket component selection limitation](SECURITY.md#known-limitation-live-basket-component-selection).
+Historical order-execution components use `maxComponentPublishTimeDivergence` (5 seconds by default). Live
+Liquidation baskets use `liquidationStalenessLimit` for component-time divergence; live OrderExecution, MarkRefresh,
+and PoolReconcile baskets use `orderExecutionStalenessLimit`. PoolReconcile freshness is separate: component age
+uses the smaller of the Engine and HousePool mark-age limits, or the Engine limit when the HousePool limit is zero.
+For nonempty live updates, the parsing lookback of `min(15, modeMaxStaleness)` also bounds component gaps. Frozen
+reads reuse the Engine mark and do not compare component times. See the accepted
+[live basket component selection limitation](SECURITY.md#known-limitation-live-basket-component-selection).
 
 The basket publish time is the newest component time so protection activation can observe a move in any component.
 Equal-time baskets cannot change the mark price. Pool reconciliation additionally requires the oldest component to

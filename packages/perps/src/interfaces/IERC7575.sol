@@ -36,6 +36,8 @@ interface IERC7575 is IERC165 {
     ) external view returns (uint256 assets);
 
     /// @notice Returns the maximum assets that `receiver` may deposit through the synchronous or claim surface.
+    /// @dev In an asynchronous flow, the argument is the request controller and the result is claim capacity;
+    ///      it does not report capacity for a new deposit request.
     function maxDeposit(
         address receiver
     ) external view returns (uint256 maxAssets);
@@ -52,6 +54,8 @@ interface IERC7575 is IERC165 {
     ) external returns (uint256 shares);
 
     /// @notice Returns the maximum shares that `receiver` may mint through the synchronous or claim surface.
+    /// @dev In an asynchronous flow, the argument is the request controller and the result is claim capacity;
+    ///      it does not report capacity for a new deposit request.
     function maxMint(
         address receiver
     ) external view returns (uint256 maxShares);
@@ -68,6 +72,8 @@ interface IERC7575 is IERC165 {
     ) external returns (uint256 assets);
 
     /// @notice Returns the maximum assets withdrawable for `owner` through the synchronous or claim surface.
+    /// @dev In an asynchronous flow, the argument is the request controller, which may differ from the original
+    ///      share owner or the eventual asset receiver. The result is funded claim capacity.
     function maxWithdraw(
         address owner
     ) external view returns (uint256 maxAssets);
@@ -85,6 +91,8 @@ interface IERC7575 is IERC165 {
     ) external returns (uint256 shares);
 
     /// @notice Returns the maximum shares redeemable for `owner` through the synchronous or claim surface.
+    /// @dev In an asynchronous flow, the argument is the request controller, which may differ from the original
+    ///      share owner or the eventual asset receiver. The result is funded claim capacity.
     function maxRedeem(
         address owner
     ) external view returns (uint256 maxShares);

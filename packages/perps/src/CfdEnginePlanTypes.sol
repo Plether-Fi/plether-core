@@ -429,6 +429,7 @@ library CfdEnginePlanTypes {
     /// @param residualPlan Full PnL-pledge unlock used by isolated liquidation settlement.
     /// @param settlementSeizedUsdc Price-loss pledge plus the LP liquidation fee; excludes separately collected action cash.
     /// @param settlementRetainedUsdc Projected settlement balance after all debits and any immediate price payout.
+    ///        Already includes freshTraderPayoutUsdc when freshPayoutIsImmediate; never add that payout a second time.
     /// @param freshTraderPayoutUsdc New price gain after action-charge withholding, payable in full or recorded as a claim.
     /// @param freshPayoutIsImmediate Whether current unreserved pool cash can service the fresh payout.
     /// @param freshPayoutCreatesClaim Whether the fresh payout is expected to remain a trader-claim liability.

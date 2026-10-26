@@ -64,9 +64,9 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(health.poolAccountedAssetsUsdc, pool.accountedAssets());
         assertEq(health.poolCustodyDeficitUsdc, 0);
         assertEq(health.seniorImpairmentUsdc, 0);
-        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 5);
-        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V5"));
-        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V4"));
+        assertEq(monitorLens.CONFIG_SCHEMA_VERSION(), 6);
+        assertEq(monitorLens.OBSERVATION_DOMAIN(), keccak256("PLETHER_SETTLEMENT_OBSERVATION_V6"));
+        assertTrue(monitorLens.OBSERVATION_DOMAIN() != keccak256("PLETHER_SETTLEMENT_OBSERVATION_V5"));
         assertTrue(monitorLens.observableConfigDigest() != bytes32(0));
     }
 
@@ -222,6 +222,7 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         assertEq(accounting.terminalHasOpenPositions, terminal.hasOpenPositions);
         assertEq(accounting.terminalDegradedMode, terminal.degradedMode);
         assertTrue(accounting.cachedPreviewAvailable);
+        assertTrue(accounting.liquidityPreviewAvailable);
         assertTrue(accounting.terminalSnapshotAvailable);
         assertEq(accounting.dependencyFailureMask, 0);
     }
@@ -246,6 +247,51 @@ contract SettlementMonitorLensTest is SettlementMonitorLensTestFixture {
         vm.mockCall(address(engine), abi.encodeWithSelector(bytes4(keccak256("terminalNavSnapshot()"))), hex"01");
         accounting = monitorLens.getSettlementObservation(observedEpoch).accounting;
         assertTrue(_hasDependency(accounting.dependencyFailureMask, SettlementMonitorViewTypes.Dependency.Engine));
+    }
+
+    function test_AccountingPreviewAvailabilityDistinguishesIndependentReadFailures() public {
+        uint256 epoch = pool.currentLpEpoch();
+        bytes memory liquidityCall = abi.encodeWithSelector(HousePool.getPoolLiquidityView.selector);
+        bytes memory trancheCall = abi.encodeWithSelector(IHousePool.getPendingTrancheState.selector);
+        // Revert and malformed response are both unavailable, even when the tranche preview succeeds.
+        for (uint256 mode; mode < 2; ++mode) {
+            if (mode == 0) {
+                vm.mockCallRevert(address(pool), liquidityCall, bytes("failed"));
+            } else {
+                vm.mockCall(address(pool), liquidityCall, hex"01");
+            }
+            SettlementMonitorViewTypes.SettlementObservation memory observation =
+                monitorLens.getSettlementObservation(epoch);
+            assertFalse(observation.accounting.liquidityPreviewAvailable);
+            assertTrue(observation.accounting.cachedPreviewAvailable);
+            assertFalse(observation.observationComplete);
+            assertTrue(
+                _hasDependency(
+                    observation.accounting.dependencyFailureMask,
+                    SettlementMonitorViewTypes.Dependency.PoolAccountingPreview
+                )
+            );
+            vm.clearMockedCalls();
+        }
+        vm.mockCall(address(pool), trancheCall, hex"01");
+        SettlementMonitorViewTypes.SettlementAccounting memory accounting =
+        monitorLens.getSettlementObservation(epoch).accounting;
+        assertTrue(accounting.liquidityPreviewAvailable);
+        assertFalse(accounting.cachedPreviewAvailable);
+        vm.clearMockedCalls();
+        accounting = monitorLens.getSettlementObservation(epoch).accounting;
+        assertTrue(accounting.liquidityPreviewAvailable);
+        assertTrue(accounting.cachedPreviewAvailable);
+    }
+
+    function test_LiquidityPreviewRejectsNonBooleanResponseFields() public {
+        uint256[12] memory invalid;
+        invalid[9] = 2;
+        vm.mockCall(address(pool), abi.encodeWithSelector(HousePool.getPoolLiquidityView.selector), abi.encode(invalid));
+        SettlementMonitorViewTypes.SettlementAccounting memory accounting =
+        monitorLens.getSettlementObservation(pool.currentLpEpoch()).accounting;
+        assertFalse(accounting.liquidityPreviewAvailable);
+        assertTrue(accounting.cachedPreviewAvailable);
     }
 
     function test_SidecarRejectsDirectCaller() public {

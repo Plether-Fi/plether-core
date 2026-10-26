@@ -403,7 +403,8 @@ interface IMarginClearinghouse {
 
     /// @notice Adjusts settlement USDC for realized PnL, trader claim settlement, or rebates (+credit, -debit).
     /// @dev Callable only by the engine or settlement sidecar. Mutates internal accounting only: it neither transfers
-    ///      tokens nor changes locked buckets, and a negative delta cannot exceed the settlement balance.
+    ///      tokens nor changes locked buckets, and a negative delta cannot exceed free settlement above all locked
+    ///      buckets. Zero is a no-op; this hook does not checkpoint carry.
     /// @param account Account to settle
     /// @param amount Signed USDC delta: positive credits, negative debits
     function settleUsdc(

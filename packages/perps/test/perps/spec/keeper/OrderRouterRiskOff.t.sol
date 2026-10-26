@@ -5,11 +5,14 @@ import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
+import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPerpsKeeper} from "@plether/perps/interfaces/IPerpsKeeper.sol";
+import {IPositionProtectionActions} from "@plether/perps/interfaces/IPositionProtectionActions.sol";
 import {ITerminalNavBookV2} from "@plether/perps/interfaces/ITerminalNavBookV2.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {OrderExecutionSettlement} from "@plether/perps/router/OrderExecutionSettlement.sol";
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -309,6 +312,117 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertEq(_positionSize(ALICE), 0, "unsafe position must liquidate");
     }
 
+    function test_RouterPreviewRefundsOnlyCutoffOpensAndMatchesPostCleanupEconomics() public {
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
+        uint64 invalidOpenId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        _commitClose(ALICE, CfdTypes.Side.LONG, 10_000e18);
+        routerAdmin.pause();
+        routerAdmin.unpause();
+        uint64 laterOpenId = _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 3000e6);
+        bytes32 bucketsBefore = _bucketsHash(ALICE);
+        uint256 pendingBefore = router.pendingOrderCounts(ALICE);
+        (IOrderRouterAccounting.PendingOrderView memory pending,) = router.getPendingOrderView(invalidOpenId);
+        ICfdEngineLens.RouterLiquidationPreview memory preview =
+            engineLens.previewRouterLiquidation(ALICE, UNSAFE_LONG_PRICE);
+        assertTrue(preview.liquidation.liquidatable, "Price loss must still require liquidation after refunds");
+        assertEq(preview.riskOffCutoff, routerAdmin.riskOffOrderCutoff());
+        assertLt(preview.riskOffCutoff, laterOpenId);
+        assertEq(preview.refundedOrderCount, 1, "Close and post-cutoff open must not be refunded");
+        assertEq(preview.releasedCommittedMarginUsdc, 2000e6);
+        assertEq(preview.releasedBountyUsdc, pending.executionBountyUsdc);
+        assertEq(_bucketsHash(ALICE), bucketsBefore, "Preview must not unlock live custody");
+        assertEq(router.pendingOrderCounts(ALICE), pendingBefore, "Preview must not mutate the queue");
+        router.clearRiskOffOrder(invalidOpenId);
+        assertEq(
+            keccak256(abi.encode(preview.liquidation)),
+            keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE))),
+            "All liquidation fields must match actual cleanup followed by canonical planning"
+        );
+        uint256 keeperBefore = clearinghouse.balanceUsdc(KEEPER);
+        bytes[] memory update = _mockPythUpdateData(UNSAFE_LONG_PRICE);
+        vm.prank(KEEPER);
+        router.executeLiquidation(ALICE, update);
+        assertEq(_positionSize(ALICE), 0);
+        assertEq(clearinghouse.balanceUsdc(KEEPER) - keeperBefore, preview.liquidation.keeperBountyUsdc);
+        assertEq(clearinghouse.balanceUsdc(ALICE), preview.liquidation.settlementRetainedUsdc);
+        assertEq(engine.traderClaimBalanceUsdc(ALICE), preview.liquidation.traderClaimBalanceUsdc);
+    }
+
+    function test_RouterPreviewIncludesPendingProtectionRefundInSyntheticPositionState() public {
+        router.updateMarkPrice(_mockPythUpdateData(MARK_PRICE));
+        OrderV3Types.OrderRequest memory request;
+        request.clientOrderId = bytes32(uint256(1));
+        request.bounds = OrderV3Types.ExecutionBounds({
+            submitBy: uint64(block.timestamp + router.maxExecutionWindowSeconds()),
+            executionWindowSeconds: uint32(router.maxExecutionWindowSeconds()),
+            allowedExecutionModes: 1 | 2 | 4,
+            expectedConfigHash: router.lifecycleBook().currentExecutionConfigHash(),
+            maxExecutionBountyUsdc: type(uint256).max,
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max,
+            maxPostPositionSize: type(uint256).max,
+            minPostSettlementBalanceUsdc: 0,
+            minPostPositionEquityUsdc: 0,
+            maxPostLeverageBps: type(uint32).max
+        });
+        request.side = CfdTypes.Side.LONG;
+        request.sizeDelta = 10_000e18;
+        request.marginDelta = 2000e6;
+        request.targetPrice = 1;
+        PositionProtectionTypes.PositionProtectionParams memory params;
+        params.takeProfitTriggerPrice = 90_000_000;
+        params.stopLossTriggerPrice = 110_000_000;
+        params.closeLimits = PositionProtectionTypes.CloseFinancialLimits({
+            maxExecutionNotionalUsdc: type(uint256).max,
+            maxGrossAccountDebitUsdc: type(uint256).max,
+            maxActionChargeUsdc: type(uint256).max,
+            maxExplicitFeesUsdc: type(uint256).max
+        });
+        IPositionProtectionActions protectionActions =
+            IPositionProtectionActions(address(router.positionProtectionBook()));
+        vm.prank(ALICE);
+        (uint64 orderId, uint64 protectionId) = protectionActions.commitOpenOrderWithProtection(request, params);
+        uint256 protectionBounty =
+            clearinghouse.getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId)
+        .amountUsdc;
+        assertGt(protectionBounty, 0, "Fixture must exercise the protection refund");
+        uint256 orderBounty = _executionBountyReserve(orderId);
+        // Public protected-open commitment requires a flat account. Direct Engine setup intentionally isolates
+        // the preview's pending-protection branch without claiming this interleaving is publicly reachable.
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
+        routerAdmin.pause();
+        ICfdEngineLens.RouterLiquidationPreview memory preview =
+            engineLens.previewRouterLiquidation(ALICE, UNSAFE_LONG_PRICE);
+        assertEq(preview.refundedOrderCount, 1);
+        assertEq(preview.releasedBountyUsdc, orderBounty + protectionBounty);
+        uint256 freeBefore = _freeSettlementUsdc(ALICE);
+        router.clearRiskOffOrder(orderId);
+        assertEq(_freeSettlementUsdc(ALICE) - freeBefore, 2000e6 + preview.releasedBountyUsdc);
+        assertEq(
+            keccak256(abi.encode(preview.liquidation)),
+            keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE)))
+        );
+    }
+
+    function test_RouterPreviewWithoutRiskOffMatchesKernelAndEmptyPositionIsInactive() public {
+        _open(ALICE, CfdTypes.Side.LONG, 100_000e18, 2000e6, MARK_PRICE);
+        _commitOpen(ALICE, CfdTypes.Side.LONG, 10_000e18, 2000e6);
+        ICfdEngineLens.RouterLiquidationPreview memory preview =
+            engineLens.previewRouterLiquidation(ALICE, UNSAFE_LONG_PRICE);
+        assertEq(preview.refundedOrderCount, 0);
+        assertEq(preview.releasedBountyUsdc, 0);
+        assertEq(
+            keccak256(abi.encode(preview.liquidation)),
+            keccak256(abi.encode(engineLens.previewLiquidation(ALICE, UNSAFE_LONG_PRICE)))
+        );
+        preview = engineLens.previewRouterLiquidation(RESTORED, 3e8);
+        assertFalse(preview.liquidation.liquidatable);
+        assertEq(preview.liquidation.oraclePrice, 2e8);
+        assertEq(preview.refundedOrderCount, 0);
+    }
+
     function _seedCarryDelinquencyWithPriceClaim() private {
         // Margin is exhausted by carry both before and after refund. A prior same-account price claim keeps price
         // health solvent once the refunded free settlement covers the residual carry obligation.
@@ -333,9 +447,19 @@ contract OrderRouterRiskOffTest is BasePerpTest {
             engineLens.isLiquidatableAt(RESTORED, MARK_PRICE, pool.totalAssets()),
             "locked order funds must leave accrued carry delinquent before refund"
         );
+        ICfdEngineLens.RouterLiquidationPreview memory routerPreview =
+            engineLens.previewRouterLiquidation(RESTORED, MARK_PRICE);
+        assertFalse(routerPreview.liquidation.liquidatable, "Router preview must include carry-covering refunds");
+        assertEq(routerPreview.refundedOrderCount, 1);
+        assertEq(routerPreview.releasedCommittedMarginUsdc, 49e6);
         uint256 branch = vm.snapshotState();
 
         router.clearRiskOffOrder(invalidOpenId);
+        assertEq(
+            keccak256(abi.encode(routerPreview.liquidation)),
+            keccak256(abi.encode(engineLens.previewLiquidation(RESTORED, MARK_PRICE))),
+            "Router-aware preview must match the kernel after actual refunds"
+        );
         assertFalse(
             engineLens.isLiquidatableAt(RESTORED, MARK_PRICE, pool.totalAssets()),
             "risk-off refund must make enough settlement reachable for carry"
@@ -392,6 +516,10 @@ contract OrderRouterRiskOffTest is BasePerpTest {
         assertTrue(
             engineLens.isLiquidatableAt(RESTORED, MARK_PRICE, pool.totalAssets()),
             "setup must be liquidatable only while the carry-covering order funds remain locked"
+        );
+        assertFalse(
+            engineLens.previewRouterLiquidation(RESTORED, MARK_PRICE).liquidation.liquidatable,
+            "Router-aware preview must predict the batch refund-and-skip result"
         );
         IOrderRouterAccounting.AccountReservationView memory reservationBefore = router.getAccountReservations(RESTORED);
         uint256 freeBefore = _freeSettlementUsdc(RESTORED);

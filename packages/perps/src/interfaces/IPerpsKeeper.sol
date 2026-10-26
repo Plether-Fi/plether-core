@@ -65,8 +65,9 @@ interface IPerpsKeeper {
 
     /// @notice Liquidates an unsafe account using fresh oracle data.
     /// @dev Permissionless and available while paused. Uses an account-adverse price. Cutoff-invalid opens are refunded
-    ///      before the solvency check; on liquidation, only the remaining live execution bounties are forfeited. Every
-    ///      queued order is then failed and unlinked, committed margin is released, and the engine-planned liquidation
+    ///      before the solvency check; liquidation forfeits remaining live order execution bounties and unpaid
+    ///      position-protection trigger bounties. Every queued order is then failed and unlinked, committed margin is
+    ///      released, and the engine-planned liquidation
     ///      bounty is credited to the caller's clearinghouse account. The oracle refunds ETH above the Pyth fee to the
     ///      caller or defers it as a caller-claimable balance if transfer fails.
     /// @param account Canonical account whose live position is tested and liquidated

@@ -4,6 +4,7 @@ pragma solidity 0.8.35;
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -12,6 +13,32 @@ import {CfdEngineTestBase} from "../shared/CfdEngineTestBase.sol";
 contract EngineOpenPreviewTest is CfdEngineTestBase {
 
     using stdStorage for StdStorage;
+
+    function test_InvalidOpenReportsActiveMaintenanceWithoutInventingEarlyEconomics() public {
+        address trader = address(0xCA2212);
+        _fundTrader(trader, 20_000e6);
+        // Friday FAD start, followed by a weekday. At $0.80, 10,000 tokens have $8,000 notional.
+        uint256[2] memory times = [uint256(1_709_933_400), uint256(1_709_683_200)];
+        for (uint256 i; i < times.length; ++i) {
+            vm.warp(times[i]);
+            assertEq(engine.isFadWindow(), i == 0);
+            ICfdEngineTypes.OpenPreview memory preview =
+                engineLens.previewOpen(trader, CfdTypes.Side.LONG, 10_000e18, 50e6, 0.8e8);
+            assertFalse(preview.valid);
+            assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN));
+            assertEq(preview.maintenanceMarginUsdc, i == 0 ? 240e6 : 80e6);
+            assertEq(preview.postHealthBps, 0, "Rejected plan must not invent post-health diagnostics");
+            preview = engineLens.previewOpen(trader, CfdTypes.Side.SHORT, 10_000e18, 50e6, 1.2e8);
+            assertFalse(preview.valid);
+            assertEq(preview.maintenanceMarginUsdc, i == 0 ? 360e6 : 120e6);
+            preview = engineLens.previewOpen(trader, CfdTypes.Side.LONG, 1, 50e6, 0.8e8);
+            assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.INVALID_SIZE_QUANTUM));
+            assertEq(preview.maintenanceMarginUsdc, 0, "No constructed economics on size rejection");
+            preview = engineLens.previewOpen(trader, CfdTypes.Side.LONG, 10_000e18, type(uint256).max, 0.8e8);
+            assertEq(uint8(preview.invalidReason), uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
+            assertEq(preview.maintenanceMarginUsdc, 0, "No constructed economics on numeric rejection");
+        }
+    }
 
     function test_PreviewOpen_PreservesFreeSettlementForIncreaseAfterMarginFundedCarry() public {
         address trader = address(0xCA2211);

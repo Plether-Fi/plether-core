@@ -42,6 +42,8 @@ interface IOrderRouterErrors {
 
     /// @notice A proposed Plether oracle has invalid code, Pyth, engine, or HousePool wiring.
     error OrderRouter__InvalidPletherOracle();
+    /// @notice A proposed Plether oracle did not retain the complete active policy after configuration was copied.
+    error OrderRouter__OraclePolicyMismatch();
     /// @notice The supplied stateless keeper sidecar has no code or is not bound to this exact Router address.
     error OrderRouter__InvalidKeeperSidecar();
     /// @notice The engine lens has no code, lacks its binding getters, or is bound to another engine.

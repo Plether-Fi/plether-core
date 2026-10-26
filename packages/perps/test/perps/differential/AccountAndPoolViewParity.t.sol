@@ -137,7 +137,7 @@ contract GrossCashAssetBoundaryTest is BasePerpTest {
         HousePoolAccountingLib.WithdrawalSnapshot memory withdrawalSnapshot = harness.buildWithdrawal(snapshot);
         harness.buildReconcile(snapshot);
 
-        assertEq(snapshot.netPhysicalAssetsUsdc, 0, "Net physical assets should saturate to zero once fees exceed cash");
+        assertEq(snapshot.netPhysicalAssetsUsdc, actualCash, "Treasury fees cannot erase remaining pool cash");
         assertEq(pool.totalAssets(), actualCash, "Test must leave the pool with less cash than the fee ledger");
         assertLe(
             withdrawalSnapshot.physicalAssets,

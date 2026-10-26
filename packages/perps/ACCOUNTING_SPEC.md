@@ -58,7 +58,11 @@ Use these terms consistently:
 - `economicDepth = max(physicalAssets - totalTraderClaimBalanceUsdc, 0)`: depth for carry utilization, skew capacity,
   and VPI. Do not also subtract open-position liabilities, the settlement buffer, or LP principal.
 - `protocolTreasuryBalance = clearinghouse.balanceUsdc(protocolTreasury)`: cash-realized protocol-owned inventory held as treasury margin in `MarginClearinghouse`, not LP equity
-- `netPhysicalAssets = max(physicalAssets - protocolTreasuryBalance, 0)`: protocol/lens diagnostic quantity exposed by accounting snapshots when treasury margin should be excluded from protocol-owned pool depth
+- `netPhysicalAssets = physicalAssets`: the retained snapshot field reports canonical pool backing. Treasury
+  settlement is held in the clearinghouse, outside pool custody, so subtracting it here would understate backing.
+  A pool-funded treasury payment already reduces `rawAssets` and `accountedAssets` when it leaves the pool.
+  Treasury-only clearinghouse deposits and withdrawals must not change either pool asset field. Trader claims
+  remain separate liabilities and are deducted when computing `economicDepth` and effective solvency assets.
 
 Operational rules:
 
@@ -501,7 +505,7 @@ Purpose:
 
 - canonical accounting payload for LP redemption funding and tranche reconciliation. Live LP kernels consume
   `physicalAssetsUsdc` plus explicit reserve fields; `netPhysicalAssetsUsdc` is exposed for protocol and read-layer
-  parity where treasury margin should be excluded.
+  parity with the same canonical pool backing. Treasury clearinghouse balances are outside this custody boundary.
 
 Key fields:
 
@@ -967,6 +971,18 @@ Required properties:
 - assessed spread must equal paid spread plus waived spread,
 - preview and live close paths should share one close-accounting kernel and expose the same assessed/paid/waived result; successful nonzero assessments emit `FrozenCloseSpreadSettled`.
 
+The engine lens close preview separates fresh payout destinations:
+
+- `payoutToPnlPledgeUsdc`: cash price profit locked as collateral for a remaining position;
+- `payoutToFreeSettlementUsdc`: paid action rebates and full-close price profit credited without a position pledge;
+- `deferredPayoutUsdc`: new unpaid price profit recorded as a trader claim, excluding pre-existing claims.
+
+The legacy `immediatePayoutUsdc` is the sum of the two cash destinations, not a withdrawable amount.
+The three destinations sum to `freshTraderPayoutUsdc`; existing claims remain separately reported.
+Released pre-existing collateral is outside these fresh payout fields. Even a free-settlement credit is not a
+withdrawal-capacity quote: account reservations, carry, and engine withdrawal guards still apply. Consumers of
+`CfdEngineLens.previewClose` and `simulateClose` must use ABI bindings with the appended destination fields.
+
 ### Open projection
 
 - request/resulting lots fit `uint112`, exact entry cost fits `uint144`, and requested margin fits `int256`;
@@ -1020,6 +1036,21 @@ without moving funds, and unknown failures still roll back the item for retry.
 - withdrawing treasury margin must not consume `HousePool` cash, trader claims, or LP withdrawal reserves.
 
 ### Liquidation settlement
+
+Use `CfdEngineLens.previewRouterLiquidation(account, oraclePrice)` to include the Router's preceding risk-off
+refunds. It releases remaining committed margin and order/protection bounties for cutoff-invalid pending opens
+in a memory snapshot before evaluating liquidation. Those refunds can cover unpaid carry and restore solvency;
+the result reports both the refund amounts and the subsequent liquidation preview. Refunds make settlement free
+inside the clearinghouse; they are not wallet transfers. `previewLiquidation` and `simulateLiquidation` remain
+Engine-level diagnostics that omit this Router cleanup. All use caller-supplied prices and do not validate oracle
+policy or predict intervening transactions or other accounts in a batch.
+
+In the liquidation preview, `settlementRetainedUsdc` is the projected settlement balance after all liquidation
+debits and any immediate price payout. `immediatePayoutUsdc` is already included in that total and must not be
+added again. `traderClaimBalanceUsdc` reports outstanding claims separately; deferred payouts are not cash in
+`settlementRetainedUsdc`. For example, $100 left after debits plus a $30 immediate payout gives retained
+settlement of $130, not $160. If that $30 is deferred instead, retained settlement stays $100 and the claim
+balance increases by $30. Retained settlement is an account-balance projection, not a withdrawal-capacity quote.
 
 Liquidation must:
 
