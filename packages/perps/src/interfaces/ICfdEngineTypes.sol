@@ -385,11 +385,14 @@ interface ICfdEngineTypes {
     /// @param protocolLiquidationFeeUsdc Configured protocol-treasury share of the liquidation charge.
     /// @param lpLiquidationFeeUsdc Remaining LP share after keeper and protocol allocations.
     /// @param seizedCollateralUsdc Price-loss pledge plus the LP liquidation fee; excludes carry and action charges.
-    /// @param settlementRetainedUsdc Existing account settlement left with the trader toward positive residual equity.
+    /// @param settlementRetainedUsdc Total projected account settlement after liquidation debits and any immediate
+    ///        payout. Already includes immediatePayoutUsdc; do not add it again. Excludes outstanding trader claims
+    ///        and is not a withdrawal-capacity quote.
     /// @param freshTraderPayoutUsdc New surplus value owed to the trader after liquidation.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted into liquidation settlement.
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
     /// @param immediatePayoutUsdc Portion of fresh trader payout paid immediately into clearinghouse settlement.
+    ///        This is a component of settlementRetainedUsdc, not an additional balance.
     /// @param traderClaimBalanceUsdc Projected claim balance after netting and any deferred fresh payout.
     /// @param triggersDegradedMode Whether liquidation newly reveals adjusted pool insolvency.
     /// @param postOpDegradedMode Projected degraded-mode latch after liquidation.

@@ -131,6 +131,7 @@ interface ICfdEngineLens {
     /// @notice Previews liquidation against current pool depth.
     /// @dev Models forfeiture of the account's pending execution bounties before terminal collateral is evaluated.
     ///      Uses current effective `HousePool.totalAssets()`, clamps the price, and does not validate oracle freshness.
+    ///      settlementRetainedUsdc already includes immediatePayoutUsdc; the latter is a breakdown, not extra cash.
     /// @param account Account whose position would be tested
     /// @param oraclePrice Candidate liquidation execution price (8 decimals)
     /// @return preview Liquidation economics and projected post-operation solvency

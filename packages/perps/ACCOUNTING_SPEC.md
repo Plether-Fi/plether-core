@@ -1033,6 +1033,13 @@ without moving funds, and unknown failures still roll back the item for retry.
 
 ### Liquidation settlement
 
+In the liquidation preview, `settlementRetainedUsdc` is the projected settlement balance after all liquidation
+debits and any immediate price payout. `immediatePayoutUsdc` is already included in that total and must not be
+added again. `traderClaimBalanceUsdc` reports outstanding claims separately; deferred payouts are not cash in
+`settlementRetainedUsdc`. For example, $100 left after debits plus a $30 immediate payout gives retained
+settlement of $130, not $160. If that $30 is deferred instead, retained settlement stays $100 and the claim
+balance increases by $30. Retained settlement is an account-balance projection, not a withdrawal-capacity quote.
+
 Liquidation must:
 
 1. collect margin-first carry and position price loss from the reduced PnL pledge and explicitly nettable claim,
