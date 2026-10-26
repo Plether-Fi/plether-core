@@ -5,7 +5,7 @@ import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 
-import {IPletherOracle} from "@plether/perps/interfaces/IPletherOracle.sol";
+import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 
 import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 
@@ -15,13 +15,13 @@ contract OrderRouterQueueRecoveryTest is OrderRouterPythTestBase {
 
     using stdStorage for StdStorage;
 
-    function test_StateMachine_StaleRevertPreservesQueueUntilHonestBatchExecutes() public {
+    function test_StateMachine_UnavailableHistoryPreservesQueueUntilHonestBatchExecutes() public {
         _startRecordingLogs();
         vm.warp(1000);
 
         vm.startPrank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000 * 1e18, 500 * 1e6, 1e8, false);
-        router.commitOrder(CfdTypes.Side.SHORT, 8000 * 1e18, 400 * 1e6, 1e8, false);
+        router.commitOrder(CfdTypes.Side.LONG, 8000 * 1e18, 400 * 1e6, 1e8, false);
         vm.stopPrank();
 
         address account = alice;
@@ -32,13 +32,19 @@ contract OrderRouterQueueRecoveryTest is OrderRouterPythTestBase {
         vm.warp(1000);
         bytes[] memory empty = _pythUpdateData();
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, empty);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, empty);
+        assertEq(result.orderId, 1);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
-        IOrderRouterAccounting.AccountReservationView memory afterRevertReservation =
+        IOrderRouterAccounting.AccountReservationView memory afterPendingReservation =
             router.getAccountReservations(account);
         assertEq(router.nextExecuteId(), 1, "Non-terminal stale failure must leave the queue untouched");
-        assertEq(afterRevertReservation.pendingOrderCount, 2, "All queued reservation should remain after stale revert");
+        assertEq(
+            afterPendingReservation.pendingOrderCount,
+            2,
+            "All queued reservation should remain while history is unavailable"
+        );
 
         mockPyth.setAllUniquePrices(feedIds, int64(100_000_000), 0, int32(-8), 1006, 900);
         vm.warp(1050);
@@ -50,7 +56,7 @@ contract OrderRouterQueueRecoveryTest is OrderRouterPythTestBase {
         assertEq(finalReservation.pendingOrderCount, 0, "Reservation should be fully released after terminal execution");
     }
 
-    function testFuzz_StaleOracleRevertPreservesReservationAndQueue(
+    function testFuzz_UnavailableHistoryPreservesReservationAndQueue(
         uint64 age
     ) public {
         _startRecordingLogs();
@@ -64,12 +70,14 @@ contract OrderRouterQueueRecoveryTest is OrderRouterPythTestBase {
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 2000 - age);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, empty);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(1, empty);
+        assertEq(result.orderId, 1);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
 
         IOrderRouterAccounting.AccountReservationView memory reservation = router.getAccountReservations(account);
-        assertEq(router.nextExecuteId(), 1, "Stale revert should keep queue head pending");
-        assertEq(reservation.pendingOrderCount, 1, "Stale revert should preserve reserved order state");
+        assertEq(router.nextExecuteId(), 1, "Unavailable history should keep queue head pending");
+        assertEq(reservation.pendingOrderCount, 1, "Unavailable history should preserve reserved order state");
         assertEq(usdc.balanceOf(address(router)), 0, "Router should not custody the keeper reserve");
         assertEq(
             reservation.executionBountyUsdc,

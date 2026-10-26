@@ -100,7 +100,7 @@ interface ICfdOrderPolicyEngineView {
 /// @notice Shared policy coordinator that derives a plan or evaluates a caller-supplied plan.
 /// @dev Provides internal snapshot, planner-call, and bound-check helpers for the public evaluator and close preview.
 ///      `_assessOrder` reads the supplied Engine and its dependencies and invokes one open or close planner. Its
-///      snapshot leaves `settlementBufferBps` at zero; engine execution separately enforces the configured buffer.
+///      snapshot reads the Engine's live `settlementBufferBps`, so planning enforces the configured buffer.
 ///      Pure helpers accept caller-supplied snapshots and deltas for deterministic simulation. Bounds follow
 ///      `ConstraintKind` order and equality passes. Full closes skip post-position equity and leverage bounds.
 abstract contract CfdOrderPolicyEvaluatorBase {

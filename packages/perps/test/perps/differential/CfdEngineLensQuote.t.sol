@@ -13,6 +13,34 @@ import {CfdEngineLensQuoteTestFixture} from "../shared/CfdEngineLensQuoteFixture
 
 contract CfdEngineLensQuoteTest is CfdEngineLensQuoteTestFixture {
 
+    function testFuzz_QuoteRejectsOutOfDomainMarginBeforeSearch(
+        uint256 margin,
+        bool shortSide
+    ) public view {
+        margin = bound(margin, uint256(type(int256).max) + 1, type(uint256).max);
+        ICfdEngineLens.MaxOpenQuote memory quote =
+            _quote(address(0xBEEF), shortSide ? CfdTypes.Side.SHORT : CfdTypes.Side.LONG, margin, 0.8e8);
+        assertEq(quote.maxSizeDelta, 0);
+        assertEq(uint8(quote.limitingReason), uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
+        assertEq(quote.preview.maintenanceMarginUsdc, 0);
+    }
+
+    function test_QuoteMarginNumericBoundaryPreservesPlannerPrecedence() public {
+        address account = address(0xBEEF);
+        _fundTrader(account, 20_000e6);
+        _open(account, CfdTypes.Side.LONG, 10_000e18, 1000e6, 0.8e8);
+        // An opposing position must not mask the earlier numeric-domain rejection.
+        ICfdEngineLens.MaxOpenQuote memory quote =
+            _quote(account, CfdTypes.Side.SHORT, uint256(type(int256).max) + 1, 1.2e8);
+        assertEq(uint8(quote.limitingReason), uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED));
+        quote = _quote(account, CfdTypes.Side.SHORT, uint256(type(int256).max), 1.2e8);
+        assertEq(uint8(quote.limitingReason), uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING));
+        quote = _quote(account, CfdTypes.Side.LONG, uint256(type(int256).max), 0.8e8);
+        assertEq(uint8(quote.limitingReason), uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES));
+        quote = _quote(address(0xCAFE), CfdTypes.Side.LONG, uint256(type(int256).max), 0.8e8);
+        assertEq(uint8(quote.limitingReason), uint8(CfdEnginePlanTypes.OpenRevertCode.MARGIN_DRAINED_BY_FEES));
+    }
+
     function test_QuoteMaxOpen_ReturnsLargestPlannerValidQuantum() public {
         address account = address(0xA11CE);
         _fundTrader(account, 10_000e6);

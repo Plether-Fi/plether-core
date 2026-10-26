@@ -198,6 +198,8 @@ library OrderV3Types {
         uint256 postSettlementBalanceUsdc;
         int256 realizedPnlUsdc;
         int256 vpiUsdc;
+        /// @notice Carry assessed for the action, including any commitment-time carry collection added to the assessment.
+        /// @dev A full close may waive uncollectible carry; this field is not the amount debited from settlement.
         uint256 carryUsdc;
         uint256 executionFeeUsdc;
         uint256 frozenSpreadUsdc;
@@ -228,6 +230,9 @@ library OrderV3Types {
         uint256 executionNotionalUsdc;
         int256 realizedPnlUsdc;
         int256 vpiUsdc;
+        /// @notice Assessed carry copied from the execution assessment, not a standalone settlement debit.
+        /// @dev On a full close, some carry may be covered by price gain or waived. Collection and waiver evidence is
+        ///      included in aggregate action-charge fields and `close`, without a separate carry-only breakdown.
         int256 carryUsdc;
         uint256 executionFeeUsdc;
         uint256 frozenSpreadUsdc;
@@ -260,6 +265,9 @@ library OrderV3Types {
         PriceSource priceSource;
         uint256 executionPrice;
         uint256 neutralMarkPrice;
+        /// @notice Gross recognized pool assets sampled for this receipt's context, in 6-decimal USDC.
+        /// @dev Uses `HousePool.totalAssets()` before trader-claim deductions, not claim-net economic depth. Zero
+        ///      may also mean that no pool context was sampled for this terminal path.
         uint256 poolDepthUsdc;
         uint64 oraclePublishTime;
         bool priceReachedEngine;

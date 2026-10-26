@@ -424,6 +424,10 @@ contract OracleEthConservationHandler is Test {
         uint256 prefix = afterPrefix ? 1 : 0;
         Expectation memory expectation = _expected(prefix, prefix, 2 * activeFee, uint32(prefix));
         expectation.stop = OrderV3Types.PendingReason.HistoricalPriceUnavailable;
+        // Single execution now preserves the pending order and refunds the unavailable allocation too.
+        if (!afterPrefix && !_single(orderIds[0], unavailableData, 2 * activeFee + excess, expectation)) {
+            return;
+        }
         if (!_batch(unavailableData, (2 * (prefix + 1) * activeFee) + excess, expectation)) {
             return;
         }
@@ -457,7 +461,11 @@ contract OracleEthConservationHandler is Test {
             _commit(false, false, address(0));
             _advance(commits[0] + 1);
         }
-        bytes[] memory data = kind == 0 ? _payload(commits[0] + 2, commits[0] + 1) : _data(true);
+        bytes[] memory data = _data(true);
+        if (kind == 0) {
+            // A malformed array (one declared feed, no feed data) remains a genuine single-call parser failure.
+            data[0] = abi.encode(uint256(32), uint256(1));
+        }
         uint256 value = (pair ? 4 : 2) * activeFee + excess;
         if (kind == 1) {
             value = 3 * activeFee;
@@ -621,12 +629,7 @@ contract OracleEthConservationHandler is Test {
         bytes memory reason;
         if (kind == 0) {
             reason = abi.encodeWithSelector(
-                IPletherOracle.PletherOracle__StalePrice.selector,
-                IPletherOracle.PriceMode.OrderExecution,
-                bytes32(0),
-                uint256(commits[0] + 1),
-                oracle.orderExecutionStalenessLimit(),
-                uint256(commits[0] + 1)
+                IPletherOracle.PletherOracle__HistoricalParserFailure.selector, bytes4(0), uint256(0)
             );
         } else if (kind == 1) {
             reason = abi.encodeWithSelector(
@@ -802,7 +805,14 @@ contract OracleEthConservationHandler is Test {
             }
         } else {
             OrderV3Types.ExecutionResult memory result = abi.decode(returned, (OrderV3Types.ExecutionResult));
-            if (result.status == OrderV3Types.LifecycleStatus.Pending) {
+            if (e.stop != OrderV3Types.PendingReason.None) {
+                if (
+                    result.status != OrderV3Types.LifecycleStatus.Pending || result.pendingReason != e.stop
+                        || result.receiptHash != bytes32(0) || _stateHash() != beforeState
+                ) {
+                    _fail(13);
+                }
+            } else if (result.status == OrderV3Types.LifecycleStatus.Pending) {
                 _fail(13);
             }
         }

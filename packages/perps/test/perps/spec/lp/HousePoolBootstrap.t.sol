@@ -399,6 +399,7 @@ contract HousePoolUnseededBootstrapTest is HousePoolAsyncTestBase {
 
         address trader = address(0xAB1717);
         _fundTrader(trader, 50_000e6);
+        router.updateMarkPrice(_mockPythUpdateData());
 
         uint256 assetsBefore = pool.totalAssets();
         uint256 feesBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());

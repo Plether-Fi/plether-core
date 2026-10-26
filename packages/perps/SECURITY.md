@@ -7,7 +7,7 @@ It is written as an audit-facing companion to:
 - [`README.md`](README.md) for the high-level product and architecture story
 - [`ACCOUNTING_SPEC.md`](ACCOUNTING_SPEC.md) for the canonical accounting model
 - [`INTERNAL_ARCHITECTURE_MAP.md`](INTERNAL_ARCHITECTURE_MAP.md) for the custody and state-boundary map
-- [`PRE_AUDIT_GUIDE.md`](PRE_AUDIT_GUIDE.md) for the compact policy tables, liveness tradeoffs, and test map used during audit review
+- [`test/perps/TEST_MAP.md`](test/perps/TEST_MAP.md) for executable evidence, independent models, and test limitations
 
 ## Security Model In One Page
 
@@ -27,6 +27,32 @@ The perps system is built around a few core security choices:
 - degraded-mode containment if a terminal transition reveals insolvency.
 
 The protocol is intentionally non-upgradeable. Admins can tune risk parameters and pause certain entrypoints, but they cannot swap logic or rewrite deployed code.
+
+## Review guide
+
+Start with the [accounting quantities and views](ACCOUNTING_SPEC.md#reading-the-accounting-model), then use the
+[architecture map](INTERNAL_ARCHITECTURE_MAP.md) to identify custody, state ownership, and callers. For each path,
+review these questions in order:
+
+1. Does execution apply the canonical planner's economics, including projected carry, rather than recomputing a
+   different settlement result?
+2. Does value cross only the intended custody boundaries, with each reserve used for its permitted obligation?
+3. Do the oracle regime, pinned order bounds, and [failure policy](#queue-failure-handling) agree with the path?
+4. Are queue traversal and cleanup bounded, trader claims protected, and reservations resolved exactly once?
+5. Does every change to lots, exact entry cost, side, PnL pledge, or nettable claim atomically synchronize the
+   affected terminal curve? Credit-only free-settlement funding changes none of those inputs.
+6. Do failed calls restore the entire affected accounting frame, while deliberately isolated batch items retain
+   already completed work?
+
+The [transaction walkthroughs](#transaction-walkthroughs) below connect these checks to settlement flows. The
+[invariant tables](#critical-protocol-invariants) define the properties to trace; the
+[test map](test/perps/TEST_MAP.md) identifies exact test entrypoints, execution profiles, and gaps.
+
+Distinguish specification examples, sequence invariants, and focused regressions when reading tests. A test name or
+folder does not establish model independence. Preview/live parity can miss an error shared by both implementations;
+look for independent arithmetic or economic end-state assertions. Synthetic-state fixtures establish local behavior,
+not that the fixture is reachable through the public lifecycle. Historical finding names and passing examples do not
+define policy or establish the absence of defects.
 
 ## Upgradeability And Admin Surface
 
@@ -50,7 +76,7 @@ Both admins expose `activeConfigVersion`, initialized to one. `CfdEngineAdmin` i
 risk, calendar, or freshness finalization; `OrderRouterAdmin` increments it only after successful Router or Oracle
 configuration finalization. The versions are execution-authority inputs, not timestamps or proposal counters.
 
-`CfdEngine` sidecars (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are now deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time. The engine rejects a settlement sidecar or admin bound to another engine and rejects a no-code admin address; audited `CfdEngineAdmin` bytecode remains a deployment trust assumption.
+`CfdEngine` dependencies (`CfdEnginePlanner`, `CfdEngineSettlementSidecar`, `CfdEngineAdmin`) are deployed separately and wired once via `setDependencies(...)`. That wiring is owner-only and one-time. The engine rejects a settlement sidecar or admin bound to another engine and rejects a no-code admin address; selecting and verifying the intended `CfdEngineAdmin` bytecode remains a deployment responsibility.
 
 `TerminalNavBookV2` is also deployed separately and wired once through `setTerminalNavBook(...)` before any exposure.
 The Engine accepts only an empty book immutably bound to itself with matching `CAP_PRICE` and the canonical `1e20`
@@ -135,11 +161,17 @@ These are one-time configuration setters rather than mutable governance knobs:
 | `setSeniorVault(address)` | `HousePool` |
 | `setJuniorVault(address)` | `HousePool` |
 
-The V2 Router additionally fixes the Engine, Engine lens, HousePool, keeper sidecar, policy evaluator, execution
+The Router additionally fixes the Engine, Engine lens, HousePool, keeper sidecar, policy evaluator, execution
 sidecar, and predeployed lifecycle Book at construction. The lifecycle Book is the eighth and final Router constructor
 dependency; it fixes the predicted Router plus the Engine, Clearinghouse, and HousePool and accepts mutations only
 from that Router. The Router rejects missing Book code or any mismatched immutable binding. These are constructor
 bindings, not entries in the mutable setter table. The stateful position-protection Book remains Router-created.
+
+Not every one-time setter validates reciprocal interfaces: `CfdEngine.setOrderRouter`,
+`MarginClearinghouse.setEngine`, and the two HousePool vault setters accept a nonzero address without proving the
+expected binding, and `CfdEngine.setDependencies` does not validate the planner implementation. Deployment must
+verify these addresses, runtime bytecode, and reciprocal bindings before funding. One-time wiring cannot repair a
+wrong address later.
 
 `SettlementMonitorLens` construction validates the required core wiring and reciprocal bindings before fixing its
 constructor bindings. `getSettlementHealth()` checks those bindings again at runtime, and the observable configuration digest
@@ -170,8 +202,9 @@ refresh cannot bypass its independent LP-epoch settlement hold.
 V3 order execution instead uses the separately deployed reusable
 `OrderRouterExecutionSidecar` fixed by the Router. It records its own deployment address only to reject direct
 stateful calls; another contract can delegate it into that contract's own context, but cannot thereby impersonate the
-protocol Router. Book, Clearinghouse, and Engine caller checks authenticate the actual Router address. Both sidecars
-have no mutable storage or upgrade setter. Order item callbacks are Router-self-only and delegate back to the same fixed
+protocol Router. Book, Clearinghouse, and Engine caller checks authenticate the actual Router address. `OrderRouterExecutionSidecar` also creates and permanently binds an `OrderRecoverySidecar` for expiry, invalid-order
+cleanup, and non-Engine terminal receipts. The recovery module rejects direct calls; item helpers additionally require
+an external Router self-call. All three delegated modules have no mutable storage or upgrade setter. Order item callbacks are Router-self-only and delegate back to the same fixed
 execution sidecar, so an external caller cannot use a sidecar to bypass Router authorization or reentrancy guards.
 
 This release requires a fresh, internally compatible stack. It does not migrate legacy Router queue storage into the
@@ -192,6 +225,11 @@ The owner can act immediately to:
   existing balances remain withdrawable by their original accounts,
 - propose, replace, or cancel a pending protocol treasury during an active lock, preserving its original expiry;
   the latest pending treasury activates automatically at that expiry,
+- initialize tranche seeds and activate trading after the lifecycle/capacity gates pass,
+- admit unaccounted pool excess, sweep that excess, or assign unowned accounted assets through the guarded bootstrap
+  path; these powers do not permit withdrawal of existing claimant backing,
+- recapitalize the pool from the owner's wallet, clear degraded mode once raw solvency is restored, and rescue
+  accidentally transferred non-settlement tokens from the Clearinghouse,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:
@@ -217,6 +255,9 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 - `OrderRouterExecutionSidecar` is a fixed, stateless Router delegate dependency. It orchestrates Oracle, evaluator,
   Engine, Clearinghouse, and lifecycle Book calls under the Router's address, but it cannot be called directly to
   obtain Router authority. Its self-call item boundary and ABI forwarding are security-critical.
+- `OrderRecoverySidecar` runs expiry, bounded invalid-order cleanup, reservation-mismatch recovery, and non-Engine
+  terminal receipts through the execution sidecar. Its immutable address and delegate/self-call checks are part of
+  the Router execution trust boundary.
 - `CfdOrderPolicyEvaluator` is permissionless and stateless. It is not a custody authority; the Router sidecar pins
   its address, validates exact return shape, and compares selected assessed mode/account/position fields against live
   pre/post state.
@@ -232,7 +273,7 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
   migration path. Engine wiring validates the bound Engine, price cap, size quantum, and completely empty book before
   accepting it once.
 - `MarginClearinghouse` broad operator paths trust only `engine` and `settlementSidecar` to move trader custody across settlement and seizure buckets; router access is limited to reservation lifecycle paths needed for queued orders.
-- Ordinary and protection close execution bounties are zero. Commitment collects applicable carry and creates an
+- Ordinary and protection close execution bounties are zero. Ordinary close commitment collects applicable carry and creates an
   authenticated Active zero Order record without moving free settlement or pledge into an execution reserve. Nonzero
   close-bounty configuration and nonzero close-commitment bounty are rejected; FIFO and queued-exposure checks still
   govern admission.
@@ -246,11 +287,19 @@ Several perps contracts intentionally expose narrow but high-authority capabilit
 |---------|---------------------------|----------------------------------|
 | `OrderLifecycleBook.registerPending(...)` / `finalize(...)` | Immutable Router only | Permanently binds identity or terminal outcome; Book finalization is last and any failure rolls back the whole item |
 | `OrderRouterExecutionSidecar.executeOrder(...)` / `executeOrderBatch(...)` | Productive protocol use is delegatecall from the Router that fixed this sidecar | Runs with the host's storage/address; direct calls are rejected, and a different delegate host does not gain the configured Router's authority |
+| `OrderRecoverySidecar` stateful entrypoints | Delegatecall through the fixed execution sidecar; item helpers also require Router self-call | Preserves per-item rollback for expiry, config cleanup, mismatch recovery, and externally settled receipts |
 | Prepared-item callback | Router external self-call only, then delegatecall to the fixed sidecar | Creates one rollback frame per order and preserves earlier batch progress on retryable item failure |
 | Router reservation settlement callbacks | Router external self-call only | Release/refund reservation, pay/refund/forfeit the exact bounty, unlink and delete the live Router record |
 | `CfdOrderPolicyEvaluator.assessOrder(...)` | Permissionless static call from the execution sidecar | Rebuilds Engine state and invokes its configured planner; typed policy failures may be terminal, unknown or malformed behavior may not be classified as terminal |
 | `MarginClearinghouse.releaseOrderReservationForTerminalCleanup(...)` | Current Router only | Releases one reservation without a carry checkpoint inside the item rollback frame |
 | `CfdEngine.processOrderTyped(...)` | Configured Router only | Applies the canonical plan; only exact known typed reverts are eligible for terminal classification |
+| `MarginClearinghouse.reserveCommittedOrderMargin(...)` | Engine or Engine-reported Router | Locks margin to one order; terminal release is Router-only |
+| Clearinghouse reserved-settlement lock / unlock | Engine, Router, or Router-created protection Book; unlock also permits settlement sidecar | Narrow action-reserve access; generic release preserves bounty and negative-VPI floors |
+| Clearinghouse bounty-ledger mutations | Router for `Order`; protection Book for `ProtectionTrigger` | Each caller owns its reservation kind; close `Order` records are zero |
+| `HousePool.payOut(...)` / `recordClaimantInflow(...)` | Engine or settlement sidecar; recapitalization inflow is Engine-only | Payout and ownership-routing authority does not extend to the Router |
+| `HousePool.reserveSeniorDeposit(...)` / `releaseSeniorDepositReservation(...)` | Configured Senior vault only | Reserves or releases pending Senior-entry capacity |
+| `HousePool.reconcile()` | Either configured tranche vault | Internal integration hook; users enter and claim through the vault |
+| `HousePool.settleLpEpoch(...)` | Configured Router when positions exist outside frozen mode; otherwise permissionless | Live route binds the Router's exact mark/time; every route respects the settlement hold |
 
 The no-carry release methods change reservation buckets only. Carry remains derived from canonical Engine indexes and
 is assessed by the planner/Engine. On a retryable order item failure, the self-call revert restores the released
@@ -259,7 +308,7 @@ reservation, so a classifier cannot strand value between custody buckets.
 Practical rule:
 
 - any new external function on `OrderRouter`, `OrderLifecycleBook`, `OrderRouterExecutionSidecar`, or
-  `CfdEngineSettlementSidecar`, and any new helper/sidecar that can reach these caller sets, must be treated as
+  `OrderRecoverySidecar`, `CfdEngineSettlementSidecar`, and any new helper/sidecar that can reach these caller sets, must be treated as
   security-critical and reviewed like a core custody or settlement change.
 
 ## Critical Protocol Invariants
@@ -272,7 +321,7 @@ These are the highest-value properties an auditor should expect to hold.
 |-----------|-------------|
 | Buffered entry solvency | With `P = pool.totalAssets()`, `C = totalTraderClaimBalance`, `E = max(P-C, 0)`, `L = max(globalLongMaxProfit, globalShortMaxProfit)`, and `B = ceil(L * settlementBufferBps / 10_000)`, every risk-increasing open/increase requires post-op `E >= L + B` |
 | Degraded containment | If a close or liquidation leaves raw post-op `E < L`, `degradedMode` latches and blocks further risk expansion while still permitting protective transitions; `B` is deliberately excluded |
-| Bounded payout | No trader payout can exceed the capped market payoff implied by `CAP_PRICE` |
+| Bounded price liability | Position price PnL is bounded by size, exact entry cost, and the price interval from zero to `CAP_PRICE`; returned collateral and separate action settlement are accounted for independently |
 | Withdrawal firewall | Synchronized LP redemption funding is limited to conservative free cash after a base reserve of `C + L + B` plus any pool-level reservations |
 | Matured Senior priority | A settlement cannot fund Junior redemptions while any eligible matured Senior demand remains unaccounted for |
 | Funded-claim backing | Every claimable LP asset is held one-for-one in vault escrow and cannot be reused by `HousePool` |
@@ -296,7 +345,7 @@ These are the highest-value properties an auditor should expect to hold.
 
 | Invariant | Description |
 |-----------|-------------|
-| Global FIFO | Execution always starts from the current global queue head |
+| Global FIFO | Price-dependent execution starts from the current global queue head; oracle-free invalid-order cleanup may remove a specific order without executing later valid orders |
 | Binding intents | Users cannot cancel queued orders once committed |
 | Permanent idempotency | `(account, clientOrderId)` is bound forever to one full intent hash; exact replay returns the original id before current-state validation and conflicting reuse reverts |
 | Bounded authority | Every fresh order pins a nonzero target, deadline, mode mask, config hash, and inclusive financial limits; zero maxima are real zero allowances rather than unbounded sentinels |
@@ -315,7 +364,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Economic close granularity | Partial close intents must meet the engine notional floor; only full residual closes may be smaller |
 | Bounded cleanup | Queue cleanup, liquidation cleanup, and close-intent position projection are account-local and intentionally bounded |
 | Credit-only funding | Exact token receipt increases beneficiary settlement only; no Engine hook, carry checkpoint, reserve allocation, or payer authority |
-| Carry-safe reservation resolution | Opening-bounty release does not checkpoint carry. Close commitment still collects applicable carry with zero bounty; retryable item rollback restores the order and its authenticated zero record |
+| Carry-safe reservation resolution | Opening-bounty release does not checkpoint carry. Ordinary close commitment still collects applicable carry with zero bounty; retryable item rollback restores the order and its authenticated zero record |
 
 ### HousePool and LP accounting
 
@@ -327,7 +376,7 @@ These are the highest-value properties an auditor should expect to hold.
 | Receivable/cash separation | Positive marked receivables are capped by account PnL pledge and nettable same-account claim, and never increase physical redemption funding before collection |
 | High-water-mark protection | Senior impairment must be restored before junior extracts surplus |
 | Bounded new senior exposure | Counted admission exposure (`E + R`) cannot exceed the smaller absolute and senior-share headrooms |
-| Junior covenant | Junior redemption funding cannot leave active protected exposure (`E`, excluding `R`) above the configured share of Senior-plus-Junior claimant capital |
+| Junior covenant | Junior redemption funding retains enough Junior capital to back active protected Senior exposure plus accepted pending Senior reservations (`E + R`) under the configured share limit |
 | Shared cutoff routing | Both tranches and both request directions use the same five-minute cutoff; exact equality rolls to the later epoch without a cutoff-specific revert |
 | Locked-epoch additions | For boundary `b`, no request at or after `b - 300` may increase locked epoch `e + 1`, including after it matures; cancellation may still shrink it, while requests after `b` may join the new imminent numeric epoch `e + 2` until its own cutoff |
 | Shared accounting inputs | Reconcile, synchronized redemption funding, deposit finalization, and LP status views consume the same canonical engine snapshot |
@@ -339,8 +388,8 @@ These are the highest-value properties an auditor should expect to hold.
 
 The tables above define intended safety properties. Their executable evidence, model independence, fixture limits,
 and execution lanes are indexed in [`test/perps/TEST_MAP.md`](test/perps/TEST_MAP.md). Test coverage is evidence to
-review against this specification; it is not proof that vulnerabilities are absent. Historical audit material remains
-in the audit status section and Git history rather than in executable test narratives.
+review against this specification; it is not proof that vulnerabilities are absent. Historical reports are linked in
+[Audit evidence](#audit-evidence); implementation and validation history remain in Git.
 
 ## Trust Assumptions
 
@@ -361,7 +410,7 @@ Mitigations:
 - live current baskets parse signed prices for every component within a caller-independent window of at most 15
   seconds; component times cannot regress, equal-time marks cannot change price, and the newest component time
   advances the protection clock,
-- live LP epoch reconciliation also requires every component to be published after the current epoch boundary,
+- live LP epoch reconciliation also requires every component to be published at or after the current epoch boundary,
 - frozen-oracle regime for close liveness during genuine market closure.
 
 Risks:
@@ -386,7 +435,8 @@ Risks:
 
 ### OpenZeppelin and other dependencies
 
-The system relies on standard audited libraries and treats them as trusted building blocks rather than protocol-specific attack surfaces.
+The system relies on the pinned dependency versions in this repository. Review the exact versions and their use in
+this stack; an audit of a library does not establish the safety of its integration.
 
 ## Internal Trust Boundaries
 
@@ -421,8 +471,7 @@ governance owns the coordinator and assigns its guardian.
   liquidation-first keeper ordering cannot change whether the invalidated-open reservation is refunded. Refunded free
   settlement remains ordinary trader capital and may still satisfy legitimate liquidation obligations. Liquidation
   reuses the exact single-order Clearinghouse reversal for each invalidated open; this is bounded by the 32-order
-  account cap and remains inside one rollback frame. A one-call aggregate variant was rejected because it made the
-  Router exceed both EIP-170 and its pre-change runtime baseline.
+  account cap and remains inside one rollback frame.
 - HousePool pause blocks LP entry only. Redemptions, synchronized redemption funding, and funded claims remain live.
   It does not itself unlock cancellation of a matured deposit; that request still needs an existing rejection,
   projected wipe, Senior impairment, or explicit settlement hold for a committed Senior request, or later activation
@@ -488,8 +537,7 @@ the close mandate.
 The Router registers every generated close as a protection attempt in `OrderLifecycleBook`. A matching failed
 attempt settles its authenticated zero Order record, pays no caller, and relatches the protection. A mismatched
 position terminally fails it with the same zero-bounty outcome. Retry requires the exact protected position and
-creates a fresh zero Order record without another trader debit. The former retained-bounty disposition is absent from
-the current enum; archived decoders remain necessary for older receipts.
+creates a fresh zero Order record without another trader debit. Decode older receipts with the ABI of their emitting deployment; current zero-bounty receipts use no retained-bounty disposition.
 Expired reservation-mismatch recovery uses the same exact-position relatch decision before deleting the child. The
 old order remains terminal with an `ExpiredReservationMismatch` receipt; disputed reservations retain their existing
 quarantine/ownership rules. Relatching neither repairs the ledger nor invents a refund, and receipt failure rolls back
@@ -567,6 +615,11 @@ availability and activation gates are described in [`BRIDGE_FUNDING.md`](BRIDGE_
 
 The router uses delayed commit/execute semantics rather than same-tx market execution.
 
+A stale stored mark does not by itself prevent a close commitment. Commitment still checks the position, queued
+exposure, applicable carry and partial-close health, and the caller's financial bounds, then records a zero bounty.
+It does not promise an executable oracle price: live execution still needs valid updates and passes FIFO, timing,
+slippage, and risk checks.
+
 Security properties:
 
 - every fresh request pins a nonzero account-scoped client id, target, deadline, execution-mode mask, exact active
@@ -587,16 +640,21 @@ Security properties:
 - partial-close size floors prevent dust closes from occupying global FIFO slots,
 - binding order semantics and the lack of a user cancellation path prevent traders from turning queued intents into
   free options,
-- the stateless evaluator reads a settlement snapshot and calls the configured Engine planner before mutation; its
-  current snapshot leaves `settlementBufferBps` at zero, while Engine execution independently enforces the configured
-  buffer. The execution sidecar checks selected assessment fields against actual pre/post state,
+- the stateless evaluator reads a settlement snapshot with the Engine's live `settlementBufferBps` and calls the
+  configured Engine planner before mutation. Planning and Engine execution enforce the configured buffer on opens
+  and increases. Closes and liquidations may consume that headroom; raw post-settlement insolvency is contained by
+  degraded mode. The execution sidecar checks selected assessment fields against actual pre/post state,
 - the execution sidecar reserves a fixed post-Engine gas tail and finalizes the lifecycle Book only after economic
   settlement and Router-record deletion,
 - batch execution also limits every item self-call and retains an outer gas tail, while Router and Oracle ETH refunds
   cap recipient-call gas and defer rejected refunds; a later gas-burning prepared item or refund recipient therefore
   cannot roll back an already finalized batch prefix,
-- Unexpected historical parser errors stop the batch with `OracleFailure`, preserving finalized predecessors and
-  refunding the failed call's unspent funding. `HistoricalPriceUnavailable` means the supplied payload contains no
+- When historical data is unavailable, both execution entrypoints return
+  `HistoricalPriceUnavailable` when the supplied payload has no qualifying historical tick. Single-order execution
+  preserves earlier terminal cleanup and leaves the target pending without updating the mark. The Oracle refunds or
+  defers the forwarded funding; the Router refunds only the excess, so each allocation is returned once.
+- Unexpected historical parser errors still revert single-order execution and stop the batch with `OracleFailure`,
+  preserving finalized predecessors and refunding the failed call's unspent funding. `HistoricalPriceUnavailable` means the supplied payload contains no
   qualifying update for at least one feed; it does not prove no such history exists elsewhere.
 - Other Oracle/Pyth preparation failures and the resulting Engine mark update remain in the outer batch frame.
   A revert at that boundary reverts the complete batch; keepers that require a strict durable-progress boundary must bound
@@ -604,7 +662,7 @@ Security properties:
 
 Deferred ETH belongs to the credited beneficiary. `OrderRouterAdmin.claimBalanceTo(recipient)` and
 `PletherOracle.claimEthRefundTo(recipient)` let that beneficiary send its full credit to a nonzero payable recipient,
-including when the beneficiary contract itself cannot receive ETH (LOW-62). Both debit only `msg.sender` before the
+including when the beneficiary contract itself cannot receive ETH. Both debit only `msg.sender` before the
 transfer; a failed transfer reverts and preserves the credit. The existing self-claim methods remain available.
 Directed claims emit `EthRefundClaimedTo(beneficiary, recipient, amount)`; the Oracle's legacy self-claim event remains
 unchanged. A beneficiary contract must be capable of invoking the claim API to redirect its refund.
@@ -616,14 +674,12 @@ Pyth, per-feed publish-time ordering, freshness, confidence, and the permitted g
 It cannot establish from those supplied updates that each component is the newest Pyth report available off-chain.
 A caller may therefore choose an older, still-valid signed component within the allowed window and obtain a
 different basket mark. This applies to live mark refresh, liquidation, and LP epoch settlement; historical order
-execution has its separate post-commit parse and 5-second component-gap rule.
+execution has its separate post-commit parse and governed component-gap limit (default five seconds).
 
 Liquidation or LP epoch settlement can consume the selected mark in the same transaction, so a later update cannot
-undo an action already settled. A fork test demonstrated a different accepted mark from a mixed-time basket, but
-did not demonstrate a wrongful liquidation, a different LP payout, or a profitable exploit. Requiring simultaneous
-feed timestamps would impede feeds that publish at different times; tightening the window would reduce, but not
-eliminate, caller choice. This remains a documented limitation of caller-supplied signed updates, with no additional
-protocol change planned on the current evidence.
+undo an action already settled. Requiring simultaneous feed timestamps would impede feeds that publish at different
+times; tightening the window reduces, but does not eliminate, caller choice. See
+[ORACLE_SYNCHRONIZATION.md](ORACLE_SYNCHRONIZATION.md) for the tested policy and evidence boundaries.
 
 ### Arbitrum and Pyth clock alignment
 
@@ -633,13 +689,17 @@ observable after the trader submitted the order. If the sequencer timestamp trai
 update, that update may qualify. References to "post-commit" ticks describe this timestamp rule, not a
 guarantee about when the trader first learned the price.
 
-The protocol acknowledges this clock-alignment limitation without adding a fixed settlement delay. The
-timestamp mismatch alone is assessed as Informational.
-Closing an existing position at a known favorable price can be normal trading PnL. The next tick is unknown
-at commitment and could favor either side; a favorable comparison made after both ticks are known does not
-by itself establish an exploitable pricing advantage.
+The implementation adds no fixed delay to compensate for this clock mismatch. A qualifying tick can already be
+known at submission, so integrations must not describe the historical-price rule as a guarantee of an unknown future
+price. Whether a particular mismatch creates an economic advantage depends on the observed timestamps, order, and
+settlement path.
 
 ### Queue failure handling
+
+An order starts `Pending`. Successful execution makes it `Executed`; an authenticated terminal rejection makes it
+`Failed`. Both terminal states unlink the live queue record and settle its reservation exactly once, while the
+lifecycle Book retains the permanent outcome and receipt hash. Neither state can reuse or requeue the same id.
+Retryable failure leaves the same order `Pending`; users cannot cancel a queued intent.
 
 Terminal classification is deliberately allow-listed:
 
@@ -840,8 +900,6 @@ booked in the epoch's claimed-share counter; funded asset dust returns raw to `H
 resetting its cooldown. These terminal sweeps prevent stranded escrow without allowing the final caller to capture
 another controller's rounding remainder.
 
-This is an explicit design choice, not an accounting accident.
-
 ### Settlement-liability buffer
 
 The settlement buffer protects a governed amount of physical headroom above the maximum directional payout envelope:
@@ -1028,8 +1086,8 @@ nonzero/nonzero. Because the facade embeds the sidecar's creation code, EIP-3860
 constraint in addition to each contract's EIP-170 runtime limit.
 
 Normal monitoring should poll the lighter `getSettlementStatus(observedEpoch)` view. The composite
-`getSettlementObservation(observedEpoch)` is designed for checkpoints and alert investigation: its ABI return is
-roughly 6 KB and representative `eth_call` execution is about 0.8–1.3 million gas. The Senior deposit-deferral mask
+`getSettlementObservation(observedEpoch)` also reads health, oracle, and configuration data; reserve it for
+checkpoints and alert investigation and measure its RPC gas budget against the deployment. The Senior deposit-deferral mask
 describes pending activation gates, not how much new Senior capital can be admitted; use the vault admission view for
 request eligibility and `HousePool.getSeniorDepositCapacity()` for mathematical headroom.
 
@@ -1099,10 +1157,10 @@ settlement must roll back both minting and checkpoint state without forgiving el
 worthless at that instant but share in recovery; this is intentional and must be reflected in incident analysis.
 There is no public checkpoint, fee-specific guardian control, performance test, Junior HWM, equalization, cost basis,
 or privileged cash-withdrawal path. The recipient redeems through the same asynchronous LP flow as every holder.
-Settlement Monitor schema/domain V3 introduced the readable active rate and recipient in observable configuration;
-V4 also commits the Engine settlement-buffer policy, and V5 commits the Engine admin's active configuration version
-to detect calendar-only finalizations. A failed or malformed required read makes the configuration digest
-unavailable rather than silently assuming a zero fee, buffer, or version.
+The current Settlement Monitor uses schema/domain V6. Its observable configuration includes the active fee rate and
+recipient, Engine settlement-buffer policy, and Engine admin configuration version. A failed or malformed required
+read makes the digest unavailable rather than silently assuming a zero fee, buffer, or version. This monitor domain is
+separate from the lifecycle Book's V5 execution-config and receipt domains.
 
 ### Senior coupon model
 
@@ -1183,6 +1241,71 @@ Batch liquidation validates and pays for one shared Pyth snapshot, updates the n
 account in its own rollback frame. Solvent and positionless accounts are skipped without losing prior successes, while
 the returned cursor leaves any low-gas or empty-revert item unattempted so a keeper can resume safely.
 
+## Transaction walkthroughs
+
+These walkthroughs show settlement order and the checks worth tracing. Exact formulas and source-of-truth balances
+remain in [ACCOUNTING_SPEC.md](ACCOUNTING_SPEC.md); external call signatures and read surfaces are in
+[CANONICAL_ENTRYPOINTS.md](CANONICAL_ENTRYPOINTS.md).
+
+### Buffered open or increase
+
+1. The trader commits a bounded intent, reserving its order margin and opening bounty. Commitment does not guarantee
+   that execution will pass current risk checks.
+2. At the FIFO head, the keeper supplies eligible oracle data. The planner projects carry, trade economics, and
+   post-operation directional liability from one snapshot.
+3. Admission requires post-operation effective assets `E >= L + B`, using the
+   [settlement buffer](#settlement-liability-buffer); equality passes. Apply-time settlement rechecks the target.
+4. The Engine applies the plan and synchronizes the account curve. The Router settles the bounty and finalizes the
+   receipt. Attached TP/SL protection inherits its parent open's risk decision rather than adding a second gate.
+
+### Profitable full close
+
+1. Commitment collects applicable carry and records an Active zero close bounty without creating a close escrow.
+2. The keeper executes the FIFO head under the current oracle regime. The planner computes price PnL, signed VPI,
+   fees, remaining carry, and any frozen-close spread; the Engine applies those results.
+3. Typed settlement consumes or releases the account buckets. A fresh payout uses available pool cash after
+   protecting existing trader claims; otherwise eligible unpaid price value becomes a trader claim.
+4. The position and its terminal curve are removed. The zero bounty settles without a recipient, and the Book
+   finalizes the order. If receipt finalization fails, the item rolls back with its economics.
+
+### Losing partial close
+
+1. The trader commits the reduction with the ordinary FIFO, queued-exposure, carry, health, and financial checks.
+   The close bounty is zero.
+2. At execution, the planner allocates exact entry cost to closed lots. Carry is collected from pledge first and
+   free settlement second before price loss uses the reduced pledge and nettable same-account claim.
+3. Price loss above the collectible cap is a diagnostic write-off. Separate action charges must still be collectible;
+   an unfunded required action remainder rejects the partial close.
+4. The Engine preserves any pledge needed for the residual marked curve and atomically installs the remaining lots,
+   entry cost, and cap. LP revenue includes physically collected value only; the write-off creates no asset or debt.
+
+### Underfunded frozen full close
+
+1. The frozen oracle policy validates the close. Normal signed VPI and its lifetime clamp still apply; the fixed
+   LP-owned spread replaces the adverse-confidence price shift on this voluntary close.
+2. Price settlement uses same-account claim and PnL pledge up to the collectible cap. Separate action obligations use
+   their eligible gain withholding, protected VPI backing, spendable action reserve, free settlement, and committed
+   order margin according to the canonical plan; those sources do not enlarge the price-loss cap.
+3. Collected spread belongs to LPs. Any terminally uncollectible spread is recorded as `frozenSpreadWaivedUsdc`, and
+   excess price loss is recorded as `PriceLossWrittenOff`; neither creates a new liability or deficit.
+4. The Engine removes the position and curve. Terminal close liveness does not waive oracle validation, FIFO,
+   timing, slippage, or caller-pinned financial bounds.
+
+### Liquidation
+
+1. The Router refunds cutoff-invalid opens before entering the isolated liquidation frame. Inside that frame it
+   authenticates reservations, settles zero close records, and invokes the planner's health/settlement checks.
+   A healthy-account result rolls back the inner frame while valid preceding risk-off refunds remain.
+2. For a liquidatable account, carry and exact price PnL use the typed collateral rules. Same-account claim nets
+   against price loss once; PnL pledge pays the remaining collectible loss. Excess price loss is written off.
+3. The dedicated liquidation reserve caps the charge. Keeper and treasury receive their configured floor-rounded
+   shares as clearinghouse credits; the exact remainder goes to LPs. There is no pool-funded bounty subsidy.
+4. Positive fresh trader payout uses available pool cash or becomes a trader claim. Uncollectible terminal action
+   obligations follow their waiver rules. The Engine removes the position and curve and checks actual post-operation
+   solvency for degraded mode.
+5. Bounded account-local cleanup finalizes remaining orders as `AccountLiquidated`; unaffected opening bounties may
+   be forfeited and zero close records move no value. Other accounts retain their relative FIFO order.
+
 ## Known Limitations
 
 ### Oracle and market-closure limitations
@@ -1204,6 +1327,10 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 - account-scoped client ids are permanent; a terminal or config-invalidated id cannot be reused for a replacement
   request, so clients must generate and persist unique ids,
 - bounded cleanup means heavily expired queues may take multiple keeper calls to clear,
+- stale cached marks can understate opening notional and execution bounties at commitment. The bounty floor/cap,
+  trader's bound, and per-account order cap limit individual commitments but cannot guarantee profitable cleanup.
+  Execution validates oracle data separately. Commitment does not require a fresh stored mark, so an idle period
+  does not by itself require a keeper refresh before the trader may submit an open,
 - ordinary failed closes require unpaid cleanup. The protocol keeper must fund gas
   for permissionless oracle-free expiry; bounded deadlines and queues do not guarantee a positive keeper incentive
   or prevent repeated fresh invalid submissions,
@@ -1211,9 +1338,9 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
   The separate trigger reward is paid once on the original trigger. Liveness depends on keepers processing the
   terminal attempt and separately appending a retry, and operators
   must alert on prolonged `Latched` state without a live child,
-- per-account pending-order caps bound griefing and liquidation cleanup now stays on bounded account-local order traversal,
+- per-account pending-order caps bound each account's queue and liquidation cleanup traverses that local queue,
 - the Router, its independently predeployed lifecycle Book, constructor-created protection Book, and fixed sidecars
-  form one non-upgradeable reviewed stack. Externalizing the lifecycle Book plus keeper and execution paths saves
+  form one non-upgradeable stack that must be reviewed together. Externalizing the lifecycle Book plus keeper and execution paths saves
   Router initcode/runtime bytes but increases review coupling: a
   change to either Book or any delegated path requires rechecking direct-call rejection, external-getter assumptions,
   Router caller/event context, and every affected EIP-170 size. Admin and protection-Book creation code remain embedded in
@@ -1228,9 +1355,8 @@ the returned cursor leaves any low-gas or empty-revert item unattempted so a kee
 - the lifecycle Book has no migration or repair authority. A binding/invariant fault requires containment and a
   fresh compatible stack.
 
-The latched-retry release therefore cannot be installed into an existing Router-created protection Book. Rollout must
-contain and reconcile the old stack, deploy and verify a complete new immutable stack, and move clients, keepers, and
-indexers to the new manifest; old protection and attempt state is not migrated.
+Changes to the Router-created protection Book require a fresh compatible stack and updated client, keeper, and
+indexer bindings. The deployment scripts do not migrate old protection or order-attempt state.
 
 ### LP accounting limitations
 
@@ -1253,19 +1379,38 @@ indexers to the new manifest; old protection and attempt state is not migrated.
   a claim-time delay, and the direct route can consume an independently aged source lot without mixing it into the
   wallet. Redemption cancellation or terminal refund still begins a new cooldown when shares return to a wallet.
 
-### Accepted rounding behavior
+### LP claim and allocation limitations
 
-- **MED-22 — position carry rounding:** Converting a position's carry-index delta to six-decimal USDC rounds down.
+- Deposit/mint share claims, redemption cancellation, and refundable-share claims require `receiver == controller`,
+  including zero-share acknowledgements. An approved operator may act for that controller. Funded USDC claims and
+  pending-deposit USDC refunds have separate receiver rules.
+- Partial deposit claims or funded-redemption claims can revert at rounding boundaries even when the full remainder
+  is claimable. A tiny asset-denominated deposit claim can round to zero shares. Clients should offer full-remainder
+  claims and preserve the entitlement display after a failed partial claim.
+- Per-controller flooring can produce zero entitlement for a dust-sized request. A full-balance redemption bypasses
+  the minimum request size and can burn shares for zero assets if its allocation rounds down to zero.
+- Funding an epoch in several passes can produce rounding differences and residual share refunds compared with one
+  pass. Unfunded shares also continue to participate in ordinary tranche profit, loss, and fees between calls.
+- Zero-payout epochs can consume bounded settlement work and delay later epochs. Regular keeper processing is still
+  required; insufficient cash or persistent Senior demand can independently defer Junior funding.
+- Terminal allocation dust follows fixed ownership rules: deposit-share dust is burned, funded-asset dust returns to
+  HousePool as excess, and refundable-share dust goes to the seed receiver. It is not awarded to the final caller.
+- An impaired Senior withdrawal may retain less than one extra USDC atom of high-water-mark protection per funded
+  pass because of conservative rounding. This can accumulate across passes and does not describe a universal bound
+  on all LP allocation dust.
+
+### Rounding limitations
+
+- **Position carry rounding:** Converting a position's carry-index delta to six-decimal USDC rounds down.
   The checkpoint advances even when the result is zero, without retaining the fractional remainder. Each such
   conversion can discard less than one USDC atom (`0.000001 USDC`). User-triggered checkpoints, including
   zero-amount withdrawals, can therefore reduce LP carry revenue; an interval whose entire accrual is below one atom
   contributes no collectible carry. Practical savings depend on borrow size, utilization, checkpoint frequency, and
-  transaction costs. This rounding behavior is accepted; fractional carry persistence is not planned.
-- **LOW-27 — zero-share Junior maintenance-fee checkpoints:** With a nonzero maintenance-fee rate and sufficiently
+  transaction costs. The implementation does not persist fractional carry.
+- **Zero-share Junior maintenance-fee checkpoints:** With a nonzero maintenance-fee rate and sufficiently
   small raw Junior share supply, the fee for completed chargeable hours can round down to zero shares. The checkpoint
   boundary still advances, so those hours do not accumulate toward a later fee mint. Mint/burn activity can trigger
-  these checkpoints. This possible undercollection is accepted; fractional fee persistence or deferring zero-share
-  checkpoints is not planned.
+  these checkpoints. The implementation does not retain fractional fee shares or defer zero-share checkpoints.
 
 ### VPI limitations
 
@@ -1281,14 +1426,13 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 
 ### Clearinghouse limitations
 
-- V1 is USDC-only cross-margin,
+- settlement uses USDC only; each account has one directional position and separate typed collateral buckets,
 - the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; settlement USDC
   is always excluded, including uncredited direct transfers, and rescue does not alter account balances or margin,
-- **LOW-6 — accepted settlement-USDC recovery limitation:** Direct USDC transfers to the clearinghouse outside its
+- **Settlement-USDC recovery limitation:** Direct USDC transfers to the clearinghouse outside its
   deposit APIs do not credit a margin account and remain unrecoverable through the current APIs, including by the
   owner. They are not allocated to HousePool or LPs. The clearinghouse has no aggregate credited-balance counter
-  with which to safely distinguish recoverable surplus from funds backing account obligations. USDC recovery,
-  aggregate surplus accounting, and allocation of such transfers to LPs are not planned as part of this remediation.
+  with which to distinguish recoverable surplus from funds backing account obligations.
   Integrations must use the supported `deposit`, `depositMargin`, or `depositFor` APIs to fund margin accounts,
 - non-USDC collateral pricing and staleness policy are intentionally out of scope.
 
@@ -1337,7 +1481,7 @@ watching only the complete-observation digest.
 
 This runbook concerns actual negative terminal LP equity or trader payout claims that physical cash cannot currently
 service. A terminal price-loss write-off above an account's collectible cap and a waived terminal action remainder
-create neither condition; V2 has no accumulated-debt ledger to clear.
+create neither condition; the current accounting model has no accumulated-debt ledger to clear.
 
 1. Let closes and liquidations continue.
 2. Prevent further risk expansion via degraded mode when `E < L`, or through the ordinary `E >= L + B` admission
@@ -1370,142 +1514,20 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 | PnL | 6 |
 | TrancheVault offset | 3 |
 
-## Audit Status
+## Audit evidence
 
-The repository records an external pre-audit / security consultation, the scoped October 2026 finding dispositions
-below, and historical Arbitrum Sepolia deployment artifacts. A formal production audit remains pending. Historical
-deployments do not establish that the current source or its immutable contract stack is deployed or production-ready.
+Checked-in historical reports:
 
-### LP vaults, tranches and claims (October 2026)
+- [SC Audit Studio pre-audit report](../../audits/plether-pre-audit-report.pdf)
+- [Collaborative audit report, May 12, 2026](../../audits/plether-collaborative-audit-report-2026-05-12.pdf)
 
-**Source:** the supplied `Plether_Labs_Audit_Report_2026-10-16.pdf`, section covering the 16 findings listed below.
-The source PDF is not checked into this repository.
-**Disposition date:** October 21, 2026.
-**Implementation:** [PR #123](https://github.com/Plether-Fi/plether-core/pull/123), runtime source through
-[`89967559`](https://github.com/Plether-Fi/plether-core/commit/899675594d1e043383e10252a8985bac2e5b6271).
+Each report applies to its stated scope and reviewed revision. Subsequent changes to order execution, accounting,
+LP settlement, and deployment wiring require review against the exact release commit. These reports and historical
+Sepolia artifacts do not establish that the current immutable stack is audited, deployed, or production-ready.
 
-All 16 findings have a project disposition: **7 fixed in this branch and 9 explicitly accepted with no further code
-change planned**. These are engineering decisions, not a statement that the report author has retested or closed the
-findings. "Fixed" describes the branch implementation, not a deployment or repair of an existing immutable stack.
-
-#### Fixed findings
-
-| Finding | Implemented resolution | Commit |
-| --- | --- | --- |
-| MED-5 | Both wallet and direct claimable-deposit redemption requests require the target tranche's seed receiver. Maximum-request views agree, preventing new unseeded requests whose terminal refund would need that receiver for share dust. | `efcf629a` |
-| MED-11 | Scale the Senior high-water mark by actual net principal removed, preserving retained fees and proportional impaired recovery protection. Zero funding preserves protection; full principal funding clears it. | `9ab65f41` |
-| MED-19 | Make accepted Senior reservations binding: retain request-time limits, honor booked capacity at activation, and include pending commitments in the Junior withdrawal backing covenant. Rejection, projected wipe, Senior impairment, and an explicit settlement hold retain refund paths. | `86e3c54f` |
-| MED-27 | Require both Pool and Engine reconciliation freshness before a Senior rate change, and reconcile under the old rate before applying the new rate. | `9dbaf0c0` |
-| LOW-39 | Replace balance-dependent third-party share delivery with controller-only delivery. Unsolicited share dust cannot disable the supported controller self-delivery path. | `efcf629a` |
-| LOW-40 | The same controller-only guard prevents deposit/mint claims, redemption cancellations, and redemption-share refunds from imposing a cooldown on a third-party receiver. The guard also applies to zero-share acknowledgements. | `efcf629a` |
-| LOW-72 | Return zero deposit-share estimates when projected deposit-pricing assets are zero with surviving shares. Pending USDC stays visible and cancellable; empty bootstrap and valid accepted Senior reservations still quote normally. | `89967559` |
-
-#### Accepted findings
-
-Acceptance retains the behavior described below. It does not mean that the triggering transaction is impossible or
-that the behavior was removed by another fix.
-
-| Finding | Retained behavior and reason for acceptance |
-| --- | --- |
-| MED-24 | Zero-payout redemption epochs can consume the bounded settlement budget and require extra calls before later epochs are funded. Accepted as an operational backlog concern under regular keeper processing: the cap is 16 epochs per tranche phase, and requests in one epoch aggregate regardless of wallet count. |
-| MED-29 | In a partially funded then refundable epoch, a tiny controller's funded-share allocation can round to zero despite a positive proportional asset amount. Those assets return to the pool; terminal refundable-share dust goes to the seed receiver. Accepted as an impractical tiny-share edge case without an entitlement redesign. |
-| LOW-3 | A partial share-denominated deposit claim can revert when its rounded asset cost consumes the full remaining asset basis. Accepted because the full remainder remains claimable; integrations should favor full-remainder claims. |
-| LOW-4 | A partial asset withdrawal can revert when its rounded share cost consumes the full remaining share basis. Accepted because claiming the full funded remainder avoids this case and a revert preserves the entitlement. |
-| LOW-5 | A tiny asset-denominated deposit claim can round to zero shares and revert. Accepted because a full-remainder claim avoids this case; a failed claim does not consume the entitlement, though it can cost gas. |
-| LOW-13 | Floor-rounded deposit-share residue is burned and funded-redemption asset residue returns to the pool, benefiting remaining holders. Accepted as the deterministic dust policy; no last-claimant remainder allocation is introduced. |
-| LOW-54 | MED-11 removes the healthy-tranche discrepancy. Impaired withdrawals still retain less than one extra USDC base unit of protection per funded settlement pass relative to that step's exact proportional arithmetic. This conservative residual rounding is accepted. |
-| LOW-63 | Repricing partial redemptions from later post-burn state can produce rounding differences or residual share refunds compared with funding in one pass. Accepted at normal operating scales; freezing an epoch price would add state and change how pending shares participate in tranche economics. |
-| LOW-67 | A full-balance dust exit can have shares burned for zero assets when a larger request makes the same epoch fundable but the small controller's asset allocation rounds to zero. Accepted as dust-exit behavior; full-balance exits deliberately bypass the ordinary minimum request size. |
-
-The MED-24 acceptance assumes normal keeper operation and sufficient opportunity to process queued epochs. It does
-not guarantee Junior funding during insufficient liquidity or persistent Senior priority. LOW-54's bound is per
-funded settlement pass (`1` USDC base unit = `$0.000001`); rounding can accumulate and retain a small existing
-impairment. Share-unit value varies, so there is no universal dollar-loss bound for all MED-29/LOW-13 cases.
-For LOW-63, normal changes in profit, loss, and fees between calls are separate from rounding: unfunded shares
-continue to participate in tranche economics. See [LP allocation and dust accounting](ACCOUNTING_SPEC.md).
-
-#### Integration handoff
-
-- Present healthy accepted Senior deposits as commitments. Pending reservations can constrain Junior withdrawals;
-  later cap reductions close new admission but do not revoke existing commitments. Preserve the four refund paths.
-- Seed each tranche before admitting its redemptions; the other tranche's seed and trading activation are separate.
-- Pass `receiver == controller` for deposit/mint share claims, redemption cancellations, and share refunds, including
-  zero-share acknowledgements. Approved operators can still execute for the controller. Update custom-error decoding
-  from `TrancheVault__ThirdPartyDepositForExistingHolder` to `TrancheVault__ReceiverNotController`.
-- Funded USDC claims, pending-deposit USDC cancellations, and ordinary ERC-20 transfers retain their receiver rules.
-- Preserve pending-asset display when a wiped tranche's deposit-share estimate is zero. The lens's
-  `refundableDepositAssets` field continues to represent rejected-epoch refunds, not all cancellable pending deposits.
-  Other admission or activation gates remain separate from the estimate; booked Senior reservations still quote when
-  new-entry capacity is exhausted.
-- Adopt these runtime changes through a coherent fresh-stack deployment and updated ABIs. This PR contains no
-  live-state migration or repair of requests already queued in older non-upgradeable contracts.
-
-#### Validation record and limits
-
-The [test map](test/perps/TEST_MAP.md) identifies the changed behavior tests. PR #123 records the commands and staged
-validation history. The runs below overlap; their counts must not be added as unique test coverage.
-
-- MED-11: the retained-fee loss/recovery regression reproduced a $250 Senior shortfall before the patch. The patched
-  stage passed 130 focused tests, 71 neighboring accounting/capacity tests, and 8 production-compiler tests; healthy
-  and impaired arithmetic fuzz properties and a capacity invariant were included.
-- At `efcf629a`, the MED-5/LOW-39/LOW-40 stage passed 228 LP tests. Coverage includes both redemption admission
-  routes, rollback, post-seed admission, claim aliases, approved operators, receiver dust, zero-share acknowledgements,
-  and funded-USDC receiver freedom. Missing-seed direct-claim and zero-share allocation tests use targeted synthetic
-  fixtures alongside ordinary lifecycle tests.
-- At runtime source `89967559`, 149 focused tests passed, including projected and reconciled Senior/Junior wipes,
-  pending-asset visibility, full cancellation refunds, backing restoration, empty bootstrap, accepted reservations at
-  exhausted capacity, and accounting/settlement controls. The preceding 228-test LP run predates LOW-72.
-- Production runtime-size checks passed at `89967559`: HousePool **23,911 bytes**, TrancheVault **23,960 bytes**,
-  each below the repository's **24,000-byte** target. Changed-file formatting, diff checks, inventory checks, and the
-  test-map check passed (216 exact references).
-- No full repository suite, coverage report, live/fork deployment, or frontend/SDK end-to-end check was completed on
-  the final combined runtime source. GitHub returned no PR status checks for `89967559` when inspected on October 21,
-  2026. Local results do not establish a green CI result. The subsequent handoff update changes documentation only.
-
-### SC Audit Studio Pre-Audit (April-May 2026)
-
-**Auditor:** SC Audit Studio OY (Linus L. / oot2k, Ihtisham U. / ihtishamSudo)  
-**Review period:** April 14-May 4, 2026  
-**Report date:** May 4, 2026  
-**Reviewed commit:** [`fc5f03ba8b91e879e0fa7f0d9be208d4c518a305`](https://github.com/Plether-Fi/plether-core/commit/fc5f03ba8b91e879e0fa7f0d9be208d4c518a305)
-**Resolution commit:** [`86263b00b6f92301c4cb62fa0aab4317f0cbe7cd`](https://github.com/Plether-Fi/plether-core/commit/86263b00b6f92301c4cb62fa0aab4317f0cbe7cd)
-**Report:** [`audits/plether-pre-audit-report.pdf`](../../audits/plether-pre-audit-report.pdf)
-
-This engagement was a pre-audit consultation intended to challenge the protocol design, find obvious security issues, improve code quality, and prepare the codebase for a later formal audit. Although it should not be treated as a production-readiness endorsement, it was performed to assess and improve readiness for testnet deployment.
-
-Findings summary:
-
-| Severity | Count |
-|----------|-------|
-| High | 2 |
-| Medium | 7 |
-| Low | 1 |
-| Informational | 18 |
-
-The review also produced code-quality and architecture recommendations. The most important outcomes were fixes or mitigations for LP yield dilution, zero-value withdrawal cooldown griefing, oracle-frozen liquidation liveness, same-side increase dust handling, rebate-backed undercollateralized opens, stale senior-yield accrual, oracle-window option value, queue dust DoS, and pending claimant accounting.
-
-Several items were intentionally acknowledged or left for follow-up rather than fully redesigned in this pre-audit cycle:
-
-- `CAP_PRICE` is immutable and cannot be changed after deployment.
-- Users cannot manually cancel committed queued orders.
-- Bounty and deferred payout accounting could be simplified further.
-- Some broader HousePool/ERC-4626 architecture and test-suite organization recommendations remain open.
-- Large fixes, especially the senior accounting rewrite and oracle-window mitigation, should receive follow-up formal audit coverage.
-
-As of May 21, 2026, `master` includes the resolution commit and later changes. Future releases should be assessed against their exact deployment commit.
-
-| Component | Status |
-|-----------|--------|
-| `CfdEngine` | Pre-audit reviewed; formal audit pending |
-| `CfdMath` | Pre-audit reviewed as supporting logic; formal audit pending |
-| `OrderRouter` | Pre-audit reviewed before the V2 bounded-intent/lifecycle redesign; V2 formal audit pending |
-| `OrderLifecycleBook`, `CfdOrderPolicyEvaluator`, and `OrderRouterExecutionSidecar` | V3 execution-authority additions; formal audit pending |
-| `MarginClearinghouse` | Pre-audit reviewed before V2 no-carry reservation release and credit-only `depositFor`; formal audit pending |
-| `HousePool` and stateless redemption-math sidecar | Settlement-hold and size-split changes require formal review |
-| `TrancheVault` | Pre-audit reviewed before the activation-aged cooldown and direct claim-escrow redemption extension; those changes require formal review |
-| `PerpsPublicLens` deposit-cooldown view | Additive read surface for the new lifecycle; formal audit pending |
-| `SettlementMonitorLens` and monitor-bound sidecar | Read-only monitoring addition; formal audit pending |
-| `EmergencyPauseCoordinator` and persistent Router risk-off refund path | Three-action emergency containment addition; formal audit pending |
+Historical finding dispositions and command results remain in Git and the associated pull requests. For current
+executable coverage and its limitations, use [the test map](test/perps/TEST_MAP.md). No document in this directory
+substitutes for matching deployed bytecode, configuration, and dependency bindings to a reviewed release.
 
 ## Security Contact
 

@@ -8,10 +8,13 @@ import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtect
 interface IPerpsTraderViews {
 
     /// @notice Returns compact account equity, withdrawable balance, and queued margin state.
-    /// @dev Monetary fields use 6-decimal USDC. The reported withdrawable amount comes from the diagnostic account
-    ///      lens and is a conservative upper bound; callers should leave a buffer at strict collateral boundaries.
+    /// @dev Monetary fields use 6-decimal USDC. With a live position, equity is post-carry PnL pledge plus same-account
+    ///      claim plus cached-mark price PnL, floored at zero; it excludes VPI and other settlement buckets. Without a
+    ///      position, equity is the raw clearinghouse settlement balance. The reported withdrawable amount comes from
+    ///      the diagnostic account lens; the exact quoted boundary may need to be reduced by one atomic USDC unit
+    ///      when the live guard requires equity to remain strictly above the collateral requirement.
     /// @param account Account to inspect
-    /// @return viewData Settlement equity, withdrawal bound, locked/reserved margin, and pending-order summary
+    /// @return viewData Price-risk or flat-account settlement equity, withdrawal bound, reservations, and position risk
     function getTraderAccount(
         address account
     ) external view returns (PerpsViewTypes.TraderAccountView memory viewData);

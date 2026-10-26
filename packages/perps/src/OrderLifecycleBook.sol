@@ -9,6 +9,7 @@ import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 /// @dev Minimal Router surface used to keep execution-config hashing outside size-constrained Router bytecode.
 interface IOrderLifecycleRouterConfigView {
@@ -277,6 +278,10 @@ contract OrderLifecycleBook is IOrderLifecycleBook {
                 || _outcomes[proposedOrderId].status != OrderV3Types.LifecycleStatus.None
         ) {
             revert OrderLifecycleBook__OrderIdAlreadyUsed(proposedOrderId);
+        }
+        // Identity replays returned above; a new order needs the Engine's terminal accounting book.
+        if (IOrderLifecycleEngineConfigView(ENGINE).terminalNavBook() == address(0)) {
+            revert IOrderRouterErrors.OrderRouter__TerminalNavBookUnavailable();
         }
 
         uint256 deadline = block.timestamp + uint256(request.bounds.executionWindowSeconds);

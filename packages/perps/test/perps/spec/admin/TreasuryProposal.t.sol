@@ -432,6 +432,48 @@ contract TreasuryProposalTest is CfdEngineTestBase {
         assertEq(engine.protocolTreasury(), TREASURY_C);
     }
 
+    function test_TreasuryProposal_MaturedSlotSupportsImmediateUpdateRelockAndNextSchedule() public {
+        address original = address(0xFEE90);
+        address firstSuccessor = address(0xFEE91);
+        address immediateTreasury = address(0xFEE92);
+        address secondSuccessor = address(0xFEE93);
+        address replacement = address(0xFEE94);
+
+        engine.setProtocolTreasury(original, 90 days);
+        uint256 firstActivation = engine.protocolTreasuryLockedUntil();
+        engine.proposeProtocolTreasury(firstSuccessor, 30 days);
+        vm.warp(firstActivation + 30 days);
+        assertEq(engine.protocolTreasury(), firstSuccessor);
+        engine.setProtocolTreasury(immediateTreasury);
+        engine.setProtocolTreasury(immediateTreasury, 7 days);
+        uint256 nextActivation = vm.getBlockTimestamp() + 7 days;
+        assertEq(engine.protocolTreasury(), immediateTreasury);
+        assertEq(engine.protocolTreasuryLockedUntil(), nextActivation);
+        (address pending,,) = engine.pendingProtocolTreasury();
+        assertEq(pending, address(0), "Relocked effective treasury must not appear as a pending proposal");
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__NoTreasuryProposal.selector);
+        engine.cancelProtocolTreasuryProposal();
+
+        engine.proposeProtocolTreasury(secondSuccessor, 2 days);
+        engine.proposeProtocolTreasury(replacement, 3 days);
+        engine.cancelProtocolTreasuryProposal();
+        assertEq(engine.protocolTreasury(), immediateTreasury, "Cancellation cannot restore an earlier treasury");
+        assertEq(engine.protocolTreasuryLockedUntil(), nextActivation);
+        engine.proposeProtocolTreasury(secondSuccessor, 4 days);
+
+        vm.warp(nextActivation - 1);
+        assertEq(engine.protocolTreasury(), immediateTreasury);
+        vm.expectRevert(abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, nextActivation));
+        engine.setProtocolTreasury(replacement);
+        vm.warp(nextActivation);
+        assertEq(engine.protocolTreasury(), secondSuccessor);
+        assertEq(engine.protocolTreasuryLockedUntil(), nextActivation + 4 days);
+        vm.expectRevert(
+            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__TreasuryLocked.selector, nextActivation + 4 days)
+        );
+        engine.setProtocolTreasury(replacement);
+    }
+
     function _lockTreasury() internal returns (uint256 expiry) {
         engine.setProtocolTreasury(TREASURY_A, 90 days);
         return block.timestamp + 90 days;

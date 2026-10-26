@@ -100,6 +100,9 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
         engine.setPool(address(housePool));
         engine.setOrderRouter(address(router));
         housePool.seedAssets(100_000e6);
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = hex"00";
+        router.updateMarkPrice(updateData);
 
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 50_000e6);
@@ -403,6 +406,15 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
             "Resulting trader claim must include the unconsumed existing claim"
         );
         uint256 freshTraderClaimUsdc = preview.traderClaimBalanceUsdc - preview.existingTraderClaimRemainingUsdc;
+        assertEq(preview.deferredPayoutUsdc, freshTraderClaimUsdc, "Deferred payout must exclude old claims");
+        assertEq(
+            preview.immediatePayoutUsdc,
+            preview.payoutToPnlPledgeUsdc + preview.payoutToFreeSettlementUsdc,
+            "Paid cash must be partitioned by destination"
+        );
+        if (preview.remainingSize == 0) {
+            assertEq(preview.payoutToPnlPledgeUsdc, 0, "Full close cannot pledge fresh payout");
+        }
         assertEq(
             preview.immediatePayoutUsdc + freshTraderClaimUsdc,
             preview.freshTraderPayoutUsdc,
@@ -445,6 +457,11 @@ contract PerpClosePreviewParityInvariantTest is RecordedOrderReceipts {
             "Close trader claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
+        assertEq(actual.payoutToPnlPledgeUsdc, expected.payoutToPnlPledgeUsdc, "Close pledged payout should match");
+        assertEq(
+            actual.payoutToFreeSettlementUsdc, expected.payoutToFreeSettlementUsdc, "Close free payout should match"
+        );
+        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Close deferred payout should match");
         assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");

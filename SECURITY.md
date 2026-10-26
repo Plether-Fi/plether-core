@@ -2,7 +2,9 @@
 
 This document outlines the security assumptions, trust model, known limitations, and emergency procedures for the Plether protocol.
 
-The perps module has its own security model and audit packet. Use [`packages/perps/SECURITY.md`](packages/perps/SECURITY.md), [`packages/perps/PRE_AUDIT_GUIDE.md`](packages/perps/PRE_AUDIT_GUIDE.md), and [`packages/perps/EMERGENCY_RESPONSE_GUIDE.md`](packages/perps/EMERGENCY_RESPONSE_GUIDE.md) for perps-specific assumptions, order-flow policy, trader claim handling, keeper bounty routing, LP risk, and circuit-breaker operations.
+The perps module has its own [security model and review guide](packages/perps/SECURITY.md) and
+[emergency response guide](packages/perps/EMERGENCY_RESPONSE_GUIDE.md). Use them for perps-specific assumptions,
+order-flow policy, trader claims, keeper rewards, LP risk and circuit-breaker operations.
 
 ## Upgradeability
 
@@ -662,6 +664,11 @@ contact@plether.com
 
 ## Audit Status
 
+### AI Audit and Scan Reports (October 2026)
+
+- [AI audit report — October 26, 2026](audits/plether-ai-audit-report-2026-10-26.pdf)
+- [Scan findings — October 15, 2026](audits/scan-plether-fi-plether-core-d4541b49.md)
+
 ### Collaborative Audit (March 2026)
 
 **Lead security experts:** blockace, eeyore
@@ -748,6 +755,7 @@ contact@plether.com
 
 | Date | Change |
 |------|--------|
+| 2026-10-26 | Added links to the October AI audit report and scan findings |
 | 2026-05-21 | Added collaborative audit results for InvarCoin, OracleLib, and StakedToken (9 findings: 1 high, 2 medium, 6 low/info; 5 resolved, 4 acknowledged, 0 unaddressed); updated coverage gaps |
 | 2026-03-17 | Added InvarCoin security documentation: trust assumptions (Curve twocrypto, gauge, CRV minter, L2 sequencer), invariants, dual pricing model, buffer management, gauge integration, protected reward tokens, donation resistance, emergency procedures; updated owner capabilities, permissionless operations, and timelock list; added to coverage gaps |
 | 2026-02-24 | Acknowledged BasketOracle deviation check freezing Morpho liquidations as intentional circuit breaker |

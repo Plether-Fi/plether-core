@@ -23,7 +23,6 @@ import {OrderRouterLiquidationBatchSidecar} from "@plether/perps/OrderRouterLiqu
 import {PerpsPublicLens} from "@plether/perps/PerpsPublicLens.sol";
 import {PletherOracle} from "@plether/perps/PletherOracle.sol";
 import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
-import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
 import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {MockPyth} from "@plether/test-utils/MockPyth.sol";
@@ -100,6 +99,9 @@ abstract contract BasePerpInvariantTest is Test {
         if (initialHousePoolAssets > 0) {
             housePool.seedAssets(initialHousePoolAssets);
         }
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = hex"00";
+        router.updateMarkPrice(updateData);
     }
 
     function _riskParams() internal pure virtual returns (CfdTypes.RiskParams memory) {
@@ -215,28 +217,6 @@ abstract contract BasePerpInvariantTest is Test {
         int256 longPnl = (SafeCast.toInt256(longEntryNotional) - SafeCast.toInt256(longOi * price)) / int256(1e20);
         int256 shortPnl = (SafeCast.toInt256(shortOi * price) - SafeCast.toInt256(shortEntryNotional)) / int256(1e20);
         return longPnl + shortPnl;
-    }
-
-    function _maintenanceMarginUsdc(
-        uint256 size,
-        uint256 price
-    ) internal view returns (uint256) {
-        (,, uint256 maintMarginBps,, uint256 fadMarginBps,,,,,) = engine.riskParams();
-        uint256 requiredBps = engine.isFadWindow() ? fadMarginBps : maintMarginBps;
-        uint256 notionalUsdc = (size * price) / 1e20;
-        return (notionalUsdc * requiredBps) / 10_000;
-    }
-
-    function _traderClaimStatus(
-        address account,
-        address keeper
-    ) internal view returns (ClaimEngineViewTypes.TraderClaimStatus memory status) {
-        uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
-        bool anyLiquidity = housePool.totalAssets() > 0;
-
-        status.traderClaimBalanceUsdc = traderClaimBalanceUsdc;
-        status.traderClaimServiceableNow = traderClaimBalanceUsdc > 0 && anyLiquidity;
-        keeper;
     }
 
 }

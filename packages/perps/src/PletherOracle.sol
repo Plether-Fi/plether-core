@@ -70,8 +70,9 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
     bool public hasAcceptedBasket;
 
     /// @notice Maximum live order-execution and mark-refresh component age, in seconds.
-    /// @dev Also bounds component publish-time divergence for current live order and mark baskets. Frozen-oracle
-    ///      policy instead uses the engine's `fadMaxStaleness` for age validation.
+    /// @dev Also bounds component publish-time divergence for current live order, mark, and PoolReconcile baskets.
+    ///      PoolReconcile component age instead uses the effective Engine/HousePool mark-age limit. Frozen-oracle
+    ///      policy uses the engine's `fadMaxStaleness` for age validation and does not compare component times.
     uint256 public override orderExecutionStalenessLimit = 60;
 
     /// @notice Maximum live liquidation component age, in seconds.
@@ -989,6 +990,8 @@ contract PletherOracle is IPletherOracle, ReentrancyGuardTransient {
         return uint256(cache.publishTime) <= uint256(commitTime) + orderSettlementWindow;
     }
 
+    /// @dev Live PoolReconcile uses the order divergence limit independently of its Engine/HousePool age limit.
+    ///      Historical order parsing uses `maxComponentPublishTimeDivergence` instead.
     function _maxPublishTimeDivergence(
         PriceMode mode
     ) internal view returns (uint256) {

@@ -126,7 +126,6 @@ contract ArbitrumSepoliaReleaseRouter is OrderRouter {
         )
     {
         minOpenNotionalUsdc = 1000e6;
-        require(pletherOracle.adverseConfidenceMultiplierBps() == 2500, "Unexpected initial adverse multiplier");
     }
 
 }
@@ -213,6 +212,10 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
         deployed.terminalNavBook = new TerminalNavBookV2(address(deployed.engine), CAP_PRICE);
         deployed.engine.setTerminalNavBook(address(deployed.terminalNavBook));
+        require(
+            address(deployed.engine.terminalNavBook()) == address(deployed.terminalNavBook),
+            "Engine terminal NAV book mismatch"
+        );
 
         deployed.planner = new CfdEnginePlanner();
         deployed.settlementSidecar = new CfdEngineSettlementSidecar(address(deployed.engine));
@@ -285,6 +288,10 @@ contract DeployPerpsArbitrumSepolia is Script {
             expectedRouter, address(deployed.engine), address(deployed.clearinghouse), address(deployed.housePool)
         );
         deployed.liquidationBatchSidecar = new OrderRouterLiquidationBatchSidecar(expectedRouter);
+        require(
+            PletherOracle(deployed.pletherOracle).adverseConfidenceMultiplierBps() == 2500,
+            "Unexpected initial adverse multiplier"
+        );
         deployed.router = new ArbitrumSepoliaReleaseRouter(
             address(deployed.engine),
             address(deployed.engineLens),
@@ -517,6 +524,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         OrderRouterExecutionSidecar orderExecutionSidecar,
         OrderRouter router
     ) internal view returns (OrderLifecycleBook lifecycleBook) {
+        require(address(engine.terminalNavBook()) != address(0), "Engine terminal NAV book unset");
         require(address(engine.pool()) == address(housePool), "Engine HousePool mismatch");
         require(address(housePool.ENGINE()) == address(engine), "HousePool Engine mismatch");
         require(address(engine.clearinghouse()) == address(clearinghouse), "Engine Clearinghouse mismatch");

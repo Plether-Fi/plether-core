@@ -147,6 +147,7 @@ abstract contract DirectCloseGasFixture is Test {
         vm.warp(junior.depositEpochStart(depositId));
         pool.settleLpEpoch(0, 0);
         junior.claimDeposit(depositId, 1_000_000e6, address(this), address(this));
+        router.updateMarkPrice(_updateData());
         // The opening, reserve, and withdrawal all use public lifecycle entry points.
         usdc.mint(ACCOUNT, 1000e6);
         vm.startPrank(ACCOUNT);

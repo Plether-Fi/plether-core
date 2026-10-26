@@ -34,10 +34,9 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     /// @notice Returns the canonical protocol accounting and solvency snapshot.
     /// @dev Maximum liability is the larger side maximum-profit envelope. Withdrawal reserve is that liability plus all
     ///      trader claims and the liability-scaled settlement buffer; free USDC is pool assets above the reserve; and
-    ///      effective solvency assets are pool assets net of trader claims. The separately reported net physical assets
-    ///      subtract the protocol-treasury clearinghouse balance, but that subtraction is not applied to
-    ///      `effectiveSolvencyAssetsUsdc`. `hasLiveLiability` follows nonzero side maximum-profit envelopes rather than
-    ///      raw open interest.
+    ///      effective solvency assets are pool assets net of trader claims. Net physical assets equal canonical pool
+    ///      assets: treasury clearinghouse balances are separate custody and are reported without subtracting them.
+    ///      `hasLiveLiability` follows nonzero side maximum-profit envelopes rather than raw open interest.
     /// @return snapshot Protocol-level accounting, liability, claim, and degraded-mode values in 6-decimal USDC units.
     function getProtocolAccountingSnapshot()
         external
@@ -48,8 +47,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     }
 
     /// @notice Builds the engine-side snapshot consumed by HousePool accounting.
-    /// @dev Physical assets are current pool `totalAssets`; net physical assets subtract the protocol-treasury
-    ///      clearinghouse balance with saturation. Terminal delta, claims, maximum directional liability, open-position
+    /// @dev Physical and net physical assets are current pool `totalAssets`; treasury clearinghouse balances are
+    ///      outside pool custody. Terminal delta, claims, maximum directional liability, open-position
     ///      status, and book version come from one authenticated Engine snapshot. The supplemental reserve is the
     ///      liability-scaled settlement buffer and affects withdrawals without changing terminal NAV.
     ///      Mark freshness is required whenever terminal price exposure exists. When gating is required,
@@ -62,11 +61,8 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
     ) external view returns (HousePoolEngineViewTypes.HousePoolInputSnapshot memory snapshot) {
         ICfdEngineTypes.TerminalNavSnapshot memory terminalSnapshot = engineContract.terminalNavSnapshot();
         uint256 poolAssetsUsdc = engineContract.pool().totalAssets();
-        uint256 protocolTreasuryBalanceUsdc =
-            engineContract.clearinghouse().balanceUsdc(engineContract.protocolTreasury());
         snapshot.physicalAssetsUsdc = poolAssetsUsdc;
-        snapshot.netPhysicalAssetsUsdc =
-            poolAssetsUsdc > protocolTreasuryBalanceUsdc ? poolAssetsUsdc - protocolTreasuryBalanceUsdc : 0;
+        snapshot.netPhysicalAssetsUsdc = poolAssetsUsdc;
         snapshot.maxLiabilityUsdc = terminalSnapshot.maxDirectionalLiabilityUsdc;
         snapshot.supplementalReservedUsdc = SolvencyAccountingLib.settlementBufferTargetUsdc(
             snapshot.maxLiabilityUsdc, engineContract.settlementBufferBps()
@@ -122,9 +118,7 @@ contract CfdEngineProtocolLens is ICfdEngineProtocolLens {
         SolvencyAccountingLib.SolvencyState memory solvencyState =
             SolvencyAccountingLib.buildSolvencyState(poolAssetsUsdc, maxLiabilityUsdc, totalTraderClaimBalanceUsdc);
         snapshot.poolAssetsUsdc = poolAssetsUsdc;
-        snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc > protocolTreasuryBalanceUsdc
-            ? solvencyState.netPhysicalAssetsUsdc - protocolTreasuryBalanceUsdc
-            : 0;
+        snapshot.netPhysicalAssetsUsdc = solvencyState.netPhysicalAssetsUsdc;
         snapshot.maxLiabilityUsdc = maxLiabilityUsdc;
         snapshot.effectiveSolvencyAssetsUsdc = solvencyState.effectiveAssetsUsdc;
         uint256 settlementBufferUsdc =

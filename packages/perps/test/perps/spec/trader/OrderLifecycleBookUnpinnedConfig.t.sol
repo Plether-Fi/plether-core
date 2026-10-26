@@ -17,6 +17,7 @@ contract OrderLifecycleBookUnpinnedConfigTest is RecordedOrderReceipts {
 
     function setUp() public {
         book = new OrderLifecycleBook(address(this), address(0xE001), address(0xC1EA), address(0xB001));
+        vm.mockCall(address(0xE001), abi.encodeWithSignature("terminalNavBook()"), abi.encode(address(0x7EAD)));
     }
 
     function test_UnpinnedInternalIntentAcceptsOracleReceiptAndRecordsObservedConfig() public {

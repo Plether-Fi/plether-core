@@ -41,8 +41,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     error OrderRouterExecutionSidecar__RetryableFailure(address target, bytes4 selector, uint256 returndataLength);
     /// @notice Router settlement did not consume exactly the lifecycle-book bounty.
     error OrderRouterExecutionSidecar__BountyMismatch(uint256 expectedUsdc, uint256 actualUsdc);
-    /// @notice A receipt-only helper was supplied a reason outside its risk-off/liquidation domain.
-    error OrderRouterExecutionSidecar__InvalidSettledReason();
     /// @notice Evaluator output disagreed with the actual pre- or post-settlement protocol state.
     error OrderRouterExecutionSidecar__AssessmentStateMismatch(uint8 field, uint256 expected, uint256 actual);
 
@@ -210,7 +208,12 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
 
         IOrderRouterExecutionHost.OrderView memory target = host.getOrderForSidecar(head);
         _requireOrderView(head, target);
-        OracleResult memory oracleResult = _prepareSingleOracle(host, target.order, executor, pythUpdateData);
+        OracleResult memory oracleResult;
+        (result.pendingReason, oracleResult) = _prepareSingleOracle(host, target.order, executor, pythUpdateData);
+        if (result.pendingReason != OrderV3Types.PendingReason.None) {
+            _refundEth(host, executor, msg.value - oracleResult.fee);
+            return _pendingResult(head, result.pendingReason);
+        }
         IOrderRouterExecutionHost.ItemRequest memory executionRequest =
             _executionItem(host, target.order, oracleResult, executor);
         uint256 executionGas = _itemCallGas();
@@ -329,14 +332,26 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         return _delegateRecovery(msg.data);
     }
 
+    function clearInvalidOrders(
+        uint64[] calldata
+    ) external onlyDelegateCall returns (uint256 nextIndex, uint256 cleared) {
+        return abi.decode(_delegateRecoveryCall(msg.data), (uint256, uint256));
+    }
+
     function _delegateRecovery(
         bytes memory data
     ) private returns (OrderV3Types.ExecutionResult memory) {
-        (bool success, bytes memory result) = recoverySidecar.delegatecall(data);
+        return abi.decode(_delegateRecoveryCall(data), (OrderV3Types.ExecutionResult));
+    }
+
+    function _delegateRecoveryCall(
+        bytes memory data
+    ) private returns (bytes memory result) {
+        bool success;
+        (success, result) = recoverySidecar.delegatecall(data);
         if (!success) {
             assembly ("memory-safe") { revert(add(result, 32), mload(result)) }
         }
-        return abi.decode(result, (OrderV3Types.ExecutionResult));
     }
 
     /// @notice Executes or terminally settles one order inside a Router self-call rollback frame.
@@ -381,7 +396,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         // Execute requests carry the digest read after oracle/mark updates by _executionItem. Only static
         // dependency reads and Router self-calls occur between that observation and this check. Reuse it inside
         // this authenticated item; public committed assessment still validates configuration independently.
-        // Cleanup requests may originate without an observation (for example permissionless expiry).
+        // Non-execution requests re-read the digest here; terminal expiry has already used its collected context.
         bytes32 observedConfigHash = request.action == IOrderRouterExecutionHost.ItemAction.Execute
             && request.observedConfigHash != bytes32(0)
             ? request.observedConfigHash
@@ -407,10 +422,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     function _recoverExpired(
         IOrderRouterExecutionHost.ItemRequest calldata request
     ) private returns (OrderV3Types.ExecutionResult memory) {
-        return
-            _delegateRecovery(
-                abi.encodeCall(OrderRecoverySidecar.recoverExpiredItem, (request.orderId, request.executor))
-            );
+        return _delegateRecovery(abi.encodeCall(OrderRecoverySidecar.recoverExpiredItem, (request)));
     }
 
     function recordSettledTerminal(
@@ -951,18 +963,19 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         CfdTypes.Order memory order,
         address executor,
         bytes[] calldata pythUpdateData
-    ) private returns (OracleResult memory result) {
+    ) private returns (OrderV3Types.PendingReason stopReason, OracleResult memory result) {
         IPletherOracle oracle = IPletherOracle(host.pletherOracle());
         result.fee = oracle.getOrderExecutionFee(pythUpdateData);
         if (msg.value < result.fee) {
             revert IPletherOracle.PletherOracle__InsufficientFee(msg.value, result.fee);
         }
         (bool ok, IPletherOracle.PriceSnapshot memory snapshot) =
-            oracle.updateOrderExecutionPrice{value: result.fee}(executor, pythUpdateData, _oracleRequest(order, true));
-        if (!ok) {
-            _revertOrderExecutionStale(oracle);
-        }
+            oracle.updateOrderExecutionPrice{value: result.fee}(executor, pythUpdateData, _oracleRequest(order, false));
         result = _oracleResult(snapshot);
+        if (!ok) {
+            // The Oracle already refunded or deferred this allocation; the caller refunds only excess funding.
+            return (OrderV3Types.PendingReason.HistoricalPriceUnavailable, result);
+        }
         _updateEngineMark(host, result);
     }
 
@@ -1077,18 +1090,6 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
             return false;
         }
         return uint256(cache.publishTime) <= uint256(commitTime) + oracle.orderSettlementWindow();
-    }
-
-    function _revertOrderExecutionStale(
-        IPletherOracle oracle
-    ) private view {
-        revert IPletherOracle.PletherOracle__StalePrice(
-            IPletherOracle.PriceMode.OrderExecution,
-            bytes32(0),
-            block.timestamp,
-            oracle.orderExecutionStalenessLimit(),
-            block.timestamp
-        );
     }
 
     function _validateBatchBounds(

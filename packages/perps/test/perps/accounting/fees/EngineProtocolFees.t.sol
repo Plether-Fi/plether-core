@@ -2,11 +2,13 @@
 pragma solidity 0.8.35;
 
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
+import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {MarginClearinghouse} from "@plether/perps/MarginClearinghouse.sol";
 
+import {ICfdEngineSettlementSidecar} from "@plether/perps/interfaces/ICfdEngineSettlementSidecar.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 
@@ -144,6 +146,61 @@ contract EngineProtocolFeesTest is CfdEngineTestBase {
             clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
             uint256(preview.tradeCostUsdc),
             "Only the directly collected trade cost reaches the treasury"
+        );
+    }
+
+    function test_OpenFeeTopUp_AdmitsTightBufferWithPartiallyFundedFee() public {
+        CfdTypes.RiskParams memory params = _riskParams();
+        params.vpiFactor = 0.0005e18;
+        _setRiskParams(params);
+
+        address longAccount = address(0xD313);
+        address shortAccount = address(0xD314);
+        uint256 size = 100_000e18;
+        _fundTrader(longAccount, 20_000e6);
+        _fundTrader(shortAccount, 20_000e6);
+        _open(longAccount, CfdTypes.Side.LONG, size, 10_000e6, 1e8);
+
+        CfdTypes.Order memory shortOrder = CfdTypes.Order({
+            account: shortAccount,
+            sizeDelta: size,
+            marginDelta: 10_000e6,
+            targetPrice: 1e8,
+            commitTime: uint64(block.timestamp),
+            commitBlock: uint64(block.number),
+            orderId: 0,
+            side: CfdTypes.Side.SHORT,
+            isClose: false
+        });
+        ICfdEngineSettlementSidecar sidecar = engine.settlementSidecar();
+        uint256 poolDepthUsdc = pool.totalAssets();
+        vm.prank(address(engine));
+        CfdEnginePlanTypes.RawSnapshot memory snap = sidecar.buildRawSnapshot(shortAccount, poolDepthUsdc);
+        CfdEnginePlanTypes.OpenDelta memory roomy = engine.planner().planOpen(snap, shortOrder, 1e8);
+        assertTrue(roomy.valid, "Setup must admit the offsetting open before cash is tightened");
+        assertEq(engine.totalTraderClaimBalanceUsdc(), 0);
+
+        uint256 freeAfterOpenUsdc = 1e6;
+        uint256 targetCashUsdc = roomy.requiredEffectiveAssetsAfterUsdc + freeAfterOpenUsdc;
+        uint256 cashBefore = pool.totalAssets();
+        assertGt(cashBefore, targetCashUsdc);
+        vm.prank(address(pool));
+        usdc.transfer(address(0xDEAD), cashBefore - targetCashUsdc);
+
+        ICfdEngineTypes.OpenPreview memory preview =
+            engineLens.previewOpen(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
+        assertTrue(preview.valid, "Affordable top-up should preserve the settlement buffer");
+        assertGt(preview.tradeCostUsdc, 0);
+        assertGt(preview.executionFeeUsdc - uint256(preview.tradeCostUsdc), freeAfterOpenUsdc);
+
+        uint256 treasuryBefore = clearinghouse.balanceUsdc(engine.protocolTreasury());
+        _open(shortAccount, CfdTypes.Side.SHORT, size, 10_000e6, 1e8);
+        assertEq(pool.totalAssets(), targetCashUsdc - freeAfterOpenUsdc);
+        assertEq(pool.getSettlementFreeUSDC(), 0, "Top-up must stop at the protected buffer");
+        assertEq(
+            clearinghouse.balanceUsdc(engine.protocolTreasury()) - treasuryBefore,
+            uint256(preview.tradeCostUsdc) + freeAfterOpenUsdc,
+            "Treasury receives only direct collection and affordable pool cash"
         );
     }
 

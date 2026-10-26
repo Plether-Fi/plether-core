@@ -269,7 +269,8 @@ interface ICfdEngineTypes {
     /// @param freshTraderPayoutUsdc New value owed to the trader by this close, whether immediate or deferred.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted into the settlement.
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
-    /// @param immediatePayoutUsdc Portion of the fresh payout paid immediately into clearinghouse settlement.
+    /// @param immediatePayoutUsdc Aggregate cash paid now: payoutToPnlPledgeUsdc + payoutToFreeSettlementUsdc.
+    ///        Includes locked collateral; integrations should use the destination fields, not treat this as withdrawable.
     /// @param traderClaimBalanceUsdc Projected claim balance after consuming old claims and recording deferred payout.
     /// @param seizedCollateralUsdc PnL pledge collected for price loss; excludes carry and action charges.
     /// @param remainingSize Position size after the close.
@@ -282,6 +283,10 @@ interface ICfdEngineTypes {
     /// @param frozenSpreadPaidUsdc Assessed spread recovered from fresh price-gain withholding or eligible action
     ///        collateral; existing trader claims cannot pay the spread.
     /// @param frozenSpreadWaivedUsdc Assessed frozen spread left uncollected; it does not become bad debt.
+    /// @param payoutToPnlPledgeUsdc Fresh price payout credited and locked as collateral for the remaining position.
+    /// @param payoutToFreeSettlementUsdc Fresh cash credited without a position pledge: paid action rebates plus
+    ///        full-close price payouts. Excludes released pre-existing collateral and is not a withdrawal-capacity quote.
+    /// @param deferredPayoutUsdc Fresh unpaid price payout recorded as a trader claim; excludes existing claims.
     struct ClosePreview {
         bool valid;
         CfdTypes.CloseInvalidReason invalidReason;
@@ -306,6 +311,9 @@ interface ICfdEngineTypes {
         uint256 frozenSpreadUsdc;
         uint256 frozenSpreadPaidUsdc;
         uint256 frozenSpreadWaivedUsdc;
+        uint256 payoutToPnlPledgeUsdc;
+        uint256 payoutToFreeSettlementUsdc;
+        uint256 deferredPayoutUsdc;
     }
 
     /// @notice Read-only open/increase trade-ticket preview.
@@ -314,7 +322,8 @@ interface ICfdEngineTypes {
     ///      partial depending on where planning stopped.
     /// @param valid Whether the planner would accept the open/increase.
     /// @param invalidReason Typed planner rejection code.
-    /// @param failureCategory Commit-time policy category for `invalidReason`.
+    /// @param failureCategory Open failure policy category for `invalidReason`, including execution-time categories
+    ///        for degraded mode and fee-drained margin.
     /// @param executionPrice Caller-supplied oracle price clamped to the engine cap.
     /// @param sizeDelta Requested position-size increase.
     /// @param notionalUsdc Notional represented by `sizeDelta` at `executionPrice`.
@@ -325,7 +334,8 @@ interface ICfdEngineTypes {
     /// @param poolRebatePayoutUsdc Pool-funded amount required by a negative `tradeCostUsdc`.
     /// @param pendingCarryUsdc Stored plus elapsed position carry realized before the increase.
     /// @param initialMarginRequirementUsdc Initial-margin requirement for the projected position.
-    /// @param maintenanceMarginUsdc Active FAD or normal maintenance requirement for the projected position.
+    /// @param maintenanceMarginUsdc Active FAD or normal maintenance requirement when position economics were
+    ///        constructed, including rejected opens. Early rejection can leave this zero and unavailable.
     /// @param postSize Projected total position size.
     /// @param postMarginUsdc Projected PnL pledge after carry, positive trade cost, and liquidation/VPI reserve
     ///        reclassification. A trade-cost rebate credits settlement without directly increasing this pledge.
@@ -384,11 +394,14 @@ interface ICfdEngineTypes {
     /// @param protocolLiquidationFeeUsdc Configured protocol-treasury share of the liquidation charge.
     /// @param lpLiquidationFeeUsdc Remaining LP share after keeper and protocol allocations.
     /// @param seizedCollateralUsdc Price-loss pledge plus the LP liquidation fee; excludes carry and action charges.
-    /// @param settlementRetainedUsdc Existing account settlement left with the trader toward positive residual equity.
+    /// @param settlementRetainedUsdc Total projected account settlement after liquidation debits and any immediate
+    ///        payout. Already includes immediatePayoutUsdc; do not add it again. Excludes outstanding trader claims
+    ///        and is not a withdrawal-capacity quote.
     /// @param freshTraderPayoutUsdc New surplus value owed to the trader after liquidation.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted into liquidation settlement.
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
     /// @param immediatePayoutUsdc Portion of fresh trader payout paid immediately into clearinghouse settlement.
+    ///        This is a component of settlementRetainedUsdc, not an additional balance.
     /// @param traderClaimBalanceUsdc Projected claim balance after netting and any deferred fresh payout.
     /// @param triggersDegradedMode Whether liquidation newly reveals adjusted pool insolvency.
     /// @param postOpDegradedMode Projected degraded-mode latch after liquidation.

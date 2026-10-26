@@ -53,6 +53,7 @@ contract CfdEngineOpenQuoter {
 
     /// @notice Quotes a global maximum, with a canonical plan and a diagnostic rejection at the next quantum.
     /// @dev A zero result includes the failed plan at the minimum notional-admissible size (one lot at zero price).
+    ///      Out-of-domain margin uses a one-lot diagnostic probe before computing size bounds.
     ///      Numeric/dependency failures propagate as in previewOpen. This does not check router or terminal-book gates.
     /// @param planner Canonical planner bound to the caller's engine.
     /// @param raw Original snapshot, retained unchanged for every probe.
@@ -91,6 +92,12 @@ contract CfdEngineOpenQuoter {
             CfdEnginePlanTypes.OpenRevertCode limitingReason
         )
     {
+        // The planner rejects this margin domain before carry, skew or funding checks. Preserve that typed
+        // result before bound construction casts/adds the budget. One lot is sufficient for this size-independent check.
+        if (probe.order.marginDelta > uint256(type(int256).max)) {
+            delta = _probe(raw, probe, 1);
+            return (0, delta, delta.revertCode);
+        }
         uint256 price = Math.min(probe.executionPrice, raw.capPrice);
         uint256 currentLots = raw.position.size / CfdTypes.SIZE_QUANTUM;
         uint256 minimumLots = price == 0
@@ -203,20 +210,22 @@ contract CfdEngineOpenQuoter {
     }
 
     /// @dev Pledge cannot grow by more than marginDelta, and exact price PnL is unchanged by an open at this price.
-    ///      Invert FLOOR(notional * IM / BPS) <= equity using CEIL((equity + 1) * BPS / denominator) - 1.
+    ///      Invert FLOOR(notional * IM / BPS) < equity using CEIL(equity * BPS / denominator) - 1.
     ///      Skew uses the carry-projected depth. Healing exceptions still cannot finish above opposing OI + the cap.
     function _upperBound(
         Context memory ctx
     ) private pure returns (uint256 high) {
-        int256 equity = SafeCast.toInt256(
-            ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount
-        ) + ctx.pricePnl;
-        if (equity < 0) {
+        // Every planner-valid open must fit P+C into the terminal book's uint144 field. Cap the optimistic
+        // collateral bound accordingly; a near-int256 budget plus existing pledge must not overflow the cast.
+        uint256 collateralCeiling = Math.min(
+            ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount, type(uint144).max
+        );
+        int256 equity = SafeCast.toInt256(collateralCeiling) + ctx.pricePnl;
+        if (equity <= 0) {
             return 0;
         }
-        uint256 maxTotalLots = Math.mulDiv(
-            uint256(equity) + 1, 10_000, ctx.price * ctx.snap.riskParams.initMarginBps, Math.Rounding.Ceil
-        ) - 1;
+        uint256 maxTotalLots =
+            Math.mulDiv(uint256(equity), 10_000, ctx.price * ctx.snap.riskParams.initMarginBps, Math.Rounding.Ceil) - 1;
         if (maxTotalLots <= ctx.currentLots) {
             return 0;
         }
@@ -301,7 +310,7 @@ contract CfdEngineOpenQuoter {
         uint256 activeMarginBps =
             ctx.snap.isFadWindow ? ctx.snap.riskParams.fadMarginBps : ctx.snap.riskParams.maintMarginBps;
         uint256 minMaintenance = Math.mulDiv(totalNotionalFloor, activeMarginBps, 10_000);
-        return maxEquity >= SafeCast.toInt256(minInitial) && maxEquity > SafeCast.toInt256(minMaintenance);
+        return maxEquity > SafeCast.toInt256(minInitial) && maxEquity > SafeCast.toInt256(minMaintenance);
     }
 
     function _maxAffordableMargin(

@@ -249,14 +249,17 @@ interface ICfdEngine is ICfdEngineTypes {
     ) external view returns (bool);
 
     /// @notice High-level protocol lifecycle used by external status consumers.
-    /// @dev `Active` means required engine wiring exists and the HousePool has enabled live risk-taking.
+    /// @dev Active requires mandatory dependency code, an unpaused Router, and HousePool risk availability.
+    ///      Precedence is Configuring for missing wiring, then Degraded, then Paused, then pool readiness.
     enum ProtocolPhase {
         /// @notice Dependencies or pool seed/trading lifecycle are not yet ready for live risk.
         Configuring,
-        /// @notice Required dependencies are wired and the HousePool permits live risk.
+        /// @notice Required dependencies are wired, the Router is unpaused, and the HousePool permits live risk.
         Active,
         /// @notice The engine has latched adjusted insolvency and disabled risk increases.
-        Degraded
+        Degraded,
+        /// @notice Router governance has paused new commitments; risk-off operations remain available.
+        Paused
     }
 
 }

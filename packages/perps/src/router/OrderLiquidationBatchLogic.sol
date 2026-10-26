@@ -2,7 +2,6 @@
 pragma solidity 0.8.35;
 
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CfdEnginePlanTypes} from "@plether/perps/CfdEnginePlanTypes.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
@@ -23,7 +22,6 @@ import {CfdEnginePlanLib} from "@plether/perps/libraries/CfdEnginePlanLib.sol";
 import {OracleFreshnessPolicyLib} from "@plether/perps/libraries/OracleFreshnessPolicyLib.sol";
 import {OrderFailurePolicyLib} from "@plether/perps/libraries/OrderFailurePolicyLib.sol";
 import {OrderValidationLib} from "@plether/perps/libraries/OrderValidationLib.sol";
-import {DecimalConstants} from "@plether/shared/libraries/DecimalConstants.sol";
 
 /// @notice Router getters and isolated item entrypoints used by delegated keeper logic.
 interface IOrderLiquidationBatchHost {
@@ -118,6 +116,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     uint256 private constant LIQUIDATION_BATCH_GAS_PER_ORDER = 600_000;
     /// @notice Gas retained by the batch frame for failure classification, events, and a clean return.
     uint256 private constant LIQUIDATION_BATCH_TAIL_GAS = 250_000;
+    /// @notice Gas spent encoding and dispatching the item self-call after the batch precheck.
+    uint256 private constant LIQUIDATION_BATCH_CALL_OVERHEAD_GAS = 50_000;
     /// @notice Bitmask of every execution regime currently defined by the V3 schema.
     uint8 private constant ALL_V3_EXECUTION_MODES = 1 | 2 | 4;
 
@@ -136,6 +136,8 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     }
 
     /// @notice Applies the same prospective admission checks as fresh public close commitment.
+    /// @dev Fresh-state checks only. CfdClosePreview resolves client identity first and checks the registration
+    ///      namespace afterwards; call its bounded-request overload for a complete submission preview.
     function previewCloseAdmission(
         address account,
         OrderV3Types.OrderRequest calldata request
@@ -145,6 +147,9 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__NotCloseOrder();
         }
         _validateFreshRequest(host, account, request, true);
+        if (host.engine().terminalNavBook() == address(0)) {
+            revert OrderRouter__TerminalNavBookUnavailable();
+        }
         _validateCloseAdmission(host, account, request.side, request.sizeDelta);
     }
 
@@ -349,11 +354,12 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         );
 
         uint256 commitPrice = _commitReferencePrice(engine);
-        (,,,,,, uint256 minBountyUsdc, uint256 bountyBps,,) = engine.riskParams();
-        uint256 minNotionalUsdc = Math.mulDiv(minBountyUsdc, 10_000, bountyBps, Math.Rounding.Ceil);
-        uint256 minCloseSizeDelta =
-            Math.mulDiv(minNotionalUsdc, DecimalConstants.USDC_TO_TOKEN_SCALE, commitPrice, Math.Rounding.Ceil);
-        if (sizeDelta < queuedPosition.size && sizeDelta < minCloseSizeDelta) {
+        // Admission already checked lot alignment; the projected size is bounded by the Engine's uint112 lots
+        // and the Router's bounded pending-order count, while commitPrice is capped.
+        if (
+            sizeDelta < queuedPosition.size
+                && (sizeDelta / CfdTypes.SIZE_QUANTUM) * commitPrice < host.minOpenNotionalUsdc()
+        ) {
             revert OrderRouter__CommitValidation(11);
         }
     }
@@ -383,7 +389,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                             queuedPosition.exists = false;
                         }
                     }
-                } else if (!queuedPosition.exists || queuedPosition.size == 0) {
+                } else if (!queuedPosition.exists) {
                     queuedPosition.exists = true;
                     queuedPosition.side = pending.side;
                     queuedPosition.size = pending.sizeDelta;
@@ -414,13 +420,21 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
             revert OrderRouter__CommitValidation(11);
         }
 
+        // Project the live position through earlier account orders before checking the requested side.
+        QueuedPositionView memory queuedPosition = _queuedPosition(host, engine, account);
+        uint8 opposingCode = uint8(CfdEnginePlanTypes.OpenRevertCode.MUST_CLOSE_OPPOSING);
+        if (queuedPosition.exists && queuedPosition.side != side) {
+            revert OrderRouter__PredictableOpenInvalid(opposingCode);
+        }
+
         uint64 commitMarkTime = engine.lastMarkTime();
         uint8 revertCode =
             host.engineLensForCommit().previewOpenRevertCode(account, side, sizeDelta, marginDelta, commitPrice);
         if (revertCode == uint8(CfdEnginePlanTypes.OpenRevertCode.NUMERIC_DOMAIN_EXCEEDED)) {
             revert OrderRouter__PredictableOpenInvalid(revertCode);
         }
-        if (commitMarkTime != 0) {
+        // A queued close can remove an opposing live position before this open reaches the FIFO head.
+        if (commitMarkTime != 0 && revertCode != opposingCode) {
             IPletherOracle.PolicySnapshot memory policy = host.pletherOracle().getOrderExecutionPolicy(false);
             if (!OracleFreshnessPolicyLib.isStale(commitMarkTime, policy.maxStaleness, block.timestamp)) {
                 CfdEnginePlanTypes.OpenFailurePolicyCategory failureCategory =
@@ -445,7 +459,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
     ) private view returns (uint256 price) {
         price = engine.lastMarkPrice();
         if (price == 0) {
-            price = 1e8;
+            revert OrderRouter__MarkPriceUnavailable();
         }
         uint256 capPrice = engine.CAP_PRICE();
         return price > capPrice ? capPrice : price;
@@ -510,7 +524,7 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
         IPletherOracle.OracleConfig memory policy = _oraclePolicy(activeOracle);
         candidate.applyConfig(policy);
         if (keccak256(abi.encode(_oraclePolicy(candidate))) != keccak256(abi.encode(policy))) {
-            revert OrderRouter__InvalidPletherOracle();
+            revert OrderRouter__OraclePolicyMismatch();
         }
     }
 
@@ -752,7 +766,10 @@ abstract contract OrderLiquidationBatchLogic is IOrderRouterErrors {
                 + (host.pendingOrderCounts(account) * LIQUIDATION_BATCH_GAS_PER_ORDER);
 
             uint256 remainingGas = gasleft();
-            if (remainingGas <= itemGas + LIQUIDATION_BATCH_TAIL_GAS) {
+            uint256 eip150Allowance = (itemGas - 1) / 63;
+            uint256 retainedGas =
+                eip150Allowance > LIQUIDATION_BATCH_TAIL_GAS ? eip150Allowance : LIQUIDATION_BATCH_TAIL_GAS;
+            if (remainingGas <= itemGas + retainedGas + LIQUIDATION_BATCH_CALL_OVERHEAD_GAS) {
                 emit LiquidationBatchStopped(nextIndex);
                 return nextIndex;
             }

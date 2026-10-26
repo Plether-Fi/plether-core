@@ -697,8 +697,19 @@ contract CfdEnginePlanRegressionTest is BasePerpTest {
             delta.openState.initialMarginRequirementUsdc,
             "IMR must be rechecked after both mandatory reserves are carved out"
         );
-        assertEq(uint8(delta.revertCode), 0, "Rebate-backed reachable collateral should keep the open valid");
-        assertTrue(delta.valid, "Planner should accept opens whose live equity remains at IMR after rebate clawback");
+        assertEq(
+            uint8(delta.revertCode),
+            uint8(CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN),
+            "Exact initial-margin equality must reject"
+        );
+        assertFalse(delta.valid);
+
+        snap.accountBuckets.settlementBalanceUsdc += 1;
+        snap.accountBuckets.freeSettlementUsdc += 1;
+        order.marginDelta += 1;
+        delta = planner.planOpen(snap, order, 1e8);
+        assertEq(delta.positionMarginAfterOpen, delta.openState.initialMarginRequirementUsdc + 1);
+        assertTrue(delta.valid, "One micro-USDC above initial margin remains admissible");
     }
 
     function test_PlanOpen_RejectsWhenCarryLeavesFreeSettlementBelowMarginDelta() public view {

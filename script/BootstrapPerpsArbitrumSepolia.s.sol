@@ -150,7 +150,7 @@ contract BootstrapPerpsArbitrumSepolia is Script {
             deployer
         );
         _fundTestUsers(IMintableERC20(usdc), testUsers, testUserAmounts);
-        _activateTrading(housePool, routerAdmin, emergencyCoordinator, activateTrading);
+        _activateTrading(housePool, router, routerAdmin, emergencyCoordinator, activateTrading);
 
         vm.stopBroadcast();
 
@@ -493,25 +493,39 @@ contract BootstrapPerpsArbitrumSepolia is Script {
 
     function _activateTrading(
         HousePool housePool,
+        OrderRouter router,
         OrderRouterAdmin routerAdmin,
         EmergencyPauseCoordinator coordinator,
         bool activateTrading
     ) internal {
-        if (!activateTrading || housePool.isTradingActive()) {
+        if (!activateTrading) {
             return;
         }
 
-        require(coordinator.guardian() != address(0), "Emergency guardian is disabled");
-        require(housePool.pauser() == address(coordinator), "HousePool pauser changed before activation");
-        require(routerAdmin.pauser() == address(coordinator), "Router pauser changed before activation");
-        require(!housePool.paused(), "HousePool is paused");
-        require(!housePool.lpEpochSettlementPaused(), "LP epoch settlement is paused");
-        require(!routerAdmin.paused(), "OrderRouterAdmin is paused");
+        bool wasActive = housePool.isTradingActive();
+        if (!wasActive) {
+            require(coordinator.guardian() != address(0), "Emergency guardian is disabled");
+            require(housePool.pauser() == address(coordinator), "HousePool pauser changed before activation");
+            require(routerAdmin.pauser() == address(coordinator), "Router pauser changed before activation");
+            require(!housePool.paused(), "HousePool is paused");
+            require(!housePool.lpEpochSettlementPaused(), "LP epoch settlement is paused");
+            require(!routerAdmin.paused(), "OrderRouterAdmin is paused");
 
-        if (!housePool.seniorSeedInitialized() || !housePool.juniorSeedInitialized()) {
-            revert("Cannot activate trading before both seeds exist");
+            if (!housePool.seniorSeedInitialized() || !housePool.juniorSeedInitialized()) {
+                revert("Cannot activate trading before both seeds exist");
+            }
         }
 
+        if (housePool.ENGINE().lastMarkPrice() == 0) {
+            bytes[] memory updateData = abi.decode(vm.envBytes("PYTH_UPDATE_DATA"), (bytes[]));
+            uint256 pythFee = router.pletherOracle().getUpdateFee(updateData);
+            router.updateMarkPrice{value: pythFee}(updateData);
+            console.log("Initialized Engine mark:", housePool.ENGINE().lastMarkPrice());
+        }
+
+        if (wasActive) {
+            return;
+        }
         housePool.activateTrading();
         console.log("Activated trading");
     }
