@@ -80,7 +80,8 @@ interface ICfdEngineLens {
     /// @dev Uses carry-adjusted bounds and an interval search that supports disconnected valid ranges. Returns an
     ///      exact, quantum-aligned result or explicitly reverts on search-budget exhaustion. Uses the same read-only
     ///      assumptions and numeric/dependency revert behavior as `previewOpen`; router policy, bounty reservations,
-    ///      and terminal-book execution checks remain outside this planner quote.
+    ///      and terminal-book execution checks remain outside this planner quote. Margin above int256.max returns
+    ///      zero capacity and NUMERIC_DOMAIN_EXCEEDED before search-bound arithmetic.
     /// @param account Account that would open or increase the position
     /// @param side Position side
     /// @param marginDelta Margin supplied with the hypothetical order in USDC

@@ -57,12 +57,9 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         if (block.timestamp <= pending.timing.executionDeadline) {
             revert OrderRouter__OrderNotExpired();
         }
-        // Solidity zero-initializes this memory struct; oracle/execution fields are intentionally absent for expiry.
-        // slither-disable-next-line uninitialized-local
-        IOrderRouterExecutionHost.ItemRequest memory request;
-        request.orderId = orderId;
-        request.action = IOrderRouterExecutionHost.ItemAction.Expire;
-        request.executor = msg.sender;
+        IOrderRouterExecutionHost.ItemRequest memory request = _cleanupRequest(
+            host, orderId, true, IOrderLifecycleBook(host.lifecycleBook()).currentExecutionConfigHash()
+        );
         return host.executeOrderItemFromSidecar(request);
     }
 
@@ -141,19 +138,19 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
     }
 
     function recoverExpiredItem(
-        uint64 orderId,
-        address executor
+        IOrderRouterExecutionHost.ItemRequest calldata request
     ) external routerSelf returns (OrderV3Types.ExecutionResult memory) {
         IOrderRouterExecutionHost host = IOrderRouterExecutionHost(address(this));
         IOrderLifecycleBook book = IOrderLifecycleBook(host.lifecycleBook());
-        OrderV3Types.PendingIntent memory pending = book.pendingIntent(orderId);
+        OrderV3Types.PendingIntent memory pending = book.pendingIntent(request.orderId);
         if (pending.account == address(0) || block.timestamp <= pending.timing.executionDeadline) {
             revert RecoveryIdentityMismatch();
         }
-        OrderV3Types.OrderReceipt memory receipt = _receipt(orderId, pending, executor);
+        OrderV3Types.OrderReceipt memory receipt = _receipt(request.orderId, pending, request.executor);
+        _copyContext(receipt, request);
         receipt.reason = OrderV3Types.TerminalReason.ExpiredReservationMismatch;
         _state(host, receipt, true);
-        IMarginClearinghouse.BountyRecovery memory recovery = host.expireMismatchedOrderFromSidecar(orderId);
+        IMarginClearinghouse.BountyRecovery memory recovery = host.expireMismatchedOrderFromSidecar(request.orderId);
         receipt.bountyUsdc = recovery.freeUsdc;
         receipt.bounty.bountyRefundedUsdc = receipt.bountyUsdc;
         receipt.bounty.discrepancy = OrderV3Types.ReservationDiscrepancy(recovery.discrepancy);
@@ -178,13 +175,7 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         }
         OrderV3Types.OrderReceipt memory receipt = _receipt(request.orderId, pending, request.executor);
         receipt.reason = reason;
-        receipt.observedConfigHash = request.observedConfigHash;
-        receipt.executionMode = request.executionMode;
-        receipt.priceSource = request.priceSource;
-        receipt.executionPrice = request.executionPrice;
-        receipt.neutralMarkPrice = request.neutralMarkPrice;
-        receipt.poolDepthUsdc = request.poolDepthUsdc;
-        receipt.oraclePublishTime = request.oraclePublishTime;
+        _copyContext(receipt, request);
         receipt.failure = failure;
         _state(host, receipt, true);
         IOrderRouterExecutionHost.BountySettlement memory settled = _settle(host, request, reason);
@@ -200,6 +191,21 @@ contract OrderRecoverySidecar is IOrderRouterErrors {
         }
         _state(host, receipt, false);
         return _finalize(book, receipt);
+    }
+
+    /// @dev Retain authenticated observations even when expiry uses reservation-mismatch recovery.
+    ///      Cached mark/depth provide context; absent oracle execution fields remain absent.
+    function _copyContext(
+        OrderV3Types.OrderReceipt memory receipt,
+        IOrderRouterExecutionHost.ItemRequest calldata request
+    ) private pure {
+        receipt.observedConfigHash = request.observedConfigHash;
+        receipt.executionMode = request.executionMode;
+        receipt.priceSource = request.priceSource;
+        receipt.executionPrice = request.executionPrice;
+        receipt.neutralMarkPrice = request.neutralMarkPrice;
+        receipt.poolDepthUsdc = request.poolDepthUsdc;
+        receipt.oraclePublishTime = request.oraclePublishTime;
     }
 
     function _settle(

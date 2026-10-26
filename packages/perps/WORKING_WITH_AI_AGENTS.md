@@ -181,6 +181,11 @@ Engine previews consume caller-supplied price and time inputs. They do not fetch
 update, validate Router oracle freshness or publish-time policy, or reproduce FIFO, pause, MEV, and slippage gates.
 Treat a preview as a candidate Engine transition, not an execution promise.
 
+Rejected open previews report the active FAD or ordinary maintenance requirement when position economics were
+constructed. Earlier failures can leave it zero because it was not calculated; always inspect `valid` and
+`invalidReason` before interpreting diagnostics. `quoteMaxOpen` returns zero capacity with
+`NUMERIC_DOMAIN_EXCEEDED` for a margin budget above `int256.max`, before constructing search bounds.
+
 ### Permissionless execution
 
 Use `IPerpsKeeper` for execution:
@@ -484,6 +489,10 @@ non-Engine receipts with `PriceSource.None`, zero execution price and oracle tim
 transaction performs oracle and mark work. Liquidation uses `PriceSource.Liquidation` and a liquidation price but
 still sets `priceReachedEngine == false`. A verifier must not apply one blanket nonzero-price or reached-Engine rule
 to every receipt.
+
+Explicit expiry, bulk cleanup and execution-driven expiry retain the observed configuration digest and cached
+neutral mark/gross pool depth. Reservation-mismatch recovery preserves that same authenticated context. These
+observations do not turn expiry into an oracle execution: execution price and oracle publication time remain zero.
 
 For TP/SL, also reconcile the retained protection record and `PositionProtectionCreated`,
 `PositionProtectionReplaced`, `PositionProtectionArmed`, `PositionProtectionCancelled`,

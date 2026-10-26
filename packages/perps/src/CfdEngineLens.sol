@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineOpenQuoter} from "@plether/perps/CfdEngineOpenQuoter.sol";
@@ -295,6 +296,15 @@ contract CfdEngineLens is ICfdEngineLens {
         }
         preview.postVpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
         if (!delta.valid) {
+            // Early failures may have no open economics. Only correct a constructed position's requirement;
+            // do not turn an uncomputed diagnostic into an apparently complete preview.
+            if (delta.openState.newSize != 0) {
+                preview.maintenanceMarginUsdc = Math.mulDiv(
+                    delta.openState.newSize / CfdTypes.SIZE_QUANTUM * price,
+                    snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps,
+                    10_000
+                );
+            }
             return preview;
         }
 

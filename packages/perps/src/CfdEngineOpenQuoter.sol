@@ -53,6 +53,7 @@ contract CfdEngineOpenQuoter {
 
     /// @notice Quotes a global maximum, with a canonical plan and a diagnostic rejection at the next quantum.
     /// @dev A zero result includes the failed plan at the minimum notional-admissible size (one lot at zero price).
+    ///      Out-of-domain margin uses a one-lot diagnostic probe before computing size bounds.
     ///      Numeric/dependency failures propagate as in previewOpen. This does not check router or terminal-book gates.
     /// @param planner Canonical planner bound to the caller's engine.
     /// @param raw Original snapshot, retained unchanged for every probe.
@@ -91,6 +92,12 @@ contract CfdEngineOpenQuoter {
             CfdEnginePlanTypes.OpenRevertCode limitingReason
         )
     {
+        // The planner rejects this margin domain before carry, skew or funding checks. Preserve that typed
+        // result before bound construction casts/adds the budget. One lot is sufficient for this size-independent check.
+        if (probe.order.marginDelta > uint256(type(int256).max)) {
+            delta = _probe(raw, probe, 1);
+            return (0, delta, delta.revertCode);
+        }
         uint256 price = Math.min(probe.executionPrice, raw.capPrice);
         uint256 currentLots = raw.position.size / CfdTypes.SIZE_QUANTUM;
         uint256 minimumLots = price == 0
@@ -208,9 +215,12 @@ contract CfdEngineOpenQuoter {
     function _upperBound(
         Context memory ctx
     ) private pure returns (uint256 high) {
-        int256 equity = SafeCast.toInt256(
-            ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount
-        ) + ctx.pricePnl;
+        // Every planner-valid open must fit P+C into the terminal book's uint144 field. Cap the optimistic
+        // collateral bound accordingly; a near-int256 budget plus existing pledge must not overflow the cast.
+        uint256 collateralCeiling = Math.min(
+            ctx.snap.position.margin + ctx.marginDelta + ctx.snap.traderClaimBalanceForAccount, type(uint144).max
+        );
+        int256 equity = SafeCast.toInt256(collateralCeiling) + ctx.pricePnl;
         if (equity <= 0) {
             return 0;
         }

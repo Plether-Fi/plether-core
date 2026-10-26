@@ -56,6 +56,60 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         assertEq(book.orderTiming(orderId).submitBy, reviewedAt + 120);
     }
 
+    function testFuzz_ExpiryPreservesAuthenticatedContext(
+        bool mismatch,
+        uint8 routeSeed
+    ) public {
+        _startRecordingLogs();
+        router.updateMarkPrice(_mockPythUpdateData(0.8e8));
+        OrderV3Types.OrderRequest memory request = _openRequest(bytes32("expiry-context"));
+        request.bounds.executionWindowSeconds = 1;
+        vm.prank(ALICE);
+        uint64 orderId = router.commitOrder(request);
+        if (mismatch) {
+            // Fault injection changes the Book's entitlement while leaving actual custody/reservations intact.
+            vm.record();
+            uint256 bounty = book.pendingIntent(orderId).executionBountyUsdc;
+            (bytes32[] memory slots,) = vm.accesses(address(book));
+            vm.store(address(book), bytes32(uint256(slots[0]) + 3), bytes32(bounty + 1));
+            assertEq(book.pendingIntent(orderId).executionBountyUsdc, bounty + 1);
+        }
+        vm.warp(uint256(book.orderTiming(orderId).executionDeadline) + 1);
+        bytes32 digest = book.currentExecutionConfigHash();
+        uint256 depth = pool.totalAssets();
+        uint256 pythCalls = baseMockPyth.updatePriceFeedsCallCount();
+        uint256 route = uint256(routeSeed) % 3;
+        vm.prank(KEEPER);
+        if (route == 0) {
+            router.expireOrder(orderId);
+        } else if (route == 1) {
+            uint64[] memory ids = new uint64[](1);
+            ids[0] = orderId;
+            (, uint256 cleared) = router.clearInvalidOrders(ids);
+            assertEq(cleared, 1);
+        } else {
+            router.executeOrder(orderId, new bytes[](0));
+        }
+        (bytes32 hash,, uint64 terminalTime, OrderV3Types.OrderReceipt memory receipt) =
+            _findFinalizedReceipt(_takeRecordedLogs(), orderId);
+        assertEq(
+            uint8(receipt.reason),
+            uint8(
+                mismatch ? OrderV3Types.TerminalReason.ExpiredReservationMismatch : OrderV3Types.TerminalReason.Expired
+            )
+        );
+        assertEq(receipt.observedConfigHash, digest, "Expiry must retain observed configuration");
+        assertEq(receipt.neutralMarkPrice, 0.8e8, "Recovery must retain the collected mark");
+        assertEq(receipt.poolDepthUsdc, depth, "Recovery must retain gross pool depth");
+        assertEq(receipt.executor, KEEPER);
+        assertEq(receipt.executionPrice, 0, "Context is not an executed oracle price");
+        assertEq(receipt.oraclePublishTime, 0);
+        assertEq(uint8(receipt.priceSource), uint8(OrderV3Types.PriceSource.None));
+        assertEq(baseMockPyth.updatePriceFeedsCallCount(), pythCalls, "Expiry must not ingest an oracle update");
+        assertEq(book.terminalOutcome(orderId).receiptHash, hash);
+        assertTrue(book.verifyReceipt(receipt, terminalTime), "Context must be authenticated by the retained receipt");
+    }
+
     function test_SubmitByInclusiveAndReplayNeverRestartsClock() public {
         OrderV3Types.OrderRequest memory request = _openRequest(bytes32("submit-boundary"));
         request.bounds.submitBy = uint64(block.timestamp + 120);
@@ -894,6 +948,7 @@ contract OrderRouterAgentV2Test is BasePerpTest {
         for (uint256 i; i < logs.length; ++i) {
             if (
                 logs[i].emitter == address(book) && logs[i].topics.length == 4
+                    && logs[i].topics[0] == IOrderLifecycleBook.OrderFinalized.selector
                     && uint64(uint256(logs[i].topics[1])) == orderId
             ) {
                 return abi.decode(logs[i].data, (bytes32, uint64, uint64, OrderV3Types.OrderReceipt));

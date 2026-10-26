@@ -326,7 +326,8 @@ interface ICfdEngineTypes {
     /// @param poolRebatePayoutUsdc Pool-funded amount required by a negative `tradeCostUsdc`.
     /// @param pendingCarryUsdc Stored plus elapsed position carry realized before the increase.
     /// @param initialMarginRequirementUsdc Initial-margin requirement for the projected position.
-    /// @param maintenanceMarginUsdc Active FAD or normal maintenance requirement for the projected position.
+    /// @param maintenanceMarginUsdc Active FAD or normal maintenance requirement when position economics were
+    ///        constructed, including rejected opens. Early rejection can leave this zero and unavailable.
     /// @param postSize Projected total position size.
     /// @param postMarginUsdc Projected PnL pledge after carry, positive trade cost, and liquidation/VPI reserve
     ///        reclassification. A trade-cost rebate credits settlement without directly increasing this pledge.

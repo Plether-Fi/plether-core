@@ -396,7 +396,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
         // Execute requests carry the digest read after oracle/mark updates by _executionItem. Only static
         // dependency reads and Router self-calls occur between that observation and this check. Reuse it inside
         // this authenticated item; public committed assessment still validates configuration independently.
-        // Cleanup requests may originate without an observation (for example permissionless expiry).
+        // Non-execution requests re-read the digest here; terminal expiry has already used its collected context.
         bytes32 observedConfigHash = request.action == IOrderRouterExecutionHost.ItemAction.Execute
             && request.observedConfigHash != bytes32(0)
             ? request.observedConfigHash
@@ -422,10 +422,7 @@ contract OrderRouterExecutionSidecar is IOrderRouterErrors {
     function _recoverExpired(
         IOrderRouterExecutionHost.ItemRequest calldata request
     ) private returns (OrderV3Types.ExecutionResult memory) {
-        return
-            _delegateRecovery(
-                abi.encodeCall(OrderRecoverySidecar.recoverExpiredItem, (request.orderId, request.executor))
-            );
+        return _delegateRecovery(abi.encodeCall(OrderRecoverySidecar.recoverExpiredItem, (request)));
     }
 
     function recordSettledTerminal(
