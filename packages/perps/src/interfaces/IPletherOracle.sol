@@ -427,7 +427,9 @@ interface IPletherOracle {
     function isOracleFrozen() external view returns (bool);
 
     /// @notice Returns the configured live order-execution and mark-refresh component-age limit.
-    /// @dev Frozen-oracle policy uses `engine.fadMaxStaleness()` instead of this value.
+    /// @dev Also bounds component-time divergence for live OrderExecution, MarkRefresh, and PoolReconcile baskets.
+    ///      PoolReconcile age validation separately uses the effective Engine/HousePool mark-age limit.
+    ///      Frozen-oracle policy uses `engine.fadMaxStaleness()` for age and does not compare component times.
     /// @return Configured live maximum component age in seconds.
     function orderExecutionStalenessLimit() external view returns (uint256);
 
@@ -445,9 +447,10 @@ interface IPletherOracle {
     function orderSettlementWindow() external view returns (uint256);
 
     /// @notice Returns max allowed publish-time divergence across basket components.
-    /// @dev This configured value applies to unique historical order baskets; current-basket reads derive their
-    ///      divergence limit from the applicable staleness policy. Frozen MarkRefresh, Liquidation, and PoolReconcile
-    ///      use `fadMaxStaleness`; frozen OrderExecution retains the live order-staleness divergence limit.
+    /// @dev This configured value applies only to unique historical order baskets. Live Liquidation baskets use
+    ///      `liquidationStalenessLimit`; live OrderExecution, MarkRefresh, and PoolReconcile baskets use
+    ///      `orderExecutionStalenessLimit`. PoolReconcile age validation separately uses the effective
+    ///      Engine/HousePool mark-age limit. Frozen reads reuse the Engine mark and do not compare component times.
     /// @return Historical basket component-time divergence limit in seconds.
     function maxComponentPublishTimeDivergence() external view returns (uint256);
 

@@ -205,14 +205,17 @@ abstract contract OrderRouterPythTestBase is BasePerpTest {
 
         _fundSetupJuniorWithoutMarkUpdate(bob, 1_000_000 * 1e6);
 
+        // Seed a real cached price for admission at the fixture's initial oracle time.
+        vm.warp(1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, 1);
+
         usdc.mint(alice, 10_000 * 1e6);
         vm.startPrank(alice);
         usdc.approve(address(clearinghouse), type(uint256).max);
         clearinghouse.deposit(alice, 10_000 * 1e6);
         vm.deal(alice, 10 ether);
         vm.stopPrank();
-
-        vm.warp(1);
     }
 
     function _forcePnlPledgeForMarginDrain(

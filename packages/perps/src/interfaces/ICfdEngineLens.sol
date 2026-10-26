@@ -24,6 +24,20 @@ interface ICfdEngineLens {
         CfdEnginePlanTypes.OpenRevertCode limitingReason;
     }
 
+    /// @notice Account-queue corruption prevents bounded Router-aware preview traversal.
+    error CfdEngineLens__InvalidRouterQueue();
+
+    /// @notice Liquidation economics after the canonical Router's persistent risk-off refunds.
+    /// @dev Refund amounts are reclassifications into free settlement, not wallet transfers. A nonzero refund count
+    ///      with liquidation.liquidatable=false predicts the Router's refund-and-skip outcome for an open position.
+    struct RouterLiquidationPreview {
+        ICfdEngineTypes.LiquidationPreview liquidation;
+        uint64 riskOffCutoff;
+        uint256 refundedOrderCount;
+        uint256 releasedCommittedMarginUsdc;
+        uint256 releasedBountyUsdc;
+    }
+
     /// @notice Returns the engine inspected by this lens.
     /// @return Bound CfdEngine address
     function engine() external view returns (address);
@@ -31,7 +45,9 @@ interface ICfdEngineLens {
     /// @notice Previews a close/decrease against current pool depth.
     /// @dev Uses current effective `HousePool.totalAssets()` (accounted assets capped by raw custody) for both planning
     ///      solvency and available pool cash. The supplied price is clamped to the engine cap; the preview does not
-    ///      validate oracle freshness or slippage.
+    ///      validate oracle freshness or slippage. Fresh payouts are split into position collateral, free settlement,
+    ///      and deferred claims. Free-settlement credits exclude released collateral and do not promise withdrawability.
+    ///      The extended ClosePreview return tuple requires matching ABI bindings for this lens deployment.
     /// @param account Account whose position would be closed
     /// @param sizeDelta Position size to close (18 decimals)
     /// @param oraclePrice Candidate execution price, clamped to `CAP_PRICE` (8 decimals)
@@ -64,7 +80,8 @@ interface ICfdEngineLens {
     /// @dev Uses carry-adjusted bounds and an interval search that supports disconnected valid ranges. Returns an
     ///      exact, quantum-aligned result or explicitly reverts on search-budget exhaustion. Uses the same read-only
     ///      assumptions and numeric/dependency revert behavior as `previewOpen`; router policy, bounty reservations,
-    ///      and terminal-book execution checks remain outside this planner quote.
+    ///      and terminal-book execution checks remain outside this planner quote. Margin above int256.max returns
+    ///      zero capacity and NUMERIC_DOMAIN_EXCEEDED before search-bound arithmetic.
     /// @param account Account that would open or increase the position
     /// @param side Position side
     /// @param marginDelta Margin supplied with the hypothetical order in USDC
@@ -101,7 +118,7 @@ interface ICfdEngineLens {
     /// @param sizeDelta Position size delta (18 decimals)
     /// @param marginDelta Margin supplied with the hypothetical order in USDC
     /// @param oraclePrice Candidate execution price (8 decimals)
-    /// @return category Commit-time open failure policy category
+    /// @return category Open failure policy category, including execution-time categories
     function previewOpenFailurePolicyCategory(
         address account,
         CfdTypes.Side side,
@@ -126,9 +143,11 @@ interface ICfdEngineLens {
         uint256 poolDepthUsdc
     ) external view returns (ICfdEngineTypes.ClosePreview memory preview);
 
-    /// @notice Previews liquidation against current pool depth.
+    /// @notice Previews liquidation against current pool depth, without preceding Router risk-off refunds.
+    /// @dev Use previewRouterLiquidation for the current Router queue/refund policy.
     /// @dev Models forfeiture of the account's pending execution bounties before terminal collateral is evaluated.
     ///      Uses current effective `HousePool.totalAssets()`, clamps the price, and does not validate oracle freshness.
+    ///      settlementRetainedUsdc already includes immediatePayoutUsdc; the latter is a breakdown, not extra cash.
     /// @param account Account whose position would be tested
     /// @param oraclePrice Candidate liquidation execution price (8 decimals)
     /// @return preview Liquidation economics and projected post-operation solvency
@@ -136,6 +155,16 @@ interface ICfdEngineLens {
         address account,
         uint256 oraclePrice
     ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview);
+
+    /// @notice Previews the canonical Router's liquidation after refunding cutoff-invalid pending opens.
+    /// @dev Includes remaining committed margin, order bounties, and pending-open protection-trigger refunds, then
+    ///      forfeits remaining bounties and evaluates carry/price health. Uses current timestamp and pool depth with
+    ///      the supplied side-appropriate price; does not ingest Pyth, validate oracle policy, or simulate other batch
+    ///      accounts, receipt integrity, callbacks, or execution gas. Queue and custody remain unchanged.
+    function previewRouterLiquidation(
+        address account,
+        uint256 oraclePrice
+    ) external view returns (RouterLiquidationPreview memory preview);
 
     /// @notice Simulates liquidation at caller-supplied pool depth.
     /// @dev Models pending-bounty forfeiture and treats the supplied depth as both solvency assets and pool cash; it

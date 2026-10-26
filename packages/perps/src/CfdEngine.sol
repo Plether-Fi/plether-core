@@ -512,7 +512,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Adds isolated margin to an existing open position without changing size.
     /// @dev The caller must equal `account`. Collectible accrued carry is realized first and any uncovered amount
     ///      remains unsettled; then clearinghouse free settlement is locked as active position margin and aggregate
-    ///      side margin and borrow-base accounting are refreshed.
+    ///      side margin and borrow-base accounting are refreshed. A zero amount reverts with `CfdEngine__ZeroAmount`.
     /// @param account Position owner and required caller.
     /// @param amount Nonzero amount to move from free settlement into position margin, in 6-decimal USDC units.
     function addMargin(
@@ -523,7 +523,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__NotAccountOwner();
         }
         if (amount == 0) {
-            revert CfdEngine__PositionTooSmall();
+            revert CfdEngine__ZeroAmount();
         }
 
         StoredPosition storage pos = _positions[account];

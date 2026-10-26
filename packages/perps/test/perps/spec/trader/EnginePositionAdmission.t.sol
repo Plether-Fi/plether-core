@@ -203,7 +203,7 @@ contract EnginePositionAdmissionTest is CfdEngineTestBase {
         _open(account, CfdTypes.Side.LONG, 50_000 * 1e18, 2000 * 1e6, 1e8);
 
         vm.prank(trader);
-        vm.expectRevert(ICfdEngineTypes.CfdEngine__PositionTooSmall.selector);
+        vm.expectRevert(ICfdEngineTypes.CfdEngine__ZeroAmount.selector);
         engine.addMargin(account, 0);
     }
 

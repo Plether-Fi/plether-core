@@ -163,6 +163,13 @@ export async function assertCompatibility(client, fixture, currentSchema) {
     'Current close preview retains an unused publish-time argument')
   assert.equal(preview.outputs[0].components.some(item => item.name === 'executionBountyUsdc'), false,
     'Current close preview must not expose a zero-only bounty output')
+  assert.deepEqual(preview.outputs[0].components.at(-1),
+    { name: 'replayOrderId', type: 'uint64', internalType: 'uint64' },
+    'Current close preview must distinguish an exact retry from fresh close economics')
+  for (const name of ['OrderLifecycleBook__ClientIdConflict', 'OrderLifecycleBook__ClientIdDomainMismatch']) {
+    assert(client.closePreviewV3Abi.some(item => item.type === 'error' && item.name === name),
+      `Current close preview must expose ${name}`)
+  }
   const protectionCreated = client.positionProtectionBookAbi.find(item => item.type === 'event' && item.name === 'PositionProtectionCreated')
   assert(protectionCreated, 'Current protection-created event is missing')
   assert.deepEqual(protectionCreated.inputs.map(item => item.name),

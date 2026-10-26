@@ -1252,7 +1252,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     }
 
     /// @notice Returns the current stored senior principal that pool liquidity permits withdrawing.
-    /// @dev Returns zero when degraded mode or the applicable mark-freshness policy disables withdrawals.
+    /// @dev Returns zero during the settlement hold, degraded mode or applicable mark staleness. Does not require
+    ///      matured demand or preview reconciliation. Execution with open positions outside frozen mode additionally
+    ///      requires a Router-bound mark published in the current epoch.
     /// @return Withdrawable senior USDC, capped by free USDC and `seniorPrincipal` (6 decimals)
     function getMaxSeniorWithdraw() public view returns (uint256) {
         if (!_withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot())) {
@@ -1264,7 +1266,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     /// @notice Returns stored-state capacity available to matured junior redemption demand.
     /// @dev Returns zero when settlement is not live or matured senior demand is queued ahead of junior. Otherwise it
     ///      does not reserve dormant senior principal: free cash, junior principal, and the protected-senior share
-    ///      covenant independently cap the result. Does not preview pending reconciliation.
+    ///      covenant independently cap the result. Does not preview pending reconciliation or enforce the current-epoch
+    ///      Router-bound mark required for execution with open positions outside frozen mode.
     /// @return Junior funding capacity in USDC, before controller-specific queue limits
     function getMaxJuniorWithdraw() public view returns (uint256) {
         if (!_withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot())) {
@@ -1280,7 +1283,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     /// @dev Read-only preview for ERC4626 consumers that need same-transaction parity with reconcile-first vault
     ///      flows. Includes elapsed senior coupon and any settleable claimant buckets. Mark-dependent waterfall
     ///      changes apply only when the applicable mark is fresh. Residual claimant value and unassigned assets
-    ///      remain reserved; both withdrawal caps are zero whenever withdrawals are not live.
+    ///      remain reserved; both withdrawal caps are zero whenever withdrawals are not live. Execution with open
+    ///      positions outside frozen mode additionally requires a Router-bound mark published in the current epoch.
     /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
     /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
     /// @return maxSeniorWithdrawUsdc Simulated senior withdrawal cap after reconcile (6 decimals)
@@ -1340,7 +1344,9 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     /// @notice Returns whether new redemption funding is live under the settlement hold, mark freshness, and runtime
     ///         mode.
     /// @dev This is a status gate only: a true result does not guarantee nonzero liquidity, unlocked vault shares,
-    ///      or satisfaction of the vault's holder cooldown. Already-funded claims do not depend on this gate.
+    ///      or satisfaction of the vault's holder cooldown. Execution with open positions outside frozen mode also
+    ///      requires a Router-bound mark published in the current epoch; this gate checks only its applicable maximum
+    ///      age. Already-funded claims do not depend on this gate.
     /// @return True when settlement is not held, the engine is not degraded, and any required mark is fresh
     function isWithdrawalLive() external view returns (bool) {
         return _withdrawalsLive(_getHousePoolInputSnapshot(), _getHousePoolStatusSnapshot());

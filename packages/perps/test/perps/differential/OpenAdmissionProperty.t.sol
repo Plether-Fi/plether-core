@@ -61,7 +61,7 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
         for (uint256 supplied = 640e6 - 1; supplied <= 640e6 + 1; supplied++) {
             uint256 snapshot = vm.snapshotState();
             bool success = _tryOpenAndCheck(CfdTypes.Side.SHORT, 40_000e18, supplied);
-            assertEq(success, supplied >= 640e6, "Admission boundary must exclude the rebate from price-risk equity");
+            assertEq(success, supplied > 640e6, "Admission boundary must exclude the rebate from price-risk equity");
             if (success) {
                 assertEq(clearinghouse.pnlPledgeUsdc(ACCOUNT), supplied - 40e6);
                 (,,,,,, int256 lifetimeVpi) = engine.positions(ACCOUNT);
@@ -97,16 +97,16 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
                 ACCOUNT,
                 side,
                 priorLots * CfdTypes.SIZE_QUANTUM,
-                priorLots * (pledgePerLot + reservePerLot + feePerLot),
+                priorLots * (pledgePerLot + reservePerLot + feePerLot) + 1,
                 price
             );
         }
         uint256 addedLots = bound(lotSeed, 17, 251);
         uint256 boundary = bound(uint256(boundarySeed), 0, 2);
-        uint256 supplied = addedLots * (pledgePerLot + reservePerLot + feePerLot) + boundary - 1;
+        uint256 supplied = addedLots * (pledgePerLot + reservePerLot + feePerLot) + boundary - 1 - (existing ? 1 : 0);
         bytes32 beforeState = _admissionState();
         uint256 depth = pool.totalAssets();
-        if (boundary == 0) {
+        if (boundary <= 1) {
             vm.expectRevert(
                 abi.encodeWithSelector(
                     ICfdEngineTypes.CfdEngine__TypedOrderFailure.selector,
@@ -117,7 +117,7 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
             );
         }
         _open(ACCOUNT, side, addedLots * CfdTypes.SIZE_QUANTUM, supplied, price, depth);
-        if (boundary == 0) {
+        if (boundary <= 1) {
             assertEq(_admissionState(), beforeState, "Initial-margin rejection must roll back every observed ledger");
         } else {
             (uint256 installedSize,,,,,,) = engine.positions(ACCOUNT);
@@ -246,7 +246,7 @@ contract OpenAdmissionPropertyTest is BasePerpTest {
         if (initialRequirement < 1e6) {
             initialRequirement = 1e6;
         }
-        assertGe(priceEquity, int256(initialRequirement), "Every successful admission installs enough P+C price equity");
+        assertGt(priceEquity, int256(initialRequirement), "Every successful admission exceeds initial price equity");
         assertGe(
             clearinghouse.vpiRebateReserveUsdc(ACCOUNT),
             lifetimeVpi < 0 ? uint256(-lifetimeVpi) : 0,

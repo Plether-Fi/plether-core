@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IPyth} from "@plether/shared/interfaces/IPyth.sol";
+
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
@@ -21,7 +24,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
 
     using stdStorage for StdStorage;
 
-    function test_PublishTimeBeforeCommit_Reverts() public {
+    function test_PublishTimeBeforeCommit_ReturnsPending() public {
         _startRecordingLogs();
         vm.warp(1000);
 
@@ -33,15 +36,14 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
 
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, empty);
+        _assertHistoryUnavailable(router.executeOrder(1, empty), 1);
 
         assertEq(
             router.nextExecuteId(), 1, "Live execution should keep the order pending when publish time predates commit"
         );
     }
 
-    function test_FuturePublishTime_Reverts() public {
+    function test_FuturePublishTime_ReturnsPending() public {
         _startRecordingLogs();
         vm.warp(1000);
 
@@ -53,11 +55,10 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         vm.roll(block.number + 1);
 
         bytes[] memory empty = _pythUpdateData();
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, empty);
+        _assertHistoryUnavailable(router.executeOrder(1, empty), 1);
 
         assertEq(router.nextExecuteId(), 1, "Future oracle publication must not consume the FIFO head");
-        assertEq(engine.lastMarkTime(), 0, "Future oracle publication must not update the cached mark");
+        assertEq(engine.lastMarkTime(), 1, "Future oracle publication must not update the cached mark");
     }
 
     function test_SameBlockExecution_ReturnsPending() public {
@@ -94,8 +95,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         vm.warp(1200);
         vm.roll(block.number + 1);
 
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, _pythUpdateData());
+        _assertHistoryUnavailable(router.executeOrder(1, _pythUpdateData()), 1);
 
         IOrderRouterAdminHost.RouterConfig memory routerConfig = _routerConfig();
         routerConfig.orderExecutionStalenessLimit = 300;
@@ -210,23 +210,25 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         assertEq(router.nextExecuteId(), 0, "Successful batch execution should clear the queue head");
     }
 
-    function test_FrozenCloseExecution_AllowsFeedPublishDivergenceWithinFadStaleness() public {
+    function test_FrozenCloseExecution_ReplaysEngineMarkDespiteFeedSkew() public {
         _startRecordingLogs();
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.orderExecutionStalenessLimit = 2 hours;
         _setRouterConfig(config);
 
         uint256 saturdayNoon = 605_016_000;
-        uint256 minPublishTime = saturdayNoon - 2 hours;
+        uint256 minPublishTime = saturdayNoon - 2 hours - 1;
         address aliceAccount = alice;
 
         vm.warp(minPublishTime - 1);
         _open(aliceAccount, CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8);
 
         mockPyth.setPrice(feedIds[0], int64(100_000_000), int32(-8), minPublishTime);
-        mockPyth.setPrice(feedIds[1], int64(100_000_000), int32(-8), minPublishTime + 2 hours);
+        mockPyth.setPrice(feedIds[1], int64(100_000_000), int32(-8), saturdayNoon);
 
         vm.warp(saturdayNoon);
+        assertGt(saturdayNoon - minPublishTime, pletherOracle.orderExecutionStalenessLimit());
+        assertLe(saturdayNoon - minPublishTime, engine.fadMaxStaleness());
         uint64 orderId = router.nextCommitId();
         vm.prank(alice);
         router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 0, 0, true);
@@ -235,7 +237,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         router.executeOrder(orderId, _pythUpdateData());
 
         (uint256 sizeAfter,,,,,,) = engine.positions(aliceAccount);
-        assertEq(sizeAfter, 0, "Frozen close execution should accept feed divergence within FAD staleness");
+        assertEq(sizeAfter, 0, "Frozen close execution should use the cached mark despite feed skew");
     }
 
     function test_SingleExecute_EmptyQueueRevertsNoOrders() public {
@@ -298,7 +300,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         assertEq(size, 10_000 * 1e18, "Only the pre-publish commitment should execute before batch processing stops");
     }
 
-    function test_PublishTimeBeforeCommit_RevertsForExternalKeeper() public {
+    function test_PublishTimeBeforeCommit_PendingForExternalKeeper() public {
         _startRecordingLogs();
         vm.warp(1000);
         mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), 999);
@@ -313,8 +315,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         bytes[] memory empty = _pythUpdateData();
         vm.roll(block.number + 1);
         vm.prank(keeper);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, empty);
+        _assertHistoryUnavailable(router.executeOrder(1, empty), 1);
 
         assertEq(router.nextExecuteId(), 1, "Live execution should reject publish times that are not post-commit");
     }
@@ -336,7 +337,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         assertEq(router.nextExecuteId(), 0, "Fresh post-commit publish should execute normally");
     }
 
-    function test_PublishTimeEqualToCommit_Reverts() public {
+    function test_PublishTimeEqualToCommit_ReturnsPending() public {
         _startRecordingLogs();
         vm.warp(1000);
 
@@ -347,8 +348,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
 
         vm.warp(1050);
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, _pythUpdateData());
+        _assertHistoryUnavailable(router.executeOrder(1, _pythUpdateData()), 1);
 
         assertEq(router.nextExecuteId(), 1, "Live execution must require a strictly post-commit tick");
     }
@@ -383,8 +383,7 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
 
         vm.warp(1050);
         vm.roll(block.number + 1);
-        vm.expectPartialRevert(IPletherOracle.PletherOracle__StalePrice.selector);
-        router.executeOrder(1, _pythUpdateData());
+        _assertHistoryUnavailable(router.executeOrder(1, _pythUpdateData()), 1);
 
         assertEq(router.nextExecuteId(), 1, "A skipped historical tick must leave the order pending");
     }
@@ -457,6 +456,109 @@ contract OrderRouterExecutionFreshnessTest is OrderRouterPythTestBase {
         assertEq(result.nextOrderId, 1);
         assertEq(uint8(result.stopReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
         assertEq(router.nextExecuteId(), 1, "Stale batch price must leave the FIFO head pending");
+    }
+
+    function test_SingleUnavailableHistory_PreservesCleanupAndRefundsExactlyOnce() public {
+        _checkUnavailableHistoryRefund(false);
+    }
+
+    function test_SingleUnavailableHistory_DefersRejectedRefundsAndPreservesCleanup() public {
+        _checkUnavailableHistoryRefund(true);
+    }
+
+    function _checkUnavailableHistoryRefund(
+        bool rejectRefund
+    ) private {
+        _startRecordingLogs();
+        vm.warp(1000);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
+        vm.warp(block.timestamp + router.maxExecutionWindowSeconds() + 1);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
+        mockPyth.setAllPrices(feedIds, int64(100_000_000), int32(-8), block.timestamp);
+        mockPyth.setFee(0.1 ether);
+        vm.warp(block.timestamp + 1);
+        vm.roll(block.number + 1);
+
+        address keeper = rejectRefund ? address(new RejectHistoryRefund()) : address(0xBEEF);
+        vm.deal(keeper, 1 ether);
+        // Pre-existing balances expose accidental double refunds or unrelated balance consumption.
+        vm.deal(address(router), 2 ether);
+        vm.deal(address(pletherOracle), 3 ether);
+        uint256 targetMargin = _remainingCommittedMargin(2);
+        uint256 targetBounty = _executionBountyReserve(2);
+        vm.prank(keeper);
+        _assertHistoryUnavailable(router.executeOrder{value: 0.3 ether}(2, _pythUpdateData()), 2);
+
+        IOrderLifecycleBook book = IOrderLifecycleBook(address(router.lifecycleBook()));
+        assertEq(uint8(book.lifecycleStatus(1)), uint8(OrderV3Types.LifecycleStatus.Failed));
+        assertEq(uint8(_verifiedOutcome(book, 1).reason), uint8(OrderV3Types.TerminalReason.Expired));
+        assertEq(_remainingCommittedMargin(1), 0, "completed expiry remains applied");
+        assertEq(_executionBountyReserve(1), 0);
+        assertEq(router.nextExecuteId(), 2);
+        assertEq(uint8(book.lifecycleStatus(2)), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(_remainingCommittedMargin(2), targetMargin);
+        assertEq(_executionBountyReserve(2), targetBounty);
+        assertEq(engine.lastMarkTime(), 1, "unavailable history must not update the mark");
+        assertEq(engine.lastMarkPrice(), 1e8);
+        assertEq(address(mockPyth).balance, 0, "failed parser retains no fee");
+        assertEq(address(router).balance, 2 ether, "router refunds only excess funding");
+        assertEq(address(pletherOracle).balance, rejectRefund ? 3.2 ether : 3 ether);
+        assertEq(pletherOracle.claimableEth(keeper), rejectRefund ? 0.2 ether : 0);
+        assertEq(routerAdmin.claimableEth(keeper), rejectRefund ? 0.1 ether : 0);
+        assertEq(keeper.balance, rejectRefund ? 0.7 ether : 1 ether);
+        if (rejectRefund) {
+            // The two refund owners retain exactly their own allocation for later claiming.
+            vm.etch(keeper, "");
+            vm.prank(keeper);
+            pletherOracle.claimEthRefund();
+            vm.prank(keeper);
+            routerAdmin.claimBalance();
+            assertEq(keeper.balance, 1 ether);
+            assertEq(pletherOracle.claimableEth(keeper), 0);
+            assertEq(routerAdmin.claimableEth(keeper), 0);
+            assertEq(address(pletherOracle).balance, 3 ether);
+        }
+    }
+
+    function test_SingleMalformedHistory_StillReverts() public {
+        vm.warp(1000);
+        vm.prank(alice);
+        router.commitOrder(CfdTypes.Side.LONG, 10_000e18, 500e6, 1e8, false);
+        vm.warp(1006);
+        vm.roll(block.number + 1);
+        bytes4 malformed = bytes4(keccak256("MalformedPayload()"));
+        vm.mockCallRevert(
+            address(mockPyth),
+            abi.encodeWithSelector(IPyth.parsePriceFeedUpdatesUnique.selector),
+            abi.encodePacked(malformed)
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPletherOracle.PletherOracle__HistoricalParserFailure.selector, malformed, uint256(4)
+            )
+        );
+        router.executeOrder(1, _pythUpdateData());
+        assertEq(router.nextExecuteId(), 1);
+    }
+
+    function _assertHistoryUnavailable(
+        OrderV3Types.ExecutionResult memory result,
+        uint64 orderId
+    ) private pure {
+        assertEq(result.orderId, orderId);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
+        assertEq(result.receiptHash, bytes32(0));
+    }
+
+}
+
+contract RejectHistoryRefund {
+
+    receive() external payable {
+        revert("reject refund");
     }
 
 }

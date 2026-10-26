@@ -295,13 +295,13 @@ resolves the execution deadline at commitment, so execution requires no new
 client signature. V2 signed calldata cannot be reinterpreted as V3.
 
 This is a breaking order ABI release. No package publication or deployment is
-included. See `packages/perps/ORDER_V3_TIMING.md` in the repository for activation
-requirements and the canonical lifecycle timing tuple.
+included. See the [order timing guide](../perps/CANONICAL_ENTRYPOINTS.md#order-timing) for the canonical lifecycle tuple and
+[deployment guide](../perps/DEPLOYMENT.md) for activation requirements.
 
-## Zero-close execution helpers
+## Close execution helpers
 
 New stacks require zero execution bounties for ordinary and protection closes. Opens/increases and the protection trigger still have positive configured rewards; carry and trading charges remain. Use `buildOwnerAccountClose` only after verifying the existing smart account's owner/factory/implementation and chain. It wraps the close in owner-authorized account execution and never changes the canonical trader to the owner EOA.
 
 `classifyKeeperHead`, `buildExecuteOrderV3`, `buildExecuteOrderBatchV3`, `buildRiskOffCleanupV3`, `buildTriggerProtection`, `buildRetryProtection` and `quoteExecutionNativeValue` support permissionless execution. Authenticate terminal evidence with the existing V5 receipt helpers. A Pending result or partial batch is not completion. Native gas and oracle fees are still payable, even when the USDC bounty is zero.
 
-See [zero-close operations](../perps/ZERO_CLOSE_OPERATIONS.md) for funding, strict expiry, FIFO blockers, protection retries and deployment limitations. The source-tree `scripts/close-operator.mjs` is an explicit one-shot operator tool, not a production daemon or an automatic retry service. Historical ABIs and receipt layouts remain available; do not apply zero-bounty assumptions to old deployments.
+See [keeper operations](../perps/DEPLOYMENT.md#order-keeper-operations) for funding, strict expiry, FIFO blockers, protection retries and deployment limitations. The source-tree `scripts/close-operator.mjs` is an explicit one-shot operator tool, not a production daemon or an automatic retry service. Historical ABIs and receipt layouts remain available; do not apply zero-bounty assumptions to old deployments.

@@ -38,8 +38,8 @@ interface ISettlementMonitorSidecarVaultView {
 ///      Bindings are constructor-only storage: this non-proxy contract exposes no setter or delegatecall path.
 contract SettlementMonitorLensSidecar {
 
-    uint256 internal constant CONFIG_SCHEMA_VERSION = 5;
-    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V5");
+    uint256 internal constant CONFIG_SCHEMA_VERSION = 6;
+    bytes32 internal constant CONFIG_DOMAIN = keccak256("PLETHER_SETTLEMENT_CONFIG_V6");
     uint256 internal constant STATIC_READ_GAS = 500_000;
     uint256 internal constant MAX_STATIC_WORDS = 16;
 
@@ -159,6 +159,7 @@ contract SettlementMonitorLensSidecar {
                 SettlementMonitorViewTypes.Dependency.PoolAccountingPreview
             );
         } else {
+            accounting.liquidityPreviewAvailable = true;
             accounting.freeUsdc = liquidity[1];
             accounting.withdrawalReservedUsdc = liquidity[2];
             accounting.cachedPreviewTerminalDeficitUsdc = liquidity[8];

@@ -721,18 +721,16 @@ contract PerpEconomicConservationInvariantTest is BasePerpInvariantTest {
         );
         assertEq(
             snapshot.netPhysicalAssetsUsdc,
-            poolAssetsUsdc > protocolSnapshot.protocolTreasuryBalanceUsdc
-                ? poolAssetsUsdc - protocolSnapshot.protocolTreasuryBalanceUsdc
-                : 0,
-            "House-pool snapshot net physical assets must exclude treasury clearinghouse fees"
+            usdc.balanceOf(address(housePool)),
+            "Mock pool backing is its actual token custody, independent of treasury settlement"
         );
         assertEq(
             snapshot.physicalAssetsUsdc, poolAssetsUsdc, "House-pool snapshot physical asset decomposition mismatch"
         );
         assertEq(
             protocolSnapshot.netPhysicalAssetsUsdc,
-            snapshot.netPhysicalAssetsUsdc,
-            "Protocol snapshot net assets mismatch"
+            usdc.balanceOf(address(housePool)),
+            "Protocol backing must match actual mock pool custody, not another lens field"
         );
         assertEq(
             protocolSnapshot.maxLiabilityUsdc, snapshot.maxLiabilityUsdc, "Protocol snapshot max liability mismatch"

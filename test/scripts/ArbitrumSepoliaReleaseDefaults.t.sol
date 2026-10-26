@@ -137,7 +137,16 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
         OrderRouterAdmin routerAdmin,
         EmergencyPauseCoordinator coordinator
     ) external {
-        _activateTrading(housePool, routerAdmin, coordinator, true);
+        _activateTrading(housePool, OrderRouter(address(0)), routerAdmin, coordinator, true);
+    }
+
+    function activateTradingWithRouter(
+        HousePool housePool,
+        OrderRouter router,
+        OrderRouterAdmin routerAdmin,
+        EmergencyPauseCoordinator coordinator
+    ) external {
+        _activateTrading(housePool, router, routerAdmin, coordinator, true);
     }
 
 }
@@ -173,8 +182,56 @@ contract MockWrongRedemptionMathSidecar {
 
 }
 
+contract MockBootstrapEngine {
+
+    uint256 public lastMarkPrice = 1e8;
+
+    function setMarkPrice(
+        uint256 price
+    ) external {
+        lastMarkPrice = price;
+    }
+
+}
+
+contract MockBootstrapOracle {
+
+    function getUpdateFee(
+        bytes[] calldata updateData
+    ) external pure returns (uint256) {
+        require(updateData.length == 1, "expected one Pyth payload");
+        return 7;
+    }
+
+}
+
+contract MockBootstrapRouter {
+
+    MockBootstrapOracle public pletherOracle = new MockBootstrapOracle();
+    MockBootstrapEngine public engine;
+    uint256 public receivedFee;
+    bytes32 public updateDataHash;
+
+    constructor(
+        MockBootstrapEngine engine_
+    ) {
+        engine = engine_;
+    }
+
+    function updateMarkPrice(
+        bytes[] calldata updateData
+    ) external payable {
+        require(msg.value == 7, "wrong Pyth fee");
+        receivedFee += msg.value;
+        updateDataHash = keccak256(abi.encode(updateData));
+        engine.setMarkPrice(160_000_000);
+    }
+
+}
+
 contract MockBootstrapHousePoolAdmin is MockEmergencyAdmin {
 
+    MockBootstrapEngine public ENGINE = new MockBootstrapEngine();
     bool public isTradingActive;
     bool public lpEpochSettlementPaused;
     bool public seniorSeedInitialized = true;
@@ -408,6 +465,11 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         assertEq(protectionBook, address(router.positionProtectionBook()), "Router-created protection book");
         assertEq(router.liquidationBatchSidecar(), address(sidecar), "prebound liquidation sidecar");
         assertNotEq(lifecycleBook.currentExecutionConfigHash(), bytes32(0), "execution config hash");
+
+        vm.mockCall(address(engine), abi.encodeWithSelector(engine.terminalNavBook.selector), abi.encode(address(0)));
+        vm.expectRevert(bytes("Engine terminal NAV book unset"));
+        deployScript.verifyV2OrderStack(engine, clearinghouse, housePool, evaluator, executionSidecar, router);
+        vm.clearMockedCalls();
 
         HousePool wrongEngineHousePool =
             new HousePool(address(usdc), address(0xE11E), address(new HousePoolRedemptionMathSidecar()));
@@ -647,6 +709,46 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
             HousePool(address(housePool)), OrderRouterAdmin(address(routerAdmin)), coordinator
         );
         assertTrue(housePool.lpEpochSettlementPaused(), "bootstrap rerun must not release settlement hold");
+    }
+
+    function test_BootstrapInitializesUnsetMarkBeforeActivationAndOnActiveRerun() public {
+        BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
+        MockEmergencyAdmin routerAdmin = new MockEmergencyAdmin();
+        MockBootstrapHousePoolAdmin housePool = new MockBootstrapHousePoolAdmin();
+        MockBootstrapRouter router = new MockBootstrapRouter(housePool.ENGINE());
+        EmergencyPauseCoordinator coordinator =
+            new EmergencyPauseCoordinator(address(routerAdmin), address(housePool), address(this));
+        routerAdmin.setPauser(address(coordinator));
+        housePool.setPauser(address(coordinator));
+        coordinator.setGuardian(address(0xBEEF));
+
+        bytes[] memory updateData = new bytes[](1);
+        updateData[0] = hex"1234";
+        vm.setEnv("PYTH_UPDATE_DATA", vm.toString(abi.encode(updateData)));
+        vm.deal(address(bootstrapScript), 14);
+
+        housePool.ENGINE().setMarkPrice(0);
+        bootstrapScript.activateTradingWithRouter(
+            HousePool(address(housePool)),
+            OrderRouter(address(router)),
+            OrderRouterAdmin(address(routerAdmin)),
+            coordinator
+        );
+        assertTrue(housePool.isTradingActive());
+        assertEq(housePool.ENGINE().lastMarkPrice(), 160_000_000);
+        assertEq(router.receivedFee(), 7);
+        assertEq(router.updateDataHash(), keccak256(abi.encode(updateData)));
+
+        housePool.ENGINE().setMarkPrice(0);
+        bootstrapScript.activateTradingWithRouter(
+            HousePool(address(housePool)),
+            OrderRouter(address(router)),
+            OrderRouterAdmin(address(routerAdmin)),
+            coordinator
+        );
+        assertTrue(housePool.isTradingActive());
+        assertEq(housePool.ENGINE().lastMarkPrice(), 160_000_000);
+        assertEq(router.receivedFee(), 14);
     }
 
     function test_DeploymentGuardsAcceptCanonicalRequestWindowAcrossCutoffs() public {

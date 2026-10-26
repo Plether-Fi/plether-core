@@ -18,6 +18,28 @@ contract OrderHardeningGasTest is SourceBoundBountyFixture {
         _measureCommit(true);
     }
 
+    function test_Gas_HardeningStaleCommitAtMaxPendingOrders() public {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.maxPendingOrders = 32;
+        _setRouterConfig(config);
+        _fundTrader(BOUNTY_TRADER, 1000e6);
+        vm.prank(address(router));
+        engine.updateMarkPrice(BOUNTY_PRICE, uint64(block.timestamp));
+        vm.warp(block.timestamp + pletherOracle.orderExecutionStalenessLimit() + 1);
+
+        for (uint256 i; i < 31; ++i) {
+            _bountyCommit(BOUNTY_TRADER, CfdTypes.Side.LONG, false, BOUNTY_SIZE, 0);
+        }
+
+        OrderV3Types.OrderRequest memory request = _bountyRequest(CfdTypes.Side.LONG, false, BOUNTY_SIZE, 0);
+        vm.prank(BOUNTY_TRADER);
+        uint256 start = gasleft();
+        router.commitOrder(request);
+        uint256 used = start - gasleft();
+        assertEq(router.pendingOrderCounts(BOUNTY_TRADER), 32);
+        emit log_named_uint("hardening_commit_stale_32_pending", used);
+    }
+
     function _measureCommit(
         bool stale
     ) private {

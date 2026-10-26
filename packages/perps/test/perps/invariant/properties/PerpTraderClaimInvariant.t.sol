@@ -4,7 +4,6 @@ pragma solidity 0.8.35;
 import {BasePerpInvariantTest} from "../BasePerpInvariantTest.sol";
 import {PerpAccountingHandler} from "../handlers/PerpAccountingHandler.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
-import {ClaimEngineViewTypes} from "@plether/perps/interfaces/ClaimEngineViewTypes.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {CashPriorityLib} from "@plether/perps/libraries/CashPriorityLib.sol";
 
@@ -12,11 +11,29 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
 
     PerpAccountingHandler internal handler;
 
+    error ClaimSettlementOutcomeMismatch(address account);
+    error ClaimSettlementCashMismatch(address account);
+
+    struct ClaimCashSnapshot {
+        uint256 claim;
+        uint256 totalClaims;
+        uint256 poolCash;
+        uint256 clearinghouseCash;
+        uint256 settlement;
+    }
+
     function setUp() public override {
         super.setUp();
 
         handler = new PerpAccountingHandler(usdc, engine, clearinghouse, router, housePool);
         handler.seedActors(50_000e6, 100_000e6);
+        // Every campaign begins with two actual deferred claims, so aggregate liquidity differs from own-claim cash.
+        handler.createTraderClaim(0);
+        handler.restoreSolvencyAndClearDegradedMode();
+        handler.setPoolAssets(1_000_000_000e6);
+        handler.createTraderClaim(1);
+        assertGt(engine.traderClaimBalanceUsdc(handler.actorAt(0)), 0, "First seed claim must execute");
+        assertGt(engine.traderClaimBalanceUsdc(handler.actorAt(1)), 0, "Second seed claim must execute");
 
         bytes4[] memory selectors = new bytes4[](8);
         selectors[0] = handler.depositCollateral.selector;
@@ -32,26 +49,111 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
         targetContract(address(handler));
     }
 
-    function _assertInvariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity() internal view {
-        uint256 totalTraderClaimBalanceUsdc;
-        uint256 poolAssets = housePool.totalAssets();
-
-        for (uint256 i = 0; i < handler.actorCount(); i++) {
-            address account = _account(handler.actorAt(i));
-            ClaimEngineViewTypes.TraderClaimStatus memory status = _traderClaimStatus(account, address(handler));
-            uint256 traderClaimBalanceUsdc = engine.traderClaimBalanceUsdc(account);
-
-            assertEq(status.traderClaimBalanceUsdc, traderClaimBalanceUsdc, "Trader claim status amount mismatch");
-            assertEq(
-                status.traderClaimServiceableNow,
-                traderClaimBalanceUsdc > 0 && poolAssets > 0,
-                "Trader claim serviceability mismatch"
-            );
-
-            totalTraderClaimBalanceUsdc += traderClaimBalanceUsdc;
+    /// @dev Probe the real settlement transaction, then restore the campaign state. Flat accounts isolate the cash
+    ///      gate from live-position carry collection. PerpIndependentClaimInvariant covers live claim routing at
+    ///      fixed time; EngineTraderClaims covers accrued-carry settlement. No legacy status struct or production
+    ///      payout helper supplies the answer.
+    function _assertInvariant_FlatClaimsSettleOnlyWhenAllClaimsAreFunded() internal {
+        for (uint256 i; i < handler.actorCount(); ++i) {
+            address account = handler.actorAt(i);
+            (uint256 size,,,,,,) = engine.positions(account);
+            if (size != 0) {
+                continue;
+            }
+            _checkFlatClaimSettlement(account);
         }
+    }
 
-        assertEq(totalTraderClaimBalanceUsdc, engine.totalTraderClaimBalanceUsdc(), "Total trader claim mismatch");
+    function _checkFlatClaimSettlement(
+        address account
+    ) internal {
+        ClaimCashSnapshot memory before = ClaimCashSnapshot({
+            claim: engine.traderClaimBalanceUsdc(account),
+            totalClaims: engine.totalTraderClaimBalanceUsdc(),
+            poolCash: usdc.balanceOf(address(housePool)),
+            clearinghouseCash: usdc.balanceOf(address(clearinghouse)),
+            settlement: clearinghouse.balanceUsdc(account)
+        });
+        bool shouldSettle = before.claim > 0 && before.poolCash >= before.totalClaims;
+        uint256 snapshot = vm.snapshotState();
+        vm.prank(account);
+        (bool settled, bytes memory reason) = address(engine).call(abi.encodeCall(engine.settleTraderClaim, (account)));
+        bool outcomeMatches = settled == shouldSettle;
+        bool cashMatches;
+        if (settled && shouldSettle) {
+            cashMatches = engine.traderClaimBalanceUsdc(account) == 0
+                && engine.totalTraderClaimBalanceUsdc() == before.totalClaims - before.claim
+                && clearinghouse.balanceUsdc(account) == before.settlement + before.claim
+                && usdc.balanceOf(address(clearinghouse)) == before.clearinghouseCash + before.claim
+                && usdc.balanceOf(address(housePool)) == before.poolCash - before.claim;
+        } else if (!settled) {
+            bytes4 expectedError = before.claim == 0
+                ? ICfdEngineTypes.CfdEngine__NoTraderClaim.selector
+                : ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector;
+            outcomeMatches = outcomeMatches && keccak256(reason) == keccak256(abi.encodeWithSelector(expectedError));
+            cashMatches = engine.traderClaimBalanceUsdc(account) == before.claim
+                && engine.totalTraderClaimBalanceUsdc() == before.totalClaims
+                && clearinghouse.balanceUsdc(account) == before.settlement
+                && usdc.balanceOf(address(clearinghouse)) == before.clearinghouseCash
+                && usdc.balanceOf(address(housePool)) == before.poolCash;
+        }
+        // Restore even a faulty successful transaction before reporting failure; expectations stay in memory.
+        assertTrue(vm.revertToStateAndDelete(snapshot), "Claim probe must restore the campaign");
+        if (!outcomeMatches) {
+            revert ClaimSettlementOutcomeMismatch(account);
+        }
+        if (!cashMatches) {
+            revert ClaimSettlementCashMismatch(account);
+        }
+    }
+
+    function test_ClaimSettlementProbeCoversAggregateLiquidityBoundariesWithoutChangingState() public {
+        address account = handler.actorAt(0);
+        uint256 claim = engine.traderClaimBalanceUsdc(account);
+        uint256 total = engine.totalTraderClaimBalanceUsdc();
+        assertGt(total, claim, "Own-claim liquidity must differ from aggregate liquidity");
+        uint256[5] memory cashLevels = [uint256(0), claim, total - 1, total, total + 1];
+        for (uint256 i; i < cashLevels.length; ++i) {
+            handler.setPoolAssets(cashLevels[i]);
+            _assertAllInvariants();
+            assertEq(usdc.balanceOf(address(housePool)), cashLevels[i], "Probe must restore pool custody");
+            assertEq(engine.traderClaimBalanceUsdc(account), claim, "Probe must restore account claim");
+            assertEq(engine.totalTraderClaimBalanceUsdc(), total, "Probe must restore aggregate claims");
+        }
+    }
+
+    function test_ClaimInvariantDetectsSuccessDuringAggregateShortfall() public {
+        address account = handler.actorAt(0);
+        handler.setPoolAssets(engine.traderClaimBalanceUsdc(account));
+        vm.mockCall(address(engine), abi.encodeCall(engine.settleTraderClaim, (account)), bytes(""));
+        vm.expectRevert(abi.encodeWithSelector(ClaimSettlementOutcomeMismatch.selector, account));
+        this.invariant_ObservedClaimsAndLiquidityGatingReconcile();
+        vm.clearMockedCalls();
+        _assertAllInvariants();
+    }
+
+    function test_ClaimInvariantDetectsRejectionDespiteFullFunding() public {
+        address account = handler.actorAt(0);
+        handler.setPoolAssets(engine.totalTraderClaimBalanceUsdc());
+        vm.mockCallRevert(
+            address(engine),
+            abi.encodeCall(engine.settleTraderClaim, (account)),
+            abi.encodeWithSelector(ICfdEngineTypes.CfdEngine__InsufficientPoolLiquidity.selector)
+        );
+        vm.expectRevert(abi.encodeWithSelector(ClaimSettlementOutcomeMismatch.selector, account));
+        this.invariant_ObservedClaimsAndLiquidityGatingReconcile();
+        vm.clearMockedCalls();
+        _assertAllInvariants();
+    }
+
+    function test_ClaimInvariantDetectsSuccessfulNoOpSettlement() public {
+        address account = handler.actorAt(0);
+        handler.setPoolAssets(engine.totalTraderClaimBalanceUsdc());
+        vm.mockCall(address(engine), abi.encodeCall(engine.settleTraderClaim, (account)), bytes(""));
+        vm.expectRevert(abi.encodeWithSelector(ClaimSettlementCashMismatch.selector, account));
+        this.invariant_ObservedClaimsAndLiquidityGatingReconcile();
+        vm.clearMockedCalls();
+        _assertAllInvariants();
     }
 
     function _assertInvariant_ObservedClaimsReconcileAcrossTrackedAccounts() internal view {
@@ -171,12 +273,12 @@ contract PerpTraderClaimInvariantTest is BasePerpInvariantTest {
     /// forge-config: quick.invariant.fail-on-revert = true
     /// forge-config: ci.invariant.fail-on-revert = true
     /// forge-config: audit.invariant.fail-on-revert = true
-    function invariant_ObservedClaimsAndLiquidityGatingReconcile() public view {
+    function invariant_ObservedClaimsAndLiquidityGatingReconcile() public {
         _assertAllInvariants();
     }
 
-    function _assertAllInvariants() internal view {
-        _assertInvariant_TraderClaimStatusMatchesEngineAndHousePoolLiquidity();
+    function _assertAllInvariants() internal {
+        _assertInvariant_FlatClaimsSettleOnlyWhenAllClaimsAreFunded();
         _assertInvariant_ObservedClaimsReconcileAcrossTrackedAccounts();
         _assertInvariant_FullClosePreviewUsesAllOrNothingHousePoolLiquidityGating();
         _assertInvariant_LiquidationPreviewUsesAllOrNothingHousePoolLiquidityGating();

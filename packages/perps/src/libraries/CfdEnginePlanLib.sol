@@ -428,7 +428,7 @@ library CfdEnginePlanLib {
         }
         if (
             postOpenRiskState.liquidatable
-                || postOpenRiskState.equityUsdc < int256(openState.initialMarginRequirementUsdc)
+                || postOpenRiskState.equityUsdc <= int256(openState.initialMarginRequirementUsdc)
         ) {
             delta.revertCode = CfdEnginePlanTypes.OpenRevertCode.INSUFFICIENT_INITIAL_MARGIN;
             return delta;
@@ -686,9 +686,9 @@ library CfdEnginePlanLib {
 
     /// @notice Applies the effective-asset requirement when a planned open preserves protected settlement headroom.
     /// @dev The selected side copies are increased by the delta. Current assets use `snap.poolCashUsdc`; the physical
-    ///      asset delta is trade cost net of execution fee, so only VPI enters pool assets. Trader claims and pending
-    ///      payouts are unchanged. The protected buffer is liability-scaled and rounded up. This helper writes the
-    ///      required effective-asset target into `delta` on success and mutates memory side aliases while projecting.
+    ///      asset delta reflects the fee actually credited from trade cost and affordable post-open pool cash. Trader
+    ///      claims and pending payouts are unchanged. The protected buffer is liability-scaled and rounded up. This
+    ///      helper writes the required effective-asset target into `delta` on success.
     /// @param snap Current pool, claim, degradation, and side-liability snapshot.
     /// @param delta Partially built open delta with side and economic changes.
     /// @return satisfied Whether projected effective assets cover liability and the configured settlement buffer.
@@ -696,21 +696,54 @@ library CfdEnginePlanLib {
         CfdEnginePlanTypes.RawSnapshot memory snap,
         CfdEnginePlanTypes.OpenDelta memory delta
     ) private pure returns (bool satisfied) {
-        CfdEnginePlanTypes.SideSnapshot memory long = snap.longSide;
-        CfdEnginePlanTypes.SideSnapshot memory short = snap.shortSide;
-        if (delta.posSide == CfdTypes.Side.LONG) {
-            long.openInterest += delta.sideOiIncrease;
-            long.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            long.totalMargin = delta.sideTotalMarginAfterOpen;
-        } else {
-            short.openInterest += delta.sideOiIncrease;
-            short.maxProfitUsdc += delta.sideMaxProfitIncrease;
-            short.totalMargin = delta.sideTotalMarginAfterOpen;
+        uint256 postMaxLiability;
+        {
+            CfdEnginePlanTypes.SideSnapshot memory long = snap.longSide;
+            CfdEnginePlanTypes.SideSnapshot memory short = snap.shortSide;
+            if (delta.posSide == CfdTypes.Side.LONG) {
+                long.openInterest += delta.sideOiIncrease;
+                long.maxProfitUsdc += delta.sideMaxProfitIncrease;
+                long.totalMargin = delta.sideTotalMarginAfterOpen;
+            } else {
+                short.openInterest += delta.sideOiIncrease;
+                short.maxProfitUsdc += delta.sideMaxProfitIncrease;
+                short.totalMargin = delta.sideTotalMarginAfterOpen;
+            }
+            postMaxLiability = SolvencyAccountingLib.getMaxLiability(long.maxProfitUsdc, short.maxProfitUsdc);
         }
 
-        uint256 postMaxLiability = SolvencyAccountingLib.getMaxLiability(long.maxProfitUsdc, short.maxProfitUsdc);
-
-        int256 physicalAssetsDeltaUsdc = delta.tradeCostUsdc - int256(delta.executionFeeUsdc);
+        uint256 directlyCreditedUsdc =
+            delta.tradeCostUsdc > 0 ? Math.min(uint256(delta.tradeCostUsdc), delta.executionFeeUsdc) : 0;
+        int256 cashDeltaBeforeTopUp = delta.tradeCostUsdc - int256(directlyCreditedUsdc);
+        uint256 poolCashBeforeTopUp;
+        if (cashDeltaBeforeTopUp >= 0) {
+            (bool fits, uint256 cash) = Math.tryAdd(snap.poolCashUsdc, uint256(cashDeltaBeforeTopUp));
+            if (!fits) {
+                return false;
+            }
+            poolCashBeforeTopUp = cash;
+        } else {
+            uint256 rebateUsdc = uint256(-cashDeltaBeforeTopUp);
+            if (rebateUsdc > snap.poolCashUsdc) {
+                return false;
+            }
+            poolCashBeforeTopUp = snap.poolCashUsdc - rebateUsdc;
+        }
+        uint256 newRevenueReserveUsdc =
+            snap.poolQueuesTradingRevenue && cashDeltaBeforeTopUp > 0 ? uint256(cashDeltaBeforeTopUp) : 0;
+        uint256 feeShortfallUsdc = delta.executionFeeUsdc - directlyCreditedUsdc;
+        uint256 topUpUsdc = feeShortfallUsdc == 0
+            ? 0
+            : Math.min(
+                feeShortfallUsdc,
+                _freePoolCashAfterLiabilityReserves(
+                    snap, poolCashBeforeTopUp, postMaxLiability, snap.totalTraderClaimBalanceUsdc, newRevenueReserveUsdc
+                )
+            );
+        if (cashDeltaBeforeTopUp < type(int256).min + int256(topUpUsdc)) {
+            return false;
+        }
+        int256 physicalAssetsDeltaUsdc = cashDeltaBeforeTopUp - int256(topUpUsdc);
 
         SolvencyAccountingLib.SolvencyState memory currentState = SolvencyAccountingLib.buildSolvencyState(
             snap.poolCashUsdc,
@@ -963,16 +996,30 @@ library CfdEnginePlanLib {
         uint256 maxLiabilityUsdc = SolvencyAccountingLib.getMaxLiabilityAfterClose(
             snap.longSide.maxProfitUsdc, snap.shortSide.maxProfitUsdc, delta.side, delta.posMaxProfitReduction
         );
-        uint256 reservedUsdc = maxLiabilityUsdc + traderClaimsUsdc
-            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, snap.settlementBufferBps)
-            + snap.poolAdditionalReservedUsdc;
+        uint256 newRevenueReserveUsdc;
         if (snap.poolQueuesTradingRevenue) {
             uint256 cashArrivedRevenueUsdc = delta.pricePnlPledgeConsumedUsdc + delta.actionChargeCollectedUsdc
                 - delta.actionProtocolFeeCreditedUsdc;
             uint256 retainedRevenueUsdc =
                 delta.actionChargeWithheldUsdc - (delta.executionFeeUsdc - delta.actionProtocolFeeCreditedUsdc);
-            reservedUsdc += cashArrivedRevenueUsdc + retainedRevenueUsdc;
+            newRevenueReserveUsdc = cashArrivedRevenueUsdc + retainedRevenueUsdc;
         }
+        return _freePoolCashAfterLiabilityReserves(
+            snap, poolCashUsdc, maxLiabilityUsdc, traderClaimsUsdc, newRevenueReserveUsdc
+        );
+    }
+
+    /// @dev Matches HousePool's settlement-free cash reserve after a projected side update and queued revenue.
+    function _freePoolCashAfterLiabilityReserves(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 poolCashUsdc,
+        uint256 maxLiabilityUsdc,
+        uint256 traderClaimsUsdc,
+        uint256 newRevenueReserveUsdc
+    ) private pure returns (uint256) {
+        uint256 reservedUsdc = maxLiabilityUsdc + traderClaimsUsdc
+            + SolvencyAccountingLib.settlementBufferTargetUsdc(maxLiabilityUsdc, snap.settlementBufferBps)
+            + snap.poolAdditionalReservedUsdc + newRevenueReserveUsdc;
         return poolCashUsdc > reservedUsdc ? poolCashUsdc - reservedUsdc : 0;
     }
 

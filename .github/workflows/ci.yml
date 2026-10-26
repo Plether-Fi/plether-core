@@ -41,7 +41,7 @@ jobs:
         run: forge build --sizes --skip test
 
       - name: Run integration and script tests
-        run: forge test --no-match-path "test/fork/*"
+        run: forge test --threads 1 --no-match-path "test/fork/*"
 
   package-test:
     name: Package (${{ matrix.package }})

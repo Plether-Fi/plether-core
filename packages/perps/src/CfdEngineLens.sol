@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineOpenQuoter} from "@plether/perps/CfdEngineOpenQuoter.sol";
@@ -12,7 +13,19 @@ import {ICfdEngineRiskParamsView} from "@plether/perps/interfaces/ICfdEngineRisk
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterEmergencyAdmin} from "@plether/perps/interfaces/IOrderRouterEmergencyAdmin.sol";
+import {IPositionProtectionViews} from "@plether/perps/interfaces/IPositionProtectionViews.sol";
+import {PositionProtectionTypes} from "@plether/perps/interfaces/PositionProtectionTypes.sol";
 import {PositionRiskAccountingLib} from "@plether/perps/libraries/PositionRiskAccountingLib.sol";
+
+/// @dev Minimal canonical Router binding used by the refund-aware liquidation preview.
+interface ILiquidationPreviewRouter is IOrderRouterAccounting {
+
+    function admin() external view returns (address);
+    function positionProtectionBook() external view returns (address);
+
+}
 
 /// @title CfdEngineLens
 /// @notice Permissionless open, close, and liquidation planning diagnostics for one CFD engine.
@@ -180,7 +193,8 @@ contract CfdEngineLens is ICfdEngineLens {
     ///      bounty reserve before planning, matching terminal liquidation reachability. It performs no oracle freshness,
     ///      publish-time, or router authorization validation. An account without a position returns a nonliquidatable
     ///      preview with only the capped oracle price populated. An underfunded negative-VPI reserve makes planning
-    ///      revert instead of returning a liquidatable preview.
+    ///      revert instead of returning a liquidatable preview. This kernel preview omits risk-off refunds;
+    ///      use previewRouterLiquidation to model the Router's preceding queue cleanup.
     /// @param account Account whose current position is tested and hypothetically liquidated.
     /// @param oraclePrice Candidate liquidation price, with 8 decimals.
     /// @return preview Liquidation eligibility, P+C equity, charge split, settlement, claims, and projected solvency.
@@ -189,6 +203,22 @@ contract CfdEngineLens is ICfdEngineLens {
         uint256 oraclePrice
     ) external view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
         preview = _previewLiquidation(account, oraclePrice, engineContract.pool().totalAssets());
+    }
+
+    /// @inheritdoc ICfdEngineLens
+    function previewRouterLiquidation(
+        address account,
+        uint256 oraclePrice
+    ) external view returns (RouterLiquidationPreview memory preview) {
+        if (_position(account).size == 0) {
+            preview.liquidation.oraclePrice =
+                oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
+            return preview;
+        }
+        CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, engineContract.pool().totalAssets());
+        _applyRouterRiskOffRefunds(snap, preview);
+        _applyLiquidationPreviewForfeiture(snap);
+        preview.liquidation = _liquidationPreviewFromSnapshot(snap, oraclePrice);
     }
 
     /// @notice Simulates full liquidation with caller-supplied hypothetical pool accounting depth and cash.
@@ -266,6 +296,15 @@ contract CfdEngineLens is ICfdEngineLens {
         }
         preview.postVpiAccrued = snap.position.vpiAccrued + delta.posVpiAccruedDelta;
         if (!delta.valid) {
+            // Early failures may have no open economics. Only correct a constructed position's requirement;
+            // do not turn an uncomputed diagnostic into an apparently complete preview.
+            if (delta.openState.newSize != 0) {
+                preview.maintenanceMarginUsdc = Math.mulDiv(
+                    delta.openState.newSize / CfdTypes.SIZE_QUANTUM * price,
+                    snap.isFadWindow ? snap.riskParams.fadMarginBps : snap.riskParams.maintMarginBps,
+                    10_000
+                );
+            }
             return preview;
         }
 
@@ -388,9 +427,18 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
         preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
         preview.existingTraderClaimRemainingUsdc = delta.existingTraderClaimRemainingUsdc;
-        preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.traderClaimBalanceUsdc =
-            delta.existingTraderClaimRemainingUsdc + (delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0);
+        // Mirror settlement routing: partial-close price cash stays pledged; action rebates are always free.
+        preview.payoutToFreeSettlementUsdc = delta.actionRebatePaidUsdc;
+        if (delta.pricePayoutIsImmediate) {
+            if (delta.deletePosition) {
+                preview.payoutToFreeSettlementUsdc += delta.pricePayoutUsdc;
+            } else {
+                preview.payoutToPnlPledgeUsdc = delta.pricePayoutUsdc;
+            }
+        }
+        preview.deferredPayoutUsdc = delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0;
+        preview.immediatePayoutUsdc = preview.payoutToPnlPledgeUsdc + preview.payoutToFreeSettlementUsdc;
+        preview.traderClaimBalanceUsdc = delta.existingTraderClaimRemainingUsdc + preview.deferredPayoutUsdc;
         preview.seizedCollateralUsdc = delta.pricePnlPledgeConsumedUsdc;
 
         preview.valid = delta.valid;
@@ -559,14 +607,21 @@ contract CfdEngineLens is ICfdEngineLens {
     ) internal view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
         uint256 price = oraclePrice > engineContract.CAP_PRICE() ? engineContract.CAP_PRICE() : oraclePrice;
         preview.oraclePrice = price;
-        ICfdEnginePlanner planner = engineContract.planner();
         if (_position(account).size == 0) {
             return preview;
         }
 
         CfdEnginePlanTypes.RawSnapshot memory snap = _buildRawSnapshot(account, poolDepthUsdc);
         _applyLiquidationPreviewForfeiture(snap);
-        CfdEnginePlanTypes.LiquidationDelta memory delta = planner.planLiquidation(snap, oraclePrice);
+        return _liquidationPreviewFromSnapshot(snap, oraclePrice);
+    }
+
+    function _liquidationPreviewFromSnapshot(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        uint256 oraclePrice
+    ) internal view returns (ICfdEngineTypes.LiquidationPreview memory preview) {
+        preview.oraclePrice = oraclePrice > snap.capPrice ? snap.capPrice : oraclePrice;
+        CfdEnginePlanTypes.LiquidationDelta memory delta = engineContract.planner().planLiquidation(snap, oraclePrice);
 
         preview.liquidatable = delta.liquidatable;
         preview.reachableCollateralUsdc = delta.liquidationReachableCollateralUsdc;
@@ -590,6 +645,59 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.postOpDegradedMode = delta.solvency.postOpDegradedMode;
         preview.effectiveAssetsAfterUsdc = delta.solvency.effectiveAssetsAfterUsdc;
         preview.maxLiabilityAfterUsdc = delta.solvency.maxLiabilityAfterUsdc;
+    }
+
+    /// @dev Mirrors only the custody reclassification performed by releaseInvalidatedOrderReserves. It neither
+    ///      transfers USDC nor checkpoints carry; the subsequent planner sees newly free settlement for carry payment.
+    function _applyRouterRiskOffRefunds(
+        CfdEnginePlanTypes.RawSnapshot memory snap,
+        RouterLiquidationPreview memory preview
+    ) internal view {
+        ILiquidationPreviewRouter router = ILiquidationPreviewRouter(engineContract.orderRouter());
+        preview.riskOffCutoff = IOrderRouterEmergencyAdmin(router.admin()).riskOffOrderCutoff();
+        if (preview.riskOffCutoff == 0) {
+            return;
+        }
+        IPositionProtectionViews protectionBook = IPositionProtectionViews(router.positionProtectionBook());
+        uint64 protectionId = protectionBook.activePositionProtectionId(snap.account);
+        PositionProtectionTypes.PositionProtectionView memory protection;
+        if (protectionId != 0) {
+            protection = protectionBook.getPositionProtection(protectionId);
+        }
+        uint256 remaining = router.pendingOrderCounts(snap.account);
+        for (uint64 orderId = router.accountHeadOrderId(snap.account); orderId != 0;) {
+            if (remaining == 0) {
+                revert CfdEngineLens__InvalidRouterQueue();
+            }
+            --remaining;
+            (IOrderRouterAccounting.PendingOrderView memory pending, uint64 next) = router.getPendingOrderView(orderId);
+            if (!pending.isClose && orderId <= preview.riskOffCutoff) {
+                ++preview.refundedOrderCount;
+                preview.releasedCommittedMarginUsdc += pending.committedMarginUsdc;
+                preview.releasedBountyUsdc += pending.executionBountyUsdc;
+                if (
+                    protection.status == PositionProtectionTypes.PositionProtectionStatus.PendingOpen
+                        && protection.parentOrderId == orderId && protection.account == snap.account
+                ) {
+                    preview.releasedBountyUsdc += IMarginClearinghouse(engineContract.clearinghouse())
+                    .getBountyReservation(IMarginClearinghouse.BountyKind.ProtectionTrigger, protectionId)
+                    .amountUsdc;
+                }
+            }
+            orderId = next;
+        }
+        uint256 released = preview.releasedCommittedMarginUsdc + preview.releasedBountyUsdc;
+        snap.lockedBuckets.committedOrderMarginUsdc -= preview.releasedCommittedMarginUsdc;
+        snap.lockedBuckets.reservedSettlementUsdc -= preview.releasedBountyUsdc;
+        snap.lockedBuckets.totalLockedMarginUsdc -= released;
+        snap.actionReserveUsdc -= preview.releasedBountyUsdc;
+        snap.protectedExecutionBountyUsdc -= preview.releasedBountyUsdc;
+        snap.accountBuckets.otherLockedMarginUsdc -= released;
+        snap.accountBuckets.totalLockedMarginUsdc -= released;
+        snap.accountBuckets.freeSettlementUsdc = snap.accountBuckets.settlementBalanceUsdc
+            > snap.accountBuckets.totalLockedMarginUsdc
+            ? snap.accountBuckets.settlementBalanceUsdc - snap.accountBuckets.totalLockedMarginUsdc
+            : 0;
     }
 
     /// @notice Reconstructs planner input from engine and clearinghouse state plus hypothetical pool depth.

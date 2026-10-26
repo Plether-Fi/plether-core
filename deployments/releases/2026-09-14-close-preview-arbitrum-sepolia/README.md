@@ -13,7 +13,7 @@ Deployed and source-verified on 2026-09-14 alongside the existing perps v1.2.3 s
 ## Frontend packet
 
 Use [manifest.json](manifest.json) as the supplemental deployment pin and [CfdClosePreview.abi.json](CfdClosePreview.abi.json) for bindings. ABI file SHA-256: `2964608dd3ba3001f86276260a47f233c54cde17218205153bf0725e17d8274c`.
-Follow the [frontend handoff](../../../packages/perps/CLOSE_PREVIEW_FRONTEND_HANDOFF.md). The deployed frontend has not been switched by this deployment operation.
+Follow the [historical frontend handoff](https://github.com/Plether-Fi/plether-core/blob/fe00a5f9be09997db7a93405f798d76392af8c7f/packages/perps/CLOSE_PREVIEW_FRONTEND_HANDOFF.md). The deployed frontend has not been switched by this deployment operation.
 
 The existing v1.2.3 engine, router and execution evaluator retain their original bindings. This transaction only created the stateless preview; it transferred no ETH value and made no protocol configuration change. The historical v1.2.3 manifest is unchanged.
 

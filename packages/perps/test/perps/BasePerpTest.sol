@@ -611,6 +611,11 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
             "Close trader claim remainder should match"
         );
         assertEq(actual.immediatePayoutUsdc, expected.immediatePayoutUsdc, "Close immediate payout should match");
+        assertEq(actual.payoutToPnlPledgeUsdc, expected.payoutToPnlPledgeUsdc, "Close pledged payout should match");
+        assertEq(
+            actual.payoutToFreeSettlementUsdc, expected.payoutToFreeSettlementUsdc, "Close free payout should match"
+        );
+        assertEq(actual.deferredPayoutUsdc, expected.deferredPayoutUsdc, "Close deferred payout should match");
         assertEq(actual.traderClaimBalanceUsdc, expected.traderClaimBalanceUsdc, "Close trader claim should match");
         assertEq(actual.seizedCollateralUsdc, expected.seizedCollateralUsdc, "Close seized collateral should match");
         assertEq(actual.remainingSize, expected.remainingSize, "Close remaining size should match");

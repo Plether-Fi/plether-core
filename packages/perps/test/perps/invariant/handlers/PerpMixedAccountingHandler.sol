@@ -2059,7 +2059,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
             return 0;
         }
         uint256 queuedLots = orders.queuedLots(i, traders[i].lots, riskOffCutoff);
-        bool belowMinimum = isClose ? lots < queuedLots && lots * currentPrice < 1000e6 : lots * currentPrice < 100e6;
+        bool belowMinimum = lots * currentPrice < router.minOpenNotionalUsdc() && (!isClose || lots < queuedLots);
         if (belowMinimum) {
             vm.prank(actorAt(i));
             vm.expectRevert(
@@ -2310,23 +2310,12 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         address executor,
         bytes[] memory data
     ) internal {
-        uint256 lastValid = uint256(o.commitTime) + 15;
-        if (lastValid > vm.getBlockTimestamp()) {
-            lastValid = vm.getBlockTimestamp();
-        }
         bytes32 beforeState = _economicFingerprint(o.actorIndex);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IPletherOracle.PletherOracle__StalePrice.selector,
-                IPletherOracle.PriceMode.OrderExecution,
-                bytes32(0),
-                lastValid,
-                uint256(60),
-                vm.getBlockTimestamp()
-            )
-        );
         vm.prank(executor);
-        router.executeOrder{value: 1}(o.id, data);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder{value: 1}(o.id, data);
+        assertEq(result.orderId, o.id);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.HistoricalPriceUnavailable));
         assertEq(_economicFingerprint(o.actorIndex), beforeState, "unavailable history preserves economic state");
         ++historicalPriceRejections;
     }
@@ -2699,21 +2688,7 @@ contract PerpMixedAccountingHandler is RecordedOrderReceipts {
         pyth.setAllUniquePrices(ids, int64(int256(currentPrice)), 0, -8, o.commitTime, o.commitTime - 1);
         bytes[] memory data = new bytes[](1);
         data[0] = abi.encode(currentPrice);
-        uint256 lastValid = uint256(o.commitTime) + 15;
-        if (lastValid > vm.getBlockTimestamp()) {
-            lastValid = vm.getBlockTimestamp();
-        }
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IPletherOracle.PletherOracle__StalePrice.selector,
-                IPletherOracle.PriceMode.OrderExecution,
-                bytes32(0),
-                lastValid,
-                uint256(60),
-                vm.getBlockTimestamp()
-            )
-        );
-        router.executeOrder{value: 1}(o.id, data);
+        _expectMissingHistoricalPrice(o, address(this), data);
         ++pendingMevRejections;
         assertModel();
     }

@@ -8,7 +8,8 @@ library ProtocolLensViewTypes {
     /// @notice Conservative protocol accounting and solvency snapshot.
     /// @dev All monetary fields use USDC's 6 decimals.
     /// @param poolAssetsUsdc Canonical physical assets recognized by the HousePool.
-    /// @param netPhysicalAssetsUsdc Pool assets net of protocol-treasury settlement credited in custody.
+    /// @param netPhysicalAssetsUsdc Canonical pool assets, equal to poolAssetsUsdc. Treasury settlement is held
+    ///        separately in the clearinghouse and must not be subtracted again; trader claims are also separate.
     /// @param maxLiabilityUsdc Larger of the long-side and short-side maximum-profit envelopes.
     /// @param effectiveSolvencyAssetsUsdc Pool assets after aggregate trader claims, floored at zero.
     /// @param withdrawalReservedUsdc Maximum position liability, aggregate trader claims, and settlement buffer.

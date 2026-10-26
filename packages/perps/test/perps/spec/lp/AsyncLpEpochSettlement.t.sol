@@ -75,6 +75,37 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
         _assertAsyncInterfaces(juniorVault);
     }
 
+    function test_ZeroControllerHasNoDepositRequestCapacity() public {
+        assertGt(seniorVault.maxRequestDeposit(ALICE), 0, "senior admission must otherwise be available");
+        assertGt(juniorVault.maxRequestDeposit(ALICE), 0, "junior admission must otherwise be available");
+        assertEq(seniorVault.maxRequestDeposit(address(0)), 0);
+        assertEq(juniorVault.maxRequestDeposit(address(0)), 0);
+
+        uint256 amount = pool.minTrancheDepositUsdc();
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        seniorVault.requestDeposit(amount, address(0), ALICE);
+        vm.expectRevert(TrancheVault.TrancheVault__ZeroAddress.selector);
+        juniorVault.requestDeposit(amount, address(0), ALICE);
+    }
+
+    function test_PublicInterfaceRedeemCancellationWrapperReturnsCallerShares() public {
+        uint256 depositId = _requestDeposit(juniorVault, ALICE, 100e6);
+        _settleAt(depositId);
+        uint256 shares = _claimAllDeposit(juniorVault, depositId, ALICE);
+        _finishCooldown(juniorVault, ALICE);
+        uint256 requestId = _requestRedeem(juniorVault, ALICE, shares, ALICE, ALICE);
+        assertEq(juniorVault.balanceOf(ALICE), 0);
+
+        vm.prank(ALICE);
+        assertEq(_async(juniorVault).cancelRedeemRequest(requestId, ALICE), shares);
+
+        assertEq(juniorVault.balanceOf(ALICE), shares);
+        assertEq(juniorVault.pendingRedeemEscrowShares(), 0);
+        assertEq(juniorVault.pendingRedeemRequest(requestId, ALICE), 0);
+        assertEq(juniorVault.controllerRedeemHead(ALICE), 0);
+        assertEq(juniorVault.lastDepositTime(ALICE), block.timestamp);
+    }
+
     function test_EpochCompatibilityViewsMatchPool() public view {
         uint256 currentEpoch = pool.currentLpEpoch();
         assertEq(juniorVault.currentLpEpoch(), currentEpoch);
@@ -954,6 +985,8 @@ contract AsyncLpEpochSettlementTest is BasePerpTest {
             asyncVault.supportsInterface(type(IAsyncTrancheVault).interfaceId),
             "custom async vault interface must be advertised"
         );
+        assertEq(type(IAsyncTrancheVault).interfaceId, bytes4(0xa4fc3325), "updated custom interface id must be stable");
+        assertTrue(asyncVault.supportsInterface(0x8f61af3a), "previous custom interface id must remain supported");
         assertFalse(asyncVault.supportsInterface(0xffffffff), "unknown interface ids must be rejected");
     }
 

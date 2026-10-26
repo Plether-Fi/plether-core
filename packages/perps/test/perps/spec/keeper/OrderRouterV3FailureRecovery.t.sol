@@ -3,6 +3,7 @@ pragma solidity 0.8.35;
 
 import {BasePerpTest} from "../../BasePerpTest.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
+import {OrderRecoverySidecar} from "@plether/perps/OrderRecoverySidecar.sol";
 import {OrderRouterExecutionSidecar} from "@plether/perps/OrderRouterExecutionSidecar.sol";
 import {OrderV3Types} from "@plether/perps/OrderV3Types.sol";
 import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
@@ -124,9 +125,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
         input = _riskOffInput();
         input.bountyUsdc++;
         vm.expectRevert(
-            abi.encodeWithSelector(
-                OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__OrderIdentityMismatch.selector, orderId
-            )
+            abi.encodeWithSelector(OrderRecoverySidecar.OrderRecoverySidecar__OrderIdentityMismatch.selector, orderId)
         );
         vm.prank(address(router));
         router.recordSettledTerminal(input);
@@ -230,7 +229,7 @@ contract OrderRouterV3FailureRecoveryTest is BasePerpTest {
     function _expectInvalidReceipt(
         IOrderRouterExecutionHost.SettledTerminalInput memory input
     ) internal {
-        vm.expectRevert(OrderRouterExecutionSidecar.OrderRouterExecutionSidecar__InvalidSettledReason.selector);
+        vm.expectRevert(OrderRecoverySidecar.OrderRecoverySidecar__InvalidSettledReason.selector);
         vm.prank(address(router));
         router.recordSettledTerminal(input);
     }

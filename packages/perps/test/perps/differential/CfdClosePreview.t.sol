@@ -9,6 +9,8 @@ import {ICfdEngineLens} from "@plether/perps/interfaces/ICfdEngineLens.sol";
 import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {ICfdOrderPolicyEvaluator} from "@plether/perps/interfaces/ICfdOrderPolicyEvaluator.sol";
 import {IMarginClearinghouse} from "@plether/perps/interfaces/IMarginClearinghouse.sol";
+import {IOrderLifecycleBook} from "@plether/perps/interfaces/IOrderLifecycleBook.sol";
+import {IOrderRouterAdminHost} from "@plether/perps/interfaces/IOrderRouterAdminHost.sol";
 import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 
 import {CfdClosePreviewTestBase} from "../CfdClosePreviewTestBase.sol";
@@ -224,6 +226,14 @@ contract CfdClosePreviewTest is CfdClosePreviewTestFixture {
 
 contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
 
+    function _setCloseFloor(
+        uint256 minimumUsdc
+    ) private {
+        IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
+        config.minOpenNotionalUsdc = minimumUsdc;
+        _setRouterConfig(config);
+    }
+
     function test_WrongSideMatchesRouterCommitError() public {
         _openNormally(CfdTypes.Side.LONG, 20e6);
         CfdTypes.Order memory o = _order(CfdTypes.Side.SHORT, SIZE);
@@ -238,6 +248,7 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
     }
 
     function test_PartialCloseDustBoundaryMatchesRouterCommit() public {
+        _setCloseFloor(1000e6);
         _openNormally(CfdTypes.Side.LONG, 20e6);
         vm.warp(uint256(engine.lastMarkTime()) + 1);
         vm.prank(address(router));
@@ -254,14 +265,15 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         _commitParity(o, 101_000_000, KEEPER);
     }
 
-    function test_DustChecksUseFallbackAndCappedMarkEvenWithZeroBounty() public {
+    function test_DustChecksRejectMissingMarkAndUseCappedMarkEvenWithZeroBounty() public {
+        _setCloseFloor(1000e6);
         _openNormally(CfdTypes.Side.LONG, 20e6);
         CfdTypes.Order memory o = _order(CfdTypes.Side.LONG, 9 * CfdTypes.SIZE_QUANTUM);
         bytes memory err = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
         vm.mockCall(address(engine), abi.encodeWithSignature("lastMarkPrice()"), abi.encode(uint256(0)));
-        vm.expectRevert(err);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MarkPriceUnavailable.selector);
         previewer.previewClose(address(engine), o, KEEPER, PRICE, _bounds());
-        vm.expectRevert(err);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__MarkPriceUnavailable.selector);
         vm.prank(ACCOUNT);
         router.commitOrder(o.side, o.sizeDelta, 0, o.targetPrice, true);
 
@@ -276,6 +288,7 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
 
     function test_FullCloseBelowDustFloorMatchesRouterCommit() public {
         // Opens must support the minimum liquidation charge; a valid partial close can leave a smaller remainder.
+        _setCloseFloor(1000e6);
         _openNormally(CfdTypes.Side.LONG, 20e6);
         (uint64 id,) = _commitParity(_order(CfdTypes.Side.LONG, SIZE - 9 * CfdTypes.SIZE_QUANTUM), PRICE, KEEPER);
         bytes[] memory update = _mockPythUpdateData(PRICE);
@@ -288,6 +301,31 @@ contract CfdClosePreviewCommitGatesTest is CfdClosePreviewTestBase {
         vm.prank(address(router));
         engine.updateMarkPrice(101_000_000, uint64(vm.getBlockTimestamp()));
         _commitParity(_order(CfdTypes.Side.LONG, size), 101_000_000, KEEPER);
+    }
+
+    function test_PartialCloseTracksGovernedMinimumWhileFullCloseRemainsExempt() public {
+        _openNormally(CfdTypes.Side.LONG, 20e6);
+        vm.warp(uint256(engine.lastMarkTime()) + 1);
+        vm.prank(address(router));
+        engine.updateMarkPrice(101_000_000, uint64(block.timestamp));
+
+        CfdTypes.Order memory order = _order(CfdTypes.Side.LONG, CfdTypes.SIZE_QUANTUM);
+        uint256 snapshot = vm.snapshotState();
+        _commitParity(order, 101_000_000, KEEPER);
+        assertTrue(vm.revertToState(snapshot));
+        vm.deleteStateSnapshot(snapshot);
+
+        _setCloseFloor(1000e6);
+        order.sizeDelta = 9 * CfdTypes.SIZE_QUANTUM;
+        bytes memory dustError = abi.encodeWithSelector(IOrderRouterErrors.OrderRouter__CommitValidation.selector, 11);
+        vm.expectRevert(dustError);
+        previewer.previewClose(address(engine), order, KEEPER, 101_000_000, _bounds());
+        vm.expectRevert(dustError);
+        vm.prank(ACCOUNT);
+        router.commitOrder(order.side, order.sizeDelta, 0, order.targetPrice, true);
+
+        order.sizeDelta = 10 * CfdTypes.SIZE_QUANTUM;
+        _commitParity(order, 101_000_000, KEEPER);
     }
 
 }
@@ -359,6 +397,89 @@ contract CfdClosePreviewCarryTest is CfdClosePreviewTestBase {
 /// @dev Regressions migrated from the retired USDC-grant preview: use the canonical V3 request all the way through
 ///      preview, commitment and execution. No grant, deposit or account funding occurs while closing.
 contract CfdClosePreviewRequestTest is CfdClosePreviewTestBase {
+
+    function test_ConflictingClientIdMatchesSubmissionEvenAfterDeadline() public {
+        _openNormally(CfdTypes.Side.LONG, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE / 2);
+        IOrderLifecycleBook book = router.lifecycleBook();
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        bytes32 existingHash = book.clientIntent(ACCOUNT, request.clientOrderId).intentHash;
+        request.sizeDelta = SIZE;
+        vm.warp(uint256(request.bounds.submitBy) + 1);
+        bytes memory expected = abi.encodeWithSelector(
+            IOrderLifecycleBook.OrderLifecycleBook__ClientIdConflict.selector,
+            ACCOUNT,
+            request.clientOrderId,
+            existingHash,
+            book.hashOrderRequest(ACCOUNT, request)
+        );
+        vm.expectRevert(expected);
+        _requestPreview(request, PRICE);
+        vm.expectRevert(expected);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 1);
+    }
+
+    function test_ReservedClientIdMatchesSubmissionRejection() public {
+        _openNormally(CfdTypes.Side.SHORT, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
+        request.clientOrderId = OrderV3Types.protocolClientOrderId(keccak256("reserved-close"));
+        bytes memory expected = abi.encodeWithSelector(
+            IOrderLifecycleBook.OrderLifecycleBook__ClientIdDomainMismatch.selector, request.clientOrderId, false
+        );
+        vm.expectRevert(expected);
+        _requestPreview(request, PRICE);
+        vm.expectRevert(expected);
+        vm.prank(ACCOUNT);
+        router.commitOrder(request);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+    }
+
+    function test_PendingExactReplayReturnsIdentityWithoutAnotherClose() public {
+        _openNormally(CfdTypes.Side.LONG, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.LONG, SIZE);
+        (uint64 id,) = _requestCommitParity(request, PRICE);
+        // A second fresh full close would fail queued-position admission; an identical retry is a no-op.
+        _assertReplay(request, id);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 1);
+        vm.warp(uint256(request.bounds.submitBy) + 1);
+        _assertReplay(request, id);
+    }
+
+    function test_TerminalExactReplayIgnoresCurrentPositionAndConfiguration() public {
+        _openNormally(CfdTypes.Side.SHORT, 40e6);
+        OrderV3Types.OrderRequest memory request = _request(CfdTypes.Side.SHORT, SIZE);
+        (uint64 id,) = _requestCommitParity(request, PRICE);
+        _executeRequest(id, PRICE, 0);
+        vm.warp(uint256(request.bounds.submitBy) + 1);
+        routerAdmin.pause();
+        vm.mockCall(
+            address(router.lifecycleBook()),
+            abi.encodeWithSelector(IOrderLifecycleBook.currentExecutionConfigHash.selector),
+            abi.encode(keccak256("changed-after-execution"))
+        );
+        vm.mockCallRevert(address(engine), abi.encodeWithSignature("planner()"), bytes("must not plan a replay"));
+        _assertReplay(request, id);
+        assertEq(router.pendingOrderCounts(ACCOUNT), 0);
+    }
+
+    function _assertReplay(
+        OrderV3Types.OrderRequest memory request,
+        uint64 id
+    ) private {
+        uint64 nextId = router.nextCommitId();
+        uint256 balance = clearinghouse.balanceUsdc(ACCOUNT);
+        CfdClosePreview.ClosePreview memory expected;
+        expected.replayOrderId = id;
+        CfdClosePreview.ClosePreview memory actual = _requestPreview(request, type(uint256).max);
+        assertEq(keccak256(abi.encode(actual)), keccak256(abi.encode(expected)), "Replay must contain identity only");
+        vm.prank(ACCOUNT);
+        assertEq(router.commitOrder(request), id, "Submission must return the same existing order");
+        assertEq(router.nextCommitId(), nextId);
+        assertEq(clearinghouse.balanceUsdc(ACCOUNT), balance);
+    }
 
     function _request(
         CfdTypes.Side side,

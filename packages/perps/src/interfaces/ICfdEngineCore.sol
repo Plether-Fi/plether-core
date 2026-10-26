@@ -28,6 +28,9 @@ interface ICfdEngineCore is ICfdEngineTypes {
     /// @return Configured HousePool address, or zero before one-time wiring
     function pool() external view returns (address);
 
+    /// @notice Terminal NAV book bound to this engine, or zero before one-time wiring.
+    function terminalNavBook() external view returns (address);
+
     /// @notice Clearinghouse account that receives protocol fee credits.
     /// @return Current protocol treasury account
     function protocolTreasury() external view returns (address);

@@ -43,6 +43,16 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
     }
 
     function test_PreviewLiquidation_PreservesExistingTraderClaimOnPositivePhysicalResidual() public {
+        _assertLiquidationRetainedSettlement(false);
+    }
+
+    function test_PreviewLiquidation_RetainedSettlementIncludesImmediatePayout() public {
+        _assertLiquidationRetainedSettlement(true);
+    }
+
+    function _assertLiquidationRetainedSettlement(
+        bool liquid
+    ) private {
         address trader = address(0xAB14002);
         address account = trader;
         address keeper = address(0xAB14003);
@@ -60,9 +70,11 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         params.fadMarginBps = 750;
         _setRiskParams(params);
 
-        uint256 poolAssets = pool.totalAssets();
-        vm.prank(address(pool));
-        usdc.transfer(address(0xDEAD), poolAssets - 30e6);
+        if (!liquid) {
+            uint256 poolAssets = pool.totalAssets();
+            vm.prank(address(pool));
+            usdc.transfer(address(0xDEAD), poolAssets - 30e6);
+        }
 
         ICfdEngineTypes.LiquidationPreview memory preview = engineLens.previewLiquidation(account, 100_000_000);
 
@@ -80,13 +92,20 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
         );
         assertEq(
             preview.immediatePayoutUsdc,
-            0,
-            "Current preview should keep the physical payout as a trader claim when the existing claim remains untouched"
+            liquid ? 30e6 : 0,
+            "Liquid cash pays the gain now; insufficient cash defers it behind the existing claim"
         );
         assertEq(
             preview.traderClaimBalanceUsdc,
-            10e6 + preview.freshTraderPayoutUsdc,
-            "Trader claim should reflect the untouched existing claim plus the fresh claim amount in the current preview model"
+            liquid ? 10e6 : 40e6,
+            "Claims include the old $10 plus the new $30 only when deferred"
+        );
+
+        uint256 settlementBefore = clearinghouse.balanceUsdc(account);
+        assertEq(
+            preview.settlementRetainedUsdc,
+            settlementBefore - preview.liquidationChargeUsdc + (liquid ? 30e6 : 0),
+            "Retained settlement includes the $30 cash gain exactly once, after liquidation charges"
         );
 
         vm.prank(keeper);
@@ -100,13 +119,13 @@ contract EngineLiquidationPreviewTest is CfdEngineTestBase {
 
         assertEq(
             clearinghouse.balanceUsdc(account),
-            preview.settlementRetainedUsdc + preview.immediatePayoutUsdc,
-            "Live settlement must conserve retained collateral plus any immediate payout"
+            preview.settlementRetainedUsdc,
+            "Live settlement must equal the retained total, which already includes any immediate payout"
         );
         assertEq(
             engine.traderClaimBalanceUsdc(account),
-            10e6 + preview.freshTraderPayoutUsdc,
-            "Live liquidation should preserve the old trader claim plus the fresh claim amount"
+            liquid ? 10e6 : 40e6,
+            "Live claims must exclude a fresh payout already paid in cash"
         );
         assertEq(
             preview.effectiveAssetsAfterUsdc,

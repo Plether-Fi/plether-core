@@ -36,6 +36,9 @@ contract NumericDomainMathHarness {
 
 contract NumericDomainLensHarness is CfdEngineLens {
 
+    /// @dev Foundry test marker: production size limits are checked against CfdEngineLens itself.
+    bool public constant IS_TEST = true;
+
     constructor() CfdEngineLens(address(0)) {}
 
     function formatOpen(

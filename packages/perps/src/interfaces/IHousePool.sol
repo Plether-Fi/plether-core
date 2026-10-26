@@ -431,16 +431,18 @@ interface IHousePool {
     ) external;
 
     /// @notice Returns current stored senior principal that conservative pool cash could fund for matured demand.
-    /// @dev Returns zero when degraded mode or applicable mark freshness disables settlement. This is a raw
-    ///      demand-neutral capacity and does not assert that any senior request is matured. Does not preview a pending
-    ///      reconciliation; use `getPendingTrancheState` for reconcile-first parity.
+    /// @dev Returns zero during the settlement hold, degraded mode or applicable mark staleness. This is a raw
+    ///      demand-neutral capacity and does not assert that any senior request is matured. With open positions
+    ///      outside frozen mode, execution also requires a Router-bound mark published in the current epoch.
+    ///      Does not preview pending reconciliation; use `getPendingTrancheState` for reconcile-first pricing.
     /// @return Senior settlement capacity capped by free cash and stored senior principal
     function getMaxSeniorWithdraw() external view returns (uint256);
 
     /// @notice Returns current stored-state capacity for funding queued junior redemptions.
     /// @dev Returns zero when settlement is not live or any matured senior redemption head exists. Without matured
     ///      senior demand, caps by conservative free cash, junior principal, and the governed active senior-share
-    ///      covenant without reserving dormant senior principal. Does not preview pending reconciliation.
+    ///      covenant without reserving dormant senior principal. Does not preview pending reconciliation or enforce
+    ///      the current-epoch Router-bound mark required for execution with open positions outside frozen mode.
     /// @return Current junior queue-funding capacity in USDC
     function getMaxJuniorWithdraw() external view returns (uint256);
 
@@ -449,7 +451,8 @@ interface IHousePool {
     ///      the applicable mark is fresh; residual claimant value and unassigned assets remain reserved. Withdrawal
     ///      caps are zero whenever settlement is not live. The junior cap is also zero while any matured senior head
     ///      exists; otherwise it does not reserve dormant senior principal. These are current queue-funding capacities,
-    ///      not promises that settlement will consume the full amounts.
+    ///      not promises that settlement will consume the full amounts. With open positions outside frozen mode,
+    ///      execution additionally requires a Router-bound mark published in the current epoch.
     /// @return seniorPrincipalUsdc Simulated senior principal after reconcile (6 decimals)
     /// @return juniorPrincipalUsdc Simulated junior principal after reconcile (6 decimals)
     /// @return maxSeniorWithdrawUsdc Simulated senior withdrawal cap after reconcile (6 decimals)
@@ -490,7 +493,9 @@ interface IHousePool {
 
     /// @notice Returns whether the protocol-level redemption-funding status gate is open.
     /// @dev A true result does not guarantee nonzero pool liquidity or matured withdrawal demand. Already funded claims
-    ///      are paid from vault escrow and deliberately do not depend on this gate.
+    ///      are paid from vault escrow and deliberately do not depend on this gate. With open positions outside frozen
+    ///      mode, execution additionally requires a Router-bound mark published in the current epoch; this view checks
+    ///      only its applicable maximum age, so a true result can precede execution readiness.
     /// @return Whether settlement is not held, the engine is not degraded, and any required mark is fresh for funding
     function isWithdrawalLive() external view returns (bool);
 
@@ -546,8 +551,9 @@ interface IHousePool {
     ) external view returns (uint256);
 
     /// @notice Minimum gross assets accepted for an asynchronous tranche deposit request (6 decimals).
-    /// @dev Request-capacity and nonbinding estimate views use the same floor when deciding whether a useful request or
-    ///      exact-share quote remains available. ERC-7575 `deposit` and `mint` are claims, not new entry flows.
+    /// @dev Deposit admission and Senior request capacity enforce this floor. Redemption admission applies the same
+    ///      minimum to estimated assets, except when requesting the owner's entire available share balance. Nonbinding
+    ///      conversion estimates do not enforce it. ERC-7575 `deposit` and `mint` are claims, not new entry flows.
     /// @return Minimum asynchronous deposit-request asset amount (1 USDC)
     function minTrancheDepositUsdc() external view returns (uint256);
 

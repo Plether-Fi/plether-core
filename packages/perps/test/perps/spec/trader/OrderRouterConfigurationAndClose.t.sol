@@ -180,6 +180,7 @@ contract OrderRouterAccountBehaviorTest is BasePerpTest {
     // Regression: order commits should not require ETH
     function test_ZeroEthCommitAllowed() public {
         _startRecordingLogs();
+        _fundJunior(bob, 500_000e6);
         _fundTrader(alice, 10_000e6);
 
         vm.prank(alice);

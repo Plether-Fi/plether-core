@@ -45,6 +45,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     bytes4 internal constant INTERFACE_ID_ERC7540_OPERATOR = 0xe3bc4e65;
     bytes4 internal constant INTERFACE_ID_ERC7540_DEPOSIT = 0xce3bbe50;
     bytes4 internal constant INTERFACE_ID_ERC7540_REDEEM = 0x620ee8e4;
+    /// @dev Custom async surface before the two-argument redemption-cancellation wrapper was declared.
+    bytes4 internal constant INTERFACE_ID_ASYNC_TRANCHE_VAULT_LEGACY = 0x8f61af3a;
 
     IHousePool public immutable POOL;
     bool public immutable IS_SENIOR;
@@ -188,8 +190,8 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         address indexed controller, address indexed owner, uint256 indexed requestId, address sender, uint256 shares
     );
     event OperatorSet(address indexed controller, address indexed operator, bool approved);
-    event DepositRequested(address indexed caller, address indexed owner, uint256 indexed epochId, uint256 assets);
-    event DepositRequestCancelled(address indexed owner, uint256 indexed epochId, uint256 assets);
+    event DepositRequested(address indexed caller, address indexed controller, uint256 indexed epochId, uint256 assets);
+    event DepositRequestCancelled(address indexed controller, uint256 indexed epochId, uint256 assets);
     event AsyncDepositRequestCancelled(
         address indexed controller, address indexed receiver, uint256 indexed epochId, uint256 assets
     );
@@ -200,7 +202,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     event DepositEpochRejected(uint256 indexed epochId, bool indexed isSenior, uint256 assets);
     event RedeemEpochFunded(uint256 indexed epochId, bool indexed isSenior, uint256 shares, uint256 assets);
     event RedeemEpochRefundable(uint256 indexed epochId, bool indexed isSenior, uint256 shares);
-    event DepositSharesClaimed(address indexed owner, uint256 indexed epochId, uint256 assets, uint256 shares);
+    event DepositSharesClaimed(address indexed controller, uint256 indexed epochId, uint256 assets, uint256 shares);
     event AsyncDepositSharesClaimed(
         address indexed controller, address indexed receiver, uint256 indexed epochId, uint256 assets, uint256 shares
     );
@@ -293,6 +295,7 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
         return interfaceId == INTERFACE_ID_ERC165 || interfaceId == INTERFACE_ID_ERC7575
             || interfaceId == INTERFACE_ID_ERC7575_SHARE || interfaceId == INTERFACE_ID_ERC7540_OPERATOR
             || interfaceId == INTERFACE_ID_ERC7540_DEPOSIT || interfaceId == INTERFACE_ID_ERC7540_REDEEM
+            || interfaceId == INTERFACE_ID_ASYNC_TRANCHE_VAULT_LEGACY
             || interfaceId == type(IAsyncTrancheVault).interfaceId
             || interfaceId == type(IAsyncTrancheVaultClaimableRedeem).interfaceId;
     }
@@ -1308,7 +1311,9 @@ contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {
     function maxRequestDeposit(
         address controller
     ) public view returns (uint256) {
-        controller;
+        if (controller == address(0)) {
+            return 0;
+        }
         if (_isTerminallyWiped() || !POOL.canAcceptTrancheDeposits(IS_SENIOR)) {
             return 0;
         }

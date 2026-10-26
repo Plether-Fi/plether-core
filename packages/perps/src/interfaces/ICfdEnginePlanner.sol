@@ -99,9 +99,11 @@ interface ICfdEnginePlanner {
         uint256 executionPrice
     ) external pure returns (CfdEnginePlanTypes.LiquidationDelta memory delta);
 
-    /// @notice Maps an open planning revert code to its commit-time failure category.
+    /// @notice Maps an open planning revert code to its commit-time or execution-time failure category.
+    /// @dev Degraded mode maps to `ExecutionTimeProtocolStateInvalidated`; fee-drained margin maps to
+    ///      `ExecutionTimeUserInvalid`. Other recognized failures map to `CommitTimeRejectable`.
     /// @param code Open revert code to classify
-    /// @return Commit-time category, or `None` for `OK` and unmapped values
+    /// @return Open failure policy category, or `None` for `OK` and unmapped values
     function getOpenFailurePolicyCategory(
         CfdEnginePlanTypes.OpenRevertCode code
     ) external pure returns (CfdEnginePlanTypes.OpenFailurePolicyCategory);

@@ -242,7 +242,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
         uint64 versionBefore = routerAdmin.activeConfigVersion();
         vm.mockCall(address(candidate), abi.encodeWithSelector(IPletherOracle.applyConfig.selector), bytes(""));
 
-        vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__OraclePolicyMismatch.selector);
         routerAdmin.finalizeOracleConfig();
 
         _assertRotationUnchanged(address(candidate), activationTime, versionBefore, policy);
@@ -269,7 +269,7 @@ contract OrderRouterOracleConfigurationTest is OrderRouterPythTestBase {
 
         for (uint256 i; i < getters.length; ++i) {
             vm.mockCall(address(candidate), abi.encodeWithSelector(getters[i]), abi.encode(type(uint256).max));
-            vm.expectRevert(IOrderRouterErrors.OrderRouter__InvalidPletherOracle.selector);
+            vm.expectRevert(IOrderRouterErrors.OrderRouter__OraclePolicyMismatch.selector);
             routerAdmin.finalizeOracleConfig();
             vm.clearMockedCalls();
             _assertRotationUnchanged(address(candidate), activationTime, versionBefore, policy);

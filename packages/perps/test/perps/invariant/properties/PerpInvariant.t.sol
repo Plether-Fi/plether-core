@@ -25,6 +25,7 @@ import {PerpsViewTypes} from "@plether/perps/interfaces/PerpsViewTypes.sol";
 import {ProtocolLensViewTypes} from "@plether/perps/interfaces/ProtocolLensViewTypes.sol";
 import {SolvencyAccountingLib} from "@plether/perps/libraries/SolvencyAccountingLib.sol";
 import {MockUSDC} from "@plether/test-utils/MockUSDC.sol";
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @dev These campaigns deliberately submit economically invalid actions. Only documented business errors are
@@ -402,6 +403,8 @@ contract PerpHandler is PerpActionHandler {
 
 contract PerpInvariantTest is BasePerpTest {
 
+    using stdStorage for StdStorage;
+
     PerpHandler handler;
     uint256 seniorHighWaterMark;
 
@@ -462,6 +465,36 @@ contract PerpInvariantTest is BasePerpTest {
         assertGt(juniorVault.balanceOf(handler.lp()), 0);
         assertEq(handler.ghost_expectedLpRejections(), 0);
         _assertAllInvariants();
+    }
+
+    function test_MainTreasuryCustodyDetectsOneAtomOvercredit() public {
+        _assertTreasuryCustodyRejectsCreditMutation(1);
+    }
+
+    function test_MainTreasuryCustodyDetectsOneAtomUndercredit() public {
+        _assertTreasuryCustodyRejectsCreditMutation(-1);
+    }
+
+    function _assertTreasuryCustodyRejectsCreditMutation(
+        int256 delta
+    ) internal {
+        handler.depositAndTrade(0, 100, 2000e6, 1e8);
+        assertEq(handler.ghost_successfulExecutions(), 1, "Mutation must follow an executed fee-bearing order");
+        this.checkTreasuryCustody();
+        address treasury = engine.protocolTreasury();
+        uint256 credit = clearinghouse.balanceUsdc(treasury);
+        assertGt(credit, 0, "Fixture must earn a treasury fee");
+        stdstore.target(address(clearinghouse)).sig("balanceUsdc(address)").with_key(treasury)
+            .checked_write(uint256(int256(credit) + delta));
+
+        // Both corrupt credits remain below total custody, so the former bound alone would accept them.
+        assertLe(clearinghouse.balanceUsdc(treasury), usdc.balanceOf(address(clearinghouse)));
+        vm.expectRevert();
+        this.checkTreasuryCustody();
+    }
+
+    function checkTreasuryCustody() external view {
+        _assertInvariant_TreasuryMatchesUnallocatedClearinghouseCustody();
     }
 
     function test_MainHandlerDoesNotHideMalformedOrUnknownCommitFailures() public {
@@ -541,14 +574,21 @@ contract PerpInvariantTest is BasePerpTest {
         assertLe(claimed, terminalEquity, "Freshly reconciled principal cannot exceed exact terminal LP equity");
     }
 
-    function _assertInvariant_FeesWithinClearinghouseTreasury() internal view {
-        uint256 fees = clearinghouse.balanceUsdc(engine.protocolTreasury());
+    function _assertInvariant_TreasuryMatchesUnallocatedClearinghouseCustody() internal view {
+        // This campaign's only settlement accounts are its three traders, the handler (keeper), and treasury.
+        // Derive treasury backing from token custody less everyone else's credits, never from treasury itself.
+        // Fee amounts and withdrawals have a separate independent model in PerpFeeFlowInvariantTest.
+        uint256 otherCredits = clearinghouse.balanceUsdc(address(handler));
+        for (uint256 i; i < 3; ++i) {
+            otherCredits += clearinghouse.balanceUsdc(handler.traders(i));
+        }
+        uint256 custody = usdc.balanceOf(address(clearinghouse));
+        assertGe(custody, otherCredits, "Other settlement accounts must be fully clearinghouse-custodied");
         assertEq(
             clearinghouse.balanceUsdc(engine.protocolTreasury()),
-            fees,
-            "Accumulated fees must equal the treasury clearinghouse balance"
+            custody - otherCredits,
+            "Treasury credit must equal custody remaining after other settlement liabilities"
         );
-        assertLe(fees, usdc.balanceOf(address(clearinghouse)), "Treasury fees must be clearinghouse-custodied");
     }
 
     function _assertInvariant_WithdrawalAccountingMatchesEngineReserve() internal view {
@@ -599,21 +639,6 @@ contract PerpInvariantTest is BasePerpTest {
                 "Action reserve must exactly back negative VPI and pending keeper bounties"
             );
         }
-    }
-
-    function _assertInvariant_ClearinghouseBalanceMatchesTrackedAccounts() internal view {
-        uint256 trackedBalances =
-            clearinghouse.balanceUsdc(address(handler)) + clearinghouse.balanceUsdc(engine.protocolTreasury());
-        for (uint256 i = 0; i < 3; i++) {
-            address account = handler.traders(i);
-            trackedBalances += clearinghouse.balanceUsdc(account);
-        }
-
-        assertEq(
-            usdc.balanceOf(address(clearinghouse)),
-            trackedBalances,
-            "Clearinghouse USDC custody must equal tracked trader balances"
-        );
     }
 
     function _assertInvariant_KnownActorUsdcConservation() internal view {
@@ -943,12 +968,11 @@ contract PerpInvariantTest is BasePerpTest {
         _assertInvariant_TranchePriority();
         _assertInvariant_SeniorHighWaterMarkBlocksJuniorExtractionWhileImpaired();
         _assertInvariant_NoNegativePrincipal();
-        _assertInvariant_FeesWithinClearinghouseTreasury();
+        _assertInvariant_TreasuryMatchesUnallocatedClearinghouseCustody();
         _assertInvariant_WithdrawalAccountingMatchesEngineReserve();
         _assertInvariant_HousePoolPendingStateMatchesReconcileFirstState();
         _assertInvariant_LiveLiabilityFlagMatchesDirectionalExposure();
         _assertInvariant_PendingKeeperReservesBackedByClearinghouseReservations();
-        _assertInvariant_ClearinghouseBalanceMatchesTrackedAccounts();
         _assertInvariant_KnownActorUsdcConservation();
         _assertInvariant_AggregateOIMatchesPositions();
         _assertInvariant_LivePositionsRemainSingleDirectionAndBounded();

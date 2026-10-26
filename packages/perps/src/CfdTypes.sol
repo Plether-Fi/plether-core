@@ -20,10 +20,10 @@ library CfdTypes {
     }
 
     /// @notice A user's active position in a specific market.
-    /// @dev `margin` is the engine's canonical economic position-margin state used for risk and state transitions.
-    ///      It is intentionally distinct from the clearinghouse custody bucket that holds the locked funds backing it.
+    /// @dev Live `margin` is read from the clearinghouse-owned PnL-pledge bucket; the engine does not store a separate
+    ///      per-position margin balance. Planner snapshots may project changes to that live value in memory.
     /// @param size Position notional in synthetic-token units (18 decimals).
-    /// @param margin Isolated position margin in USDC units (6 decimals).
+    /// @param margin Current or projected clearinghouse PnL pledge in USDC units (6 decimals).
     /// @param entryPrice Display-only average entry mark, floored from exact remaining entry cost per lot (8 decimals).
     /// @param maxProfitUsdc Cumulative maximum-profit envelope used for solvency accounting (6-decimal USDC).
     /// @param side Direction of the position.
@@ -32,7 +32,7 @@ library CfdTypes {
     /// @param vpiAccrued Signed cumulative VPI charged (positive) or rebated (negative), in 6-decimal USDC.
     struct Position {
         uint256 size; // [18 dec] Notional size in synthetic tokens
-        uint256 margin; // [6 dec] Isolated margin backing this position
+        uint256 margin; // [6 dec] Current or projected clearinghouse PnL pledge
         uint256 entryPrice; // [8 dec] Display-only average; exact basis is stored separately
         uint256 maxProfitUsdc; // [6 dec] Cumulative max profit tracked to avoid truncation underflow
         Side side; // [uint8] Trade direction
@@ -72,7 +72,8 @@ library CfdTypes {
         NoPosition,
         /// @notice The requested close size is zero or exceeds the live position.
         BadSize,
-        /// @notice The requested partial close cannot collect every assessed action charge from eligible collateral.
+        /// @notice Legacy value retained for ABI compatibility; the current close preview does not emit it.
+        /// @dev Uncollectible partial-close charges return `PartialActionChargeUncollectible` instead.
         PartialCloseUnderwater,
         /// @notice Legacy dust-failure value retained for ABI compatibility; the current close planner does not emit it.
         DustPosition,
@@ -80,7 +81,9 @@ library CfdTypes {
         InvalidSizeQuantum,
         /// @notice The position's dedicated negative-VPI rebate reserve is below its required target.
         VpiRebateReserveUnderfunded,
+        /// @notice The requested partial close cannot collect every assessed action charge from eligible collateral.
         PartialActionChargeUncollectible,
+        /// @notice The requested partial close cannot leave the remaining position above active maintenance.
         PartialCloseUnhealthy
     }
 

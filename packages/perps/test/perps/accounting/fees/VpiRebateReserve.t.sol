@@ -229,6 +229,8 @@ contract VpiRebateReserveTest is Test {
 
     function test_GrossRebateBackingIncludesFeeOffset() public pure {
         CfdEnginePlanTypes.RawSnapshot memory snap;
+        // Leave one micro-USDC above initial margin after funding the rebate and liquidation reserves.
+        uint256 marginUsdc = 4920e6 + 1;
         snap.account = address(0xD00D);
         snap.position.side = CfdTypes.Side.SHORT;
         snap.longSide.openInterest = 300_000e18;
@@ -236,11 +238,11 @@ contract VpiRebateReserveTest is Test {
         snap.poolAssetsUsdc = 2_000_000e6;
         snap.poolCashUsdc = 2_000_000e6;
         snap.accountBuckets = IMarginClearinghouse.AccountUsdcBuckets({
-            settlementBalanceUsdc: 4920e6,
+            settlementBalanceUsdc: marginUsdc,
             totalLockedMarginUsdc: 0,
             activePositionMarginUsdc: 0,
             otherLockedMarginUsdc: 0,
-            freeSettlementUsdc: 4920e6
+            freeSettlementUsdc: marginUsdc
         });
         snap.capPrice = CAP_PRICE;
         snap.riskParams = _riskParams(0.05e18);
@@ -249,7 +251,7 @@ contract VpiRebateReserveTest is Test {
         CfdTypes.Order memory order = CfdTypes.Order({
             account: snap.account,
             sizeDelta: 300_000e18,
-            marginDelta: 4920e6,
+            marginDelta: marginUsdc,
             targetPrice: ENTRY_PRICE,
             commitTime: 1,
             commitBlock: 1,
@@ -265,7 +267,7 @@ contract VpiRebateReserveTest is Test {
         assertEq(delta.poolRebatePayoutUsdc, 1005e6);
         assertEq(delta.vpiRebateReserveAfterUsdc, 1125e6);
         assertEq(delta.vpiRebateReserveFromPledgeUsdc, 120e6);
-        assertEq(delta.positionMarginAfterOpen, 4500e6);
+        assertEq(delta.positionMarginAfterOpen, 4500e6 + 1);
     }
 
     function test_LiquidationCancelsFundedVpiOnceAndProtectsBounty() public pure {
