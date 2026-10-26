@@ -81,20 +81,35 @@ The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked up
 ### Protocol treasury commitment
 
 `CfdEngine.setProtocolTreasury(address,uint256)` activates a nonzero treasury immediately and locks it for a
-caller-selected positive duration in seconds. The constructor's initial treasury is unlocked. Both treasury setters,
-including the legacy one-argument setter and same-address calls, reject updates while
-`block.timestamp < protocolTreasuryLockedUntil`. A lock cannot be cancelled, shortened, extended, or bypassed by
-ownership transfer. At the exact expiry, the owner may update again; expiry never automatically changes the address.
-The legacy setter starts no new lock. The expiry getter retains the last lock timestamp.
+caller-selected positive duration in seconds. The constructor's initial treasury is unlocked. Both immediate treasury
+setters, including the legacy one-argument setter and same-address calls, reject updates while
+`block.timestamp < protocolTreasuryLockedUntil()`. The current lock's expiry cannot be cancelled, shortened,
+extended, or bypassed by ownership transfer. The legacy setter starts no new lock.
 
-This is an optional commitment after immediate activation, not a proposal delay or a mandatory minimum tenure.
-There is no emergency override or duration cap; an incorrect address or excessively long duration cannot be
-corrected before expiry. Zero duration is rejected by the locking setter, and timestamp overflow reverts atomically.
-The commitment affects future protocol credits only. Existing balances remain with their original clearinghouse
-accounts, and normal withdrawal rules continue to apply to both old and current treasuries. It does not constrain
-the treasury wallet's own spending or the separately governed junior-vault maintenance-fee recipient.
-`ProtocolTreasuryLocked(treasury, lockedUntil)` records each commitment. Existing non-upgradeable deployments
-cannot acquire this protection without a new deployment.
+While a lock is active, the engine owner may call `proposeProtocolTreasury(address,uint256)` to queue or replace a
+nonzero successor, or `cancelProtocolTreasuryProposal()` to remove a pending successor. Neither action changes the
+current lock's expiry. At the exact expiry, the latest pending address becomes effective automatically for all
+protocol credits and treasury views, without a confirmation or keeper transaction. With no pending proposal, the
+current treasury remains. A matured proposal cannot be cancelled or replaced retroactively. Ownership transfer
+preserves the schedule; renouncing ownership does not prevent activation.
+
+The proposal's duration determines the successor's lock from the scheduled activation timestamp, even if the next
+interaction occurs much later. Zero duration is allowed for a proposal and leaves its successor unlocked. The
+effective treasury stays selected after its own lock expires. `pendingProtocolTreasury()` returns the address,
+activation time, and successor lock expiry only while the proposal is pending, then returns zeros.
+`protocolTreasury()` and `protocolTreasuryLockedUntil()` resolve the effective values by timestamp; the latter
+retains the latest effective expiry after it passes.
+
+There is no mandatory minimum tenure, emergency override, or duration cap. An incorrect active address or
+excessively long active lock cannot be corrected before expiry. Zero duration is rejected by the immediate locking
+setter, and timestamp overflow reverts atomically. The commitment affects future protocol credits only. Existing
+balances remain with their original clearinghouse accounts, and normal withdrawal rules continue to apply to both
+old and current treasuries. It does not constrain the treasury wallet's own spending or the separately governed
+junior-vault maintenance-fee recipient. `ProtocolTreasuryLocked(treasury, lockedUntil)` records an immediate
+commitment; `ProtocolTreasuryProposed(treasury, activationTime, lockedUntil)` records the pending schedule and
+`ProtocolTreasuryProposalCancelled()` records cancellation. There is no autonomous activation event at expiry;
+monitors must resolve the effective getters. Existing non-upgradeable deployments cannot acquire this protection
+without a new deployment.
 
 ### Owner-funded recapitalization
 
@@ -175,6 +190,8 @@ The owner can act immediately to:
 - rotate or disable the coordinator guardian,
 - set the protocol treasury account when its optional commitment lock has expired, optionally starting a new lock;
   existing balances remain withdrawable by their original accounts,
+- propose, replace, or cancel a pending protocol treasury during an active lock, preserving its original expiry;
+  the latest pending treasury activates automatically at that expiry,
 - initiate an ownership transfer, which the pending owner must explicitly accept through the `Ownable2Step` flow.
 
 The owner cannot:

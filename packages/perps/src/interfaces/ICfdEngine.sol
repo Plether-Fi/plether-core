@@ -30,12 +30,18 @@ interface ICfdEngine is ICfdEngineTypes {
     /// @return Configured router address, or zero before one-time wiring
     function orderRouter() external view returns (address);
 
-    /// @notice Clearinghouse account that receives protocol fee credits.
+    /// @notice Effective clearinghouse account that receives protocol fee credits, resolving any matured proposal.
     /// @return Current protocol treasury account
     function protocolTreasury() external view returns (address);
 
-    /// @notice Unix timestamp before which treasury updates revert; zero if no lock has ever been set.
+    /// @notice Effective treasury's lock expiry; immediate updates revert before this timestamp.
     function protocolTreasuryLockedUntil() external view returns (uint256);
+
+    /// @notice Pending successor and its activation and lock-expiry timestamps; all zero once active or cancelled.
+    function pendingProtocolTreasury()
+        external
+        view
+        returns (address treasury, uint256 activationTime, uint256 lockedUntil);
 
     /// @notice Settlement token used for fees, margin, and payouts
     /// @return USDC-compatible settlement token

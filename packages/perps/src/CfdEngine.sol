@@ -127,11 +127,10 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 public totalTraderClaimBalanceUsdc;
     /// @notice One-time-configured router authorized to reserve bounties and execute orders and liquidations.
     address public orderRouter;
-    /// @notice Clearinghouse account credited with protocol execution fees and forfeited bounties.
-    address public protocolTreasury;
-    /// @notice Unix timestamp before which all treasury updates revert; zero means no lock has been set.
-    /// @dev Expiry does not change the treasury or clear this historical timestamp.
-    uint256 public protocolTreasuryLockedUntil;
+    address private _protocolTreasury;
+    uint256 private _protocolTreasuryLockedUntil;
+    address private _pendingProtocolTreasury;
+    uint256 private _pendingProtocolTreasuryLockedUntil;
 
     /// @notice Whether a Unix day number is configured as an all-day FAD and oracle-frozen override.
     mapping(uint256 => bool) public fadDayOverrides;
@@ -152,7 +151,8 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @dev This affects open/increase admission and LP withdrawals, but not raw insolvency or terminal NAV.
     uint256 public settlementBufferBps = 25;
 
-    /// @notice Emitted when the clearinghouse account designated to receive future protocol fees changes.
+    /// @notice Emitted when an immediate setter changes the account designated to receive future protocol fees.
+    /// @dev Scheduled activation is resolved by timestamp and emits no automatic event.
     /// @param treasury New protocol treasury clearinghouse account.
     event ProtocolTreasuryUpdated(address indexed treasury);
 
@@ -160,6 +160,13 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @param treasury Treasury protected against replacement, including by a subsequent owner.
     /// @param lockedUntil Unix timestamp at which treasury updates become available again.
     event ProtocolTreasuryLocked(address indexed treasury, uint256 lockedUntil);
+
+    /// @notice Schedules or replaces the successor at the current treasury's unchanged lock expiry.
+    /// @dev Activation is resolved by timestamp; no transaction or event is required at activationTime.
+    event ProtocolTreasuryProposed(address indexed treasury, uint256 activationTime, uint256 lockedUntil);
+
+    /// @notice Cancels a pending successor without changing the current treasury or its lock expiry.
+    event ProtocolTreasuryProposalCancelled();
 
     function _sideIndex(
         CfdTypes.Side side
@@ -341,7 +348,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         CAP_PRICE = _capPrice;
         _activeRiskParams = _riskParams;
         frozenCloseSpreadBps = _frozenCloseSpreadBps;
-        protocolTreasury = msg.sender;
+        _protocolTreasury = msg.sender;
     }
 
     /// @notice Atomically configures the planner, settlement sidecar, and engine admin exactly once.
@@ -447,6 +454,72 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
         orderRouter = _router;
     }
 
+    /// @notice Clearinghouse account credited with protocol fees and forfeited bounties at the current timestamp.
+    /// @dev A scheduled successor becomes active at the previous lock's expiry without a transaction.
+    function protocolTreasury() public view returns (address) {
+        return _treasuryProposalMatured() ? _pendingProtocolTreasury : _protocolTreasury;
+    }
+
+    /// @notice Lock expiry of the effective treasury; an elapsed timestamp is retained after expiry.
+    function protocolTreasuryLockedUntil() public view returns (uint256) {
+        return _treasuryProposalMatured() ? _pendingProtocolTreasuryLockedUntil : _protocolTreasuryLockedUntil;
+    }
+
+    /// @notice Pending successor, activation timestamp, and next lock expiry; all zero once active or cancelled.
+    function pendingProtocolTreasury()
+        external
+        view
+        returns (address treasury, uint256 activationTime, uint256 lockedUntil)
+    {
+        if (_pendingProtocolTreasury != address(0) && !_treasuryProposalMatured()) {
+            return (_pendingProtocolTreasury, _protocolTreasuryLockedUntil, _pendingProtocolTreasuryLockedUntil);
+        }
+    }
+
+    /// @notice Queues or replaces the treasury that automatically takes effect when the current lock expires.
+    /// @dev Owner-only; requires an active lock. Replacement leaves the current lock's expiry unchanged.
+    /// @param treasury Nonzero clearinghouse account for future fees after activation.
+    /// @param nextLockDuration Seconds to lock the successor from the scheduled activation time; zero leaves it unlocked.
+    function proposeProtocolTreasury(
+        address treasury,
+        uint256 nextLockDuration
+    ) external onlyOwner {
+        _syncProtocolTreasury();
+        if (block.timestamp >= _protocolTreasuryLockedUntil) {
+            revert CfdEngine__TreasuryNotLocked();
+        }
+        if (treasury == address(0)) {
+            revert CfdEngine__ZeroAddress();
+        }
+        _pendingProtocolTreasury = treasury;
+        _pendingProtocolTreasuryLockedUntil = _protocolTreasuryLockedUntil + nextLockDuration;
+        emit ProtocolTreasuryProposed(treasury, _protocolTreasuryLockedUntil, _pendingProtocolTreasuryLockedUntil);
+    }
+
+    /// @notice Cancels the pending successor before activation without restarting or removing the current lock.
+    function cancelProtocolTreasuryProposal() external onlyOwner {
+        if (_pendingProtocolTreasury == address(0) || _treasuryProposalMatured()) {
+            revert CfdEngine__NoTreasuryProposal();
+        }
+        delete _pendingProtocolTreasury;
+        delete _pendingProtocolTreasuryLockedUntil;
+        emit ProtocolTreasuryProposalCancelled();
+    }
+
+    function _treasuryProposalMatured() internal view returns (bool) {
+        return _pendingProtocolTreasury != address(0) && block.timestamp >= _protocolTreasuryLockedUntil;
+    }
+
+    /// @dev Normalize the timestamp-resolved state before an administrative mutation, never on fee or view paths.
+    function _syncProtocolTreasury() internal {
+        if (_treasuryProposalMatured()) {
+            _protocolTreasury = _pendingProtocolTreasury;
+            _protocolTreasuryLockedUntil = _pendingProtocolTreasuryLockedUntil;
+            delete _pendingProtocolTreasury;
+            delete _pendingProtocolTreasuryLockedUntil;
+        }
+    }
+
     /// @notice Immediately updates the protocol treasury without starting a new lock.
     /// @dev Owner-only; reverts while a treasury lock is active, even for the current address.
     ///      Existing balances remain in their original accounts. Once unlocked, the current address is a no-op.
@@ -460,7 +533,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     /// @notice Immediately sets the protocol treasury and prevents further updates for lockDuration seconds.
     /// @dev Owner-only. Can lock the current address. An active lock cannot be shortened, extended, or bypassed
     ///      through ownership transfer. Existing balances and withdrawals are unaffected. Expiry allows updates
-    ///      at block.timestamp >= protocolTreasuryLockedUntil; it does not automatically replace the treasury.
+    ///      at block.timestamp >= protocolTreasuryLockedUntil(). A queued successor activates at expiry.
     /// @param treasury Nonzero clearinghouse account that will receive future protocol fee credits.
     /// @param lockDuration Positive lock duration in seconds. Timestamp overflow reverts atomically.
     function setProtocolTreasury(
@@ -471,24 +544,25 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             revert CfdEngine__InvalidTreasuryLockDuration();
         }
         _setProtocolTreasury(treasury);
-        protocolTreasuryLockedUntil = block.timestamp + lockDuration;
-        emit ProtocolTreasuryLocked(treasury, protocolTreasuryLockedUntil);
+        _protocolTreasuryLockedUntil = block.timestamp + lockDuration;
+        emit ProtocolTreasuryLocked(treasury, _protocolTreasuryLockedUntil);
     }
 
     /// @dev Shared guard for both public setters, including same-address calls.
     function _setProtocolTreasury(
         address treasury
     ) internal {
-        if (block.timestamp < protocolTreasuryLockedUntil) {
-            revert CfdEngine__TreasuryLocked(protocolTreasuryLockedUntil);
+        _syncProtocolTreasury();
+        if (block.timestamp < _protocolTreasuryLockedUntil) {
+            revert CfdEngine__TreasuryLocked(_protocolTreasuryLockedUntil);
         }
         if (treasury == address(0)) {
             revert CfdEngine__ZeroAddress();
         }
-        if (treasury == protocolTreasury) {
+        if (treasury == _protocolTreasury) {
             return;
         }
-        protocolTreasury = treasury;
+        _protocolTreasury = treasury;
         emit ProtocolTreasuryUpdated(treasury);
     }
 
@@ -505,7 +579,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
             return;
         }
 
-        address treasury = protocolTreasury;
+        address treasury = protocolTreasury();
         clearinghouse.transferReservedSettlement(sourceAccount, treasury, amountUsdc);
         emit BountyCredited(sourceAccount, treasury, amountUsdc);
     }

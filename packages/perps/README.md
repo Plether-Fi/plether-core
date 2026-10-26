@@ -72,7 +72,7 @@ Refunds remain available under the documented recovery conditions. See the
 The contracts are non-upgradeable. Governance can adjust risk parameters through timelocks, and emergency
 controls can restrict trading and LP activity. See the [security model](SECURITY.md) for trust assumptions.
 
-## Protocol treasury lock
+## Protocol treasury lock and scheduling
 
 The engine owner can activate a treasury immediately and lock its address for a chosen positive duration in seconds:
 
@@ -81,16 +81,34 @@ engine.setProtocolTreasury(treasury, 90 days);
 uint256 expiry = engine.protocolTreasuryLockedUntil();
 ```
 
-Both treasury setters revert while `block.timestamp < expiry`, including calls that supply the current address.
-The lock cannot be shortened, extended, or bypassed by transferring ownership. At expiry the treasury stays in place;
-the owner may then replace it or lock it again. The one-argument `setProtocolTreasury(treasury)` remains available
-when unlocked and does not start a new lock. The constructor's initial treasury is unlocked.
+Both immediate treasury setters revert while `block.timestamp < expiry`, including calls that supply the current
+address. During that lock, the owner can schedule a successor, replace it, or cancel it:
+
+```solidity
+engine.proposeProtocolTreasury(nextTreasury, 90 days);
+engine.proposeProtocolTreasury(replacementTreasury, 30 days); // Keeps the original activation time.
+engine.cancelProtocolTreasuryProposal(); // Keeps the current treasury and its original lock.
+```
+
+At the original expiry, the latest pending treasury automatically becomes the recipient of future protocol fees.
+No confirmation or keeper transaction is required. Replacement and cancellation never reset the countdown. A
+proposal's duration sets the successor's lock, starting at that scheduled activation time; zero leaves the successor
+unlocked. If there is no pending proposal, the current treasury stays in place at expiry. Proposals require an active
+lock, and an already active successor cannot be cancelled.
+
+`protocolTreasury()` and `protocolTreasuryLockedUntil()` resolve the effective address and lock from the timestamp,
+even without a transaction at expiry. `pendingProtocolTreasury()` returns `(treasury, activationTime, lockedUntil)`
+before activation and zeros after activation or cancellation. The one-argument `setProtocolTreasury(treasury)` remains
+available when unlocked and starts no new lock. The constructor's initial treasury is unlocked. Ownership transfer
+does not alter the current lock or schedule.
 
 The lock applies to future protocol fee routing, not fund withdrawals: existing clearinghouse balances stay with
 their original accounts and remain withdrawable under normal clearinghouse rules. Junior-vault maintenance-fee
-recipients are configured separately. `ProtocolTreasuryLocked` exposes the selected address and expiry for monitoring.
-The expiry getter retains the last lock timestamp after expiry. These contracts are non-upgradeable, so this feature
-requires a new deployment and does not change existing deployments.
+recipients are configured separately. `ProtocolTreasuryLocked` records immediate commitments;
+`ProtocolTreasuryProposed` records scheduled addresses and both timestamps, and `ProtocolTreasuryProposalCancelled`
+records cancellation. No event is emitted merely because time passes: monitors should use the effective getters.
+The lock expiry getter retains the latest effective expiry after it passes. These contracts are non-upgradeable, so
+this feature requires a new deployment and does not change existing deployments.
 
 ## Development
 
