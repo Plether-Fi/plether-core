@@ -31,7 +31,9 @@ interface ICfdEngineLens {
     /// @notice Previews a close/decrease against current pool depth.
     /// @dev Uses current effective `HousePool.totalAssets()` (accounted assets capped by raw custody) for both planning
     ///      solvency and available pool cash. The supplied price is clamped to the engine cap; the preview does not
-    ///      validate oracle freshness or slippage.
+    ///      validate oracle freshness or slippage. Fresh payouts are split into position collateral, free settlement,
+    ///      and deferred claims. Free-settlement credits exclude released collateral and do not promise withdrawability.
+    ///      The extended ClosePreview return tuple requires matching ABI bindings for this lens deployment.
     /// @param account Account whose position would be closed
     /// @param sizeDelta Position size to close (18 decimals)
     /// @param oraclePrice Candidate execution price, clamped to `CAP_PRICE` (8 decimals)

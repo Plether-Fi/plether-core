@@ -967,6 +967,18 @@ Required properties:
 - assessed spread must equal paid spread plus waived spread,
 - preview and live close paths should share one close-accounting kernel and expose the same assessed/paid/waived result; successful nonzero assessments emit `FrozenCloseSpreadSettled`.
 
+The engine lens close preview separates fresh payout destinations:
+
+- `payoutToPnlPledgeUsdc`: cash price profit locked as collateral for a remaining position;
+- `payoutToFreeSettlementUsdc`: paid action rebates and full-close price profit credited without a position pledge;
+- `deferredPayoutUsdc`: new unpaid price profit recorded as a trader claim, excluding pre-existing claims.
+
+The legacy `immediatePayoutUsdc` is the sum of the two cash destinations, not a withdrawable amount.
+The three destinations sum to `freshTraderPayoutUsdc`; existing claims remain separately reported.
+Released pre-existing collateral is outside these fresh payout fields. Even a free-settlement credit is not a
+withdrawal-capacity quote: account reservations, carry, and engine withdrawal guards still apply. Consumers of
+`CfdEngineLens.previewClose` and `simulateClose` must use ABI bindings with the appended destination fields.
+
 ### Open projection
 
 - request/resulting lots fit `uint112`, exact entry cost fits `uint144`, and requested margin fits `int256`;

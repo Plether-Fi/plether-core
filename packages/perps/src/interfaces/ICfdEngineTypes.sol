@@ -261,7 +261,8 @@ interface ICfdEngineTypes {
     /// @param freshTraderPayoutUsdc New value owed to the trader by this close, whether immediate or deferred.
     /// @param existingTraderClaimConsumedUsdc Existing claim value netted into the settlement.
     /// @param existingTraderClaimRemainingUsdc Existing claim left after settlement netting.
-    /// @param immediatePayoutUsdc Portion of the fresh payout paid immediately into clearinghouse settlement.
+    /// @param immediatePayoutUsdc Aggregate cash paid now: payoutToPnlPledgeUsdc + payoutToFreeSettlementUsdc.
+    ///        Includes locked collateral; integrations should use the destination fields, not treat this as withdrawable.
     /// @param traderClaimBalanceUsdc Projected claim balance after consuming old claims and recording deferred payout.
     /// @param seizedCollateralUsdc PnL pledge collected for price loss; excludes carry and action charges.
     /// @param remainingSize Position size after the close.
@@ -274,6 +275,10 @@ interface ICfdEngineTypes {
     /// @param frozenSpreadPaidUsdc Assessed spread recovered from fresh price-gain withholding or eligible action
     ///        collateral; existing trader claims cannot pay the spread.
     /// @param frozenSpreadWaivedUsdc Assessed frozen spread left uncollected; it does not become bad debt.
+    /// @param payoutToPnlPledgeUsdc Fresh price payout credited and locked as collateral for the remaining position.
+    /// @param payoutToFreeSettlementUsdc Fresh cash credited without a position pledge: paid action rebates plus
+    ///        full-close price payouts. Excludes released pre-existing collateral and is not a withdrawal-capacity quote.
+    /// @param deferredPayoutUsdc Fresh unpaid price payout recorded as a trader claim; excludes existing claims.
     struct ClosePreview {
         bool valid;
         CfdTypes.CloseInvalidReason invalidReason;
@@ -298,6 +303,9 @@ interface ICfdEngineTypes {
         uint256 frozenSpreadUsdc;
         uint256 frozenSpreadPaidUsdc;
         uint256 frozenSpreadWaivedUsdc;
+        uint256 payoutToPnlPledgeUsdc;
+        uint256 payoutToFreeSettlementUsdc;
+        uint256 deferredPayoutUsdc;
     }
 
     /// @notice Read-only open/increase trade-ticket preview.

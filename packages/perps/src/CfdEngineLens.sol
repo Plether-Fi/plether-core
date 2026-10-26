@@ -388,9 +388,18 @@ contract CfdEngineLens is ICfdEngineLens {
         preview.freshTraderPayoutUsdc = delta.freshTraderPayoutUsdc;
         preview.existingTraderClaimConsumedUsdc = delta.existingTraderClaimConsumedUsdc;
         preview.existingTraderClaimRemainingUsdc = delta.existingTraderClaimRemainingUsdc;
-        preview.immediatePayoutUsdc = delta.freshPayoutIsImmediate ? delta.freshTraderPayoutUsdc : 0;
-        preview.traderClaimBalanceUsdc =
-            delta.existingTraderClaimRemainingUsdc + (delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0);
+        // Mirror settlement routing: partial-close price cash stays pledged; action rebates are always free.
+        preview.payoutToFreeSettlementUsdc = delta.actionRebatePaidUsdc;
+        if (delta.pricePayoutIsImmediate) {
+            if (delta.deletePosition) {
+                preview.payoutToFreeSettlementUsdc += delta.pricePayoutUsdc;
+            } else {
+                preview.payoutToPnlPledgeUsdc = delta.pricePayoutUsdc;
+            }
+        }
+        preview.deferredPayoutUsdc = delta.pricePayoutCreatesClaim ? delta.pricePayoutUsdc : 0;
+        preview.immediatePayoutUsdc = preview.payoutToPnlPledgeUsdc + preview.payoutToFreeSettlementUsdc;
+        preview.traderClaimBalanceUsdc = delta.existingTraderClaimRemainingUsdc + preview.deferredPayoutUsdc;
         preview.seizedCollateralUsdc = delta.pricePnlPledgeConsumedUsdc;
 
         preview.valid = delta.valid;
