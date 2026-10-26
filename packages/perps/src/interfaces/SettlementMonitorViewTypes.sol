@@ -229,9 +229,13 @@ library SettlementMonitorViewTypes {
         uint64 terminalBookVersion;
         bool terminalHasOpenPositions;
         bool terminalDegradedMode;
+        /// @notice Availability of the four cached tranche principal/withdrawal preview fields only.
         bool cachedPreviewAvailable;
         bool terminalSnapshotAvailable;
         uint256 dependencyFailureMask;
+        /// @notice Availability of freeUsdc, withdrawalReservedUsdc, and cachedPreviewTerminalDeficitUsdc.
+        /// @dev Independent of cachedPreviewAvailable; false means these fields are unavailable, not measured zero.
+        bool liquidityPreviewAvailable;
     }
 
     /// @notice Current-feed PoolReconcile observation. It does not validate a future Hermes payload or fee quote.
