@@ -19,12 +19,13 @@ interface IPositionProtectionBookSource {
 }
 
 /// @title MarginClearinghouse
-/// @notice Custodies settlement USDC and maintains the margin buckets used by Plether perpetual accounts.
-/// @dev Account ids are addresses. A settlement balance is an internal claim on this contract's USDC custody;
+/// @notice Custodies the settlement token and maintains the margin buckets used by Plether perpetual accounts.
+/// @dev Account ids are addresses. A settlement balance is an internal claim on this contract's token custody;
 ///      PnL pledge, liquidation reserve, committed-order margin, and action reserve are encumbrances within that
-///      balance, not separate token balances. The contract assumes a standard six-decimal USDC implementation and
+///      balance, not separate token balances. The contract assumes a standard six-decimal ERC-20 implementation and
 ///      does not support fee-on-transfer accounting. The deployer owns the one-time engine wiring and rescue of
-///      non-settlement tokens through `Ownable2Step`.
+///      non-settlement tokens through `Ownable2Step`. Legacy `Usdc` names denote settlement-token units, including
+///      MockUSDG on the new testnet stack; unsolicited settlement-token transfers do not credit an account.
 /// @custom:security-contact contact@plether.com
 contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTransient {
 
@@ -66,7 +67,7 @@ contract MarginClearinghouse is IMarginAccount, Ownable2Step, ReentrancyGuardTra
     );
 
     /// @notice Settlement ERC-20 whose native units are used for every balance and margin amount.
-    /// @dev Expected to be six-decimal USDC; the constructor does not inspect the token contract or its decimals.
+    /// @dev Expected to have six decimals; the constructor does not inspect the token contract or its decimals.
     address public immutable settlementAsset;
 
     /// @notice Engine authorized to operate account balances and margin buckets.

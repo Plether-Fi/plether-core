@@ -68,10 +68,11 @@ interface ITrancheVaultEpochSettlement {
 /// @title HousePool
 /// @notice Tranched house pool. Senior tranche gets a junior-funded target coupon with last-loss protection.
 ///         Junior tranche pays senior carry, absorbs first loss, and captures surplus revenue.
-/// @dev Maintains a canonical accounted-asset boundary separate from the raw USDC balance, reserves trader and
-///      unassigned claims from LP withdrawals, and prices the two asynchronous tranche vaults through a senior-first
-///      waterfall. Ordinary LP deposits and new trader risk remain disabled until both seed positions exist and
-///      the owner activates trading.
+/// @dev Maintains a canonical accounted-asset boundary separate from the raw settlement-token balance, reserves
+///      trader and unassigned claims from LP withdrawals, and prices the two asynchronous tranche vaults through a
+///      senior-first waterfall. Ordinary LP deposits and new trader risk remain disabled until both seed positions exist and
+///      the owner activates trading. Legacy `USDC` and `Usdc` identifiers denote six-decimal settlement-token units,
+///      including MockUSDG on the new testnet stack. Unsolicited tokens require explicit recognition before accounting.
 /// @custom:security-contact contact@plether.com
 contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, ReentrancyGuardTransient {
 
@@ -125,7 +126,8 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         bool entriesDeferred
     );
 
-    /// @notice USDC token held as pool collateral and used for all accounting amounts.
+    /// @notice Six-decimal settlement token held as pool collateral and used for all accounting amounts.
+    /// @dev Legacy getter name retained for ABI compatibility; token identity comes from its configured address.
     IERC20 public immutable USDC;
     /// @notice CfdEngine authorized to settle pool cash flows and provide protocol state.
     ICfdEngineCore public immutable ENGINE;
@@ -220,7 +222,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     ///      target rate, a 60-second live mark limit, and 25/75-bps senior/junior frozen-oracle LP fees. Senior
     ///      capacity starts at neutral unbounded sentinels that governance must replace before trading activation.
     ///      Deployment neither initializes tranche vaults nor activates trading.
-    /// @param _usdc USDC token address used as 6-decimal collateral
+    /// @param _usdc Settlement token address used as 6-decimal collateral (legacy parameter name)
     /// @param _engine CfdEngine that manages positions, liabilities, and PnL
     /// @param _redemptionMathSidecar Stateless exact redemption-pricing implementation
     constructor(

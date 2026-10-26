@@ -4,9 +4,36 @@ This document covers the current deployment flow for the perps stack in `package
 
 The current target network is Arbitrum Sepolia with:
 
-- mock USDC as the settlement asset
+- MockUSDG (`Mock USDG`, symbol `USDG`, six decimals) as the settlement asset
 - Pyth as the router oracle source
 - a separate deploy phase and bootstrap phase
+
+MockUSDG is the release-local test token in `script/DeployPerpsArbitrumSepolia.s.sol`. Anyone may call
+`mint(address,uint256)` repeatedly; it has no redemption value, issuer backing, EIP-2612 permit, EIP-3009
+authorization, or rewards. It is distinct from official USDG. All clearinghouse, Engine, HousePool, vault, and lens
+asset bindings use the same token address. Public `USDC()` getters, `*Usdc` receipt fields, and SDK `usdc` inputs
+remain legacy names for the configured six-decimal settlement token; price, margin, liquidation, carry, and tranche
+math remain unchanged. Historical releases retain their original token and manifests.
+
+The current implementation stage permits local tests and no-broadcast simulations only. Deployment, minting on a
+public testnet, bootstrap, and activation commands below are future operator instructions; do not execute them as
+part of this implementation.
+
+## Settlement-token release metadata
+
+New manifests use schema version `4`. The canonical contract entry is `contracts.settlementToken`, with artifact
+`script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG`, an address, and a runtime code hash. Top-level `settlementToken`
+metadata records `name: "Mock USDG"`, `symbol: "USDG"`, `decimals: 6`, `isMock: true`,
+`supportsReceiveWithAuthorization: false`, and `supportsBridgeFunding: false`. Applications should display
+`Mock USDG`, use the manifest address for balances and approvals, and gate funding routes by those capabilities.
+Do not relabel an address from an older USDC deployment. Historical `contracts.mockUsdc` manifests and their ABI
+exports remain historical evidence; export new artifacts into a fresh directory from the reviewed source revision.
+
+Bootstrap and verification read `PERPS_SETTLEMENT_TOKEN`; seed inputs are `SENIOR_SEED_ASSETS` and
+`JUNIOR_SEED_ASSETS`. Do not put the new token into `PERPS_USDC`: spot scripts may inherit that old setting.
+The verifier checks code, six decimals, expected mock name/symbol, and matching asset bindings. Metadata checks
+identify this test release and do not authenticate official USDG. Prepared manifests keep unknown addresses and
+transaction evidence unset and must not be marked deployed or active.
 
 ## Oracle synchronization and live watermark candidate
 
@@ -85,7 +112,7 @@ The bootstrap script handles operator actions after deploy:
 - fail-closing on the constructor-initialized HousePool senior limits and Router opening/oracle parameters
 - verifying the constructor-initialized Junior maintenance fee and treasury snapshot
 - seeding the junior tranche and then the senior tranche
-- minting mock USDC to test users
+- minting MockUSDG to test users
 - activating trading
 
 LP deposits and redemptions share the vaults' deterministic round-hour epoch clock and fixed 300-second request
@@ -106,7 +133,7 @@ pool, or vault side effect.
 
 The deploy script creates and wires:
 
-1. `MockUSDC`
+1. `MockUSDG`
 2. `MarginClearinghouse`
 3. `CfdEngine`
 4. `TerminalNavBookV2`
@@ -208,7 +235,7 @@ Important:
   settlement authority. Its constructor deploys a size-management `SettlementMonitorLensSidecar` that accepts calls
   only from that facade. Deployment verifies that the facade's `SIDECAR` has code, the sidecar's `MONITOR` is the
   facade, and both contracts' Router, Engine, HousePool, Engine protocol lens, clearinghouse, terminal-book, vault,
-  and USDC bindings match the deployed stack. The sidecar is an implementation detail, not a second integration
+  and settlement-token bindings match the deployed stack. The sidecar is an implementation detail, not a second integration
   address or canonical monitoring surface. Facade construction rejects missing or mismatched required one-time core
   wiring, including equality between the Router's immutable settlement pool and `Engine.pool()`, and the health view
   rechecks those reciprocal bindings rather than assuming deployment stayed correct.
@@ -330,7 +357,7 @@ The next Arbitrum Sepolia perps deployment uses these initial defaults:
 | `minOpenNotionalUsdc` | `1_000e6` (release-Router constructor initialization) |
 | `maxPendingOrders` | `5` (unchanged) |
 | Close execution bounty | Always zero; no configuration field or getter |
-| `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDC`) |
+| `positionProtectionTriggerBountyUsdc` | `200_000` (`0.20 USDG`) |
 | `juniorMaintenanceFeeAprBps` | `0` nominal APR (disabled at deployment) |
 | `juniorMaintenanceFeeRecipient` | deployment-time `protocolTreasury()` snapshot |
 | `maxSeniorExposureUsdc` | `40_000_000e6` (release-HousePool constructor initialization) |
@@ -353,7 +380,7 @@ After deployment, the current HousePool owner may propose a rate/recipient pair,
 values, and finalize it. Rates are
 capped at `1,000 bps` nominal APR and a nonzero rate requires a valid nonzero recipient. Finalization crystallizes
 elapsed completed-hour fees under the old pair before applying the new pair. The recipient receives ordinary Junior
-shares, not USDC, and must use the normal asynchronous redemption lifecycle. There is no public fee checkpoint;
+shares, not settlement tokens, and must use the normal asynchronous redemption lifecycle. There is no public fee checkpoint;
 materialization occurs before an actual Junior supply mutation or during configuration finalization. Each checkpoint
 charges at most 8,760 hours and explicitly forgives older elapsed hours. Accrual continues during settlement holds,
 oracle freeze, and zero NAV.
@@ -364,7 +391,7 @@ deployment ordering.
 
 The first Junior seed receives no retroactive dilution: when raw supply is zero, the checkpoint boundary advances
 without minting fee shares. Completed hours after supply exists accrue through the existing effective-supply and
-checkpoint paths. Fee payment remains Junior-share dilution only, with no USDC transfer, principal mutation, or Senior
+checkpoint paths. Fee payment remains Junior-share dilution only, with no settlement-token transfer, principal mutation, or Senior
 charge.
 
 `PerpsViewTypes.TrancheView` now includes raw/effective supply and Junior fee fields before `sharePrice`. Its tuple ABI
@@ -467,7 +494,7 @@ forge script script/DeployPerpsArbitrumSepolia.s.sol:DeployPerpsArbitrumSepolia 
 The script prints the deployed addresses and position-protection defaults to the console. Save the complete output,
 including at least:
 
-- `MockUSDC`
+- `MockUSDG`
 - `MarginClearinghouse`
 - `CfdEngine`
 - `TerminalNavBookV2`
@@ -490,7 +517,7 @@ including at least:
 - `EmergencyPauseCoordinator`
 
 Also record the active V5 execution-config hash, source commit, deployment block, transaction hashes, and
-verified-bytecode status. `MockUSDC`,
+verified-bytecode status. `MockUSDG`,
 `HousePool`, `HousePoolRedemptionMathSidecar`, `OrderRouter`, and `EmergencyPauseCoordinator` are consumed directly by
 the bootstrap script. Bootstrap derives the RouterAdmin, policy evaluator, V3 execution sidecar, lifecycle Book,
 stateful protection Book, and stateless keeper sidecar from the Router; it verifies the supplied redemption-math
@@ -508,15 +535,15 @@ Required:
 TEST_PRIVATE_KEY=...
 ARB_SEPOLIA_RPC_URL=...
 
-PERPS_USDC=0x...
+PERPS_SETTLEMENT_TOKEN=0x...
 PERPS_HOUSE_POOL=0x...
 PERPS_HOUSE_POOL_REDEMPTION_MATH_SIDECAR=0x...
 PERPS_ORDER_ROUTER=0x...
 PERPS_EMERGENCY_COORDINATOR=0x...
 PERPS_GUARDIAN=0x...
 
-SENIOR_SEED_USDC=1000000
-JUNIOR_SEED_USDC=1000000
+SENIOR_SEED_ASSETS=1000000
+JUNIOR_SEED_ASSETS=1000000
 
 SENIOR_SEED_RECEIVER=0x...
 JUNIOR_SEED_RECEIVER=0x...
@@ -534,8 +561,8 @@ TEST_USER_AMOUNTS=1000000000000,500000000000
 
 Notes:
 
-- USDC amounts are raw 6-decimal values.
-- `1000000` means `1e6`, or 1 mock USDC.
+- Settlement-token amounts are raw 6-decimal values.
+- `1000000` means `1e6`, or 1 Mock USDG.
 - Seed amounts, seed receivers, guardian, and activation intent are explicit mandatory inputs. Bootstrap accepts only
   the approved `$1/$1` seed values and independently reads and verifies the constructor-installed `$40M/80%`
   HousePool and `$1,000/2,500` Router values.
@@ -611,6 +638,58 @@ This is useful if the first bootstrap attempt completes only partially.
 Position protection needs no enablement proposal. Bootstrap verifies the constructor-installed
 minimum opening notional and adverse-confidence multiplier plus the unchanged `10`-bps basket confidence and
 pending-order limit `5`. Final output reports the Book address and trigger bounty.
+
+## Repeat testnet funding
+
+After a separately authorized deployment, fund a tester directly without rerunning deployment, bootstrap, or
+activation. Resolve and check the tester's canonical trading smart-account address for that release, then mint to
+that address. An owner EOA and its trading account are different beneficiaries. For example, to mint 1,000 Mock USDG:
+
+```bash
+# Future operator command: submits a transaction and requires Arbitrum Sepolia ETH.
+PERPS_TRADING_ACCOUNT=0x...
+cast send "$PERPS_SETTLEMENT_TOKEN" 'mint(address,uint256)' "$PERPS_TRADING_ACCOUNT" 1000000000 \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" --account testnet-funder
+```
+
+`testnet-funder` is a locally configured Foundry keystore account. Any gas-funded account may mint; no token-owner
+role, faucet allowance, daily limit, or deployment rerun is required. Minting adds tokens only to the recipient's
+wallet balance, not its clearinghouse margin balance. Use `buildSmartAccountBalanceDepositAction` with the
+configured token passed through its legacy `usdc` input to approve and call `depositMargin` from the trading
+account. If tokens were minted to an owner EOA instead, transfer them to the canonical trading account first.
+Do not mint or transfer directly to the clearinghouse to fund an account.
+
+MockUSDG cannot execute the signed owner-wallet `receiveWithAuthorization` first-deposit route. Keep that route
+disabled while allowing the ordinary account-balance deposit; gas sponsorship may cover that supported flow when
+configured and simulated against this exact stack. Update sponsor token targets and code hashes with the new
+release. External bridge funding remains disabled; an old USDC bridge manifest is not a MockUSDG route.
+
+## Future rewards readiness
+
+Top-level manifest `rewards` records `status: "not_applicable"`,
+`holdingContracts: ["marginClearinghouse", "housePool"]`, `payoutAddress: null`, and `payoutController: null`.
+The holding entries resolve through the same manifest's contract inventory; the manifest's chain id supplies the
+network. MockUSDG has no reward entitlement or accrual, and leaving the destination unconfigured is intentional.
+
+For a future production USDG deployment, onboarding is a separate operator task:
+
+1. Confirm the supported network, token, eligible holding contracts/balances, registration requirements, and claim
+   authority with the production Paxos configuration. Register the actual clearinghouse and HousePool addresses
+   only after eligibility and control verification are established.
+2. Choose a separate treasury or multisig payout address. Record its address and controlling party; verify that the
+   controller can move received tokens. Reject a destination equal to the clearinghouse, Engine, HousePool, or either
+   tranche vault, and check it against the complete deployment inventory before configuring production payouts.
+3. Configure that destination with the reward provider, record registration status and verification evidence, and
+   monitor receipts. Reconfirm the provider's current payout and claim process at activation.
+4. Decide and implement any subsequent reward allocation separately. An external distributor can pay traders or LPs
+   without adding a reward claim hook or settlement-token rescue authority to the clearinghouse.
+
+Unsolicited transfers to the clearinghouse credit no account and cannot be rescued as settlement assets. HousePool
+excess becomes accounted capital only through its explicit owner-controlled recognition path. Therefore rewards
+should not be sent to collateral custody contracts. Unclaimed rewards never increase margin or LP NAV; receipts in
+the separate treasury also have no accounting effect until deliberately allocated through supported protocol flows.
+This readiness metadata introduces no reward contract, principal-withdrawal permission, APY promise, or change to
+the tranche waterfall.
 
 ## Position Protection Operation
 
@@ -710,7 +789,7 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
   bootstrap fee transaction. Any later rate or recipient change is a separate 48-hour governance operation.
 - `TerminalNavBookV2` has no owner repair or import function. Do not activate trading unless its Engine binding,
   price cap, size quantum, and empty initial state were verified by the deploy transaction.
-- The bootstrap script only mints mock USDC. It does not fund users with ETH.
+- The bootstrap script only mints MockUSDG. It does not fund users with ETH.
 - Test users still need Arbitrum Sepolia ETH from a faucet to submit transactions.
 - The deploy and bootstrap scripts currently assume the broadcaster owns the deployed contracts.
 - The router admin is deployed internally by `OrderRouter`; bootstrap uses `router.admin()` to reach it.
@@ -741,7 +820,7 @@ FIFO execution, terminal cleanup, latched retry, and liquidation remain live.
    plus the canonical Router success paths for mark refresh, protection-trigger oracle resolution, single liquidation,
    batch liquidation, and atomic-refresh LP-epoch settlement, and the direct-Pool cached settlement path. Verify the
    `SettlementMonitorLens` facade and its internal sidecar are bound to the same Router, Engine, pool, terminal book,
-   clearinghouse, vaults, USDC, protocol lens, and planner version. Confirm Junior maintenance-fee rate, recipient,
+   clearinghouse, vaults, settlement token, protocol lens, and planner version. Confirm Junior maintenance-fee rate, recipient,
    pending shares, and effective supply read back as `0`, the deployment-time protocol-treasury snapshot, `0`, and
    raw supply respectively. Also verify the constructor-installed HousePool `$40M/80%` and Router `$1,000/2,500`
    values with zero active configuration proposals. Verify the

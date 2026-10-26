@@ -16,6 +16,7 @@ export interface BridgeFundingCall {
 /** Values pinned by a separately validated bridge-funding release, never inferred from a wallet/provider. */
 export interface BridgeFundingDeployment {
   readonly chainId: number;
+  /** Legacy input name: the settlement token pinned by this bridge-specific release. */
   readonly usdc: Address;
   readonly clearinghouse: Address;
   readonly destinationSpokePool: Address;
@@ -65,11 +66,11 @@ export function buildDepositForCalls(input: {
   if (input.amount <= 0n || input.amount > maxUint256) {
     throw new InvalidPerpsActionError("Deposit amount must be a positive uint256.");
   }
-  const usdc = address(input.usdc, "USDC");
+  const usdc = address(input.usdc, "Settlement token");
   const clearinghouse = address(input.clearinghouse, "Clearinghouse");
   const beneficiary = address(input.beneficiary, "Beneficiary");
   if (usdc === clearinghouse) {
-    throw new InvalidPerpsActionError("USDC and clearinghouse must be distinct.");
+    throw new InvalidPerpsActionError("Settlement token and clearinghouse must be distinct.");
   }
   return Object.freeze([
     call(usdc, encodeFunctionData({ abi: erc20ApproveAbi, functionName: "approve", args: [clearinghouse, input.amount] })),
@@ -102,7 +103,7 @@ export async function verifyBridgeFundingDeployment(input: {
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new InvalidPerpsActionError("Deployment chain id must be a positive safe integer.");
   }
-  const usdc = address(input.deployment.usdc, "USDC");
+  const usdc = address(input.deployment.usdc, "Settlement token");
   const clearinghouse = address(input.deployment.clearinghouse, "Clearinghouse");
   const destinationSpokePool = address(input.deployment.destinationSpokePool, "Destination SpokePool");
   const destinationSpokePoolImplementation = address(input.deployment.destinationSpokePoolImplementation, "SpokePool implementation");
@@ -112,7 +113,7 @@ export async function verifyBridgeFundingDeployment(input: {
     throw new InvalidPerpsActionError("Funding deployment contracts must be distinct.");
   }
   const hashes = [
-    word(input.deployment.usdcRuntimeCodeHash, "USDC runtime hash"),
+    word(input.deployment.usdcRuntimeCodeHash, "Settlement token runtime hash"),
     word(input.deployment.clearinghouseRuntimeCodeHash, "Clearinghouse runtime hash"),
     word(input.deployment.destinationSpokePoolRuntimeCodeHash, "SpokePool runtime hash"),
     word(input.deployment.destinationSpokePoolImplementationRuntimeCodeHash, "SpokePool implementation runtime hash"),

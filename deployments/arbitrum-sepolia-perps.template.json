@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "orderInterfaceVersion": 3,
   "network": {
     "name": "arbitrum-sepolia",
@@ -18,7 +18,11 @@
     "pyth": "0x0B73614636C855Bf23F342F307FB981A3e47f42B"
   },
   "contracts": {
-    "mockUsdc": { "address": null, "runtimeCodeHash": null },
+    "settlementToken": {
+      "artifact": "script/DeployPerpsArbitrumSepolia.s.sol:MockUSDG",
+      "address": null,
+      "runtimeCodeHash": null
+    },
     "marginClearinghouse": { "address": null, "runtimeCodeHash": null },
     "cfdEngine": { "address": null, "runtimeCodeHash": null },
     "terminalNavBookV2": { "address": null, "runtimeCodeHash": null },
@@ -59,6 +63,20 @@
     "settlementMonitorLens": { "address": null, "runtimeCodeHash": null },
     "settlementMonitorLensSidecar": { "address": null, "runtimeCodeHash": null },
     "emergencyPauseCoordinator": { "address": null, "runtimeCodeHash": null }
+  },
+  "settlementToken": {
+    "name": "Mock USDG",
+    "symbol": "USDG",
+    "decimals": 6,
+    "isMock": true,
+    "supportsReceiveWithAuthorization": false,
+    "supportsBridgeFunding": false
+  },
+  "rewards": {
+    "status": "not_applicable",
+    "holdingContracts": ["marginClearinghouse", "housePool"],
+    "payoutAddress": null,
+    "payoutController": null
   },
   "economics": {
     "vpiFactorWad": "10000000000000000",

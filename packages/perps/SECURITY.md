@@ -2,6 +2,11 @@
 
 This document describes the trust model, protocol invariants, failure-containment design, and known limitations for the Plether perps system.
 
+The new Arbitrum Sepolia release uses six-decimal MockUSDG. Retained `USDC()`, `*Usdc`, and `usdc` public names
+refer to the configured settlement asset and its six-decimal units; they do not establish token identity. Historical
+USDC deployments and their recorded audit evidence retain their original meaning. The token substitution adds no
+margin, PnL, liquidation, or tranche-math change.
+
 It is written as an audit-facing companion to:
 
 - [`README.md`](README.md) for the high-level product and architecture story
@@ -81,7 +86,7 @@ The constructor `settlementBufferBps` default is `25` bps (0.25%). Timelocked up
 ### Owner-funded recapitalization
 
 `CfdEngine.recapitalizePool(amountUsdc)` is an immediate, owner-only, non-reentrant recovery action.
-The engine owner approves the engine to pull USDC from its own wallet directly into the configured HousePool.
+The engine owner approves the engine to pull settlement tokens from its own wallet directly into the configured HousePool.
 The engine checkpoints carry against the old pool depth, verifies the exact token balance increase, and records
 `Recapitalization` with `CashArrived` atomically. Existing excess cannot substitute for the incoming transfer.
 The pool queues claimant allocation for normal reconciliation; no shares are minted and degraded mode is not
@@ -337,16 +342,39 @@ Risks:
 - the basket-only confidence gate deliberately favors liveness over an individual-feed hard ceiling: a low-weight component with a wide confidence interval can pass when its weighted contribution keeps aggregate basket confidence within the configured limit,
 - all live execution still depends on external oracle availability.
 
-### USDC
+### Settlement token and MockUSDG
 
-The protocol assumes standard ERC-20 behavior and practical dollar parity from USDC.
+The protocol assumes a standard six-decimal ERC-20 settlement token and practical dollar parity. It does not price
+collateral separately or support fee-on-transfer or rebasing accounting. The configured address is immutable for
+the deployed stack; metadata and token names are not authentication of an issuer's asset.
 
-Risks:
+The release-local MockUSDG is freely mintable by anyone, with name `Mock USDG`, symbol `USDG`, and six decimals.
+It has no financial backing, redemption right, or rewards and must remain test-only. It provides ordinary ERC-20
+approval and transfer behavior, without EIP-2612 permit or EIP-3009 `receiveWithAuthorization`. Consequently the
+signed owner-wallet funding route and external bridge funding are disabled. The supported testnet trading-account
+flow mints to the canonical smart account, then batches approval and `depositMargin` from that account; minting to
+the clearinghouse does not fund a user's margin.
 
-- blacklist risk,
-- upgrade risk at the token level,
+An official production token requires separate compatibility and issuer review. Risks include:
+
+- issuer freezing/blacklisting or pausing transfers,
+- upgrade risk at the token level where supported by the issuer,
 - collateral centralization risk,
-- no mitigation inside the core perps design.
+- loss of dollar parity, with no collateral-price mitigation inside the core perps design.
+
+### External USDG rewards
+
+MockUSDG reward metadata is explicitly `not_applicable`. The manifest records the intended holding-contract keys
+(`marginClearinghouse` and `housePool`), chain, and an unconfigured separate payout address/controller for a future
+production integration. It is not evidence of eligibility, accrued income, or an authorized claim mechanism.
+
+Any future payout address must be separate from the clearinghouse, Engine, HousePool, and both tranche vaults, with
+a controller able to transfer received tokens. A reward transfer into the clearinghouse would credit no account
+and cannot be rescued; unsolicited HousePool excess requires explicit owner recognition before affecting its
+accounting. Registration, eligible balances, and claim/payout control must be verified against production provider
+configuration. Unclaimed rewards and treasury receipts do not increase trader margin or LP NAV. Distribution is
+a separate policy and component, with no new core withdrawal permissions, arbitrary-call hooks, claim contracts,
+or automatic change to the waterfall. See the [activation runbook](DEPLOYMENT.md#future-rewards-readiness).
 
 ### OpenZeppelin and other dependencies
 
@@ -477,7 +505,7 @@ equity must be strictly greater than `max(initMargin, active maintenance/FAD mar
 The broad operators can:
 
 - lock and unlock margin,
-- settle USDC balances,
+- settle account balances,
 - seize settlement into protocol-authorized flows.
 
 The router reservation paths can:
@@ -492,6 +520,9 @@ Those actors cannot:
 - bypass clearinghouse bucket accounting.
 
 ### Credit-only funding and bridge destination calls
+
+The bridge route described below is the existing USDC integration. It is unavailable for the new MockUSDG
+deployment; its manifest, token allowlist, and external provider route must not be reused as MockUSDG funding.
 
 `MarginClearinghouse.depositFor(account, amount)` is permissionless funding from the caller's own token allowance.
 It requires a nonzero beneficiary, positive amount, and exact receipt of the requested settlement token amount before
@@ -621,7 +652,7 @@ Terminal classification is deliberately allow-listed:
 - when the exact protected position remains after a registered protection-attempt failure, cleanup settles that
   attempt's zero record, pays no executor, and moves `Triggered -> Latched`; retry creates a fresh zero record,
 - terminal-invalid closes move no bounty value. The separate protection-trigger bounty is paid only on trigger,
-- open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet USDC transfers,
+- open-order refunds and keeper payouts credit clearinghouse settlement rather than sending direct wallet settlement-token transfers,
 - persistent risk-off cancellation is administrative invalidation, precedes expiry, needs no oracle, and fully refunds
   the trader's order plus attached `PendingOpen` protection reserves internally in one no-checkpoint clearinghouse
   release without paying the cleanup caller; its receipt records no price source and, for a nonzero order bounty,
@@ -796,7 +827,7 @@ for invariant and differential testing of every settlement path.
 
 A settlement pass that advances no queue item reverts, rolling back both waterfall reconciliation and engine carry
 checkpoints. This prevents per-block no-op checkpoint grief. Senior coupon arithmetic still floors independently at
-each settlement that advances real epoch work, so sub-micro-USDC rounding remains execution-frequency dependent; the
+each settlement that advances real epoch work, so sub-micro-token rounding remains execution-frequency dependent; the
 hourly aggregation of requests bounds that residual rather than making coupon accrual mathematically remainder-exact.
 
 Async allocation uses per-controller floor rounding against immutable epoch totals. Splitting a request among more
@@ -1055,7 +1086,7 @@ The current HousePool owner may configure it through a 48-hour delay, subject to
 Finalization must checkpoint elapsed fees to the old recipient before changing the rate or recipient; enabling from
 zero starts prospectively.
 
-The fee mints ordinary Junior shares and never transfers USDC or mutates tranche principal, the Senior HWM, reserves,
+The fee mints ordinary Junior shares and never transfers settlement tokens or mutates tranche principal, the Senior HWM, reserves,
 claim escrows, or waterfall accounting. Security review must distinguish raw ERC-20 supply from effective pricing
 supply (`raw + pending fee shares`). Every Junior conversion, preview, and settlement price uses effective supply,
 while raw supply remains the conservation quantity for actually issued balances. Pending deposits are excluded until
@@ -1081,10 +1112,10 @@ This removes unpaid senior-coupon debt queues while making the cost of the fixed
 ### Senior exposure limits and passive overage
 
 Active protected senior exposure is `E = max(projected senior principal, projected senior high-water mark)`. Counted
-admission exposure is `C = E + R`, where `R` is the gross USDC reserved in unfinalized senior deposit epochs. The
+admission exposure is `C = E + R`, where `R` is the gross settlement-token amount reserved in unfinalized senior deposit epochs. The
 absolute and share admission tests use `C`, and the Junior redemption-funding covenant protects the same committed
 exposure `C`.
-Governance sets both an absolute USDC limit and a maximum share of senior-plus-junior claimant capital. The high-water
+Governance sets both an absolute settlement-token limit and a maximum share of senior-plus-junior claimant capital. The high-water
 term prevents an impaired principal balance from falsely reopening capacity while its restoration entitlement remains.
 
 Senior deposit reservations are firm once accepted. They consume quoted headroom when requested and settle even if
@@ -1233,9 +1264,9 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 
 ### Accepted rounding behavior
 
-- **MED-22 — position carry rounding:** Converting a position's carry-index delta to six-decimal USDC rounds down.
+- **MED-22 — position carry rounding:** Converting a position's carry-index delta to six-decimal settlement units rounds down.
   The checkpoint advances even when the result is zero, without retaining the fractional remainder. Each such
-  conversion can discard less than one USDC atom (`0.000001 USDC`). User-triggered checkpoints, including
+  conversion can discard less than one settlement-token atom (`0.000001` tokens). User-triggered checkpoints, including
   zero-amount withdrawals, can therefore reduce LP carry revenue; an interval whose entire accrual is below one atom
   contributes no collectible carry. Practical savings depend on borrow size, utilization, checkpoint frequency, and
   transaction costs. This rounding behavior is accepted; fractional carry persistence is not planned.
@@ -1259,16 +1290,16 @@ indexers to the new manifest; old protection and attempt state is not migrated.
 
 ### Clearinghouse limitations
 
-- V1 is USDC-only cross-margin,
-- the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; settlement USDC
+- Each stack supports one six-decimal settlement token for cross-margin; the new testnet stack uses MockUSDG,
+- the owner may rescue accidentally transferred non-settlement ERC-20 tokens through `rescueToken`; the settlement token
   is always excluded, including uncredited direct transfers, and rescue does not alter account balances or margin,
-- **LOW-6 — accepted settlement-USDC recovery limitation:** Direct USDC transfers to the clearinghouse outside its
+- **LOW-6 — accepted settlement-token recovery limitation:** Direct settlement-token transfers to the clearinghouse outside its
   deposit APIs do not credit a margin account and remain unrecoverable through the current APIs, including by the
   owner. They are not allocated to HousePool or LPs. The clearinghouse has no aggregate credited-balance counter
-  with which to safely distinguish recoverable surplus from funds backing account obligations. USDC recovery,
+  with which to safely distinguish recoverable surplus from funds backing account obligations. Settlement-token recovery,
   aggregate surplus accounting, and allocation of such transfers to LPs are not planned as part of this remediation.
   Integrations must use the supported `deposit`, `depositMargin`, or `depositFor` APIs to fund margin accounts,
-- non-USDC collateral pricing and staleness policy are intentionally out of scope.
+- multi-asset collateral pricing and collateral-price staleness policy are intentionally out of scope.
 
 ## Emergency Procedures
 
@@ -1327,7 +1358,7 @@ create neither condition; V2 has no accumulated-debt ledger to clear.
 
 ## Asset Isolation
 
-Core perps LP capital must remain pure, immediately accessible USDC.
+Core perps LP capital must remain in the configured, immediately accessible settlement token.
 
 The protocol explicitly rejects embedding third-party yield or lending-market exposure into the core `HousePool` because that would:
 
@@ -1342,7 +1373,7 @@ If yield overlays are desired, they should sit above the base protocol as opt-in
 
 | Quantity | Decimals |
 |----------|----------|
-| USDC | 6 |
+| Settlement token (including legacy `USDC` / `Usdc` fields) | 6 |
 | Position size | 18 |
 | Oracle / basket price | 8 |
 | PnL | 6 |
@@ -1410,7 +1441,7 @@ continue to participate in tranche economics. See [LP allocation and dust accoun
 - Pass `receiver == controller` for deposit/mint share claims, redemption cancellations, and share refunds, including
   zero-share acknowledgements. Approved operators can still execute for the controller. Update custom-error decoding
   from `TrancheVault__ThirdPartyDepositForExistingHolder` to `TrancheVault__ReceiverNotController`.
-- Funded USDC claims, pending-deposit USDC cancellations, and ordinary ERC-20 transfers retain their receiver rules.
+- Funded settlement-token claims, pending-deposit settlement-token cancellations, and ordinary ERC-20 transfers retain their receiver rules.
 - Preserve pending-asset display when a wiped tranche's deposit-share estimate is zero. The lens's
   `refundableDepositAssets` field continues to represent rejected-epoch refunds, not all cancellable pending deposits.
   Other admission or activation gates remain separate from the estimate; booked Senior reservations still quote when

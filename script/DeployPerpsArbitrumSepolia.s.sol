@@ -71,10 +71,10 @@ interface IPositionProtectionBookDeploymentView {
 contract ArbitrumSepoliaReleaseHousePool is HousePool {
 
     constructor(
-        address usdc,
+        address settlementToken,
         address engine,
         address redemptionMathSidecar
-    ) HousePool(usdc, engine, redemptionMathSidecar) {
+    ) HousePool(settlementToken, engine, redemptionMathSidecar) {
         poolConfig.maxSeniorExposureUsdc = 40_000_000e6;
         poolConfig.maxSeniorShareBps = 8000;
         _validatePoolConfig(poolConfig);
@@ -166,7 +166,7 @@ contract DeployPerpsArbitrumSepolia is Script {
     uint256 internal constant BASE_CHF_USD = 126_100_000;
 
     struct DeployedContracts {
-        MockUSDC usdc;
+        MockUSDG settlementToken;
         MarginClearinghouse clearinghouse;
         CfdEngine engine;
         TerminalNavBookV2 terminalNavBook;
@@ -205,10 +205,14 @@ contract DeployPerpsArbitrumSepolia is Script {
 
         vm.startBroadcast(privateKey);
 
-        deployed.usdc = new MockUSDC();
-        deployed.clearinghouse = new MarginClearinghouse(address(deployed.usdc));
+        deployed.settlementToken = new MockUSDG();
+        deployed.clearinghouse = new MarginClearinghouse(address(deployed.settlementToken));
         deployed.engine = new CfdEngine(
-            address(deployed.usdc), address(deployed.clearinghouse), CAP_PRICE, _riskParams(), FROZEN_CLOSE_SPREAD_BPS
+            address(deployed.settlementToken),
+            address(deployed.clearinghouse),
+            CAP_PRICE,
+            _riskParams(),
+            FROZEN_CLOSE_SPREAD_BPS
         );
         deployed.terminalNavBook = new TerminalNavBookV2(address(deployed.engine), CAP_PRICE);
         deployed.engine.setTerminalNavBook(address(deployed.terminalNavBook));
@@ -236,10 +240,12 @@ contract DeployPerpsArbitrumSepolia is Script {
             "HousePool redemption math sidecar ID mismatch"
         );
         deployed.housePool = new ArbitrumSepoliaReleaseHousePool(
-            address(deployed.usdc), address(deployed.engine), address(deployed.housePoolRedemptionMathSidecar)
+            address(deployed.settlementToken),
+            address(deployed.engine),
+            address(deployed.housePoolRedemptionMathSidecar)
         );
         deployed.seniorVault = new TrancheVault(
-            IERC20(address(deployed.usdc)),
+            IERC20(address(deployed.settlementToken)),
             address(deployed.housePool),
             true,
             "Plether Senior LP",
@@ -252,7 +258,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         address juniorFeeRecipient = deployed.engine.protocolTreasury();
         require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         deployed.juniorVault = new TrancheVault(
-            IERC20(address(deployed.usdc)),
+            IERC20(address(deployed.settlementToken)),
             address(deployed.housePool),
             false,
             "Plether Junior LP",
@@ -262,7 +268,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         );
 
         deployed.housePool.setJuniorVault(address(deployed.juniorVault));
-        _verifyAsyncVaultPair(deployed.housePool, deployed.seniorVault, deployed.juniorVault, deployed.usdc);
+        _verifyAsyncVaultPair(deployed.housePool, deployed.seniorVault, deployed.juniorVault, deployed.settlementToken);
         deployed.engine.setPool(address(deployed.housePool));
 
         deployed.accountLens = new CfdEngineAccountLens(address(deployed.engine));
@@ -375,8 +381,8 @@ contract DeployPerpsArbitrumSepolia is Script {
             "SettlementMonitorLens JuniorVault mismatch"
         );
         require(
-            address(deployed.settlementMonitorLens.USDC()) == address(deployed.usdc),
-            "SettlementMonitorLens USDC mismatch"
+            address(deployed.settlementMonitorLens.USDC()) == address(deployed.settlementToken),
+            "SettlementMonitorLens settlement token mismatch"
         );
         require(
             deployed.settlementMonitorLensSidecar.MONITOR() == address(deployed.settlementMonitorLens),
@@ -555,12 +561,12 @@ contract DeployPerpsArbitrumSepolia is Script {
         HousePool housePool,
         TrancheVault seniorVault,
         TrancheVault juniorVault,
-        MockUSDC usdc
+        MockUSDG settlementToken
     ) internal view {
         require(address(seniorVault) != address(juniorVault), "HousePool vault pair is duplicated");
         require(housePool.seniorVault() == address(seniorVault), "HousePool senior vault mismatch");
         require(housePool.juniorVault() == address(juniorVault), "HousePool junior vault mismatch");
-        require(address(housePool.USDC()) == address(usdc), "HousePool asset mismatch");
+        require(address(housePool.USDC()) == address(settlementToken), "HousePool asset mismatch");
         require(housePool.LP_EPOCH_DURATION() == 1 hours, "Unexpected LP epoch duration");
         require(housePool.MAX_LP_EPOCHS_PER_PHASE() == 16, "Unexpected LP epoch bound");
 
@@ -580,11 +586,11 @@ contract DeployPerpsArbitrumSepolia is Script {
         address juniorFeeRecipient = CfdEngine(address(housePool.ENGINE())).protocolTreasury();
         require(juniorFeeRecipient != address(0), "Protocol treasury is zero");
         (uint256 seniorNextRequestEpoch, uint256 seniorNextRequestCutoffTime) =
-            _verifyAsyncVault(address(seniorVault), address(housePool), address(usdc), true, 0, address(0));
+            _verifyAsyncVault(address(seniorVault), address(housePool), address(settlementToken), true, 0, address(0));
         (uint256 juniorNextRequestEpoch, uint256 juniorNextRequestCutoffTime) = _verifyAsyncVault(
             address(juniorVault),
             address(housePool),
-            address(usdc),
+            address(settlementToken),
             false,
             JUNIOR_MAINTENANCE_FEE_APR_BPS,
             juniorFeeRecipient
@@ -613,7 +619,7 @@ contract DeployPerpsArbitrumSepolia is Script {
     function _verifyAsyncVault(
         address vault,
         address housePool,
-        address usdc,
+        address settlementToken,
         bool isSenior,
         uint256 expectedMaintenanceFeeAprBps,
         address expectedMaintenanceFeeRecipient
@@ -622,7 +628,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         require(candidate.POOL() == housePool, "TrancheVault pool mismatch");
         require(candidate.IS_SENIOR() == isSenior, "TrancheVault side mismatch");
         require(candidate.LP_REQUEST_CUTOFF_DURATION() == 5 minutes, "Unexpected LP request cutoff duration");
-        require(candidate.asset() == usdc, "TrancheVault asset mismatch");
+        require(candidate.asset() == settlementToken, "TrancheVault asset mismatch");
         require(candidate.share() == vault, "TrancheVault share mismatch");
         require(candidate.supportsInterface(ERC165_INTERFACE_ID), "TrancheVault missing ERC165");
         require(candidate.supportsInterface(ERC7540_OPERATOR_INTERFACE_ID), "TrancheVault missing ERC7540 operator");
@@ -639,7 +645,7 @@ contract DeployPerpsArbitrumSepolia is Script {
             "TrancheVault missing claimable redeem interface"
         );
         require(!candidate.supportsInterface(0xffffffff), "TrancheVault accepts invalid ERC165 id");
-        require(candidate.vault(usdc) == vault, "TrancheVault share lookup mismatch");
+        require(candidate.vault(settlementToken) == vault, "TrancheVault share lookup mismatch");
         require(
             candidate.maintenanceFeeAprBps() == expectedMaintenanceFeeAprBps,
             "TrancheVault maintenance fee APR mismatch"
@@ -660,7 +666,7 @@ contract DeployPerpsArbitrumSepolia is Script {
         DeployedContracts memory deployed
     ) internal view {
         console.log("");
-        console.log("MockUSDC:", address(deployed.usdc));
+        console.log("MockUSDG:", address(deployed.settlementToken));
         console.log("MarginClearinghouse:", address(deployed.clearinghouse));
         console.log("CfdEngine:", address(deployed.engine));
         console.log("TerminalNavBookV2:", address(deployed.terminalNavBook));
@@ -715,9 +721,11 @@ contract DeployPerpsArbitrumSepolia is Script {
 
 }
 
-contract MockUSDC is ERC20 {
+/// @notice Freely mintable six-decimal test token for the perps release; not official Paxos USDG.
+/// @dev Standard transfers/approvals only. EIP-2612 permit and EIP-3009 receiveWithAuthorization are unsupported.
+contract MockUSDG is ERC20 {
 
-    constructor() ERC20("Mock USDC", "USDC") {}
+    constructor() ERC20("Mock USDG", "USDG") {}
 
     function decimals() public pure override returns (uint8) {
         return 6;

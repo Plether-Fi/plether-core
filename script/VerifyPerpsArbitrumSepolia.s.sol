@@ -36,8 +36,8 @@ import "forge-std/Script.sol";
 contract VerifyPerpsArbitrumSepolia is Script {
 
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
-    uint256 internal constant RELEASE_SENIOR_SEED_USDC = 1e6;
-    uint256 internal constant RELEASE_JUNIOR_SEED_USDC = 1e6;
+    uint256 internal constant RELEASE_SENIOR_SEED_ASSETS = 1e6;
+    uint256 internal constant RELEASE_JUNIOR_SEED_ASSETS = 1e6;
     uint256 internal constant RELEASE_MAX_SENIOR_EXPOSURE_USDC = 40_000_000e6;
     uint256 internal constant RELEASE_MAX_SENIOR_SHARE_BPS = 8000;
     uint256 internal constant RELEASE_MIN_OPEN_NOTIONAL_USDC = 1000e6;
@@ -51,7 +51,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
     struct Deployment {
         address owner;
         address guardian;
-        address usdc;
+        address settlementToken;
         MarginClearinghouse clearinghouse;
         CfdEngine engine;
         TerminalNavBookV2 terminalNavBook;
@@ -133,7 +133,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
     function _loadDeployment() internal view returns (Deployment memory deployed) {
         deployed.owner = vm.envAddress("PERPS_OWNER");
         deployed.guardian = vm.envAddress("PERPS_GUARDIAN");
-        deployed.usdc = vm.envAddress("PERPS_USDC");
+        deployed.settlementToken = vm.envAddress("PERPS_SETTLEMENT_TOKEN");
         deployed.clearinghouse = MarginClearinghouse(vm.envAddress("PERPS_CLEARINGHOUSE"));
         deployed.engine = CfdEngine(vm.envAddress("PERPS_ENGINE"));
         deployed.terminalNavBook = TerminalNavBookV2(vm.envAddress("PERPS_TERMINAL_NAV_BOOK"));
@@ -168,7 +168,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
     ) internal view {
         require(deployed.owner != address(0), "Owner is zero");
         require(deployed.guardian != address(0), "Guardian is zero");
-        _requireCode(deployed.usdc, "USDC has no code");
+        _requireCode(deployed.settlementToken, "Settlement token has no code");
         _requireCode(address(deployed.clearinghouse), "Clearinghouse has no code");
         _requireCode(address(deployed.engine), "Engine has no code");
         _requireCode(address(deployed.terminalNavBook), "Terminal NAV book has no code");
@@ -205,10 +205,19 @@ contract VerifyPerpsArbitrumSepolia is Script {
     function _verifyCoreGraph(
         Deployment memory deployed
     ) internal view {
-        require(IERC20Metadata(deployed.usdc).decimals() == 6, "USDC decimals mismatch");
-        require(deployed.clearinghouse.settlementAsset() == deployed.usdc, "Clearinghouse asset mismatch");
+        require(IERC20Metadata(deployed.settlementToken).decimals() == 6, "Settlement token decimals mismatch");
+        // These are release-mock identity checks, not authentication of the official issuer's USDG.
+        require(
+            keccak256(bytes(IERC20Metadata(deployed.settlementToken).name())) == keccak256("Mock USDG"),
+            "Settlement token name mismatch"
+        );
+        require(
+            keccak256(bytes(IERC20Metadata(deployed.settlementToken).symbol())) == keccak256("USDG"),
+            "Settlement token symbol mismatch"
+        );
+        require(deployed.clearinghouse.settlementAsset() == deployed.settlementToken, "Clearinghouse asset mismatch");
         require(deployed.clearinghouse.engine() == address(deployed.engine), "Clearinghouse engine mismatch");
-        require(address(deployed.engine.USDC()) == deployed.usdc, "Engine USDC mismatch");
+        require(address(deployed.engine.USDC()) == deployed.settlementToken, "Engine settlement token mismatch");
         require(
             address(deployed.engine.clearinghouse()) == address(deployed.clearinghouse), "Engine clearinghouse mismatch"
         );
@@ -235,7 +244,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
             "Redemption math implementation mismatch"
         );
 
-        require(address(deployed.housePool.USDC()) == deployed.usdc, "HousePool USDC mismatch");
+        require(address(deployed.housePool.USDC()) == deployed.settlementToken, "HousePool settlement token mismatch");
         require(address(deployed.housePool.ENGINE()) == address(deployed.engine), "HousePool engine mismatch");
         require(deployed.housePool.seniorVault() == address(deployed.seniorVault), "Senior vault mismatch");
         require(deployed.housePool.juniorVault() == address(deployed.juniorVault), "Junior vault mismatch");
@@ -322,7 +331,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
         );
         require(address(deployed.monitor.SENIOR_VAULT()) == address(deployed.seniorVault), "Monitor Senior mismatch");
         require(address(deployed.monitor.JUNIOR_VAULT()) == address(deployed.juniorVault), "Monitor Junior mismatch");
-        require(address(deployed.monitor.USDC()) == deployed.usdc, "Monitor USDC mismatch");
+        require(address(deployed.monitor.USDC()) == deployed.settlementToken, "Monitor settlement token mismatch");
         require(address(deployed.monitor.SIDECAR()) == address(deployed.monitorSidecar), "Monitor sidecar mismatch");
         require(deployed.monitorSidecar.MONITOR() == address(deployed.monitor), "Monitor sidecar binding mismatch");
 
@@ -345,7 +354,7 @@ contract VerifyPerpsArbitrumSepolia is Script {
     ) internal view {
         require(address(vault.POOL()) == address(deployed.housePool), "Vault pool mismatch");
         require(vault.IS_SENIOR() == isSenior, "Vault side mismatch");
-        require(vault.asset() == deployed.usdc, "Vault asset mismatch");
+        require(vault.asset() == deployed.settlementToken, "Vault asset mismatch");
         require(vault.supportsInterface(type(IAsyncTrancheVault).interfaceId), "Vault missing custom async interface");
         require(
             vault.supportsInterface(type(IAsyncTrancheVaultClaimableRedeem).interfaceId),
@@ -443,8 +452,8 @@ contract VerifyPerpsArbitrumSepolia is Script {
         require(
             deployed.juniorVault.seedReceiver() == vm.envAddress("JUNIOR_SEED_RECEIVER"), "Junior receiver mismatch"
         );
-        require(deployed.housePool.seniorPrincipal() >= RELEASE_SENIOR_SEED_USDC, "Senior seed backing mismatch");
-        require(deployed.housePool.juniorPrincipal() >= RELEASE_JUNIOR_SEED_USDC, "Junior seed backing mismatch");
+        require(deployed.housePool.seniorPrincipal() >= RELEASE_SENIOR_SEED_ASSETS, "Senior seed backing mismatch");
+        require(deployed.housePool.juniorPrincipal() >= RELEASE_JUNIOR_SEED_ASSETS, "Junior seed backing mismatch");
         require(deployed.emergencyCoordinator.guardian() == deployed.guardian, "Guardian mismatch");
 
         if (phase == PHASE_SEEDED) {

@@ -83,19 +83,70 @@ reuses the stub limits and rejects a final response that changes paymaster addre
 message. The package test pins the shared Solidity/TypeScript digest
 `0xd92042495de3ae32c76391a73aeb6bfaf515af2dd3da45c9a8921b5310cde1ea`.
 
-## First USDC deposit
+## Settlement token and MockUSDG testnet funding
+
+The new perps testnet release uses **Mock USDG** (`USDG`, six decimals), an
+unrestricted mintable ERC-20. Display its configured name so users can distinguish
+it from official USDG. Resolve the token from `contracts.settlementToken` in the
+schema-4 deployment manifest and use its top-level `settlementToken` metadata for
+display and capabilities. It records `name: "Mock USDG"`, `symbol: "USDG"`,
+`decimals: 6`, `isMock: true`, `supportsReceiveWithAuthorization: false`, and
+`supportsBridgeFunding: false`.
+Historical USDC releases retain their own token addresses and metadata.
+
+SDK inputs named `usdc`, `usdcRuntimeCodeHash`, and protocol fields ending in
+`Usdc` are retained for compatibility. They refer to the selected deployment's
+six-decimal settlement token, not a hardcoded USDC address. Pass the MockUSDG
+address through these existing inputs; retain six-decimal amount formatting.
+
+For normal testnet funding:
+
+1. Resolve the canonical trading smart account as in the integration sequence.
+2. Call MockUSDG's `mint(accountAddress, amount)` to fund that account. Anyone may
+   repeat this call, but the mint transaction still requires testnet native gas.
+   If tokens already belong to the owner EOA, transfer them to the trading account.
+3. Build the existing account-balance deposit and execute it through the account:
+
+```ts
+const deposit = buildSmartAccountBalanceDepositAction({
+  account: account.accountAddress,
+  usdc: settlementTokenAddress, // contracts.settlementToken.address
+  clearinghouse: clearinghouseAddress,
+  amount: 25_000_000n, // 25 Mock USDG
+});
+```
+
+This batches `approve(clearinghouse, amount)` and `depositMargin(amount)` from the
+canonical account. It needs account batch execution and the normal account
+authorization, but no token authorization signature. `firstDeposit.supported`
+describes only the owner-wallet EIP-3009 route below; its false value must not
+disable this account-balance route, even for the account's first deposit.
+Sponsorship for the `deposit` action remains a separate check against the sponsor's
+configured targets and availability. Refresh those targets for the new token and
+core addresses before enabling sponsorship.
+
+MockUSDG implements neither EIP-2612 nor EIP-3009. Do not offer token permit or
+signed owner-wallet deposits for this release. Official USDG signature support
+requires separate verification against its deployed implementation and domain.
+
+## Authorized owner-wallet deposit
 
 `buildReceiveWithAuthorizationTypedData` creates the owner signature payload. The domain name and version are required configuration because the SDK does not guess token metadata. After the owner signs it, `buildAuthorizedDepositAction` creates one atomic smart-account batch:
 
 ```text
-USDC.receiveWithAuthorization(owner, smartAccount, amount, ...)
-USDC.approve(clearinghouse, amount)
+settlementToken.receiveWithAuthorization(owner, smartAccount, amount, ...)
+settlementToken.approve(clearinghouse, amount)
 clearinghouse.depositMargin(amount)
 ```
 
-The smart account is both the EIP-3009 recipient and the caller of `depositMargin`, preserving the contracts' `msg.sender` ownership invariant. Enable this route only after verifying that the configured USDC implements `receiveWithAuthorization` with the expected EIP-712 domain.
+The smart account is both the EIP-3009 recipient and the caller of `depositMargin`, preserving the contracts' `msg.sender` ownership invariant. Enable this route only after verifying that the configured settlement token implements `receiveWithAuthorization` with the expected EIP-712 domain.
 
 ## Bridge funding
+
+External bridge funding is unavailable for the MockUSDG release. A USDC bridge
+release manifest cannot be reused with a MockUSDG address, and the helpers below
+do not establish a provider route for the mock. Enable a future route only after
+separately validating provider compatibility and a bridge-specific release.
 
 The source package exports funding primitives for a separately verified release with
 `MarginClearinghouse.depositFor(address,uint256)`. Existing immutable clearinghouses without that method require a
@@ -105,7 +156,7 @@ new compatible core deployment. Existing published package versions may not cont
 must execute from the same payer; use an atomic batch when the account supports it, or confirm approval before the
 deposit. The beneficiary receives no authority over the payer, and the payer receives no authority over the beneficiary.
 
-`verifyBridgeFundingDeployment` checks the destination chain, pinned USDC/clearinghouse/SpokePool/implementation/handler
+`verifyBridgeFundingDeployment` checks the destination chain, pinned settlement-token/clearinghouse/SpokePool/implementation/handler
 code, the SpokePool's EIP-1967 implementation slot, and the clearinghouse settlement token at one block. Supply
 `chainId`, `usdc`, `clearinghouse`, `destinationSpokePool`, `destinationSpokePoolImplementation`, `multicallHandler`, and
 each contract's corresponding `RuntimeCodeHash` from a trusted release. The full core graph and actual `depositFor` behavior must
@@ -116,7 +167,7 @@ The builder returns raw zero-native-value destination calls, not sponsored `Perp
 quotes, destination message construction, source allowlists, and durable source/fill correlation remain application
 responsibilities. A handler address, provider status, or token balance alone does not prove margin credit. Match the
 specific source deposit and destination fill/message to the beneficiary's confirmed clearinghouse credit, and count
-the `Deposit`/`DepositFor` pair once. If Across returns USDC to the intended fallback beneficiary after a destination
+the `Deposit`/`DepositFor` pair once. If Across returns settlement tokens to the intended fallback beneficiary after a destination
 call fails, that wallet balance still needs a separate authorized deposit. This SDK does not create receivers or
 provide receiver flush/recovery operations. See the repository's
 [bridge-funding guide](../perps/BRIDGE_FUNDING.md) for release and fallback requirements.
@@ -127,10 +178,10 @@ Builders are provided for deposit, commit order, add margin, withdraw, and settl
 
 `buildPlaceOrderAction` retains the historical scalar-router ABI. Use `buildPlaceOrderV3Action` for V3 deployments.
 
-`buildWithdrawAction` calls `withdrawMargin`, so the clearinghouse sends USDC to
+`buildWithdrawAction` calls `withdrawMargin`, so the clearinghouse sends settlement tokens to
 the smart account (`msg.sender`). It does not silently append a transfer to the
 owner EOA. `buildWithdrawToOwnerAction` provides the explicit atomic alternative:
-`withdrawMargin(amount)` followed by `USDC.transfer(owner, amount)`. Both amounts
+`withdrawMargin(amount)` followed by `settlementToken.transfer(owner, amount)`. Both amounts
 are identical and both calls carry zero native value. The backend must prove the
 recipient is the registered smart-account owner; it must reject arbitrary
 recipients, token addresses, extra calls, and mismatched amounts. EIP-7702
@@ -151,7 +202,7 @@ the exported `positionProtectionBookAbi` is generated for the current source and
 Supply all four `bigint` fields in `params.closeLimits` for create, replace, and
 protected open: `maxExecutionNotionalUsdc`, `maxGrossAccountDebitUsdc`,
 `maxActionChargeUsdc`, and `maxExplicitFeesUsdc`. The amendment builder takes
-the same `closeLimits` object. Values are uint256 ceilings in 6-decimal USDC
+the same `closeLimits` object. Values are uint256 ceilings in six-decimal settlement-token
 units. Zero is a zero allowance; use `maxUint256` only when unlimited authority
 is intended. Builders reject missing or invalid close limits; they do not
 insert unlimited defaults. Read the current values from the Book's
@@ -198,7 +249,7 @@ describes the artifact compatibility gate.
 Use `mapPerpsExecutionError` to turn nested wallet, bundler, paymaster, and contract failures into stable codes and user-safe messages. Do not silently fall back to an EOA transaction: it would create protocol state under a different `msg.sender` and split the user's account. If sponsorship is unavailable, show a retry/support state unless the product has explicitly implemented and disclosed user-paid smart-account gas.
 
 `buildCloseOrderV3` uses the same request shape for full closes and partial
-reductions. New close commitments have zero USDC keeper bounty; normal native
+reductions. New close commitments have zero settlement-token keeper bounty; normal native
 account-abstraction gas sponsorship remains available. Opening orders and
 protection triggers retain their separate reward rules. `classifyCloseFailureV3`
 keeps carry funding, action funding, residual health, and live-side mismatch
@@ -302,6 +353,6 @@ requirements and the canonical lifecycle timing tuple.
 
 New stacks require zero execution bounties for ordinary and protection closes. Opens/increases and the protection trigger still have positive configured rewards; carry and trading charges remain. Use `buildOwnerAccountClose` only after verifying the existing smart account's owner/factory/implementation and chain. It wraps the close in owner-authorized account execution and never changes the canonical trader to the owner EOA.
 
-`classifyKeeperHead`, `buildExecuteOrderV3`, `buildExecuteOrderBatchV3`, `buildRiskOffCleanupV3`, `buildTriggerProtection`, `buildRetryProtection` and `quoteExecutionNativeValue` support permissionless execution. Authenticate terminal evidence with the existing V5 receipt helpers. A Pending result or partial batch is not completion. Native gas and oracle fees are still payable, even when the USDC bounty is zero.
+`classifyKeeperHead`, `buildExecuteOrderV3`, `buildExecuteOrderBatchV3`, `buildRiskOffCleanupV3`, `buildTriggerProtection`, `buildRetryProtection` and `quoteExecutionNativeValue` support permissionless execution. Authenticate terminal evidence with the existing V5 receipt helpers. A Pending result or partial batch is not completion. Native gas and oracle fees are still payable, even when the settlement-token bounty is zero.
 
 See [zero-close operations](../perps/ZERO_CLOSE_OPERATIONS.md) for funding, strict expiry, FIFO blockers, protection retries and deployment limitations. The source-tree `scripts/close-operator.mjs` is an explicit one-shot operator tool, not a production daemon or an automatic retry service. Historical ABIs and receipt layouts remain available; do not apply zero-bounty assumptions to old deployments.

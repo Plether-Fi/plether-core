@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
-import {DeployPerpsArbitrumSepolia} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
+import {DeployPerpsArbitrumSepolia, MockUSDG} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {ArbitrumSepoliaReleaseRouter} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {VerifyPerpsArbitrumSepolia} from "../../script/VerifyPerpsArbitrumSepolia.s.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
@@ -14,7 +14,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
     address internal constant RELEASE_PYTH = 0x0B73614636C855Bf23F342F307FB981A3e47f42B;
     uint256 internal constant DEPLOYER_KEY = 0xA11CE;
 
-    function test_VerifiesOneUsdcReleaseAcrossDeploymentSeedingAndActivation() public {
+    function test_VerifiesMockUSDGReleaseAcrossDeploymentSeedingAndActivation() public {
         vm.chainId(421_614);
         MockPyth pyth = new MockPyth();
         vm.etch(RELEASE_PYTH, address(pyth).code);
@@ -32,7 +32,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
 
         _setAddress("PERPS_OWNER", vm.addr(DEPLOYER_KEY));
         _setAddress("PERPS_GUARDIAN", address(0xBEEF));
-        _setAddress("PERPS_USDC", address(deployed.usdc));
+        _setAddress("PERPS_SETTLEMENT_TOKEN", address(deployed.settlementToken));
         _setAddress("PERPS_CLEARINGHOUSE", address(deployed.clearinghouse));
         _setAddress("PERPS_ENGINE", address(deployed.engine));
         _setAddress("PERPS_TERMINAL_NAV_BOOK", address(deployed.terminalNavBook));
@@ -63,6 +63,29 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
 
         VerifyPerpsArbitrumSepolia verifier = new VerifyPerpsArbitrumSepolia();
         verifier.run();
+        assertEq(deployed.settlementToken.name(), "Mock USDG");
+        assertEq(deployed.settlementToken.symbol(), "USDG");
+        assertEq(deployed.settlementToken.decimals(), 6);
+
+        vm.mockCall(address(deployed.settlementToken), abi.encodeWithSignature("name()"), abi.encode("Mock USDC"));
+        vm.expectRevert(bytes("Settlement token name mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+        vm.mockCall(address(deployed.settlementToken), abi.encodeWithSignature("symbol()"), abi.encode("USDC"));
+        vm.expectRevert(bytes("Settlement token symbol mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+        vm.mockCall(address(deployed.settlementToken), abi.encodeWithSignature("decimals()"), abi.encode(uint8(18)));
+        vm.expectRevert(bytes("Settlement token decimals mismatch"));
+        verifier.run();
+        vm.clearMockedCalls();
+
+        // A second mock has the right metadata but is not the stack's configured settlement asset.
+        MockUSDG wrongSettlementToken = new MockUSDG();
+        _setAddress("PERPS_SETTLEMENT_TOKEN", address(wrongSettlementToken));
+        vm.expectRevert(bytes("Clearinghouse asset mismatch"));
+        verifier.run();
+        _setAddress("PERPS_SETTLEMENT_TOKEN", address(deployed.settlementToken));
 
         assertGt(address(deployed.closePreview).code.length, 0);
         assertTrue(deployed.router.policyEvaluator() != address(deployed.closePreview));
@@ -74,15 +97,23 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
 
         _setAddress("SENIOR_SEED_RECEIVER", address(0x5151));
         _setAddress("JUNIOR_SEED_RECEIVER", address(0x7171));
-        vm.setEnv("SENIOR_SEED_USDC", "1000000");
-        vm.setEnv("JUNIOR_SEED_USDC", "1000000");
+        vm.setEnv("SENIOR_SEED_ASSETS", "1000000");
+        vm.setEnv("JUNIOR_SEED_ASSETS", "1000000");
         vm.setEnv("ACTIVATE_TRADING", "false");
+        // Empty optional arrays make the initial seed-only pass independent of the caller's environment.
+        vm.setEnv("TEST_USER_RECIPIENTS", "");
+        vm.setEnv("TEST_USER_AMOUNTS", "");
         BootstrapPerpsArbitrumSepolia bootstrap = new BootstrapPerpsArbitrumSepolia();
+        _setAddress("PERPS_SETTLEMENT_TOKEN", address(wrongSettlementToken));
+        vm.expectRevert(bytes("PERPS_SETTLEMENT_TOKEN does not match HousePool"));
+        bootstrap.run();
+        assertEq(deployed.settlementToken.totalSupply(), 0, "wrong configuration must not mint seeds");
+        _setAddress("PERPS_SETTLEMENT_TOKEN", address(deployed.settlementToken));
         bootstrap.run();
 
-        assertEq(deployed.housePool.seniorPrincipal(), 1e6, "one USDC senior backing");
-        assertEq(deployed.housePool.juniorPrincipal(), 1e6, "one USDC junior backing");
-        assertEq(deployed.usdc.totalSupply(), 2e6, "only two USDC minted for seeds");
+        assertEq(deployed.housePool.seniorPrincipal(), 1e6, "one Mock USDG senior backing");
+        assertEq(deployed.housePool.juniorPrincipal(), 1e6, "one Mock USDG junior backing");
+        assertEq(deployed.settlementToken.totalSupply(), 2e6, "only two Mock USDG minted for seeds");
         assertEq(deployed.seniorVault.seedReceiver(), address(0x5151));
         assertEq(deployed.juniorVault.seedReceiver(), address(0x7171));
         assertGt(deployed.seniorVault.seedShareFloor(), 0);
@@ -94,7 +125,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         uint256 seniorShares = deployed.seniorVault.totalSupply();
         uint256 juniorShares = deployed.juniorVault.totalSupply();
         bootstrap.run();
-        assertEq(deployed.usdc.totalSupply(), 2e6, "seed rerun must not mint again");
+        assertEq(deployed.settlementToken.totalSupply(), 2e6, "seed rerun must not mint again");
         assertEq(deployed.seniorVault.totalSupply(), seniorShares, "senior seed rerun is a no-op");
         assertEq(deployed.juniorVault.totalSupply(), juniorShares, "junior seed rerun is a no-op");
         assertFalse(deployed.housePool.isTradingActive(), "seed rerun must stay inactive");
@@ -107,7 +138,16 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         vm.setEnv("VERIFY_PHASE", "active");
         verifier.run();
         assertTrue(deployed.housePool.isTradingActive());
-        assertEq(deployed.usdc.totalSupply(), 2e6, "activation must not repeat seed funding");
+        assertEq(deployed.settlementToken.totalSupply(), 2e6, "activation must not repeat seed funding");
+
+        vm.setEnv("TEST_USER_RECIPIENTS", vm.toString(address(0xF00D)));
+        vm.setEnv("TEST_USER_AMOUNTS", "25000000");
+        bootstrap.run();
+        bootstrap.run();
+        assertEq(deployed.settlementToken.balanceOf(address(0xF00D)), 50e6, "optional tester funding repeats");
+        assertEq(deployed.settlementToken.totalSupply(), 52e6, "permanent seeds remain unchanged on funding reruns");
+        assertEq(deployed.seniorVault.totalSupply(), seniorShares, "tester funding preserves senior seed");
+        assertEq(deployed.juniorVault.totalSupply(), juniorShares, "tester funding preserves junior seed");
         vm.warp(block.timestamp + 365 days);
         assertEq(deployed.juniorVault.pendingMaintenanceFeeShares(), 0, "disabled fee must not accrue");
     }
@@ -123,7 +163,7 @@ contract VerifyPerpsArbitrumSepoliaTest is Test {
         DeployPerpsArbitrumSepolia.DeployedContracts memory d
     ) private view {
         address[25] memory contracts = [
-            address(d.usdc),
+            address(d.settlementToken),
             address(d.clearinghouse),
             address(d.engine),
             address(d.terminalNavBook),

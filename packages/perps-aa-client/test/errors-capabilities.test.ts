@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { Address } from "viem";
+import { decodeFunctionData, type Address } from "viem";
 
 import {
+  buildSmartAccountBalanceDepositAction,
   derivePerpsCapabilities,
+  erc20ApproveAbi,
+  marginClearinghouseTraderAbi,
   mapPerpsExecutionError,
   type PerpsActionKind,
 } from "../src/index.js";
@@ -43,6 +46,43 @@ describe("UI capability and error mapping", () => {
     });
     expect(capabilities.firstDeposit.supported).toBe(false);
     expect(capabilities.firstDeposit.reason).toMatch(/cannot sign/i);
+  });
+
+  it.each([true, false])("keeps MockUSDG account-balance deposits usable when wallet typed-data signing is %s", (canSignTypedData) => {
+    const settlementToken = "0x3333333333333333333333333333333333333333" as Address;
+    const clearinghouse = "0x4444444444444444444444444444444444444444" as Address;
+    const capabilities = derivePerpsCapabilities({
+      wallet: { canSignTypedData },
+      smartAccount: { accountAddress: account, canExecuteBatch: true, entryPointVersion: "0.8" },
+      sponsor: { available: true, sponsoredActions: new Set(["deposit"]) },
+      token: { supportsReceiveWithAuthorization: false },
+    });
+
+    expect(capabilities.firstDeposit).toMatchObject({ supported: false, sponsored: false });
+    if (canSignTypedData) {
+      expect(capabilities.firstDeposit.reason).toMatch(/settlement token does not support receiveWithAuthorization/);
+    }
+
+    // Testnet funding mints to the canonical account; this route needs neither
+    // receiveWithAuthorization nor a token-domain signature from its owner.
+    const action = buildSmartAccountBalanceDepositAction({
+      account,
+      usdc: settlementToken,
+      clearinghouse,
+      amount: 25_000_000n,
+    });
+    expect(action.kind).toBe("deposit");
+    expect(action.account).toBe(account);
+    expect(action.calls.map(({ to, value }) => ({ to, value }))).toEqual([
+      { to: settlementToken, value: 0n },
+      { to: clearinghouse, value: 0n },
+    ]);
+    expect(decodeFunctionData({ abi: erc20ApproveAbi, data: action.calls[0]!.data })).toEqual({
+      functionName: "approve", args: [clearinghouse, 25_000_000n],
+    });
+    expect(decodeFunctionData({ abi: marginClearinghouseTraderAbi, data: action.calls[1]!.data })).toEqual({
+      functionName: "depositMargin", args: [25_000_000n],
+    });
   });
 
   it("maps nested protocol, sponsor, and wallet failures to actionable UI errors", () => {

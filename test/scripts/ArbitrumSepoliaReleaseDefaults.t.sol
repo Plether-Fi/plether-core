@@ -2,7 +2,7 @@
 pragma solidity 0.8.35;
 
 import {BootstrapPerpsArbitrumSepolia} from "../../script/BootstrapPerpsArbitrumSepolia.s.sol";
-import {DeployPerpsArbitrumSepolia, MockUSDC} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
+import {DeployPerpsArbitrumSepolia, MockUSDG} from "../../script/DeployPerpsArbitrumSepolia.s.sol";
 import {MockPyth} from "../mocks/MockPyth.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
@@ -42,9 +42,9 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
         HousePool housePool,
         TrancheVault seniorVault,
         TrancheVault juniorVault,
-        MockUSDC usdc
+        MockUSDG settlementToken
     ) external view {
-        _verifyAsyncVaultPair(housePool, seniorVault, juniorVault, usdc);
+        _verifyAsyncVaultPair(housePool, seniorVault, juniorVault, settlementToken);
     }
 
     function verifyPositionProtectionBook(
@@ -69,12 +69,12 @@ contract DeployPerpsArbitrumSepoliaHarness is DeployPerpsArbitrumSepolia {
 
 contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
 
-    function defaultSeniorSeedUsdc() external pure returns (uint256) {
-        return RELEASE_SENIOR_SEED_USDC;
+    function defaultSeniorSeedAssets() external pure returns (uint256) {
+        return RELEASE_SENIOR_SEED_ASSETS;
     }
 
-    function defaultJuniorSeedUsdc() external pure returns (uint256) {
-        return RELEASE_JUNIOR_SEED_USDC;
+    function defaultJuniorSeedAssets() external pure returns (uint256) {
+        return RELEASE_JUNIOR_SEED_ASSETS;
     }
 
     function verifyRedemptionMathSidecar(
@@ -105,9 +105,9 @@ contract BootstrapPerpsArbitrumSepoliaHarness is BootstrapPerpsArbitrumSepolia {
 
     function verifyAsyncVaultPair(
         HousePool housePool,
-        address usdc
+        address settlementToken
     ) external view {
-        _verifyAsyncVaultPair(housePool, usdc);
+        _verifyAsyncVaultPair(housePool, settlementToken);
     }
 
     function validateGuardian(
@@ -275,15 +275,19 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
     function test_GenericCoreDefaultsRemainUnchangedOutsideReleaseWrappers() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
-        MockUSDC usdc = new MockUSDC();
-        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        MockUSDG settlementToken = new MockUSDG();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(settlementToken));
         CfdEngine engine = new CfdEngine(
-            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+            address(settlementToken),
+            address(clearinghouse),
+            2e8,
+            deployScript.riskParams(),
+            deployScript.frozenCloseSpreadBps()
         );
         TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), 2e8);
         engine.setTerminalNavBook(address(terminalNavBook));
         HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
-        HousePool genericPool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
+        HousePool genericPool = new HousePool(address(settlementToken), address(engine), address(redemptionMathSidecar));
 
         assertEq(engine.executionFeeBps(), 4, "execution fee");
         assertEq(engine.frozenCloseSpreadBps(), 50, "frozen close spread");
@@ -336,10 +340,14 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     function test_DeploymentGuardsAcceptDistinctCanonicalPositionProtectionBookAndBoundSidecar() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
-        MockUSDC usdc = new MockUSDC();
-        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        MockUSDG settlementToken = new MockUSDG();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(settlementToken));
         CfdEngine engine = new CfdEngine(
-            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+            address(settlementToken),
+            address(clearinghouse),
+            2e8,
+            deployScript.riskParams(),
+            deployScript.frozenCloseSpreadBps()
         );
         TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), 2e8);
         engine.setTerminalNavBook(address(terminalNavBook));
@@ -348,7 +356,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         CfdEngineAdmin engineAdmin = new CfdEngineAdmin(address(engine), address(this));
         engine.setDependencies(address(planner), address(settlementSidecar), address(engineAdmin));
         HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
-        HousePool pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
+        HousePool pool = new HousePool(address(settlementToken), address(engine), address(redemptionMathSidecar));
         engine.setPool(address(pool));
 
         bytes32[] memory feedIds = new bytes32[](1);
@@ -400,10 +408,14 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     function test_DeploymentGuardsAcceptCanonicalV3OrderStackAndRejectMixedPolicyModule() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
-        MockUSDC usdc = new MockUSDC();
-        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        MockUSDG settlementToken = new MockUSDG();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(settlementToken));
         CfdEngine engine = new CfdEngine(
-            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+            address(settlementToken),
+            address(clearinghouse),
+            2e8,
+            deployScript.riskParams(),
+            deployScript.frozenCloseSpreadBps()
         );
         TerminalNavBookV2 terminalNavBook = new TerminalNavBookV2(address(engine), 2e8);
         engine.setTerminalNavBook(address(terminalNavBook));
@@ -414,7 +426,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         engine.setDependencies(address(planner), address(settlementSidecar), address(engineAdmin));
 
         HousePool housePool =
-            new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+            new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
         engine.setPool(address(housePool));
         MockPyth pyth = new MockPyth();
         vm.etch(RELEASE_PYTH, address(pyth).code);
@@ -472,7 +484,7 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         vm.clearMockedCalls();
 
         HousePool wrongEngineHousePool =
-            new HousePool(address(usdc), address(0xE11E), address(new HousePoolRedemptionMathSidecar()));
+            new HousePool(address(settlementToken), address(0xE11E), address(new HousePoolRedemptionMathSidecar()));
         vm.mockCall(address(engine), abi.encodeWithSignature("pool()"), abi.encode(address(wrongEngineHousePool)));
         vm.expectRevert(bytes("HousePool Engine mismatch"));
         deployScript.verifyV2OrderStack(
@@ -486,14 +498,14 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         vm.clearMockedCalls();
 
         HousePool wrongHousePool =
-            new HousePool(address(usdc), address(engine), address(new HousePoolRedemptionMathSidecar()));
+            new HousePool(address(settlementToken), address(engine), address(new HousePoolRedemptionMathSidecar()));
         vm.expectRevert(bytes("Engine HousePool mismatch"));
         deployScript.verifyV2OrderStack(engine, clearinghouse, wrongHousePool, evaluator, executionSidecar, router);
         vm.expectRevert(bytes("Engine HousePool mismatch"));
         bootstrapScript.verifyRouterWiring(wrongHousePool, router);
 
-        MockUSDC wrongUsdc = new MockUSDC();
-        vm.mockCall(address(engine), abi.encodeWithSignature("USDC()"), abi.encode(address(wrongUsdc)));
+        MockUSDG wrongSettlementToken = new MockUSDG();
+        vm.mockCall(address(engine), abi.encodeWithSignature("USDC()"), abi.encode(address(wrongSettlementToken)));
         vm.expectRevert(bytes("Engine settlement asset mismatch"));
         deployScript.verifyV2OrderStack(engine, clearinghouse, housePool, evaluator, executionSidecar, router);
         vm.expectRevert(bytes("Engine settlement asset mismatch"));
@@ -501,7 +513,9 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
         vm.clearMockedCalls();
 
         vm.mockCall(
-            address(clearinghouse), abi.encodeWithSignature("settlementAsset()"), abi.encode(address(wrongUsdc))
+            address(clearinghouse),
+            abi.encodeWithSignature("settlementAsset()"),
+            abi.encode(address(wrongSettlementToken))
         );
         vm.expectRevert(bytes("Clearinghouse settlement asset mismatch"));
         deployScript.verifyV2OrderStack(engine, clearinghouse, housePool, evaluator, executionSidecar, router);
@@ -521,17 +535,17 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     function test_BootstrapDefaults_MatchArbitrumSepoliaReleaseSeeds() public {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
 
-        assertEq(bootstrapScript.defaultSeniorSeedUsdc(), 1e6, "senior seed");
-        assertEq(bootstrapScript.defaultJuniorSeedUsdc(), 1e6, "junior seed");
+        assertEq(bootstrapScript.defaultSeniorSeedAssets(), 1e6, "senior seed");
+        assertEq(bootstrapScript.defaultJuniorSeedAssets(), 1e6, "junior seed");
     }
 
     function test_DeploymentUsesExpectedRedemptionMathSidecarAndSettlementStartsLive() public {
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
-        MockUSDC usdc = new MockUSDC();
+        MockUSDG settlementToken = new MockUSDG();
         HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
 
         bootstrapScript.verifyRedemptionMathSidecar(address(redemptionMathSidecar));
-        HousePool pool = new HousePool(address(usdc), address(0xE11E), address(redemptionMathSidecar));
+        HousePool pool = new HousePool(address(settlementToken), address(0xE11E), address(redemptionMathSidecar));
 
         assertGt(address(redemptionMathSidecar).code.length, 0, "redemption math sidecar code");
         assertEq(
@@ -543,7 +557,8 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     }
 
     function test_AsyncVaultReleaseDefaults_DisableJuniorMaintenanceFeeWithTreasuryRecipient() public {
-        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+        (MockUSDG settlementToken, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) =
+            _deployAsyncVaultPair();
 
         assertEq(seniorVault.maintenanceFeeAprBps(), 0, "Senior maintenance fee APR");
         assertEq(seniorVault.maintenanceFeeRecipient(), address(0), "Senior maintenance fee recipient");
@@ -558,38 +573,40 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
-        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
-        bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, settlementToken);
+        bootstrapScript.verifyAsyncVaultPair(pool, address(settlementToken));
     }
 
     function test_DeploymentAndBootstrapRejectUnexpectedMaintenanceFeeRecipient() public {
-        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+        (MockUSDG settlementToken, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) =
+            _deployAsyncVaultPair();
         juniorVault.proposeMaintenanceFeeConfig(0, address(0xFEE));
         vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
         juniorVault.finalizeMaintenanceFeeConfig();
 
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         vm.expectRevert(bytes("TrancheVault maintenance fee recipient mismatch"));
-        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
+        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, settlementToken);
 
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
         vm.expectRevert(bytes("TrancheVault maintenance fee recipient mismatch"));
-        bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+        bootstrapScript.verifyAsyncVaultPair(pool, address(settlementToken));
     }
 
     function test_DeploymentAndBootstrapRejectNonzeroJuniorMaintenanceFeeApr() public {
-        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+        (MockUSDG settlementToken, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) =
+            _deployAsyncVaultPair();
         juniorVault.proposeMaintenanceFeeConfig(100, CfdEngine(address(pool.ENGINE())).protocolTreasury());
         vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
         juniorVault.finalizeMaintenanceFeeConfig();
 
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         vm.expectRevert(bytes("TrancheVault maintenance fee APR mismatch"));
-        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
+        deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, settlementToken);
 
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
         vm.expectRevert(bytes("TrancheVault maintenance fee APR mismatch"));
-        bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+        bootstrapScript.verifyAsyncVaultPair(pool, address(settlementToken));
     }
 
     function test_BootstrapRejectsMissingRedemptionMathSidecarOnRerun() public {
@@ -754,27 +771,32 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
     function test_DeploymentGuardsAcceptCanonicalRequestWindowAcrossCutoffs() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
-        (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) = _deployAsyncVaultPair();
+        (MockUSDG settlementToken, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault) =
+            _deployAsyncVaultPair();
 
         uint256 boundary = 10 hours;
         uint256[4] memory timestamps = [boundary - 301 seconds, boundary - 300 seconds, boundary, boundary + 55 minutes];
         for (uint256 i; i < timestamps.length; ++i) {
             vm.warp(timestamps[i]);
-            deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, usdc);
-            bootstrapScript.verifyAsyncVaultPair(pool, address(usdc));
+            deployScript.verifyAsyncVaultPair(pool, seniorVault, juniorVault, settlementToken);
+            bootstrapScript.verifyAsyncVaultPair(pool, address(settlementToken));
         }
     }
 
     function test_BootstrapRejectsStackWithoutTerminalNavBook() public {
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
         BootstrapPerpsArbitrumSepoliaHarness bootstrapScript = new BootstrapPerpsArbitrumSepoliaHarness();
-        MockUSDC usdc = new MockUSDC();
-        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        MockUSDG settlementToken = new MockUSDG();
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(settlementToken));
         CfdEngine engine = new CfdEngine(
-            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+            address(settlementToken),
+            address(clearinghouse),
+            2e8,
+            deployScript.riskParams(),
+            deployScript.frozenCloseSpreadBps()
         );
         HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
-        HousePool pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
+        HousePool pool = new HousePool(address(settlementToken), address(engine), address(redemptionMathSidecar));
 
         vm.expectRevert(bytes("TerminalNavBookV2 is not wired"));
         bootstrapScript.verifyTerminalNavBook(pool);
@@ -855,20 +877,25 @@ contract ArbitrumSepoliaReleaseDefaultsTest is Test {
 
     function _deployAsyncVaultPair()
         internal
-        returns (MockUSDC usdc, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault)
+        returns (MockUSDG settlementToken, HousePool pool, TrancheVault seniorVault, TrancheVault juniorVault)
     {
-        usdc = new MockUSDC();
+        settlementToken = new MockUSDG();
         DeployPerpsArbitrumSepoliaHarness deployScript = new DeployPerpsArbitrumSepoliaHarness();
-        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(usdc));
+        MarginClearinghouse clearinghouse = new MarginClearinghouse(address(settlementToken));
         CfdEngine engine = new CfdEngine(
-            address(usdc), address(clearinghouse), 2e8, deployScript.riskParams(), deployScript.frozenCloseSpreadBps()
+            address(settlementToken),
+            address(clearinghouse),
+            2e8,
+            deployScript.riskParams(),
+            deployScript.frozenCloseSpreadBps()
         );
         HousePoolRedemptionMathSidecar redemptionMathSidecar = new HousePoolRedemptionMathSidecar();
-        pool = new HousePool(address(usdc), address(engine), address(redemptionMathSidecar));
-        seniorVault = new TrancheVault(IERC20(address(usdc)), address(pool), true, "Senior", "senior", 0, address(0));
+        pool = new HousePool(address(settlementToken), address(engine), address(redemptionMathSidecar));
+        seniorVault =
+            new TrancheVault(IERC20(address(settlementToken)), address(pool), true, "Senior", "senior", 0, address(0));
         pool.setSeniorVault(address(seniorVault));
         juniorVault = new TrancheVault(
-            IERC20(address(usdc)), address(pool), false, "Junior", "junior", 0, engine.protocolTreasury()
+            IERC20(address(settlementToken)), address(pool), false, "Junior", "junior", 0, engine.protocolTreasury()
         );
         pool.setJuniorVault(address(juniorVault));
     }

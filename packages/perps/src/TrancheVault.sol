@@ -24,6 +24,8 @@ interface IHousePoolMaintenanceFeeAdminView {
 /// @title TrancheVault
 /// @notice Fully asynchronous ERC-7540-style entry point for one HousePool tranche.
 /// @dev The vault escrows request tokens and claim tokens. HousePool alone moves epochs into claimable state.
+///      The underlying is the pool's six-decimal settlement token, including MockUSDG on the new testnet stack.
+///      Legacy `usdc` identifiers refer to that configured asset; they do not change its identity or accounting units.
 // Legacy integration interfaces are implemented structurally; the pool settlement fragment is intentionally local to HousePool.
 // slither-disable-next-line missing-inheritance
 contract TrancheVault is ERC4626, IAsyncTrancheVaultClaimableRedeem {

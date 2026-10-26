@@ -39,8 +39,9 @@ interface ICfdEnginePoolBinding {
 /// @dev Orders and liquidations enter through the authorized router. Economic deltas are computed by the planner,
 ///      then applied through the settlement sidecar while the engine remains the canonical position-state owner.
 ///      The clearinghouse custodies trader settlement balances and margin; the HousePool supplies counterparty cash.
-///      Unless stated otherwise, prices use 8 decimals, position sizes use 18 decimals, USDC amounts use 6 decimals,
-///      basis-point values use a 10,000 denominator, and timestamps are Unix seconds.
+///      Unless stated otherwise, prices use 8 decimals, position sizes use 18 decimals, settlement amounts use 6
+///      decimals, basis-point values use a 10,000 denominator, and timestamps are Unix seconds. Legacy `USDC` and
+///      `Usdc` identifiers denote the configured settlement token, including MockUSDG on the new testnet stack.
 /// @custom:security-contact contact@plether.com
 contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Ownable2Step, ReentrancyGuardTransient {
 
@@ -73,6 +74,7 @@ contract CfdEngine is ICfdEngineTypes, IWithdrawGuard, ICfdEngineAdminHost, Owna
     uint256 public immutable CAP_PRICE;
 
     /// @notice Settlement token used for margin, fees, carry, recapitalization, and payouts.
+    /// @dev Legacy getter name retained for ABI compatibility; token identity comes from its configured address.
     IERC20 public immutable USDC;
     /// @notice Clearinghouse that custodies trader settlement balances and typed margin buckets.
     IMarginClearinghouse public immutable clearinghouse;

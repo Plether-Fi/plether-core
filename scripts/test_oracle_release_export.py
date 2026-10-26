@@ -1,5 +1,6 @@
 """Release export must bind every deployment and reject incomplete or changing evidence."""
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -61,6 +62,68 @@ def forge_result(records=None, status="Success"):
     return {release.SIZE_TEST_SUITE: {"test_results": {release.SIZE_TEST: {
         "status": status, "decoded_logs": [release.LOG_PREFIX + json.dumps(item) for item in records],
     }}}}
+
+
+class SettlementConfigurationTest(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(__file__).resolve().parents[1]
+        self.manifest = json.loads((self.root / "deployments/arbitrum-sepolia-perps.template.json").read_text())
+
+    def test_new_template_selects_mock_usdg_and_retains_historical_artifact_mapping(self):
+        release.validate_settlement_configuration(self.manifest)
+        identifier = release.artifact_identifier("settlementToken", self.manifest["contracts"]["settlementToken"])
+        self.assertEqual(identifier, "DeployPerpsArbitrumSepolia.s.sol:MockUSDG")
+        inventory = release.consumer_inventory(self.root, self.manifest)
+        self.assertEqual(inventory[identifier], "script/DeployPerpsArbitrumSepolia.s.sol")
+        self.assertNotIn("DeployPerpsArbitrumSepolia.s.sol:MockUSDC", inventory)
+        self.assertEqual(release.artifact_identifier("mockUsdc", {}), "DeployPerpsArbitrumSepolia.s.sol:MockUSDC")
+        release.validate_settlement_configuration(MANIFEST)
+
+    def test_mock_cannot_advertise_signed_deposits_bridge_funding_or_gdn_eligibility(self):
+        for section, key, value in (
+            ("settlementToken", "supportsReceiveWithAuthorization", True),
+            ("settlementToken", "supportsBridgeFunding", True),
+            ("settlementToken", "decimals", 18),
+            ("settlementToken", "isMock", False),
+            ("rewards", "status", "active"),
+            ("rewards", "holdingContracts", ["marginClearinghouse", "seniorVault"]),
+        ):
+            with self.subTest(key=key):
+                manifest = copy.deepcopy(self.manifest)
+                manifest[section][key] = value
+                with self.assertRaises(ValueError):
+                    release.consumer_inventory(self.root, manifest)
+
+    def test_schema_four_requires_explicit_new_token_entry(self):
+        self.manifest["contracts"]["mockUsdc"] = self.manifest["contracts"].pop("settlementToken")
+        with self.assertRaisesRegex(ValueError, "explicit MockUSDG"):
+            release.validate_settlement_configuration(self.manifest)
+
+    def test_rewards_can_use_a_separate_controlled_payout_wallet(self):
+        self.manifest["rewards"].update(payoutAddress="0x" + "ab" * 20, payoutController="0x" + "cd" * 20)
+        release.validate_settlement_configuration(self.manifest)
+
+    def test_reward_payments_cannot_target_any_protocol_custody_address_case_insensitively(self):
+        for key in ("marginClearinghouse", "cfdEngine", "housePool", "seniorVault", "juniorVault"):
+            with self.subTest(key=key):
+                manifest = copy.deepcopy(self.manifest)
+                manifest["contracts"][key]["address"] = "0x" + "AB" * 20
+                manifest["rewards"].update(payoutAddress="0x" + "ab" * 20, payoutController="0x" + "cd" * 20)
+                with self.assertRaisesRegex(ValueError, "separate from deployed protocol"):
+                    release.validate_settlement_configuration(manifest)
+
+    def test_payout_requires_both_valid_nonzero_addresses(self):
+        for destination, controller in (
+            ("0x" + "ab" * 20, None), (None, "0x" + "cd" * 20),
+            ("0x" + "00" * 20, "0x" + "cd" * 20),
+            ("0x" + "ab" * 20, "0x" + "00" * 20),
+            ("not-an-address", "0x" + "cd" * 20),
+        ):
+            with self.subTest(destination=destination, controller=controller):
+                manifest = copy.deepcopy(self.manifest)
+                manifest["rewards"].update(payoutAddress=destination, payoutController=controller)
+                with self.assertRaisesRegex(ValueError, "both be nonzero addresses"):
+                    release.validate_settlement_configuration(manifest)
 
 
 class DeploymentSizeEvidenceTest(unittest.TestCase):
