@@ -186,7 +186,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
     bool public juniorSeedInitialized;
 
     /// @notice Delay between proposing and finalizing pool configuration changes, in seconds.
-    uint256 public constant TIMELOCK_DELAY = 48 hours;
+    uint256 public constant TIMELOCK_DELAY = 72 hours;
 
     /// @notice Most recently proposed pool configuration awaiting finalization.
     /// @dev Rate, fee, and share fields use basis points; `markStalenessLimit` uses seconds and maximum senior
@@ -296,7 +296,7 @@ contract HousePool is IHousePool, IPerpsLPActions, Ownable2Step, Pausable, Reent
         juniorVault = _vault;
     }
 
-    /// @notice Propose a new pool config, subject to a 48h timelock.
+    /// @notice Propose a new pool config, subject to a 72h timelock.
     /// @dev Only the owner may call. A valid proposal supersedes any existing proposal and restarts the timelock.
     ///      The annual senior rate is capped at 10,000 bps, mark staleness must be nonzero, and each frozen LP
     ///      fee is capped by `MAX_FROZEN_LP_FEE_BPS`. Senior-capacity proposals must replace both constructor-only

@@ -65,11 +65,11 @@ All perps contracts are non-upgradeable.
   Clearinghouse, and HousePool dependencies. The Router constructor validates all four bindings before accepting it.
   `CfdOrderPolicyEvaluator` and `OrderRouterExecutionSidecar` are separately deployed stateless code dependencies
   fixed by a fresh Router; none has an upgrade setter.
-- `OrderRouter`'s configured `PletherOracle` address can be rotated only through `OrderRouterAdmin`'s 48-hour timelocked oracle config flow. Feed ids, basket weights, base prices, inversion flags, and the Pyth endpoint are fixed on each `PletherOracle` instance, so changing them requires deploying a new oracle and timelocking the router onto it.
+- `OrderRouter`'s configured `PletherOracle` address can be rotated only through `OrderRouterAdmin`'s 72-hour timelocked oracle config flow. Feed ids, basket weights, base prices, inversion flags, and the Pyth endpoint are fixed on each `PletherOracle` instance, so changing them requires deploying a new oracle and timelocking the router onto it.
 
 ### Timelocked admin state
 
-The following parameter families are owner-controlled behind a 48-hour propose/finalize delay.
+The following parameter families are owner-controlled behind a 72-hour propose/finalize delay.
 Engine risk controls live in `CfdEngineAdmin`, and router risk controls live in `OrderRouterAdmin`, with each deployed admin contract applying finalized values onto its host contract:
 
 Both admins expose `activeConfigVersion`, initialized to one. `CfdEngineAdmin` increments it only after successful
@@ -84,16 +84,16 @@ size quantum.
 
 | Parameter | Contract | Guard |
 |-----------|----------|-------|
-| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`, `settlementBufferBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `EngineCalendarConfig` (`fadDayOverrides`, `fadRunwaySeconds`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 48-hour timelock |
-| `seniorRateBps` | `HousePool` | `onlyOwner`, 48-hour timelock |
-| `markStalenessLimit` | `HousePool` | `onlyOwner`, 48-hour timelock |
-| `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps` | `HousePool` | `onlyOwner`, 48-hour timelock; each fee is capped at `1,000` bps |
-| `maxSeniorExposureAssets`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 48-hour timelock; finalized values must be finite and below 100%, respectively |
-| Junior `maintenanceFeeAprBps`, `maintenanceFeeRecipient` | `TrancheVault` | current `HousePool.owner()` only, 48-hour timelock; fee is capped at `1,000` bps nominal APR |
-| `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, confidence policy, historical settlement window, component skew, opening minimum, bounty rates/limits, pending-order cap, minimum execution gas, cleanup cap) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
-| `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 48-hour timelock |
+| `EngineRiskConfig` (`riskParams`, `executionFeeBps`, `frozenCloseSpreadBps`, `settlementBufferBps`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
+| `EngineCalendarConfig` (`fadDayOverrides`, `fadRunwaySeconds`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
+| `EngineFreshnessConfig` (`fadMaxStaleness`, `engineMarkStalenessLimit`) | `CfdEngineAdmin` -> `CfdEngine` | `onlyOwner`, 72-hour timelock |
+| `seniorRateBps` | `HousePool` | `onlyOwner`, 72-hour timelock |
+| `markStalenessLimit` | `HousePool` | `onlyOwner`, 72-hour timelock |
+| `seniorFrozenLpFeeBps`, `juniorFrozenLpFeeBps` | `HousePool` | `onlyOwner`, 72-hour timelock; each fee is capped at `1,000` bps |
+| `maxSeniorExposureAssets`, `maxSeniorShareBps` | `HousePool` | `onlyOwner`, 72-hour timelock; finalized values must be finite and below 100%, respectively |
+| Junior `maintenanceFeeAprBps`, `maintenanceFeeRecipient` | `TrancheVault` | current `HousePool.owner()` only, 72-hour timelock; fee is capped at `10,000` bps (100%) nominal APR |
+| `RouterConfig` (`maxExecutionWindowSeconds`, staleness limits, confidence policy, historical settlement window, component skew, opening minimum, bounty rates/limits, pending-order cap, minimum execution gas, cleanup cap) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 72-hour timelock |
+| `OracleConfig` (`pletherOracle`) | `OrderRouterAdmin` -> `OrderRouter` | `onlyOwner`, 72-hour timelock |
 
 Each successful Engine/Router finalization therefore changes
 `OrderLifecycleBook.currentExecutionConfigHash()`. Proposal, cancellation, pause/unpause, and failed finalization do
@@ -1105,7 +1105,7 @@ the HousePool owner can release it.
 
 The optional maintenance fee applies only to Junior. The generic Junior constructor permits a zero rate with a zero
 or valid nonzero recipient; this release deploys at `0 bps` with the deployment-time protocol treasury as recipient.
-The current HousePool owner may configure it through a 48-hour delay, subject to a `1,000 bps` nominal-APR cap.
+The current HousePool owner may configure it through a 72-hour delay, subject to a `10,000 bps` (100%) nominal-APR cap.
 Finalization must checkpoint elapsed fees to the old recipient before changing the rate or recipient; enabling from
 zero starts prospectively.
 

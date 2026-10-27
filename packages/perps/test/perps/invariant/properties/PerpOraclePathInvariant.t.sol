@@ -116,7 +116,7 @@ contract PerpOraclePathHandler is Test {
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours);
+        vm.warp(block.timestamp + 72 hours);
         routerAdmin.finalizeRouterConfig();
         vm.stopPrank();
     }
@@ -143,7 +143,7 @@ contract PerpOraclePathHandler is Test {
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(block.timestamp + 48 hours);
+        vm.warp(block.timestamp + 72 hours);
         routerAdmin.finalizeRouterConfig();
         vm.stopPrank();
     }

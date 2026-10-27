@@ -47,7 +47,7 @@ contract JuniorMaintenanceFeeMathLibTest is Test {
     uint256 internal constant RAY = 1e27;
     uint256 internal constant BPS = 10_000;
     uint256 internal constant HOURS_PER_YEAR = 8760;
-    uint256 internal constant MAX_APR_BPS = 1000;
+    uint256 internal constant MAX_APR_BPS = 10_000;
 
     JuniorMaintenanceFeeMathHarness internal harness;
 
@@ -71,9 +71,15 @@ contract JuniorMaintenanceFeeMathLibTest is Test {
     }
 
     function test_TenPercentAnnualExample() public view {
-        assertEq(harness.hourlyFeeRay(MAX_APR_BPS), 11_415_525_114_155_251_141_552);
-        assertEq(harness.retentionRay(MAX_APR_BPS, HOURS_PER_YEAR), 904_836_901_572_463_003_134_684_023);
-        assertEq(harness.pendingFeeShares(100 ether, MAX_APR_BPS, HOURS_PER_YEAR), 10_517_154_888_594_687_866);
+        assertEq(harness.hourlyFeeRay(1000), 11_415_525_114_155_251_141_552);
+        assertEq(harness.retentionRay(1000, HOURS_PER_YEAR), 904_836_901_572_463_003_134_684_023);
+        assertEq(harness.pendingFeeShares(100 ether, 1000, HOURS_PER_YEAR), 10_517_154_888_594_687_866);
+    }
+
+    function test_HundredPercentAnnualExample() public view {
+        assertEq(harness.hourlyFeeRay(MAX_APR_BPS), 114_155_251_141_552_511_415_525);
+        assertEq(harness.retentionRay(MAX_APR_BPS, HOURS_PER_YEAR), 367_858_442_487_638_606_602_765_413);
+        assertEq(harness.pendingFeeShares(100 ether, MAX_APR_BPS, HOURS_PER_YEAR), 171_843_699_776_879_164_369);
     }
 
     function test_InvalidBoundsRevert() public {
@@ -93,8 +99,8 @@ contract JuniorMaintenanceFeeMathLibTest is Test {
         harness.pendingFeeShares(1, MAX_APR_BPS, HOURS_PER_YEAR + 1);
     }
 
-    function test_MaxUintSupplyQuoteDoesNotOverflow() public view {
-        uint256 feeShares = harness.pendingFeeShares(type(uint256).max, MAX_APR_BPS, HOURS_PER_YEAR);
+    function test_MaxUintSupplyQuoteAtTenPercentDoesNotOverflow() public view {
+        uint256 feeShares = harness.pendingFeeShares(type(uint256).max, 1000, HOURS_PER_YEAR);
 
         assertGt(feeShares, 0);
         assertLt(feeShares, type(uint256).max / 9);

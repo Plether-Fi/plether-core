@@ -230,8 +230,21 @@ contract PerpsForkTest is ForkTrancheFunding {
         config.minEngineGas = router.minEngineGas();
         config.maxPruneOrdersPerCall = router.maxPruneOrdersPerCall();
         routerAdmin.proposeRouterConfig(config);
-        vm.warp(vm.getBlockTimestamp() + 48 hours + 1);
+        vm.warp(vm.getBlockTimestamp() + 72 hours + 1);
         routerAdmin.finalizeRouterConfig();
+
+        // The governance wait can end on a weekend. These price-age tests need live trading,
+        // so advance to Monday noon UTC before creating any orders or oracle timestamps.
+        uint256 finalizedAt = vm.getBlockTimestamp();
+        uint256 day = finalizedAt / 1 days;
+        uint256 dayOfWeek = (day + 4) % 7;
+        uint256 mondayNoon = (day + (8 - dayOfWeek) % 7) * 1 days + 12 hours;
+        if (mondayNoon <= finalizedAt) {
+            mondayNoon += 7 days;
+        }
+        vm.warp(mondayNoon);
+        assertFalse(engine.isFadWindow(), "price-age fixture must allow opening trades");
+        assertFalse(router.pletherOracle().isOracleFrozen(), "price-age fixture requires live oracle policy");
     }
 
     function _commitOrderDeterministic(

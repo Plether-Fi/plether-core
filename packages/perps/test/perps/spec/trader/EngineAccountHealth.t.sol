@@ -241,7 +241,7 @@ contract CfdEngineAccountBehaviorTest is BasePerpTest {
 
         CarryRateChangeModel memory model;
         model.openedAt = block.timestamp;
-        model.finalizedAt = model.openedAt + 3 days + 1;
+        model.finalizedAt = model.openedAt + 1 days + engineAdmin.TIMELOCK_DELAY() + 1;
         model.poolBefore = settlementToken.balanceOf(address(pool));
         model.settlementBefore = clearinghouse.balanceAssets(carol);
         // The supplied $10,000 first pays a 4-bps execution fee and funds a 10-bps liquidation reserve.

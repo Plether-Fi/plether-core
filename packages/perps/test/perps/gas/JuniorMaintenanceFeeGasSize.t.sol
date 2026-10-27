@@ -118,11 +118,12 @@ contract JuniorMaintenanceFeeGasSizeTest is BasePerpTest {
         uint256 requestId = _requestJuniorDepositForGas(EPOCH_DEPOSITOR, EPOCH_DEPOSIT_ASSETS);
         uint256 branchPoint = vm.snapshotState();
 
-        juniorVault.proposeMaintenanceFeeConfig(1000, FEE_RECIPIENT);
+        juniorVault.proposeMaintenanceFeeConfig(10_000, FEE_RECIPIENT);
         vm.warp(juniorVault.maintenanceFeeConfigActivationTime());
         juniorVault.finalizeMaintenanceFeeConfig();
+        // Move the two-year catch-up from Saturday to Monday so deposits can settle.
         uint256 settlementTime = juniorVault.maintenanceFeeCheckpointBoundary() + 2
-            * juniorVault.MAX_MAINTENANCE_FEE_CHECKPOINT_HOURS() * 1 hours;
+            * juniorVault.MAX_MAINTENANCE_FEE_CHECKPOINT_HOURS() * 1 hours + 2 days;
         vm.warp(settlementTime);
         assertLe(requestId, pool.currentLpEpoch(), "fee branch must mature the queued deposit");
         uint256 expectedFeeShares = juniorVault.pendingMaintenanceFeeShares();

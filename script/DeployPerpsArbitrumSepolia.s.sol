@@ -83,7 +83,7 @@ contract ArbitrumSepoliaReleaseHousePool is HousePool {
 }
 
 /// @dev Release-only constructor wrapper for the oracle-backed Router confidence policy. Subsequent policy changes
-///      still flow exclusively through the existing RouterAdmin 48-hour proposal/finalization path.
+///      still flow exclusively through the existing RouterAdmin 72-hour proposal/finalization path.
 contract ArbitrumSepoliaReleaseOracle is PletherOracle {
 
     constructor(

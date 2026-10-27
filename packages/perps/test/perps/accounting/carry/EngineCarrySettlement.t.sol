@@ -70,7 +70,8 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
         _configureSnapshotBuffer();
         _setFadMaxStaleness(1 hours);
         _openSnapshotBufferPositions();
-        uint64 frozenMarkTime = uint64(SETUP_TIMESTAMP + 5 days + 2 hours);
+        // Two governance waits now pass the first Saturday; use the following frozen weekend.
+        uint64 frozenMarkTime = uint64(SETUP_TIMESTAMP + 12 days + 2 hours);
         vm.warp(frozenMarkTime);
         assertTrue(engine.isOracleFrozen(), "This boundary must use the frozen freshness policy");
         vm.prank(address(router));
@@ -649,6 +650,8 @@ contract EngineCarrySettlementTest is CfdEngineTestBase {
     {
         CfdTypes.RiskParams memory params = _riskParams();
         _setRiskParams(params);
+        // Preserve the fixed carry interval while keeping opening and reservation outside FAD.
+        vm.warp(SETUP_TIMESTAMP + 7 days);
 
         address trader = address(0x51584);
         address account = trader;

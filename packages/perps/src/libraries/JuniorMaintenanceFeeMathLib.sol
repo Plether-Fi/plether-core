@@ -20,7 +20,7 @@ library JuniorMaintenanceFeeMathLib {
     uint256 internal constant HOURS_PER_YEAR = 8760;
 
     /// @notice Maximum governance-configurable nominal annual fee.
-    uint256 internal constant MAX_APR_BPS = 1000;
+    uint256 internal constant MAX_APR_BPS = 10_000;
 
     /// @notice Maximum number of completed hours charged by one crystallization.
     uint256 internal constant MAX_CHARGE_HOURS = HOURS_PER_YEAR;

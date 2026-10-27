@@ -138,6 +138,9 @@ contract OracleSynchronizationGasTest is OracleSynchronizationTestBase {
     }
 
     function test_Gas_FrozenReplaysWithoutPythUpdate() public {
+        // Refresh the cached mark after the governance wait, before entering frozen mode.
+        vm.prank(address(router));
+        engine.updateMarkPrice(1e8, uint64(block.timestamp));
         uint64 commit = uint64(block.timestamp);
         _advance(commit + 1);
         vm.mockCall(address(engine), abi.encodeWithSignature("isOracleFrozen()"), abi.encode(true));

@@ -157,7 +157,7 @@ contract OrderRouterAccountBehaviorTest is BasePerpTest {
         IOrderRouterAdminHost.RouterConfig memory config = _routerConfig();
         config.maxExecutionWindowSeconds = 300;
         routerAdmin.proposeRouterConfig(config);
-        _warpForward(48 hours + 1);
+        _warpForward(72 hours + 1);
         routerAdmin.finalizeRouterConfig();
 
         _fundJunior(bob, 1_000_000e6);
