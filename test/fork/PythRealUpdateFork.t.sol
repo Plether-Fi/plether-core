@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {ForkTrancheFunding} from "./helpers/ForkTrancheFunding.sol";
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineAdmin} from "@plether/perps/CfdEngineAdmin.sol";
@@ -22,12 +24,13 @@ import {TerminalNavBookV2} from "@plether/perps/TerminalNavBookV2.sol";
 import {TrancheVault} from "@plether/perps/TrancheVault.sol";
 import {IHousePool} from "@plether/perps/interfaces/IHousePool.sol";
 import {IOrderRouterAccounting} from "@plether/perps/interfaces/IOrderRouterAccounting.sol";
+import {IOrderRouterErrors} from "@plether/perps/interfaces/IOrderRouterErrors.sol";
 import {IPyth, PythStructs} from "@plether/shared/interfaces/IPyth.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @notice Opt-in fork checks for real Hermes update bytes against Ethereum mainnet Pyth.
 /// @dev Generate env vars with scripts/fetch-pyth-real-update-fixture.sh before running.
-contract PythRealUpdateForkTest is Test {
+contract PythRealUpdateForkTest is ForkTrancheFunding {
 
     address internal constant settlementToken = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address internal constant REAL_PYTH = 0x4305FB66699C3B2702D4d05CF36551390A4c69C6;
@@ -72,22 +75,16 @@ contract PythRealUpdateForkTest is Test {
         bytes32[] memory priceIds = _singleFeedIds();
         uint256 fee = IPyth(REAL_PYTH).getUpdateFee(updateData);
 
-        vm.expectRevert();
+        vm.expectRevert(bytes4(keccak256("PriceFeedNotFoundWithinRange()")));
         IPyth(REAL_PYTH).parsePriceFeedUpdatesUnique{value: fee}(updateData, priceIds, prevPublishTime, publishTime);
     }
 
-    function test_OrderRouter_ExecutesPostCommitOrder_WithRealHermesBytes() public {
+    function test_OrderRouter_RealHermesBytes_RespectsMarketCalendar() public {
         (bytes[] memory updateData, uint64 prevPublishTime, uint64 publishTime) = _realHermesFixture();
         assertLt(prevPublishTime, publishTime, "fixture must cover at least one commit timestamp");
 
-        // This exercises the live-market historical path. If the fixture is captured during a
-        // frozen FX market window, the direct parser tests above still validate Pyth behavior.
-        if (_isUtcWeekend(publishTime)) {
-            emit log("skipping router execution check for weekend/frozen FX fixture");
-            return;
-        }
-
-        _deployPerpsWithRealPyth(publishTime);
+        // Bootstrap liquidity during a live weekday, then test the market policy at the signed tick.
+        _deployPerpsWithRealPyth(_liveSetupTime(publishTime));
         _depositToClearinghouse(alice, 10_000e6);
 
         uint64 commitTime = publishTime - 1;
@@ -96,9 +93,65 @@ contract PythRealUpdateForkTest is Test {
         vm.roll(1_000_000);
         uint64 orderId = router.nextCommitId();
 
-        vm.prank(alice);
-        router.commitOrder(_orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6));
+        OrderV3Types.OrderRequest memory request1 = _orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6);
+        bool closeOnly = router.pletherOracle().getOrderExecutionPolicy(false).closeOnly;
+        uint256 dayOfWeek = ((commitTime / 1 days) + 4) % 7;
+        // Independent calendar anchors prevent an always-close-only policy from turning
+        // this live integration test into a passing rejection test. Friday/Sunday depend on NY DST.
+        if (dayOfWeek >= 1 && dayOfWeek <= 4) {
+            assertFalse(closeOnly, "Monday through Thursday are live");
+        }
+        if (dayOfWeek == 6) {
+            assertTrue(closeOnly, "Saturday is closed");
+        }
+        if (closeOnly) {
+            _assertCloseOnlyCommitRejected(request1);
+        } else {
+            _executeRealUpdate(request1, updateData, publishTime, commitTime, orderId);
+        }
+    }
 
+    function test_OrderRouter_SaturdayRejectsOpenWithoutReservingFunds() public {
+        (,, uint64 publishTime) = _realHermesFixture();
+        uint256 setupTime = _liveSetupTime(publishTime);
+        _deployPerpsWithRealPyth(setupTime);
+        _depositToClearinghouse(alice, 10_000e6);
+        // Setup is Wednesday noon UTC; Saturday noon is unambiguously closed in either DST regime.
+        vm.warp(setupTime + 3 days);
+        assertTrue(engine.isOracleFrozen());
+        _assertCloseOnlyCommitRejected(_orderRequest(alice, CfdTypes.Side.LONG, 100_000e18, 5000e6));
+    }
+
+    function _assertCloseOnlyCommitRejected(
+        OrderV3Types.OrderRequest memory request
+    ) internal {
+        uint64 nextId = router.nextCommitId();
+        uint256 balance = clearinghouse.balanceAssets(alice);
+        uint256 buyingPower = clearinghouse.getFreeBuyingPowerAssets(alice);
+        vm.expectRevert(IOrderRouterErrors.OrderRouter__CloseOnlyWindow.selector);
+        vm.prank(alice);
+        router.commitOrder(request);
+        assertEq(router.nextCommitId(), nextId);
+        assertEq(router.pendingOrderCounts(alice), 0);
+        assertEq(clearinghouse.balanceAssets(alice), balance);
+        assertEq(clearinghouse.getFreeBuyingPowerAssets(alice), buyingPower);
+        assertEq(clearinghouse.totalBountyReservationsAssets(alice), 0);
+        assertEq(clearinghouse.getAccountReservationSummary(alice).activeCommittedOrderMarginAssets, 0);
+        (uint256 size,,,,,,) = engine.positions(alice);
+        assertEq(size, 0);
+    }
+
+    function _executeRealUpdate(
+        OrderV3Types.OrderRequest memory request,
+        bytes[] memory updateData,
+        uint64 publishTime,
+        uint64 commitTime,
+        uint64 orderId
+    ) internal {
+        vm.prank(alice);
+        router.commitOrder(request);
+        uint256 bounty = router.lifecycleBook().pendingIntent(orderId).executionBountyAssets;
+        uint256 keeperBefore = clearinghouse.balanceAssets(keeper);
         uint256 fee = IPyth(REAL_PYTH).getUpdateFee(updateData);
         vm.deal(keeper, fee);
         vm.warp(publishTime + 1);
@@ -108,7 +161,13 @@ contract PythRealUpdateForkTest is Test {
         assertGt(block.number, pending.commitBlock, "execution must happen after the commit block");
 
         vm.prank(keeper);
-        router.executeOrder{value: fee}(orderId, updateData);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder{value: fee}(orderId, updateData);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Executed));
+        assertEq(uint8(result.terminalReason), uint8(OrderV3Types.TerminalReason.Executed));
+        assertEq(router.pendingOrderCounts(alice), 0);
+        assertEq(clearinghouse.balanceAssets(keeper) - keeperBefore, bounty);
+        assertEq(clearinghouse.totalBountyReservationsAssets(alice), 0);
+        assertEq(clearinghouse.getAccountReservationSummary(alice).activeCommittedOrderMarginAssets, 0);
 
         (uint256 size,,,,,,) = engine.positions(alice);
         assertEq(size, 100_000e18, "position opened with real Pyth update bytes");
@@ -212,11 +271,7 @@ contract PythRealUpdateForkTest is Test {
         pool.initializeSeedPosition(true, 1000e6, address(this));
         pool.activateTrading();
 
-        deal(settlementToken, lp, 1_000_000e6);
-        vm.startPrank(lp);
-        IERC20(settlementToken).approve(address(juniorVault), type(uint256).max);
-        juniorVault.deposit(1_000_000e6, lp);
-        vm.stopPrank();
+        _fundForkTranche(juniorVault, engine, lp, 1_000_000e6);
     }
 
     function _orderRequest(
@@ -270,12 +325,17 @@ contract PythRealUpdateForkTest is Test {
         feedIds[0] = EUR_USD_FEED_ID;
     }
 
-    function _isUtcWeekend(
-        uint256 timestamp
-    ) internal pure returns (bool) {
-        // Unix epoch Thursday = day 4. Saturday/Sunday are 6/0.
-        uint256 day = ((timestamp / 1 days) + 4) % 7;
-        return day == 0 || day == 6;
+    function _liveSetupTime(
+        uint256 publishTime
+    ) internal pure returns (uint256 setupTime) {
+        // The latest Wednesday noon at least ten minutes before the signed tick.
+        // This only chooses the bootstrap time; order admission uses the real tick's calendar regime.
+        uint256 day = publishTime / 1 days;
+        uint256 daysSinceWednesday = ((day + 4) % 7 + 4) % 7;
+        setupTime = (day - daysSinceWednesday) * 1 days + 12 hours;
+        if (setupTime + 10 minutes >= publishTime) {
+            setupTime -= 7 days;
+        }
     }
 
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity 0.8.35;
 
+import {ArbitrumForkSupport} from "@plether/test-utils/ArbitrumForkSupport.sol";
+
 import {SourceBoundBountyFixture} from "../shared/SourceBoundBountyFixture.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
@@ -39,6 +41,7 @@ contract NativeCloseFallbackTest is SourceBoundBountyFixture {
     function setUp() public override {
         string memory rpc = vm.envString("NATIVE_CLOSE_FORK_RPC_URL");
         vm.createSelectFork(rpc, SOURCE_RPC_BLOCK);
+        ArbitrumForkSupport.install();
         assertEq(block.chainid, 421_614);
         emit log_named_uint("SimpleAccount source fork RPC block", SOURCE_RPC_BLOCK);
         assertEq(FACTORY.codehash, 0xa2e635152a61e180383c7afc045620b7461ef6f43ba27d592262513106b991b7);
@@ -106,6 +109,22 @@ contract NativeCloseFallbackTest is SourceBoundBountyFixture {
         vm.expectRevert();
         account.execute(address(router), 0, abi.encodeCall(OrderRouter.commitOrder, (request)));
         assertEq(router.pendingOrderCounts(address(account)), 0);
+    }
+
+    function testFork_SameL2BlockExecutionRemainsPending() public {
+        uint64 id = _ownerCommit(true, BOUNTY_SIZE, 0);
+        uint256 commitBlock = vm.getBlockNumber();
+        // Provide a qualifying post-commit price, but keep the L2 execution height
+        // equal to the commit height so the block guard itself is exercised.
+        bytes[] memory data = _mockPythUpdateData(BOUNTY_PRICE);
+        vm.roll(commitBlock);
+        vm.prank(OWNER);
+        OrderV3Types.ExecutionResult memory result = router.executeOrder(id, data);
+        assertEq(uint8(result.status), uint8(OrderV3Types.LifecycleStatus.Pending));
+        assertEq(uint8(result.pendingReason), uint8(OrderV3Types.PendingReason.SameBlock));
+        assertEq(router.pendingOrderCounts(address(account)), 1);
+        // The normal helper advances one L2 block; the same order must then execute.
+        _bountyExecute(id, BOUNTY_PRICE, OWNER, OrderV3Types.LifecycleStatus.Executed);
     }
 
 }

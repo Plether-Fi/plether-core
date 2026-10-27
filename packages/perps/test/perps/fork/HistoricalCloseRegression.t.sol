@@ -4,13 +4,13 @@ import {
     ILegacyCloseClearinghouse,
     ILegacyCloseEngine,
     ILegacyCloseRouter,
+    ILegacyEngineLens,
     LegacyCloseTypes
 } from "../../fixtures/LegacyCloseV2.sol";
 import {CfdEngine} from "@plether/perps/CfdEngine.sol";
 import {CfdEngineLens} from "@plether/perps/CfdEngineLens.sol";
 import {CfdTypes} from "@plether/perps/CfdTypes.sol";
 import {OrderRouter} from "@plether/perps/OrderRouter.sol";
-import {ICfdEngineTypes} from "@plether/perps/interfaces/ICfdEngineTypes.sol";
 import {Test} from "forge-std/Test.sol";
 
 /// @notice Original deployed-bytecode regressions. No state overrides, candidate substitution, or broadcast.
@@ -90,7 +90,8 @@ contract HistoricalCloseRegressionTest is Test {
         (uint256 size, uint256 margin,,,,,) = ENGINE.positions(account);
         assertEq(size, 42_326_500e18);
         assertEq(margin, 138_534_490_401);
-        ICfdEngineTypes.ClosePreview memory preview = LENS.previewClose(account, 10_000e18, 98_182_413);
+        ILegacyEngineLens.ClosePreview memory preview =
+            ILegacyEngineLens(address(LENS)).previewClose(account, 10_000e18, 98_182_413);
         assertFalse(preview.valid);
         assertEq(uint8(preview.invalidReason), 3);
     }

@@ -110,6 +110,21 @@ def selected_ids(discovered):
             for contract, tests in contracts.items() for name in tests}
 
 
+def command_root(command):
+    """Capture the configuration of the checkout actually selected by Forge."""
+    for index, argument in enumerate(command):
+        if argument == "--root":
+            value = command[index + 1]
+            break
+        if argument.startswith("--root="):
+            value = argument.split("=", 1)[1]
+            break
+    else:
+        return ROOT
+    path = Path(value)
+    return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
+
+
 def capture(command, path):
     secrets = [(key, value) for key, value in os.environ.items()
                if key.endswith(("RPC_URL", "API_KEY", "PRIVATE_KEY", "TOKEN", "SECRET", "JWT"))
@@ -182,6 +197,7 @@ def main():
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if command[:2] != ["forge", "test"]:
         parser.error("command must start with forge test")
+    project = command_root(command)
     output = Path(os.environ.get("PERPS_ARTIFACT_DIR", str(ROOT / "artifacts/perps"))) / args.lane
     output.mkdir(parents=True, exist_ok=True)
     for campaign in ("fuzz", "invariant"):
@@ -199,7 +215,7 @@ def main():
     capture(["git", "rev-parse", "HEAD"], output / "commit.txt")
     capture(["git", "status", "--short"], output / "working-tree.txt")
     capture(["forge", "--version"], output / "toolchain.txt")
-    if capture(["forge", "config", "--json", "--root", str(PACKAGE)], output / "config.json"):
+    if capture(["forge", "config", "--json", "--root", str(project)], output / "config.json"):
         metadata.update(status="configuration_failed")
         persist()
         raise SystemExit("cannot capture effective Forge configuration")
@@ -236,14 +252,14 @@ def main():
         expected = set(Path(expected_inventory).read_text().splitlines())
         test_root = Path(config.get("test", "test"))
         if not test_root.is_absolute():
-            test_root = PACKAGE / test_root
+            test_root = project / test_root
         actual = set()
         for source, contracts in discovered.items():
             if not any(contracts.values()):
                 continue
             path = Path(source)
             if not path.is_absolute():
-                path = PACKAGE / path
+                path = project / path
             try:
                 actual.add(path.relative_to(test_root).as_posix())
             except ValueError:

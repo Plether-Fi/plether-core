@@ -41,10 +41,10 @@ coverage-perps:
 fmt-check:
 	forge fmt --check packages test script
 
-.PHONY: test-perps-quick test-perps-ci test-perps-audit test-perps-fork check-perps-tests
+.PHONY: test-perps-quick test-perps-ci test-perps-audit test-perps-fork test-perps-fork-all check-perps-tests
 check-perps-tests:
 	python3 scripts/check-perps-test-map.py
-	python3 -m unittest discover -s scripts -p 'test_perps_runners.py'
+	python3 -m unittest discover -s scripts -p 'test_perps*.py'
 	python3 scripts/perps-test-inventory.py
 
 test-perps: test-perps-quick
@@ -60,3 +60,6 @@ test-perps-audit:
 
 test-perps-fork:
 	bash scripts/run-perps-fork-tests.sh
+
+test-perps-fork-all:
+	python3 scripts/run-perps-integration-forks.py

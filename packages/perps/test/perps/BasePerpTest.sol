@@ -897,7 +897,7 @@ abstract contract BasePerpTest is RecordedOrderReceipts {
         address engineLens_,
         address pool_,
         address oracle_
-    ) internal returns (LegacyOrderRouterHarness deployedRouter) {
+    ) internal virtual returns (LegacyOrderRouterHarness deployedRouter) {
         policyEvaluator = new CfdOrderPolicyEvaluator();
         orderExecutionSidecar = new OrderRouterExecutionSidecar();
         address predictedRouter = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);

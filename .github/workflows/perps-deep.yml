@@ -96,6 +96,7 @@ jobs:
     env:
       SPONSORED_CLOSE_FORK_RPC_URL: ${{ secrets.SPONSORED_CLOSE_FORK_RPC_URL }}
       CLOSE_REGRESSION_ARCHIVE_RPC_URL: ${{ secrets.CLOSE_REGRESSION_ARCHIVE_RPC_URL }}
+      NATIVE_CLOSE_FORK_RPC_URL: ${{ secrets.NATIVE_CLOSE_FORK_RPC_URL }}
       FOUNDRY_PROFILE: ci
     steps:
       - uses: actions/checkout@v4
@@ -107,9 +108,9 @@ jobs:
           version: v1.5.1
       - name: Run configured pinned-block integration
         run: |
-          if [ -z "${SPONSORED_CLOSE_FORK_RPC_URL}" ] && [ -z "${CLOSE_REGRESSION_ARCHIVE_RPC_URL}" ]; then
+          if [ -z "${SPONSORED_CLOSE_FORK_RPC_URL}" ] && [ -z "${CLOSE_REGRESSION_ARCHIVE_RPC_URL}" ] && [ -z "${NATIVE_CLOSE_FORK_RPC_URL}" ]; then
             mkdir -p artifacts/perps/fork
-            echo 'NOT RUN: neither pinned-block RPC integration lane is configured.' | tee artifacts/perps/fork/status.txt >> "$GITHUB_STEP_SUMMARY"
+            echo 'NOT RUN: no perps fork RPC integration lane is configured.' | tee artifacts/perps/fork/status.txt >> "$GITHUB_STEP_SUMMARY"
           else
             bash scripts/run-with-heartbeat.sh bash scripts/run-perps-fork-tests.sh
           fi

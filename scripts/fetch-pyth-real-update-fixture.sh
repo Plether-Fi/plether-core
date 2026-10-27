@@ -3,14 +3,26 @@ set -euo pipefail
 
 FEED_ID="${PYTH_REAL_FEED_ID:-0xa995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b}"
 HERMES_BASE_URL="${HERMES_BASE_URL:-https://hermes.pyth.network/v2/updates/price}"
+curl_args=(-fsS)
+if [ -n "${PYTH_API_KEY:-}" ]; then
+  # Match capture-oracle-sync-fixture.py's authenticated Hermes endpoint.
+  if [ "$HERMES_BASE_URL" = 'https://hermes.pyth.network/v2/updates/price' ]; then
+    HERMES_BASE_URL='https://pyth.dourolabs.app/hermes/v2/updates/price'
+  fi
+  case "$HERMES_BASE_URL" in
+    https://pyth.dourolabs.app/hermes/*) ;;
+    *) echo 'Refusing to send PYTH_API_KEY outside the configured HTTPS Hermes service.' >&2; exit 1 ;;
+  esac
+  curl_args+=(-H "Authorization: Bearer ${PYTH_API_KEY}")
+fi
 
-latest_response="$(curl -fsS "${HERMES_BASE_URL}/latest?ids[]=${FEED_ID}&encoding=hex")"
+latest_response="$(curl "${curl_args[@]}" "${HERMES_BASE_URL}/latest?ids[]=${FEED_ID}&encoding=hex")"
 latest_publish_time="$(jq -r '.parsed[0].price.publish_time' <<< "$latest_response")"
 
 response=""
 for offset in $(seq 0 120); do
   candidate="$((latest_publish_time - offset))"
-  candidate_response="$(curl -fsS "${HERMES_BASE_URL}/${candidate}?ids[]=${FEED_ID}&encoding=hex")"
+  candidate_response="$(curl "${curl_args[@]}" "${HERMES_BASE_URL}/${candidate}?ids[]=${FEED_ID}&encoding=hex")"
   candidate_publish_time="$(jq -r '.parsed[0].price.publish_time' <<< "$candidate_response")"
   candidate_prev_publish_time="$(jq -r '.parsed[0].metadata.prev_publish_time' <<< "$candidate_response")"
   if [ "$candidate_prev_publish_time" -lt "$candidate_publish_time" ]; then
